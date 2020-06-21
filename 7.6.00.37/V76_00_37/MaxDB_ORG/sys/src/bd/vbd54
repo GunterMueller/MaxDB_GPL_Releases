@@ -1,0 +1,1116 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VBD54$
+.tt 2 $$$
+.tt 3 $JuergenP$indexupdateorders$1999-07-14$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+Module  : indexupdateorders
+=========
+.sp
+Purpose : managing orders for B* index updates
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              b54add_index (
+                    pSep               : tsp00_KeyAddr (* ptocSynonym tsp00_KeyPtr *);
+                    SepLen             : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    VAR indexorderlist : tbd00_OrderList);
+ 
+        PROCEDURE
+              b54del_index (
+                    pSep               : tsp00_KeyAddr (* ptocSynonym tsp00_KeyPtr *);
+                    SepLen             : tsp00_Int4;
+                    n_level            : tsp00_Int2;
+                    VAR indexorderlist : tbd00_OrderList);
+ 
+        PROCEDURE
+              b54repl_index (
+                    pOldSep              : tsp00_KeyAddr(* ptocSynonym tsp00_KeyPtr *);
+                    OldSepLen            : tsp00_Int4;
+                    pNewSep              : tsp00_KeyAddr(* ptocSynonym tsp00_KeyPtr *);
+                    NewSepLen            : tsp00_Int4;
+                    n_id                 : tsp00_PageNo;
+                    n_level              : tsp00_Int2;
+                    VAR indexorderlist   : tbd00_OrderList);
+ 
+        PROCEDURE
+              b54execute_indexorder (
+                    VAR indexorderlist : tbd00_OrderList;
+                    VAR current        : tbd_current_tree);
+ 
+        FUNCTION
+              b54tadd_index (
+                    pSep               : tsp00_KeyAddr (* ptocSynonym tsp00_KeyPtr *);
+                    SepLen             : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+        FUNCTION
+              b54tdel_index (
+                    pSep               : tsp00_KeyAddr (* ptocSynonym tsp00_KeyPtr *);
+                    SepLen             : tsp00_Int4;
+                    n_level            : tsp00_Int2;
+                    pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+        FUNCTION
+              b54trepl_index (
+                    pOldSep              : tsp00_KeyAddr(* ptocSynonym tsp00_KeyPtr *);
+                    OldSepLen            : tsp00_Int4;
+                    pNewSep              : tsp00_KeyAddr(* ptocSynonym tsp00_KeyPtr *);
+                    NewSepLen            : tsp00_Int4;
+                    n_id                 : tsp00_PageNo;
+                    n_level              : tsp00_Int2;
+                    pIndexOrderList      : tsp00_Addr) : boolean;
+ 
+        PROCEDURE
+              b54texecute_indexorder (
+                    pIndexOrderList : tsp00_Addr;
+                    VAR current     : tbd_current_tree);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              bd06CorruptedTreeHandling (
+                    VAR fileId : tgg00_FileId;
+                    msgNo      : tsp00_Int4;
+                    trError    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              nodehandling : VBD13;
+ 
+        PROCEDURE
+              bd13GetNode (VAR Current : tbd_current_tree;
+                    Pno          : tsp00_PageNo;
+                    PageLockMode : tbd00_PageLockMode;
+                    NodeReq      : tbd_node_request;
+                    VAR Nptrs    : tbd_node_ptrs);
+ 
+        PROCEDURE
+              b13r_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree;
+                    lru_info    : tbd_lru_info);
+ 
+        PROCEDURE
+              b13w_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              indexhandling        : VBD50;
+ 
+        PROCEDURE
+              bd50FindBranchNode (
+                    VAR sepkey            : tsp00_Key;
+                    keyLen                : tsp00_Int4;
+                    wantedLevel           : tsp00_Int2;
+                    VAR nptrs             : tbd_node_ptrs;
+                    VAR neighbs           : tbd_neighbors;
+                    VAR bWantedLevelFound : boolean;
+                    VAR current           : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              branchnodehandling   : VBD51;
+ 
+        PROCEDURE
+              bd51SearchBranch (VAR Current : tbd_current_tree;
+                    pSepKey      : tsp00_KeyAddr;
+                    KeyLen       : tsp00_Int4;
+                    VAR Nptr     : tbd_nodeptr;
+                    VAR RecIndex : tsp00_Int4);
+ 
+        PROCEDURE
+              b51next_branch (VAR nptr : tbd_nodeptr;
+                    VAR index : integer;
+                    VAR last  : boolean);
+ 
+        PROCEDURE
+              b51add_branch (VAR nptr  : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    VAR sep            : tbd00_Separator;
+                    VAR indexorderlist : tbd00_OrderList;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51del_branch (VAR nptr  : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    VAR indexorderlist : tbd00_OrderList;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51repl_branch (VAR nptr : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    VAR sep            : tbd00_Separator;
+                    VAR indexorderlist : tbd00_OrderList;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51new_branchroot (VAR nptr : tbd_node_ptrs;
+                    VAR sep            : tbd00_Separator;
+                    VAR indexorderlist : tbd00_OrderList;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51tadd_branch (VAR nptr  : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    VAR sep            : tbd00_Separator;
+                    pIndexOrderList    : tsp00_Addr;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51tdel_branch (VAR nptr  : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    pIndexOrderList    : tsp00_Addr;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51trepl_branch (VAR nptr : tbd_node_ptrs;
+                    index              : tsp00_Int4;
+                    left               : tsp00_PageNo;
+                    VAR sep            : tbd00_Separator;
+                    pIndexOrderList    : tsp00_Addr;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              b51tnew_branchroot (VAR nptr : tbd_node_ptrs;
+                    VAR sep            : tbd00_Separator;
+                    pIndexOrderList    : tsp00_Addr;
+                    VAR current        : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              branchhandling   : VBD52;
+ 
+        PROCEDURE
+              bd52PutSepLeafCount (pRec : tgg00_RecPtr;
+                    LeafCount     : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              bd999PushIndexOrder(
+                    pIndexOrderList : tsp00_Addr;
+                    VAR indexOrder : tbd00_TreeIndexOrder) : boolean;
+ 
+        FUNCTION
+              bd999InsertBottomIndexOrder(
+                    pIndexOrderList : tsp00_Addr;
+                    VAR indexOrder : tbd00_TreeIndexOrder) : boolean;
+ 
+        FUNCTION
+              bd999GetTopIndexOrder(
+                    pIndexOrderList : tsp00_Addr) : tbd00_TreeIndexOrderPtr;
+ 
+        FUNCTION
+              bd999IsEmptyIndexOrderList(
+                    pIndexOrderList : tsp00_Addr) : boolean;
+ 
+        PROCEDURE
+              bd999PrintIndexOrderList(
+                    pIndexOrderList : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        PROCEDURE
+              g01key_assign (VAR source_key : tgg00_Lkey;
+                    VAR target_key : tgg00_Lkey;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              g01key_and_len_assign (VAR source_key : tsp00_Key;
+                    source_key_len     : tsp00_Int4;
+                    VAR target_key     : tsp00_Key;
+                    VAR target_key_len : tsp00_Int2;
+                    VAR e              : tgg00_BasisError);
+ 
+        PROCEDURE
+              g01abort (msg_no : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C24;
+                    bad_value : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_cpp_auxiliary_functions : VGG06;
+ 
+        PROCEDURE
+              gg06PnoPut (VAR Cint4 : tgg90_Cint4; int4 : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (layer : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01key (debug : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    VAR k   : tgg00_Lkey);
+ 
+        PROCEDURE
+              t01name (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Name);
+ 
+        PROCEDURE
+              t01separator (debug : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    separator     : tgg00_RecPtr);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenP
+.sp
+.cp 3
+Created : 1985-mm-dd
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 1999-07-14
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+A B* tree is used for dynamic management of a file.  As the file
+grows and shrinks, the B* index, which is made up of all the
+nodes of the B* tree except the leaves and is used to
+quickly locate the file entries accomodated in the leaves,
+is dynamically built up and dismantled or restructured.  The
+routines described below always refer to the current B* tree,
+which is determined by the last call of the b30adjust_tree
+to be executed.
+.sp
+For each change in the B* index that has become necessary,
+first of all a suitable order is stored in an order list
+specifically for this purpose.  Inserting, deleting or
+replacing a file entry first leads to changes in one or
+more leaves of the tree.  This can result in one or more
+orders for modification of the B* index.  Once the processing
+of the leaves has been completed, the orders that have been
+accumulated in the order list, if there are any, are processed
+in the order in which they were inserted in the list (FIFO).
+.sp
+The execution of such an order can itself lead to further
+orders; these further orders are always placed at the beginning
+of the list to ensure that they are completely processed before
+the next order issued by a leaf is executed.  In this way,
+at the moment when each order is being executed, it finds a
+B* index that is consistent except for the change to be carried out
+by the order.
+.sp 2
+   current
+.sp
+This variable contains the following information on the
+current B* tree:
+.sp ;.of 2
+- the page number 'root' of the root of the tree,
+.br ;.in ;.of 2
+- the type ft of the file managed by the tree
+(see filesysteminterface),
+.br ;.in ;.of 2
+- the buffer type bt, which depends on whether a temporary file,
+the system file or another permanent file is involved
+(see systembufferinterface VBD20).
+.sp 2
+   indexorderlist
+.sp
+In this list, information is managed for a possible index update
+or an index reorganization
+(see VBD54, indexupdateorders !).
+.sp 2
+   b54add_index (sep,n_id,n_level,indexorderlist)
+.sp
+This routine generates the order to insert in the B* index a branch to
+the node with the node number n_id and located on the level n_level with
+a separator sep.
+If, at the start of the execution of this order, n is on the same
+level as the B* tree root, the B* tree should grow by one level.
+If n_level is the same as 'leaflevel', the order generated is
+added as the last in the order list; otherwise it becomes the first.
+.sp 2
+   b54del_index (sep,n_level,indexorderlist)
+.sp
+This routine requires that the root of the B* tree have at least one
+more level than n_level.  It generates the order to delete from the
+B* index the branch to the root on level n_level of the subtree
+responsible for the key sep.  If, immediately following the execution of
+this order, the current root of the B* tree contains only one branch,
+the tree should shrink by one level.
+If n_level is the same as 'leaflevel', the order generated is
+added as the last in the order list; otherwise it becomes the first.
+.sp 2
+   b54repl_index (old_sep,new_sep,n_id,n_level,
+.br
+                  indexorderlist)
+.sp
+This routine requires that the root of the B* tree have at least one
+more level than n_level.  It generates the order to replace in the
+B* index the branch to the root on level n_level of the subtree
+responsible for the key old_sep with a new branch with the separator
+new_sep and a pointer to the node with the node number n_id.
+If n_level is the same as 'leaflevel', the order generated is
+added as the last in the order list; otherwise it becomes the first.
+.sp 2
+   b54execute_indexorder(indexorderlist,current,e)
+.sp
+This routine requires that the order list contain at least one
+order.  It causes the first order in the list to be executed.
+Possible acknowledgements in e:
+   - e_ok
+   - b_no_more_space
+   - b_disk_not_accessible
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+The order list is implemented by an ARRAY (indexorderlist)
+with a fixed number (max_orders) of list elements.  A counter
+(count) indicates how many list elements valid
+and the order of the list elements corresponds to
+the order of the ARRAY components, with the last list element
+having the lowest index (lwb_of_list).  When orders are inserted
+at the end of the list, the orders already present are
+shifted forward (see next_of_list).
+.sp
+Each order (indexorder) contains an identifier (op) of the
+order type, the number of the level (objectlevel) on which the
+order directly operates and other order-specific information
+likely to be significant (searchkey, separator,
+oldsubroot, newsubroot).  If an order is issued when a node
+on level sourcelevel is being processed, it always operates
+directly on the level that is one level higher.
+.sp
+When the first order in the list is processed (b54execute_indexorder),
+first the node that contains or should contain the relevant branch
+is located.  At this time it is determined whether the tree must
+grow by one level (found = FALSE after b50bfind_branchnode).
+Then an appropriate routine is called for processing the branch
+node.  This routine is responsible for removing the successfully
+processed order from the list and adding new orders to the order
+list.
+.sp
+In choosing the list size (max_orders) the following factors
+were taken into account:
+.br
+An analysis of the reorganization algorithms in the leaf level
+(leafoverflow, b34leafunderflow, invreorganization)
+shows that no more than three orders can be inserted in the list
+from there.  Within the B* index, in extreme cases one additional
+order can be added to each level before the first order has been
+fully executed (branchreorganization, branchnodehandling).
+Assuming that the B* trees do not grow to more than four levels
+(maxlevel), space is provided for a maximum of six orders.
+These considerations must be taken into account when changing the
+maximum key length and the page size.
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b54add_index (pSep       : tsp00_KeyAddr;
+            SepLen             : tsp00_Int4;
+            n_id               : tsp00_PageNo;
+            n_level            : tsp00_Int2;
+            VAR indexorderlist : tbd00_OrderList);
+ 
+VAR
+      e : tgg00_BasisError;
+ 
+BEGIN
+WITH indexorderlist.olstOrder_bd00 [bd54next_of_list (n_level, indexorderlist)]  DO
+    BEGIN
+    e          := e_ok;
+    txoOp_bd00 := opAdd_ebd00;
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    e := e_ok; (* ignore error *)
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSep_bd00.sepKey_bd00.keyVal_gg00, txoSep_bd00.sepKey_bd00.keyLen_gg00, e);
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        gg06PnoPut (hrecPno_gg00, n_id);
+        hrecLen_gg00 := cgg_rec_key_offset + hrecKeyLen_gg00 + sizeof (tbd00_SepLeafCount);
+        bd52PutSepLeafCount (@txoSep_bd00, 0)
+        END;
+    (*ENDWITH*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b54del_index (pSep       : tsp00_KeyAddr;
+            SepLen             : tsp00_Int4;
+            n_level            : tsp00_Int2;
+            VAR indexorderlist : tbd00_OrderList);
+ 
+VAR
+      e : tgg00_BasisError;
+ 
+BEGIN
+WITH indexorderlist.olstOrder_bd00 [bd54next_of_list(n_level,indexorderlist)]  DO
+    BEGIN
+    txoOp_bd00 := opDel_ebd00;
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        hrecLen_gg00    := 0;
+        hrecKeyLen_gg00 := 0;
+        END;
+    (*ENDWITH*) 
+    e := e_ok;
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b54repl_index (pOldSep     : tsp00_KeyAddr;
+            OldSepLen            : tsp00_Int4;
+            pNewSep              : tsp00_KeyAddr;
+            NewSepLen            : tsp00_Int4;
+            n_id                 : tsp00_PageNo;
+            n_level              : tsp00_Int2;
+            VAR indexorderlist   : tbd00_OrderList);
+ 
+VAR
+      e : tgg00_BasisError;
+ 
+BEGIN
+WITH indexorderlist.olstOrder_bd00 [bd54next_of_list(n_level,indexorderlist)]  DO
+    BEGIN
+    e          := e_ok;
+    txoOp_bd00 := opRepl_ebd00;
+    g01key_and_len_assign (pOldSep^, OldSepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    e := e_ok; (* ignore error *)
+    g01key_and_len_assign (pNewSep^, NewSepLen,
+          txoSep_bd00.sepKey_bd00.keyVal_gg00, txoSep_bd00.sepKey_bd00.keyLen_gg00, e);
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        gg06PnoPut (hrecPno_gg00, n_id);
+        hrecLen_gg00 := cgg_rec_key_offset + hrecKeyLen_gg00 + sizeof (tbd00_SepLeafCount);
+        bd52PutSepLeafCount (@txoSep_bd00, 0)
+        END
+    (*ENDWITH*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b54execute_indexorder (VAR indexorderlist : tbd00_OrderList;
+            VAR current : tbd_current_tree);
+ 
+VAR
+      read              : boolean;
+      write             : boolean;
+      LastBranch        : boolean;
+      bWantedLevelFound : boolean;
+      RecIndex          : tsp00_Int4;
+      nptr              : tbd_node_ptrs;
+      neighbs           : tbd_neighbors;
+ 
+BEGIN
+WITH current, curr_tree_id, curr_trans^, nptr DO
+    BEGIN
+    trError_gg00 := e_ok;
+    read         := false;
+    write        := true;
+    np_ptr       := NIL;
+    np_cbptr     := NIL;
+    WHILE (indexorderlist.olstCount_bd00 > 0) AND (trError_gg00 = e_ok) DO
+        BEGIN
+&       ifdef TRACE
+        bd54print_indexorders (indexorderlist);
+&       endif
+        WITH indexorderlist, olstOrder_bd00 [ pred(LWB_OF_LIST_BD00 + olstCount_bd00) ] DO
+            BEGIN
+            IF  (txoLevel_bd00 = FIRST_INDEX_LEVEL_BD00)
+                AND
+                (curr_lvl_1_pno <> NIL_PAGE_NO_GG00)
+            THEN
+                BEGIN
+                IF  (NOT read) AND (np_ptr = NIL)
+                THEN
+                    BEGIN
+                    bd13GetNode (current, curr_lvl_1_pno, plmLock_ebd00, nr_for_update, nptr);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        bWantedLevelFound := true;
+                        neighbs.ln        := curr_lvl_1_left;
+                        read              := true;
+                        write             := false
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  (NOT write) AND (np_ptr <> NIL)
+                THEN
+                    BEGIN
+                    b13w_release_node (nptr, current);
+                    curr_lvl_1_pno := NIL_PAGE_NO_GG00;
+                    write          := true
+                    END;
+                (*ENDIF*) 
+                IF  (trError_gg00 = e_ok) AND (np_ptr = NIL)
+                THEN
+                    bd50FindBranchNode (txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00,
+                          txoLevel_bd00, nptr, neighbs, bWantedLevelFound, current)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  NOT bWantedLevelFound
+                THEN
+                    (*txoOp_bd00 = opAdd_ebd00 assumed*)
+                    b51new_branchroot (nptr, txoSep_bd00, indexorderlist, current)
+                ELSE
+                    BEGIN
+                    bd51SearchBranch (current, @txoSearchKey_bd00.keyVal_gg00,
+                          txoSearchKey_bd00.keyLen_gg00, np_ptr, RecIndex);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        WITH neighbs DO
+                            CASE txoOp_bd00 OF
+                                opAdd_ebd00 :
+                                    BEGIN
+                                    b51next_branch (np_ptr, RecIndex, LastBranch);
+                                    IF  LastBranch
+                                    THEN
+                                        RecIndex := succ (RecIndex);
+                                    (*ENDIF*) 
+                                    b51add_branch (nptr, RecIndex, ln, txoSep_bd00,
+                                          indexorderlist, current)
+                                    END;
+                                opDel_ebd00 :
+                                    b51del_branch  (nptr, RecIndex, ln, indexorderlist, current);
+                                opRepl_ebd00 :
+                                    b51repl_branch (nptr, RecIndex, ln, txoSep_bd00,
+                                          indexorderlist, current);
+                                OTHERWISE
+                                    BEGIN
+                                    g01abort (csp3_b54_1_invalid_indexorder,
+                                          csp3_n_btree, 'B54EXECUTE_INDEXORDER   ',0)
+                                    END
+                                END
+                            (*ENDCASE*) 
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+        END;
+    (*ENDWHILE*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  ftsConcurrent_egg00 IN fileType_gg00
+        THEN
+            bd06CorruptedTreeHandling (curr_tree_id,
+                  bd54x1IndexorderExecutionFailed_csp03, trError_gg00);
+        (*ENDIF*) 
+        IF  np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      bd54next_of_list (sourcelevel : tsp00_Int2;
+            VAR indexorderlist : tbd00_OrderList) : integer;
+ 
+VAR
+      here : integer;
+ 
+BEGIN
+WITH indexorderlist DO
+    BEGIN
+    (*olstCount_bd00 < max_orders assumed*)
+    IF  sourcelevel <> LEAF_LEVEL_BD00
+    THEN
+        here := LWB_OF_LIST_BD00 + olstCount_bd00
+    ELSE
+        BEGIN
+        IF  olstCount_bd00 > 0
+        THEN
+            FOR here := pred(LWB_OF_LIST_BD00 + olstCount_bd00)
+                  DOWNTO LWB_OF_LIST_BD00 DO
+                bd54copy_indexorder (olstOrder_bd00 [here], olstOrder_bd00 [succ (here)]);
+            (*ENDFOR*) 
+        (*ENDIF*) 
+        here := LWB_OF_LIST_BD00
+        END;
+    (*ENDIF*) 
+    olstOrder_bd00 [here].txoLevel_bd00 := succ (sourcelevel);
+    olstCount_bd00                      := succ(olstCount_bd00)
+    END;
+(*ENDWITH*) 
+bd54next_of_list := here
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd54copy_indexorder (VAR source_order : tbd00_TreeIndexOrder;
+            VAR target_order : tbd00_TreeIndexOrder);
+ 
+VAR
+      err : tgg00_BasisError;
+ 
+BEGIN
+target_order.txoOp_bd00    := source_order.txoOp_bd00;
+target_order.txoLevel_bd00 := source_order.txoLevel_bd00;
+err := e_ok;
+g01key_assign (source_order.txoSearchKey_bd00, target_order.txoSearchKey_bd00, err);
+err := e_ok; (* ignore error *)
+SAPDB_PascalMove ('VBD54 ',   1,    
+      sizeof (source_order.txoSep_bd00), sizeof (target_order.txoSep_bd00),
+      @source_order.txoSep_bd00, 1,
+      @target_order.txoSep_bd00, 1,
+      source_order.txoSep_bd00.sepHead_bd00.hrecLen_gg00, err)
+END;
+ 
+&ifdef TRACE
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd54print_indexorders (VAR indexorderlist : tbd00_OrderList);
+ 
+VAR
+      i : integer;
+ 
+BEGIN
+WITH indexorderlist DO
+    BEGIN
+    t01int4 (bd_index, 'order count ', olstCount_bd00);
+    IF  olstCount_bd00 > 0
+    THEN
+        FOR i := 1 TO olstCount_bd00 DO
+            BEGIN
+            WITH olstOrder_bd00 [i] DO
+                BEGIN
+                t01int4      (bd_index, '=== OrderNo ', i);
+                CASE txoOp_bd00 OF
+                    opAdd_ebd00 :
+                        t01name (bd_index, 'Add Separator     ');
+                    opDel_ebd00:
+                        t01name (bd_index, 'Del Separator     ');
+                    opRepl_ebd00:
+                        t01name (bd_index, 'Repl Separator    ');
+                    OTHERWISE:
+                        t01name (bd_index, 'UNKOWN            ');
+                    END;
+                (*ENDCASE*) 
+                t01int4      (bd_index, 'txoLevel    ', txoLevel_bd00);
+                t01key       (bd_index, 'txoSearchKey', txoSearchKey_bd00);
+                IF  txoOp_bd00 <> opDel_ebd00
+                THEN
+                    t01separator (bd_index, 'txoSep      ', @txoSep_bd00)
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+            END
+        (*ENDFOR*) 
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+&endif
+(*------------------------------*) 
+ 
+FUNCTION
+      b54tadd_index (pSep       : tsp00_KeyAddr;
+            SepLen             : tsp00_Int4;
+            n_id               : tsp00_PageNo;
+            n_level            : tsp00_Int2;
+            pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+VAR
+      indexOrder : tbd00_TreeIndexOrder;
+      e          : tgg00_BasisError;
+ 
+BEGIN
+WITH indexOrder DO
+    BEGIN
+    e             := e_ok;
+    txoOp_bd00    := opAdd_ebd00;
+    txoLevel_bd00 := n_level + 1;
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    e := e_ok; (* ignore error *)
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSep_bd00.sepKey_bd00.keyVal_gg00, txoSep_bd00.sepKey_bd00.keyLen_gg00, e);
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        gg06PnoPut (hrecPno_gg00, n_id);
+        hrecLen_gg00 := cgg_rec_key_offset + hrecKeyLen_gg00 + sizeof (tbd00_SepLeafCount);
+        bd52PutSepLeafCount (@txoSep_bd00, 0)
+        END;
+    (*ENDWITH*) 
+    END;
+(*ENDWITH*) 
+IF  n_level <> LEAF_LEVEL_BD00
+THEN
+    b54tadd_index := bd999PushIndexOrder (pIndexOrderList, indexOrder)
+ELSE
+    b54tadd_index := bd999InsertBottomIndexOrder (pIndexOrderList, indexOrder);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      b54tdel_index (pSep       : tsp00_KeyAddr;
+            SepLen             : tsp00_Int4;
+            n_level            : tsp00_Int2;
+            pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+VAR
+      indexOrder : tbd00_TreeIndexOrder;
+      e          : tgg00_BasisError;
+ 
+BEGIN
+WITH indexOrder DO
+    BEGIN
+    e             := e_ok;
+    txoOp_bd00    := opDel_ebd00;
+    txoLevel_bd00 := n_level + 1;
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        hrecLen_gg00    := 0;
+        hrecKeyLen_gg00 := 0;
+        END;
+    (*ENDWITH*) 
+    e := e_ok;
+    g01key_and_len_assign (pSep^, SepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    END;
+(*ENDWITH*) 
+IF  n_level <> LEAF_LEVEL_BD00
+THEN
+    b54tdel_index := bd999PushIndexOrder (pIndexOrderList, indexOrder)
+ELSE
+    b54tdel_index := bd999InsertBottomIndexOrder (pIndexOrderList, indexOrder);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      b54trepl_index (pOldSep     : tsp00_KeyAddr;
+            OldSepLen            : tsp00_Int4;
+            pNewSep              : tsp00_KeyAddr;
+            NewSepLen            : tsp00_Int4;
+            n_id                 : tsp00_PageNo;
+            n_level              : tsp00_Int2;
+            pIndexOrderList      : tsp00_Addr) : boolean;
+ 
+VAR
+      indexOrder : tbd00_TreeIndexOrder;
+      e          : tgg00_BasisError;
+ 
+BEGIN
+WITH indexOrder DO
+    BEGIN
+    e             := e_ok;
+    txoOp_bd00    := opRepl_ebd00;
+    txoLevel_bd00 := n_level + 1;
+    g01key_and_len_assign (pOldSep^, OldSepLen,
+          txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00, e);
+    e := e_ok; (* ignore error *)
+    g01key_and_len_assign (pNewSep^, NewSepLen,
+          txoSep_bd00.sepKey_bd00.keyVal_gg00, txoSep_bd00.sepKey_bd00.keyLen_gg00, e);
+    WITH txoSep_bd00.sepHead_bd00 DO
+        BEGIN
+        gg06PnoPut (hrecPno_gg00, n_id);
+        hrecLen_gg00 := cgg_rec_key_offset + hrecKeyLen_gg00 + sizeof (tbd00_SepLeafCount);
+        bd52PutSepLeafCount (@txoSep_bd00, 0)
+        END
+    (*ENDWITH*) 
+    END;
+(*ENDWITH*) 
+IF  n_level <> LEAF_LEVEL_BD00
+THEN
+    b54trepl_index := bd999PushIndexOrder (pIndexOrderList, indexOrder)
+ELSE
+    b54trepl_index := bd999InsertBottomIndexOrder (pIndexOrderList, indexOrder);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b54texecute_indexorder (pIndexOrderList : tsp00_Addr;
+            VAR current : tbd_current_tree);
+ 
+VAR
+      read              : boolean;
+      write             : boolean;
+      LastBranch        : boolean;
+      bWantedLevelFound : boolean;
+      RecIndex          : tsp00_Int4;
+      nptr              : tbd_node_ptrs;
+      neighbs           : tbd_neighbors;
+      indexOrderPtr     : tbd00_TreeIndexOrderPtr;
+ 
+BEGIN
+WITH current, curr_tree_id, curr_trans^, nptr DO
+    BEGIN
+    trError_gg00 := e_ok;
+    read         := false;
+    write        := true;
+    np_ptr       := NIL;
+    np_cbptr     := NIL;
+    WHILE (NOT bd999IsEmptyIndexOrderList(pIndexOrderList))
+          AND (trError_gg00 = e_ok) DO
+        BEGIN
+&       ifdef TRACE
+        bd999PrintIndexOrderList (pIndexOrderList);
+&       endif
+        indexOrderPtr := bd999GetTopIndexOrder (pIndexOrderList);
+        WITH indexOrderPtr^ DO
+            BEGIN
+            IF  (txoLevel_bd00 = FIRST_INDEX_LEVEL_BD00)
+                AND
+                (curr_lvl_1_pno <> NIL_PAGE_NO_GG00)
+            THEN
+                BEGIN
+                IF  (NOT read) AND (np_ptr = NIL)
+                THEN
+                    BEGIN
+                    bd13GetNode (current, curr_lvl_1_pno, plmLock_ebd00, nr_for_update, nptr);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        bWantedLevelFound := true;
+                        neighbs.ln        := curr_lvl_1_left;
+                        read              := true;
+                        write             := false
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  (NOT write) AND (np_ptr <> NIL)
+                THEN
+                    BEGIN
+                    b13w_release_node (nptr, current);
+                    curr_lvl_1_pno := NIL_PAGE_NO_GG00;
+                    write          := true
+                    END;
+                (*ENDIF*) 
+                IF  (trError_gg00 = e_ok) AND (np_ptr = NIL)
+                THEN
+                    bd50FindBranchNode (txoSearchKey_bd00.keyVal_gg00, txoSearchKey_bd00.keyLen_gg00,
+                          txoLevel_bd00, nptr, neighbs, bWantedLevelFound, current)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  NOT bWantedLevelFound
+                THEN
+                    (*txoOp_bd00 = opAdd_ebd00 assumed*)
+                    b51tnew_branchroot (nptr, txoSep_bd00, pIndexOrderList, current)
+                ELSE
+                    BEGIN
+                    bd51SearchBranch (current, @txoSearchKey_bd00.keyVal_gg00,
+                          txoSearchKey_bd00.keyLen_gg00, np_ptr, RecIndex);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        WITH neighbs DO
+                            CASE txoOp_bd00 OF
+                                opAdd_ebd00 :
+                                    BEGIN
+                                    b51next_branch (np_ptr, RecIndex, LastBranch);
+                                    IF  LastBranch
+                                    THEN
+                                        RecIndex := succ (RecIndex);
+                                    (*ENDIF*) 
+                                    b51tadd_branch (nptr, RecIndex, ln, txoSep_bd00,
+                                          pIndexOrderList, current)
+                                    END;
+                                opDel_ebd00 :
+                                    b51tdel_branch  (nptr, RecIndex, ln, pIndexOrderList, current);
+                                opRepl_ebd00 :
+                                    b51trepl_branch (nptr, RecIndex, ln, txoSep_bd00,
+                                          pIndexOrderList, current);
+                                OTHERWISE
+                                    BEGIN
+                                    g01abort (csp3_b54_1_invalid_indexorder,
+                                          csp3_n_btree, 'B54EXECUTE_INDEXORDER   ',0)
+                                    END
+                                END
+                            (*ENDCASE*) 
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+        END;
+    (*ENDWHILE*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  ftsConcurrent_egg00 IN fileType_gg00
+        THEN
+            bd06CorruptedTreeHandling (curr_tree_id,
+                  bd54x1IndexorderExecutionFailed_csp03, trError_gg00);
+        (*ENDIF*) 
+        IF  np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

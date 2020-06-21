@@ -1,0 +1,167 @@
+#!/usr/bin/perl
+#
+#       @(#)opendoc     Version:6.2.8           30-10-1997
+#
+#       Gert Groﬂmann, SAP AG
+#
+# usage: opendoc [-e editorname] [-r] [-s] file [ file ... ]
+#	-e editorname	: name of the used editor
+#   -r				: open as ReadOnly file
+#	-s				: split the given files in the editor
+#
+# open files with the given editor and mode
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package OpenDoc;
+use Env;
+use Getopt::Std;
+&if $OS in [ WIN32 ]
+use OLE;
+&endif
+
+undef $opt_e; undef $opt_s; undef $opt_r;
+
+if ( getopts('e:rs') && @ARGV == 0 ) { die "usage: opendoc [-e editorname] [-r] [-s] file [ file ... ]\n" }
+
+if ( !defined($opt_e) ) {
+	die "environment %EDITOR% not used!\n" unless defined($EDITOR);
+	$opt_e = $EDITOR;
+}
+else {
+    $opt_e_set = 1;
+}
+
+&if $OS in [ WIN32 ]
+chdir($OWN); # wichtig, da "system()" nicht klappt, falls Arbeitsverzeichnis ein UNC-Pfad ist
+if ( $opt_e !~ /msdev|devenv/i ) 	
+{
+	if ( $opt_e =~ /runemacs/i )
+	{
+            system( "$opt_e @ARGV" ) == 0
+		or warn "Can't execute '$opt_e @ARGV': $!\n";
+	}
+        else {
+            local @special_args;
+            if ( $opt_e =~ /vim/i )
+            {
+		push @special_args, "-f";
+		push @special_args, "-o";
+		push @special_args, "-R" if $opt_r;
+            }
+            system( "start $opt_e @special_args @ARGV" ) == 0
+		or warn "Can't execute 'start $opt_e @ARGV': $!\n";
+        }
+}
+elsif ( $opt_e =~ /devenv/i )
+{
+	# Developer Studio OLE
+	local $editor;
+	$editor = GetObject OLE 'VisualStudio.DTE';
+	if (! defined($editor))
+	{
+		print ("Start new devenv ...\n");
+		system("start $opt_e");
+		sleep (2);
+		# wait for devenv before attach
+		$i = 1;
+		while ( $i++ < 10 )
+		{
+			$editor = GetObject OLE 'VisualStudio.DTE';
+			last if ($editor);
+			print ("Start of Devenv is running. Waiting some seconds ...\n");
+			sleep (2);
+		}
+		die "Couldn't create new instance of DevEnv App!!" unless ($editor);
+	}
+
+	# um gleiche Fenster Position wie im VIM zu erreichen
+	@ARGV = reverse @ARGV;
+	foreach $file (@ARGV)
+	{
+		$file=~s/\//\\/g;
+		$editor->Documents->Open($file);
+	}
+	$editor->{'MainWindow'}->{'Visible'} = 1;
+	0;
+}
+else
+{
+	# Developer Studio OLE
+	local $editor;
+	$editor = GetObject OLE 'MSDEV.APPLICATION';
+	if (! defined($editor)) {
+
+		$editor = CreateObject OLE 'MSDEV.APPLICATION'
+			or die "Couldn't create new instance of MsDev App!!";
+	}
+	$editor->{'WindowState'} = 2;#dsWindowStateMaximzed (bugfix WIn2000)
+	$editor->{'WindowState'} = 3;#dsWindowStateNormal
+	if ( $opt_s ) {
+		# alle offenen Dokumente verkleinern
+		$editor->Windows->Arrange(1); #dsMinimize
+	}
+    # um gleiche Fenster Position wie im VIM zu erreichen
+    @ARGV = reverse @ARGV;
+	foreach $file (@ARGV) {
+		$file =~ s/\//\\/g;
+		$editor->Documents->Open($file);
+		if ( $editor->ActiveDocument ) {
+			$editor->ActiveDocument->{'ReadOnly'} = 1 if $opt_r;
+			$editor->ActiveDocument->{'Language'} = "C/C++" if $file =~ /(v[a-z]+\d+\w*[cx]|\.cpc)$/i;
+		}
+	}
+	if ( $opt_s ) {
+		# Fenster splitten
+		$editor->Windows->Arrange(2); #dsTileHorizontal
+	}
+	$editor->{'Visible'} = 1;
+	$editor->{'Active'} = 1;
+	0;
+}
+&else
+    @ED_CMD = ();
+    if (defined ($opt_e_set)) {
+        push @ED_CMD, $opt_e;
+    }
+	elsif ($opt_r != 0) {
+		if (-x "/usr/local/bin/less") {
+			push @ED_CMD, "/usr/local/bin/less";
+		}
+		# PTS 1103330
+		elsif (-x "/usr/bin/less") {
+			push @ED_CMD, "/usr/bin/less";
+		}
+		elsif ($opt_e  eq "vi") {
+			push @ED_CMD, "vi", "-R";
+		}
+	}
+	# &gar for local read -> not read only
+	else {
+		push @ED_CMD, $opt_e;
+	}
+
+	push @ED_CMD, @ARGV;
+
+	system (@ED_CMD) == 0
+		or warn "Can't execute \"@ED_CMD\": $!\n";		
+
+&endif

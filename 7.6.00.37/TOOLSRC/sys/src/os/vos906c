@@ -1,0 +1,517 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$vos906c$
+.tt 2 $$$
+.tt 3 $D.Dittmar$Control Server Communication$1997-03-26$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : Control Server Communication
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : D.Dittmar
+.sp
+.cp 3
+Created : 1997-01-07
+.sp
+.cp 3
+Version : 1997-01-07
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-03-26
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+/*
+ * MODULE - Control Server Communication
+ */
+
+/*
+ * INCLUDE FILES
+ */
+
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS906C : "
+#define MF__   MOD__"UNDEFINED"
+
+/*
+ *  MACROS
+ */
+
+#if defined (DEBUG)
+#define TRC(x)  fprintf x
+#else
+#define TRC(x)
+#endif
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+typedef struct CServerOptionsT {
+    int         socket;
+    HANDLE      readHandle;
+    HANDLE      writeHandle;
+    char*       dbname;
+    char*       dbroot;
+} CServerOptionsT;
+
+typedef struct CServerConnectionT {
+    TCPIP_SERV_CONNECT_INFO_REC connectInfo;    // defined in vos00xsc
+    PCOMM_PACKET_REC            replyPacket;
+    ULONG                       ulSenderRef;
+    ULONG                       ulReceiverRef;
+    BOOL                        useSocket;
+    void                       *rawMemory;
+} CServerConnectionT;
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+
+static void parseOptions_MF (     
+        CServerOptionsT* options,
+        int argc,
+        char* argv []);
+
+static void initConnectionInfo_MF (      
+        CServerConnectionT* csRTE);
+
+static int readConnectionInfo_MF (
+        CServerConnectionT* csRTE,
+        HANDLE readHandle);
+
+static int allocPacket_MF (       
+        CServerConnectionT *csRTE);
+
+static void sendReadyMessage_MF ( 
+        HANDLE writeHandle);
+
+static void freePacket_MF (
+    CServerConnectionT *csRTE);
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+    #undef MF__
+    #define MF__ MOD__"sqlxservinit"
+void
+sqlxservinit (
+    void** rteData,
+    int argc,
+    char* argv [],
+    char* dbname,
+    char* dbroot,
+    tsp1_comm_error* commErr)
+{
+    #undef MF__
+    #define MF__ MOD__"sqlxservinit"
+    CServerConnectionT* csRTE;
+    CServerOptionsT     options;
+
+    /* parse options */
+    parseOptions_MF (&options, argc, argv);
+    if ((options.readHandle == INVALID_HANDLE_VALUE) 
+            && (options.writeHandle == INVALID_HANDLE_VALUE)) {
+        //fprintf (traceFile_MV, "cserver: No pipe given (option -P)\n");
+        *commErr = SQLNOTOK;
+        return;
+    }
+    /* alloc */
+    csRTE = (CServerConnectionT*) malloc (sizeof (CServerConnectionT));
+    if (csRTE == NULL) {
+        //fprintf (traceFile_MV, "cserver: out of memory\n");
+        *commErr = SP1CE_NOTOK;
+        return;
+    }
+    /* fill connectInfo from pipe */
+    initConnectionInfo_MF (csRTE);
+    *commErr = readConnectionInfo_MF (csRTE, options.readHandle);
+    if (*commErr != SP1CE_OK) {
+        return;
+    }
+
+    csRTE->useSocket = (options.socket != INVALID_SOCKET);
+    csRTE->connectInfo.sd = options.socket;
+    /* alloc packet */
+    if (!allocPacket_MF (csRTE)) {
+        *commErr = SP1CE_NOTOK;
+    }
+    /* write Ready message to pipe */
+    sendReadyMessage_MF (options.writeHandle);
+    /* close pipe */
+    CloseHandle (options.readHandle);
+    CloseHandle (options.writeHandle);
+    if (options.dbname != NULL) {
+        strcpy (dbname, options.dbname);
+    }
+    else {
+        dbname [0] = '\0';
+    }
+    if (options.dbroot != NULL) {
+        strcpy (dbroot, options.dbroot);
+    }
+    else {
+        dbroot [0] = '\0';
+    }
+    *rteData = csRTE;
+    *commErr = SP1CE_OK;
+    
+}
+
+    #undef MF__
+    #define MF__ MOD__"sqlxservrecv"
+void
+sqlxservrecv (
+    void *voidRTE,
+    char** recvPacket,
+    int*   recvLen,
+    char** sendPacket,
+    int*   maxSendLen,
+    tsp1_comm_error* commErr)
+{
+    #undef MF__
+    #define MF__ MOD__"sqlxservrecv"
+    CServerConnectionT*         csRTE = (CServerConnectionT*) voidRTE;
+    ERRORTEXT                   ErrText;
+    CHAR                        szErrText[sizeof(ErrText) + 1];
+    ULONG                       ulDataLen;
+    ULONG                       ulMessClass;
+    PCOMM_PACKET_REC            pCommPacket;
+
+    *commErr = (tsp1_comm_error) sql42c_recv_packet ( csRTE->connectInfo.sd,
+                                       csRTE->connectInfo.ulSwapType,
+                                       csRTE->connectInfo.pCommPacket,
+                                       csRTE->connectInfo.ulMaxCmdDataLen,
+                                       &ulDataLen,
+                                       &csRTE->ulSenderRef,
+                                       &csRTE->ulReceiverRef,
+                                       &ulMessClass,
+                                       ErrText );
+    if (*commErr  != SP1CE_OK) {
+ 
+        sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+        MSGD (( ERR_XSER_RECV_PACKET, csRTE->connectInfo.ulServerRef, 
+                szErrText ));
+        return;
+    }
+    else if (ulDataLen == 0) {
+        return;
+    }
+
+    //MSG8 (( INFO_XSER_READ_REQ_PACKET, ulDataLen ));
+    pCommPacket  = csRTE->connectInfo.pCommPacket;
+    *recvPacket  = &pCommPacket->pDataPart [0];
+    *recvLen     = ulDataLen;
+    csRTE->replyPacket = (PCOMM_PACKET_REC)&pCommPacket->pDataPart [*recvLen]; 
+    *sendPacket  = csRTE->replyPacket->pDataPart;
+    *maxSendLen  = csRTE->connectInfo.ulMaxCmdDataLen - ulDataLen 
+        - sizeof (pCommPacket->RTEHeader); 
+    *commErr     = SP1CE_OK;
+}
+
+void
+sqlxservsend (
+    void *voidRTE,
+    int sendLen,
+    tsp1_comm_error* commErr)
+{
+    #undef MF__
+    #define MF__ MOD__"sqlxservsend"
+    CServerConnectionT* csRTE = (CServerConnectionT*) voidRTE;
+    ERRORTEXT                   ErrText;
+
+    *commErr = (tsp1_comm_error)sql42c_send_packet (csRTE->connectInfo.sd,
+                                        csRTE->connectInfo.ulMaxSegmentSize,
+                                        csRTE->replyPacket,
+                                        sendLen,
+                                        csRTE->ulSenderRef,
+                                        csRTE->ulReceiverRef,
+                                        RSQL_USER_DATA_REPLY,
+                                        SP1CE_OK,
+                                        ErrText );
+}
+
+void
+sqlxservexit (
+    void *voidRTE)
+{
+    #undef MF__
+    #define MF__ MOD__"sqlxservexit"
+    CServerConnectionT* csRTE = (CServerConnectionT*) voidRTE;
+
+    sql40c_socket_close (csRTE->connectInfo.sd );
+    freePacket_MF (csRTE);
+    free (csRTE);
+}
+
+/*
+ * ========================== LOCAL FUNCTIONS ================================
+ */
+
+static void
+parseOptions_MF (
+    CServerOptionsT* options,
+    int argc,
+    char* argv [])
+{
+    #undef MF__
+    #define MF__ MOD__"parseOptions_MF"
+    int i;
+    int inOptions = TRUE;
+    BOOLEAN usePipe = FALSE;
+
+    options->socket      = INVALID_SOCKET;
+    options->readHandle  = INVALID_HANDLE_VALUE;
+    options->writeHandle = INVALID_HANDLE_VALUE;
+    options->dbname      = NULL;
+    options->dbroot      = NULL;
+    for (i = 1; (i < argc) && inOptions; ++i) {
+        TRC ((traceFile_MV, "    option '%s'!\n", argv [i]));
+        if (argv[i][0] != '-') {
+            inOptions = FALSE;
+        }
+        else {
+            switch (argv[i][1]) {
+                case 'S':
+                    sscanf (argv [i +1], "%x", &options->socket);
+                    ++i;
+                    break;
+                case 'P':
+                    sscanf (argv [i + 1], "%x,%x", &options->readHandle,
+                            &options->writeHandle);
+                    ++i;
+                    usePipe = TRUE;
+                    break;
+                case 'd':
+                    options->dbname = argv [i + 1];
+                    ++i;
+                    break;
+                case 'R':
+                    options->dbroot = argv [i + 1];
+                    ++i;
+                    break;
+                case 'v':
+                    // verbose_MV = TRUE;
+                    break;
+                default:
+                    // usage_MF ();
+                    break;
+            }
+        }
+    }
+}
+
+static void
+initConnectionInfo_MF (
+    CServerConnectionT* csRTE)
+{
+    #undef MF__
+    #define MF__ MOD__"initConnectionInfo_MF"
+    PTCPIP_SERV_CONNECT_INFO_REC   pConnInfo = &csRTE->connectInfo;
+
+    memset (pConnInfo, '\0', sizeof (csRTE->connectInfo));
+    pConnInfo->ulConnStatus               = CON_INITIALIZED;
+    pConnInfo->ulServerRef                = (ULONG)UNDEF;
+    pConnInfo->ulMaxCmdDataLen            = (ULONG)UNDEF;
+    pConnInfo->pCommPacket                = NULL;
+
+    pConnInfo->fAcknowledge               = FALSE;
+    pConnInfo->ulSwapType                 = (ULONG)UNDEF;
+    pConnInfo->ulMaxSegmentSize           = (ULONG)UNDEF;
+}
+
+static int
+readConnectionInfo_MF (
+    CServerConnectionT* csRTE,
+    HANDLE readHandle)
+{
+    #undef MF__
+    #define MF__ MOD__"readConnectionInfo_MF"
+    CONPKT_PARAM_REC    ConPktParamRec;
+    ERRORTEXT           ErrText;
+    ULONG               rc;
+
+    rc = sql42c_pipe_recv_conpkt (&ConPktParamRec, readHandle, ErrText);
+    if (rc == SQLOK){
+        /* ThrdCtrlHeader not necessary as control server       */
+        /* runs in a single thread                              */
+        csRTE->connectInfo.ThrdCtrlHeader.Tid         = (TID)UNDEF;
+        csRTE->connectInfo.ThrdCtrlHeader.hThrd       = (HANDLE)INVALID_HANDLE_VALUE;
+        csRTE->connectInfo.ThrdCtrlHeader.lThrdPrio   = SERVER_THRD_PRIO;
+        csRTE->connectInfo.ThrdCtrlHeader.ThrdState   = THRD_INITIALIZED;
+        csRTE->connectInfo.ThrdCtrlHeader.ulStartTime = (ULONG)UNDEF;
+
+        csRTE->connectInfo.ulConnInfoHandle           = 1; // is this required ?
+        csRTE->connectInfo.ulConnStatus               = CON_INITIALIZED;
+
+        csRTE->connectInfo.sd                         = -1; // initialized outside
+        csRTE->connectInfo.szSenderNodeID [0]         = '\0'; // how do I call sql43c_get_host_by_address ?
+
+        csRTE->connectInfo.fAcknowledge               = ConPktParamRec.fAcknowledge;
+        csRTE->connectInfo.ulSwapType                 = ConPktParamRec.ulSwapType;
+        csRTE->connectInfo.ulMaxSegmentSize           = ConPktParamRec.ulMaxSegmentSize;
+        csRTE->connectInfo.ulServiceType              = ConPktParamRec.ulServiceType;
+        csRTE->connectInfo.ulServerRef                = (ULONG)UNDEF;
+        csRTE->connectInfo.ulSenderRef                = ConPktParamRec.ulSenderRef;
+        strcpy (csRTE->connectInfo.szServerDB, ConPktParamRec.szReceiverServerDB );
+        csRTE->connectInfo.ulMaxCmdDataLen            = ConPktParamRec.ulMaxDataLen
+            - ConPktParamRec.ulMinReplySize;
+        csRTE->connectInfo.pCommPacket                = NULL;
+
+        // csRTE->connectInfo.pWorldSA;   // --- NT only
+        // csRTE->connectInfo.pLockSA;    // --- NT only
+
+        // csRTE->connectInfo.Shm;   // - vos33c, internal use only!
+    }
+    return rc;
+}
+
+static int
+allocPacket_MF (
+    CServerConnectionT *csRTE)
+{
+    #undef MF__
+    #define MF__ MOD__"allocPacket_MF"
+    char       *ptr;
+    int         siz;
+    long        off;
+    TCPIP_SERV_CONNECT_INFO_REC  *connectInfo = &csRTE->connectInfo;
+    APIRET      rc;
+
+    siz = connectInfo->ulMaxSegmentSize;
+    rc = ALLOC_MEM ((PPVOID)&ptr, (unsigned) siz + 8);
+    if (rc != NO_ERROR) {
+        return FALSE;
+    }
+    csRTE->rawMemory = ptr ;
+    off = (long) ptr & 7 ;
+    if ( off )
+    {
+        ptr += 8 - off ;
+    }
+    connectInfo->pCommPacket = (PCOMM_PACKET_REC)ptr;
+    return TRUE;
+}
+
+static void
+sendReadyMessage_MF (
+    HANDLE writeHandle)
+{
+    #undef MF__
+    #define MF__ MOD__"sendReadyMessage_MF"
+    DWORD       bytesWritten;
+
+    WriteFile (writeHandle, READY_MESSAGE, READY_MESSAGE_LEN, 
+               &bytesWritten, NULL);
+}
+
+static void
+freePacket_MF (
+    CServerConnectionT *csRTE)
+{
+
+    #undef MF__
+    #define MF__ MOD__"freePacket_MF"
+    
+    FREE_MEM (csRTE->rawMemory);
+}
+
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************

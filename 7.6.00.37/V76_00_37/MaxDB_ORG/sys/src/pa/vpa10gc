@@ -1,0 +1,1352 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA10GC$
+.tt 2 $$$
+.TT 3 $BurkhardD$CORE-LEVEL FUNTIONS  G - Z$2001-07-18$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 08-31-1993
+.sp
+.cp 3
+Version : 1994-04-25
+.sp
+.cp 3
+Release :  7.3    Date : 2001-07-18
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 64 "vpa10gc"
+#endif
+#include <ctype.h>
+
+#include "vpa00global.h"
+#include "vpa10Handle.h"
+#include "vpa40DBC.h"
+#include "vpa50Env.h"
+#include "vpa60Stmt.h"
+#include "vpa70SQLDA.h"
+#include "vpa80String.h"
+#include "vpa30.h"
+#include "vpa06.h"
+#include "vpa09.h"
+
+#ifndef SAPDB_FAST
+#ifdef _UNICODE_ODBC
+UCHAR *PA10_FN_SQLGETCURSORNAME = { (UCHAR*) "SQLGetCursorName" };
+UCHAR *PA10_FN_SQLNUMRESULTCOLS = { (UCHAR*) "SQLNumResultCols" };
+UCHAR *PA10_FN_SQLPREPARE = { (UCHAR*) "SQLPrepare" };
+UCHAR *PA10_FN_SQLROWCOUNT = { (UCHAR*) "SQLRowCount" };
+UCHAR *PA10_FN_SQLSETCURSORNAME = { (UCHAR*) "SQLSetCursorName" };
+UCHAR *PA10_FN_SQLSETPARAM = { (UCHAR*) "SQLSetParam" };
+#else
+extern UCHAR *PA10_FN_SQLGETCURSORNAME;
+extern UCHAR *PA10_FN_SQLNUMRESULTCOLS;
+extern UCHAR *PA10_FN_SQLPREPARE;
+extern UCHAR *PA10_FN_SQLROWCOUNT;
+extern UCHAR *PA10_FN_SQLSETCURSORNAME;
+extern UCHAR *PA10_FN_SQLSETPARAM;
+#endif
+#endif
+
+UCHAR *pa10gSelectSearch( UCHAR *stmt_ptr );
+
+UCHAR *pa10NextSymbol( UCHAR  *strp,
+                       UWORD  *symb,
+                       UCHAR  *out_str,
+                       UDWORD  out_length_max );
+
+API_RETCODE pa60MoveLong( tpa40DBC   *dbc_block_ptr,
+                          tpa60Stmt  *stmt_block_ptr,
+                          tpa20Desc  *appl_desc_ptr,
+                          tpa20Desc  *impl_desc_ptr,
+                          UWORD       icol,
+                          UWORD       number_cols );
+
+API_RETCODE pa01mkstm( tpr05_String *SqlStmt,
+                       tpa60Stmt *stmt_block_ptr,
+                       SDWORD  order_type );
+
+#if defined(WIN32)
+void pa10_CallErrorBox (const char *, tpa40DBC *, tpa60Stmt *);
+#endif
+
+#define PA10TOOMANYHOSTVAR(sql_code, error_exit); \
+switch (sql_code) {\
+   case (PA_OK):\
+      break;\
+   case (PA_ROW_NOT_FOUND):\
+   case (PA_ERR_TOO_MANY_HOSTVAR):\
+      sql_code = PA_OK;\
+      break;\
+   default:\
+      retcode = SQL_ERROR;\
+      pa60PutError( hstmt, \
+	 pa41apmercv(&dbc_block_ptr->esqblk), &dbc_block_ptr->esqblk);\
+      goto error_exit;\
+      break;\
+}
+	     
+#ifdef _UNICODE_ODBC
+ODBC_PROC(SQLGetCursorNameW,
+	  (SQLHSTMT      hstmt,
+	   SQLWCHAR     *szCursor,
+	   SQLSMALLINT   cbCursorMax,
+	   SQLSMALLINT  *pcbCursor),
+	  (hstmt, szCursor, cbCursorMax, pcbCursor))
+#else
+ODBC_PROC(SQLGetCursorName,
+	  (SQLHSTMT         hstmt,
+	   SQLCHAR         *szCursor,
+	   SQLSMALLINT      cbCursorMax,
+	   SQLSMALLINT     *pcbCursor),
+	  (hstmt, szCursor, cbCursorMax, pcbCursor))
+#endif
+{
+    RETCODE retcode;
+    API_RETCODE api_retcode;
+    tpa60Stmt *stmt_block_ptr;
+
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLGETCURSORNAME,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+    API_TRACE(API_TR_PTR,"szCursor",&szCursor);
+    API_TRACE(API_TR_SWORD,"cbCursorMax",&cbCursorMax);
+    API_TRACE(API_TR_PTR,"pcbCursor",&pcbCursor);
+
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLGETCURSORNAME);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+        if (pa60VerifyStmt(hstmt) != API_OK) { /* hstmt valid? */
+            retcode = SQL_INVALID_HANDLE;
+        }
+        else {
+            pa60ResetError( hstmt );
+            if (cbCursorMax < 0) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1090, NULL); /* invalid
+                                                             * buffer length */
+            }
+            else {
+                tsp00_Uint4 len;
+                stmt_block_ptr = (tpa60Stmt*) hstmt;
+                API_ASSERT_PTR(stmt_block_ptr);
+                api_retcode = pa80ODBCtoEncoding (
+#ifdef _UNICODE_ODBC
+                                                  sp77nativeUnicodeEncoding (),
+                                                  (PTR) szCursor,
+                                                  sizeof (SQLWCHAR) * cbCursorMax,
+#else
+                                                  sp77encodingAscii,
+                                                  (PTR) szCursor,
+                                                  cbCursorMax,
+#endif
+                                                  &len,     /* pcbCursor */
+                                                  stmt_block_ptr->cursor_name);
+                if (pcbCursor != NULL)
+                  *pcbCursor = (SQLSMALLINT) len;
+                                                  /*
+                api_retcode = apmstow(stmt_block_ptr -> cursor_name,
+                                      szCursor,
+                                      cbCursorMax,
+                                      pcbCursor);
+                                                  */
+                if (api_retcode == API_OK) {
+                    retcode = SQL_SUCCESS;
+                }
+                else {
+                    retcode = SQL_SUCCESS_WITH_INFO;
+                    pa60PutError( hstmt,
+                                  API_ODBC_01004, /* data turncated */
+                                  NULL);
+                } /* of if api_retcode OK */
+            } /* of if buffer len ok */
+        } /* of if valid handle */
+    } /* set odbc_function */
+    API_TRACE( API_TR_EXIT,PA10_FN_SQLGETCURSORNAME, 0 );
+    API_TRACE( API_TR_RETCODE, "retcode",&retcode );
+    API_TRACE_LEN( API_TR_ODBC_STRING, "szCursor", szCursor,
+                   ((pcbCursor) ? (*pcbCursor) : SQL_NTS) );
+    API_TRACE( API_TR_SWORD, "cbCursor", pcbCursor );
+
+    return (retcode);
+} /* SQLGetCursorName */
+
+#ifdef _UNICODE_ODBC
+ODBC_PROC(SQLPrepareW,
+          (SQLHSTMT     hstmt,
+           SQLWCHAR    *szSqlStr,
+           SQLINTEGER   cbSqlStr),
+          (hstmt, szSqlStr, cbSqlStr))
+#else
+ODBC_PROC(SQLPrepare,
+          (SQLHSTMT    hstmt,
+           SQLCHAR    *szSqlStr,
+           SQLINTEGER  cbSqlStr),
+          /*           UCHAR    *szSqlStr,
+                       SDWORD    cbSqlStr),*/
+          (hstmt, szSqlStr, cbSqlStr))
+#endif    
+{
+    RETCODE retcode=SQL_SUCCESS;
+    API_RETCODE api_retcode;
+    UWORD state;
+    UWORD number_parms;
+    UWORD number_cols;
+    UWORD sqlda_parms;
+    UWORD sqlda_cols;
+    UDWORD tuple_size;
+    API_HANDLE tuple_handle;
+    tpa60Stmt *stmt_block_ptr;
+    tpa62DBCSpecial *dbc_special_ptr;
+    tpr05_String *stmt_str_ptr;
+    UCHAR parsid [ API_SQLDB_PARSID_LEN ];
+    SWORD newparse = TRUE;
+    SQLHDBC hdbc;
+    tpa40DBC *dbc_block_ptr;
+    SQLHENV henv;
+    tpa50Env *env_block_ptr;
+    tpr05_String *SqlStmt = NULL;
+
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLPREPARE,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+#ifdef _UNICODE_ODBC
+    API_TRACE_LEN(API_TR_WSTRING,"szSqlStr",szSqlStr,cbSqlStr);    
+#else    
+    API_TRACE_LEN(API_TR_ODBC_STRING,"szSqlStr",szSqlStr,cbSqlStr);
+#endif    
+    API_TRACE(API_TR_SDWORD,"cbSqlStr",&cbSqlStr);
+  
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLPREPARE);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+        if (pa60VerifyStmt( hstmt ) != API_OK) { /* hstmt valid? */
+            retcode = SQL_INVALID_HANDLE;
+        }
+        else {
+            pa60ResetError( hstmt );
+            /* get the parents of the statement */
+            apmlocp(&hstmt, &stmt_block_ptr, &hdbc, &dbc_block_ptr, 
+                    &henv, &env_block_ptr);
+            state = stmt_block_ptr->state;
+            PA09ENTERASYNCFUNCTION(dbc_block_ptr, stmt_block_ptr);
+
+            if (pa09IsAsync(stmt_block_ptr, dbc_block_ptr, NULL))
+                {
+                    if (pa09IsConnectionBusy(stmt_block_ptr, dbc_block_ptr)) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_S1010, NULL);
+                        goto exit_1_lock;
+                    }
+                    if (state == API_STMT_POSITIONED) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_24000, NULL);
+                        goto exit_1_lock;
+                    }
+                 
+                    if (szSqlStr == NULL) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt, 
+                                API_ODBC_S1009, NULL); /* invalid argument */
+                        goto exit_1_lock;
+                    }    
+
+                    if (cbSqlStr == SQL_NTS)
+#ifdef _UNICODE_ODBC
+                        cbSqlStr = sp81UCS2strlen ((tsp81_UCS2Char*) szSqlStr);
+                    cbSqlStr *= sizeof (tsp81_UCS2Char);
+#else    
+                        cbSqlStr = (SQLINTEGER) API_STRLEN (szSqlStr);
+#endif    
+                        
+                    if (cbSqlStr < 0) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt, 
+                                API_ODBC_S1090, NULL); /* invalid string */
+                        goto exit_1_lock;
+                    }
+
+                    if (cbSqlStr == 0) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt, 
+                                API_ODBC_37000, NULL);
+                        goto exit_1_lock;
+                    }    
+                    API_TRACE(API_TR_SDWORD, "stmt_str_len", &cbSqlStr);
+#ifdef _UNICODE_ODBC
+                    SqlStmt = pr05IfCom_String_NewDynString (cbSqlStr,
+                                                             sp77nativeUnicodeEncoding ());
+#else
+                    SqlStmt = pr05IfCom_String_NewDynString (cbSqlStr,
+                                                             sp77encodingAscii);
+#endif
+                    API_MEMCPY (SqlStmt->rawString, szSqlStr, cbSqlStr);
+                    SqlStmt->cbLen = cbSqlStr;
+
+                    if (stmt_block_ptr -> stmtopt.passthrough != TRUE) {
+                        stmt_block_ptr->stmt_function_code = csp1_nil_fc;
+                        pa01anstm (SqlStmt,
+                                   &stmt_block_ptr->dbc_special.order_type);
+#ifdef PA10SYNTAXCHECK       
+                        if (stmt_block_ptr->dbc_special.order_type
+                            == API_CMD_DESCRIBE
+                            && stmt_block_ptr->dbc_special.special
+                            == API_SPEC_NOT) {
+                            api_retcode = pa30SyntaxCheck(&dbc_block_ptr
+                                                          ->esqblk,
+                                                          dbc_block_ptr,
+                                                          stmt_block_ptr,
+                                                          SqlStmt);
+                        }
+#endif       
+                    }	
+                    else {
+                        stmt_block_ptr->dbc_special.order_type = API_CMD_PARSE;
+                    }
+                    if (stmt_block_ptr->dbc_special.order_type
+                        == API_CMD_ERROR) {
+                        retcode = SQL_ERROR;
+                        pa41apmmker( API_SQLRUNTIME_3008,
+                                     &dbc_block_ptr->esqblk);
+                        pa60PutError( hstmt,
+                                pa41apmercv(&dbc_block_ptr->esqblk),
+                                &dbc_block_ptr->esqblk);
+                        goto exit_1_lock;
+                    }       
+                 
+                    api_retcode = pa01mkstm( SqlStmt,
+                                             stmt_block_ptr,
+                                             stmt_block_ptr->dbc_special.order_type);
+                    if (api_retcode != API_OK) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_S1001, NULL); /* allocation error */
+                        goto exit_1_lock;
+                    }
+                    if (pa09IsAsync(stmt_block_ptr, dbc_block_ptr, &retcode))
+                        pa09PrepareAsyncCall(hstmt, SQL_API_SQLPREPARE);     
+                } /* async exec */
+            if (pa09IsAsync(stmt_block_ptr, dbc_block_ptr, &retcode)) {
+                pa09ExecuteAsyncCall(hstmt);
+                goto exit_1_lock;
+            }
+            /* Aufsetzpunkt bei ASYNCRONER Verarbeitung */
+            stmt_str_ptr = (tpr05_String*) (stmt_block_ptr -> stmt_str_handle);
+            stmt_block_ptr->input_sqlda_ptr = (sqldatype*)
+                (stmt_block_ptr -> input_sqlda_handle);
+            API_ASSERT_PTR(stmt_block_ptr->input_sqlda_ptr);
+            stmt_block_ptr->output_sqlda_ptr = (sqldatype*)
+                (stmt_block_ptr -> output_sqlda_handle);
+            API_ASSERT_PTR(stmt_block_ptr->output_sqlda_ptr);
+            dbc_special_ptr = &stmt_block_ptr -> dbc_special;
+         
+            retcode = SQL_SUCCESS;
+            stmt_block_ptr->input_sqlda_ptr -> sqln = 0;
+            stmt_block_ptr->output_sqlda_ptr -> sqln = 0;
+            switch (dbc_special_ptr->order_type) {
+            case (API_CMD_EXECUTE) : 
+                api_retcode = pa30SyntaxCheck( &dbc_block_ptr->esqblk,
+                                               dbc_block_ptr,
+                                               stmt_block_ptr,
+                                               stmt_str_ptr);
+                PA10TOOMANYHOSTVAR(PA_ENV_SQLCODE, exit_1_lock);
+                stmt_block_ptr->input_sqlda_ptr -> sqld = 0;
+                PA_ENV_SQLCODE = 0;
+                break;
+            case (API_CMD_PARSE) : {}
+            case (API_CMD_DESCRIBE) : {
+                int try2;
+                pa60DropParseIds( stmt_block_ptr );
+                for(try2=0; try2 < 2; try2++) {
+                    /* ESQ prepare function ok? */
+                    if (apeprep (&dbc_block_ptr->esqblk,
+                                 stmt_str_ptr, 
+                                 parsid,
+                                 dbc_block_ptr,
+                                 stmt_block_ptr)
+                        != API_OK) { 
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_S1000, NULL);
+                        /* general error */		  
+                        goto exit_1_lock;
+                    }
+                    if (PA_ENV_SQLCODE == PA_UPDATE_NOT_ALLOWED) {		
+                        UWORD stmt_type = stmt_block_ptr->stmt_type;		
+                        stmt_block_ptr->stmt_type
+                            |= API_ATTRIB_SELECT_FOR_UPDATE;
+                        api_retcode = pa01mkstm( SqlStmt,
+                                                 stmt_block_ptr,
+                                                 dbc_special_ptr->order_type);
+                        if (api_retcode != API_OK) {
+                            retcode = SQL_ERROR;
+                            pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                            goto exit_1_lock;
+                        }
+                        stmt_str_ptr =
+                            (tpr05_String*) (stmt_block_ptr->stmt_str_handle);
+                        API_ASSERT_PTR(stmt_str_ptr);    
+                        stmt_block_ptr->stmt_type = stmt_type;
+                        continue;
+                    }
+                    else 
+                        break;
+                }
+                PA10TOOMANYHOSTVAR(PA_ENV_SQLCODE, exit_1_lock);
+                /* the prepare worked, so */
+                /* store the parsid */
+                API_MEMCPY( stmt_block_ptr->stmt_parsid,
+                            parsid,
+                            API_SQLDB_PARSID_LEN);
+                /* if it's a select cmd parse a fetch to get the col info */
+                if ( dbc_special_ptr->order_type == API_CMD_DESCRIBE ) {
+                    api_retcode = apedesc(&dbc_block_ptr->esqblk,
+                                          parsid,
+                                          dbc_block_ptr,
+                                          stmt_block_ptr);
+                    PA10TOOMANYHOSTVAR(PA_ENV_SQLCODE, exit_1_lock);
+                } /* end describe */
+                break;
+            }
+            default : {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt,
+                        API_ODBC_37000, NULL);
+                /* syntax error or access violation */
+                goto exit_1_lock;
+                break;
+            }
+            }
+
+            /* local SQL statement is not longer needed (async: SqlStmt = NULL doesn't harm */
+            pr05IfCom_String_DeleteString (SqlStmt);     /* PTS 1110978 */
+
+            /* calculate number of parameters */
+            sqlda_parms = (UWORD) stmt_block_ptr->input_sqlda_ptr->sqlmax;
+    
+            number_parms = pa70NumParam( stmt_block_ptr->input_sqlda_ptr );
+            stmt_block_ptr -> number_parms = number_parms;
+    
+            /* calculate number of columns */
+            sqlda_cols = (UWORD) stmt_block_ptr->output_sqlda_ptr->sqlmax;
+            if (sqlda_cols > (UWORD) stmt_block_ptr->output_sqlda_ptr->sqln ){
+                number_cols = pa70NumCol( stmt_block_ptr->output_sqlda_ptr );
+            }
+            else
+                number_cols = stmt_block_ptr->output_sqlda_ptr->sqln;
+            stmt_block_ptr -> number_cols = number_cols;
+        
+            API_TRACE(API_TR_UWORD,"number_parms",&number_parms);
+            API_TRACE(API_TR_UWORD,"sqlda_parms",&sqlda_parms);
+            API_TRACE(API_TR_UWORD,"number_cols",&number_cols);
+            API_TRACE(API_TR_UWORD,"sqlda_cols",&sqlda_cols);
+
+            /* verify size of input_sqlda */
+            /* and output_sqlda           */
+            if (number_parms > sqlda_parms) { /* sqlda too small? */
+                /* free and re-allocate */
+                api_retcode =
+                    pa70FreeSQLDA( stmt_block_ptr->input_sqlda_handle );
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt, API_ODBC_S1000, NULL);
+                    /* general error */	
+                    goto exit_1_lock;
+                }
+                api_retcode =
+                    pa70AllocSQLDA( &(stmt_block_ptr->input_sqlda_handle),
+                                    number_parms );
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt,
+                            API_ODBC_S1001, NULL); /* allocation error */
+                    goto exit_1_lock;
+                }
+            }
+            if (number_cols > sqlda_cols) { /* sqlda too small? */
+                /* free and re-allocate */
+                api_retcode =
+                    pa70FreeSQLDA( stmt_block_ptr -> output_sqlda_handle);
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt,
+                            API_ODBC_S1000, NULL); /* general error */
+                    goto exit_1_lock;
+                }
+                api_retcode =
+                    pa70AllocSQLDA( &(stmt_block_ptr->output_sqlda_handle),
+                                    number_cols);
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt,
+                            API_ODBC_S1001, NULL); /* allocation error */
+                    goto exit_1_lock;
+                }
+            }
+    
+            /* re-lock SQLDAs */
+            stmt_block_ptr->input_sqlda_ptr = (sqldatype*)
+                (stmt_block_ptr->input_sqlda_handle);
+            API_ASSERT_PTR(stmt_block_ptr->input_sqlda_ptr);
+            stmt_block_ptr->output_sqlda_ptr = (sqldatype*)
+                (stmt_block_ptr->output_sqlda_handle);
+            API_ASSERT_PTR(stmt_block_ptr->output_sqlda_ptr);
+            
+            /* did we reallocated? */
+            if ((number_parms > sqlda_parms) || (number_cols > sqlda_cols)) {
+                if (number_parms > sqlda_parms) {
+                    apedrprs( &dbc_block_ptr->esqblk,
+                              parsid,
+                              dbc_block_ptr,
+                              stmt_block_ptr);
+                    if (PA_ENV_SQLCODE != PA_OK) { /* DROP PARSID ok? */
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                pa41apmercv(&dbc_block_ptr->esqblk),
+                                &dbc_block_ptr->esqblk);
+                        goto exit_1_lock;
+                    }
+                    stmt_block_ptr->input_sqlda_ptr->sqln = 0;
+                    /* ESQ prepare function ok? */
+                    if (apeprep (&dbc_block_ptr->esqblk,
+                                 stmt_str_ptr, 
+                                 parsid,
+                                 dbc_block_ptr,
+                                 stmt_block_ptr) != API_OK) { 
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_S1000, NULL); /* general error */	 
+                        goto exit_1_lock;
+                    }
+                    if (PA_ENV_SQLCODE != PA_OK) { /* ESQ prepare ok? */
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                pa41apmercv( &dbc_block_ptr->esqblk),
+                                &dbc_block_ptr->esqblk);
+                        goto exit_1_lock;
+                    }
+                    /* the prepare worked, so */
+                    /* store the parsid */
+                    API_MEMCPY( stmt_block_ptr->stmt_parsid,
+                                parsid,
+                                API_SQLDB_PARSID_LEN);
+                    newparse = TRUE;   
+                    /* do the DESCRIBE */
+                } /* new prepare */
+                /* did we reallocated? */
+                if ((number_cols > sqlda_cols) || (newparse)) {
+                    if ( dbc_special_ptr->order_type == API_CMD_DESCRIBE ) {
+                        api_retcode = apedesc( &dbc_block_ptr->esqblk,
+                                               parsid,
+                                               dbc_block_ptr,
+                                               stmt_block_ptr);
+                        if (api_retcode != API_OK) { 
+                            retcode = SQL_ERROR;
+                            pa60PutError( hstmt,
+                                    API_ODBC_S1000, NULL); /* general error */
+                            goto exit_1_lock;
+                        }	
+                        if (PA_ENV_SQLCODE != PA_OK) { /* ESQ prepare ok? */
+                            retcode = SQL_ERROR;
+                            pa60PutError( hstmt,
+                                          pa41apmercv(&dbc_block_ptr->esqblk),
+                                          &dbc_block_ptr->esqblk);
+                            goto exit_1_lock;
+                        }
+                    } /* order_type */
+                } /* new parse */
+                sqlda_parms = stmt_block_ptr->input_sqlda_ptr -> sqln;
+                sqlda_cols = stmt_block_ptr->output_sqlda_ptr -> sqln;
+            } /* realloc da's */
+
+            /* resize the attribute block */
+            /* areas allocated when the   */
+            /* statement was allocated if */
+            /* needed                     */
+            api_retcode = pa20ReallocRecords( stmt_block_ptr->ardPtr,
+                                              number_cols );
+            pa20SetCount( stmt_block_ptr->ardPtr, number_cols );
+            if (api_retcode != API_OK) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                /* memory allocation failure */
+                goto exit_1_lock;
+            }; /* if */
+            api_retcode = pa20ReallocRecords( &stmt_block_ptr->ird,
+                                              number_cols );
+            pa20SetCount( &stmt_block_ptr->ird, number_cols );
+            if (api_retcode != API_OK) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                /* memory allocation failure */
+                goto exit_1_lock;
+            }; /* if */
+            api_retcode = pa20ReallocRecords( stmt_block_ptr->apdPtr,
+                                              number_parms );
+            pa20SetCount( stmt_block_ptr->apdPtr, number_parms );
+            if (api_retcode != API_OK) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                /* memory allocation failure */
+                goto exit_1_lock;
+            }; /* if */
+            api_retcode = pa20ReallocRecords( &stmt_block_ptr->ipd,
+                                              number_parms );
+            pa20SetCount( &stmt_block_ptr->ipd, number_parms );
+            if (api_retcode != API_OK) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                /* memory allocation failure */
+                goto exit_1_lock;
+            }; /* if */
+    
+            if (number_parms > 0) {
+                api_retcode =
+                    pa20PopulateDesc( stmt_block_ptr->input_sqlda_ptr,
+                                      &stmt_block_ptr->ipd,
+                                      number_parms,
+                                      &tuple_size,
+                                      dbc_special_ptr,
+                                      dbc_block_ptr->unicode_catalog);
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa41apmmker( API_SQLRUNTIME_9803,
+                                 &dbc_block_ptr->esqblk);      
+                    pa60PutError( hstmt,
+                            pa41apmercv( &dbc_block_ptr->esqblk),
+                            &dbc_block_ptr->esqblk); /* general error */
+                    goto exit_1_lock;
+                }
+                if (stmt_block_ptr -> parm_size > 0) {
+                    if (tuple_size > stmt_block_ptr -> parm_size) {
+                        apdfree(stmt_block_ptr -> parm_handle);
+                        stmt_block_ptr -> parm_size = 0;
+                    }
+                }
+                if (stmt_block_ptr -> parm_size == 0) {
+                    tuple_handle = apdallo( (DWORD) tuple_size);
+                    if (tuple_handle == 0) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                        /* allocation error */
+                        goto exit_1_lock;
+                    }
+                    stmt_block_ptr -> parm_size = tuple_size;
+                    stmt_block_ptr -> parm_handle = tuple_handle;
+                }              
+                api_retcode = pa20AllocLong( &stmt_block_ptr->ipd,
+                                             number_parms );
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt,
+                            API_ODBC_S1001, NULL); /* allocation error */
+                    goto exit_1_lock;
+                }
+            }
+   
+            if (number_cols > 0) {
+                UDWORD odbcVersion = 0;
+                pa10GetODBCVersion( SQL_HANDLE_STMT,
+                                    (SQLHSTMT) stmt_block_ptr,
+                                    &odbcVersion );
+                api_retcode = pa70patch( stmt_block_ptr->output_sqlda_ptr,
+                                         number_cols,
+                                         dbc_special_ptr->special,
+                                         odbcVersion );
+                api_retcode =
+                    pa20PopulateDesc( stmt_block_ptr->output_sqlda_ptr,
+                                      &stmt_block_ptr->ird,
+                                      number_cols,
+                                      &tuple_size,
+                                      dbc_special_ptr,
+                                      dbc_block_ptr->unicode_catalog);
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa41apmmker(API_SQLRUNTIME_9803, &dbc_block_ptr->esqblk);
+                    pa60PutError( hstmt,
+                                  pa41apmercv( &dbc_block_ptr->esqblk),
+                                  &dbc_block_ptr->esqblk); /* general error */
+                    goto exit_1_lock;
+                }
+                if (stmt_block_ptr -> col_size > 0) {
+                    if (tuple_size > stmt_block_ptr -> col_size) {
+                        apdfree(stmt_block_ptr -> col_handle);
+                        stmt_block_ptr -> col_handle = API_NULL_HANDLE;
+                        stmt_block_ptr -> col_size = 0;
+                    }
+                }
+                if (stmt_block_ptr -> col_size == 0) {
+                    tuple_handle = apdallo( (DWORD) tuple_size);
+                    if (tuple_handle == 0) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt,
+                                API_ODBC_S1001, NULL); /* allocation error */
+                        goto exit_1_lock;
+                    }
+                    stmt_block_ptr -> col_size = tuple_size;
+                    stmt_block_ptr -> col_handle = tuple_handle;       
+                }       
+                api_retcode = pa20AllocLong( &stmt_block_ptr->ird,
+                                             number_cols);
+                if (api_retcode != API_OK) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt, API_ODBC_S1001, NULL);
+                    /* allocation error */
+                    goto exit_1_lock;
+                }
+            }
+
+            retcode = SQL_SUCCESS;
+            stmt_block_ptr -> number_rows
+                = dbc_block_ptr->esqblk.number_rows_modified;
+            stmt_block_ptr -> state = API_STMT_PREPARED;
+
+exit_1_lock:
+            if(dbc_block_ptr->status == API_STMT_RECONNECTED) {
+                dbc_block_ptr->status = API_DBC_CONNECTED;
+                if (retcode == SQL_SUCCESS)
+                    retcode = SQL_SUCCESS_WITH_INFO;
+                pa41apmmker( API_SQLODBC_22005, &dbc_block_ptr->esqblk);
+                pa60PutError( hstmt, API_ODBC_01000, &dbc_block_ptr->esqblk);
+            }
+            PA09LEAVEASYNCFUNCTION();	
+
+        } /* of if hstmt valid */
+    } /* set odbc_function */
+
+    API_TRACE(API_TR_EXIT,PA10_FN_SQLPREPARE,0);
+    API_TRACE(API_TR_RETCODE,"retcode",&retcode);
+
+    /*
+#if defined(WIN32)
+    if (dbc_block_ptr->esqblk.esq_sql_code != 0)
+        pa10_CallErrorBox ("SQLPrepare", dbc_block_ptr, stmt_block_ptr);
+#endif
+    */
+
+    return (retcode);
+} /* SQLPrepare */
+
+#ifdef _UNICODE_ODBC
+ODBC_PROC(SQLSetCursorNameW, ( SQLHSTMT     hstmt,
+                               SQLWCHAR    *szCursor,
+                               SQLSMALLINT  cbCursor),
+          (hstmt, szCursor, cbCursor))
+#else
+ODBC_PROC(SQLSetCursorName, ( SQLHSTMT     hstmt,
+                              SQLCHAR     *szCursor,
+                              SQLSMALLINT  cbCursor),
+          (hstmt, szCursor, cbCursor))
+#endif
+{
+    RETCODE retcode;
+    API_RETCODE api_retcode;
+    UWORD state;
+    tpa60Stmt *stmt_block_ptr;
+    UWORD number_cols;
+    tpa40DBC *dbc_block_ptr;
+#ifdef _UNICODE_ODBC
+    const tsp77encoding *encodingType = sp77nativeUnicodeEncoding ();
+#else
+    const tsp77encoding *encodingType = sp77encodingAscii;
+#endif   
+    const int charSize = encodingType->fixedCharacterSize;
+
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLSETCURSORNAME,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+    API_TRACE_LEN(API_TR_ODBC_STRING,"szCursor",szCursor,cbCursor);
+    API_TRACE(API_TR_SWORD,"cbCursor",&cbCursor);
+
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLSETCURSORNAME);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+        if (pa60VerifyStmt( hstmt ) != API_OK) { /* hstmt valid? */
+            retcode = SQL_INVALID_HANDLE;
+        }
+        else {
+            state = ((tpa60Stmt*) hstmt)->state;
+            pa60ResetError( hstmt );
+            if (szCursor == NULL) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1009, NULL);
+                /* invalid argument value */	      
+            }
+            else if (cbCursor < 0 && cbCursor != SQL_NTS) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1090, NULL);
+                /* invalid buffer length or string */	      
+            }
+            else {
+                if (state != API_STMT_ALLOCATED
+                    && state != API_STMT_PREPARED) {
+                    retcode = SQL_ERROR;
+                    pa60PutError( hstmt, API_ODBC_24000, NULL);
+                    /* invalid cursor state */
+                }
+                else {
+                    stmt_block_ptr = (tpa60Stmt*) (hstmt);
+                    API_ASSERT_PTR(stmt_block_ptr);
+                    number_cols = stmt_block_ptr->number_cols;
+                    if (cbCursor > 0)
+                      cbCursor *= charSize;
+                    api_retcode = pa80ODBCtoTpr05 (stmt_block_ptr->cursor_name,
+                                                   encodingType,
+                                                   szCursor,
+                                                   cbCursor);
+
+                    API_ASSERT( pa40VerifyDBC( stmt_block_ptr->parent_hdbc )
+                                == API_OK );
+                    dbc_block_ptr = (tpa40DBC*) stmt_block_ptr->parent_hdbc;
+                    /* fetch and close cursor commands must be parsed new
+                     * when cursor name changes */
+                    pa60DropFetchParseIds( stmt_block_ptr );
+                    apedrprs( &dbc_block_ptr->esqblk,
+                              stmt_block_ptr -> close_parsid,
+                              dbc_block_ptr,
+                              stmt_block_ptr );
+                    apdunlk(hstmt);
+                    if (api_retcode != API_OK) {
+                        retcode = SQL_ERROR;
+                        pa60PutError( hstmt, API_ODBC_34000, NULL );
+                    }
+                    else {
+                        retcode = SQL_SUCCESS;
+                    } /* of if api_retcode OK */
+                } /* of if state OK */
+            } 
+        } /* of if valid handle */
+    }
+    API_TRACE(API_TR_EXIT,PA10_FN_SQLSETCURSORNAME,0);
+    API_TRACE(API_TR_RETCODE,"retcode",&retcode);
+
+    return (retcode);
+} /* SQLSetCursorName */
+
+
+#ifndef _UNICODE_ODBC
+/* returns number of cols in resultant table */
+ODBC_PROC(SQLNumResultCols,
+          (SQLHSTMT     hstmt,
+           SQLSMALLINT *pccol),
+          (hstmt, pccol))
+{
+    UWORD state;
+    tpa60Stmt *stmt_block_ptr;
+    UWORD number_cols;
+    RETCODE retcode;
+    API_RETCODE api_retcode;
+
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLNUMRESULTCOLS,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+    API_TRACE(API_TR_PTR,"pccol",&pccol);
+
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLNUMRESULTCOLS);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+        if (pa60VerifyStmt( hstmt ) != API_OK) { /* hstmt valid? */
+            retcode = SQL_INVALID_HANDLE;
+        }
+        else {
+            state = ((tpa60Stmt*) hstmt)->state;
+            pa60ResetError( hstmt );
+            if (state != API_STMT_PREPARED && state != API_STMT_EXECUTED &&
+                state != API_STMT_POSITIONED) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1010, NULL);
+                /* function sequence error */
+            }
+            else {
+                stmt_block_ptr = (tpa60Stmt*) (hstmt);
+                API_ASSERT_PTR(stmt_block_ptr);
+                number_cols = stmt_block_ptr -> number_cols;
+             
+                *pccol = number_cols;
+                retcode = SQL_SUCCESS;
+            }
+        }
+    }
+    API_TRACE(API_TR_EXIT,PA10_FN_SQLNUMRESULTCOLS,0);
+    API_TRACE(API_TR_SWORD,"pccol",pccol);
+    API_TRACE(API_TR_RETCODE,"retcode",&retcode);
+
+    return (retcode);
+} /* SQLNumResultCols */
+
+ODBC_PROC(SQLRowCount, ( SQLHSTMT   hstmt,
+                         SQLLEN    *pcrow),
+          (hstmt, pcrow))
+{
+    RETCODE retcode;
+    API_RETCODE api_retcode;
+    UWORD state;
+    tpa60Stmt *stmt_block_ptr;
+    SDWORD number_rows;
+    UWORD number_cols;
+
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLROWCOUNT,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+    API_TRACE(API_TR_PTR,"pcrow",&pcrow);
+
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLROWCOUNT);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+        if (pa60VerifyStmt(hstmt) != API_OK) {
+            retcode = SQL_INVALID_HANDLE;
+        }   
+        else {
+            state = ((tpa60Stmt*) hstmt)->state;  
+            pa60ResetError( hstmt );
+            if (state != API_STMT_EXECUTED && state != API_STMT_POSITIONED) {
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_S1010, NULL );
+            }
+            else {
+                stmt_block_ptr = (tpa60Stmt*) (hstmt);
+                API_ASSERT_PTR(stmt_block_ptr);
+                number_rows = stmt_block_ptr -> number_rows;
+                number_cols = stmt_block_ptr -> number_cols;
+
+                apdunlk(hstmt);
+                /* for select the number of	*/
+                /* affected rows is not       */
+                /* available                  */
+
+                *pcrow = number_rows;
+                retcode = SQL_SUCCESS;
+
+            }
+        }
+    }
+    API_TRACE(API_TR_EXIT,PA10_FN_SQLROWCOUNT,0);
+    API_TRACE(API_TR_RETCODE,"retcode",&retcode);
+    API_TRACE(API_TR_SDWORD,"pcrow",pcrow);
+
+    return (retcode);
+} /* SQLRowCount */
+
+UCHAR *pa10gSelectSearch(UCHAR *stmt_ptr)
+{
+    UCHAR  local_str[API_MAX_KEYWORD_LEN+1];
+    UCHAR *p;
+    UWORD  symb;
+    
+    if (p = pa10NextSymbol(stmt_ptr, &symb, local_str, sizeof(local_str))) {
+        aputoup ((UCHAR*)local_str);
+        if (API_STRCMP(local_str, "DECLARE")) {
+            p = NULL;
+        } 
+        else {	 
+            /* CURSOR */
+            p = pa10NextSymbol(p, &symb, local_str, sizeof(local_str));
+            /* "SQL_CURSOR_" */
+            p = pa10NextSymbol(p, &symb, local_str, sizeof(local_str));
+            /* FOR */
+            p = pa10NextSymbol(p, &symb, local_str, sizeof(local_str));
+            /* SELECT */
+            pa10NextSymbol(p, &symb, local_str, sizeof(local_str));
+            aputoup ((UCHAR*)local_str);
+            if (API_STRCMP(local_str, "SELECT")) {
+                p = NULL;
+            }
+        }
+    }
+    API_TRACE(API_TR_PTR, "pa10gSelectSearch", &p);
+
+    return (p);
+} /* pa10gSelectSearch */
+
+
+UCHAR *pa10NextSymbol( UCHAR  *strp,
+                       UWORD  *symb,
+                       UCHAR  *out_str,
+                       UDWORD  out_length_max)
+{
+    UCHAR  *p, *s;
+    UDWORD  size;
+    symb;
+    
+    if (!strp)
+        s = NULL;
+    else {
+        for (p = strp; *p != '\0'; p++) {
+            if (!isspace(*p))
+                break;  
+        }
+        for (s = p; *s != '\0'; s++) {
+            if (isspace(*s))
+                break;  
+        }
+        /* quoted string ? */
+        if (*p == '"') {
+            p++;
+            for (s=p; *s != '\0'; s++)
+                {
+                    if (*s == '"') {
+                        if (*(s+1) == '"') {
+                            s++;
+                            continue;	   
+                        }
+                        else {
+                            s++;
+                            break;
+                        }
+                    }
+                }	 
+        }
+        size = (UDWORD) (s-p);
+        if (size > 0) {
+            if (out_str != NULL) {
+                size = (size > out_length_max) ? out_length_max-1 : size;
+                memcpy(out_str, p, (int)size);
+                out_str[size] = '\0';
+            }
+        }
+        else 
+            s = NULL;
+    }
+    API_TRACE(API_TR_PTR, "pa10NextSymbol", &s);
+    return (s);
+} /* pa10NextSymbol */
+
+/* binds a storage location to an input field/column */
+ODBC_PROC(SQLSetParam, (SQLHSTMT      hstmt,
+                        SQLUSMALLINT  ipar,
+                        SQLSMALLINT   fCType,
+                        SQLSMALLINT   fSqlType,
+                        SQLULEN       cbColDef,
+                        SQLSMALLINT   ibScale,
+                        SQLPOINTER    rgbValue,
+                        SQLLEN       *pcbValue),
+          ( hstmt, ipar, fCType, fSqlType, cbColDef, ibScale,
+            rgbValue, pcbValue))
+{
+    RETCODE retcode;
+    API_RETCODE api_retcode;
+    
+    API_TRACE(API_TR_ENTRY,PA10_FN_SQLSETPARAM,0);
+    API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+    API_TRACE(API_TR_UWORD,"ipar",&ipar);
+    API_TRACE(API_TR_SWORD,"fCType",&fCType);
+    API_TRACE(API_TR_SWORD,"fSqlType",&fSqlType);
+    API_TRACE(API_TR_UDWORD,"cbColDef",&cbColDef);
+    API_TRACE(API_TR_SWORD,"ibScale", &ibScale);
+    API_TRACE(API_TR_PTR,"rgbValue",&rgbValue);
+    API_TRACE(API_TR_PTR,"pcbValue",&pcbValue);
+    API_TRACE(API_TR_SDWORD, "*pcbValue",pcbValue);
+  
+    retcode = SQL_SUCCESS;
+
+    /* verify the statement     */
+
+    api_retcode = apmstfc(SQL_NULL_HENV, SQL_NULL_HDBC, hstmt, 
+                          SQL_API_SQLSETPARAM);
+    if (api_retcode != API_OK) {
+        retcode = SQL_INVALID_HANDLE;
+    }
+    else {
+#if (ODBCVER >= 0x0200)
+        SWORD fParamType;
+        fParamType = SQL_PARAM_INPUT_OUTPUT;
+        retcode = CALL_ODBC(SQLBindParameter,
+                            (hstmt,
+                             ipar,
+                             fParamType,
+                             fCType,
+                             fSqlType,
+                             cbColDef,
+                             ibScale,
+                             rgbValue,
+                             (pcbValue) ? *pcbValue : -1,
+                             pcbValue));
+#else
+        pa60ResetError( hstmt );
+        stmt_block_ptr = (tpa60Stmt*) (hstmt);
+        API_ASSERT_PTR(stmt_block_ptr);
+        /* verify function sequence        */
+        /* only necessary for asynch. exec.*/
+     
+        /* check SQL-format type           */
+        /* must be changed for ext.data typ*/
+        if ((fSqlType < SQL_CHAR || fSqlType > SQL_VARCHAR) &&
+            (fSqlType < SQL_BIT || fSqlType > SQL_LONGVARCHAR) &&
+            (fSqlType < SQL_UNICODE_LONGVARCHAR || fSqlType > SQL_UNICODE)) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1C00, NULL);
+            goto exit_1_lock;
+        }
+        /* check conversion                */
+        /* char C data can be converted to */
+        /*   any valid SQL data type       */
+        /* numeric C data can not be       */
+        /*   converted to char SQL data typ*/
+
+        switch (fCType) {        /* !! add extended C data types    */
+        case (SQL_C_CHAR): {}
+        case (SQL_C_BINARY): {}
+        case (SQL_C_DEFAULT): {
+            break;
+        }
+        case (SQL_C_SSHORT): {}
+        case (SQL_C_USHORT): {}
+        case (SQL_C_SHORT): {}
+        case (SQL_C_SLONG): {}
+        case (SQL_C_ULONG): {}
+        case (SQL_C_LONG): {}
+        case (SQL_C_FLOAT): {}
+        case (SQL_C_DOUBLE): {}
+        case (SQL_C_BIT): {}
+        case (SQL_C_STINYINT): {}
+        case (SQL_C_UTINYINT): {}
+        case (SQL_C_TINYINT): {
+        case (SQL_C_NUMERIC): {} /* new in 3.0 */
+        case (SQL_C_SBIGINT): {} /* new in 3.0 */
+        case (SQL_C_UBIGINT): {} /* new in 3.0 */
+            switch (fSqlType) {  /* !! add extended SQL data types */
+            case (SQL_TYPE_DATE): {}
+            case (SQL_TYPE_TIME): {}
+            case (SQL_TYPE_TIMESTAMP): {}
+            case (SQL_DATE): {}
+            case (SQL_TIME): {}
+            case (SQL_TIMESTAMP): {}
+            case (SQL_LONGVARBINARY): {}
+            case (SQL_VARBINARY): {}
+            case (SQL_BINARY): { /* restricted data type */
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_07006, NULL );
+                goto exit_1_lock;
+                break;
+            }
+            default: {
+                break;
+            }
+            }
+            break;
+        }
+        case (SQL_C_TYPE_DATE): {}
+        case (SQL_C_TYPE_TIME): {}
+        case (SQL_C_TYPE_TIMESTAMP): {}
+        case (SQL_C_DATE): {}
+        case (SQL_C_TIME): {}
+        case (SQL_C_TIMESTAMP): {
+            switch (fSqlType) {  /* !! add extended SQL data types */
+            case (SQL_CHAR): {}
+            case (SQL_UNICODE): {}
+            case (SQL_VARCHAR): {}
+            case (SQL_UNICODE_VARCHAR): {}
+            case (SQL_LONGVARCHAR): {}
+            case (SQL_UNICODE_LONGVARCHAR): {}
+            case (SQL_TYPE_TIMESTAMP): {
+                break;
+            }
+            default: {
+                if (( fCType == SQL_C_TYPE_TIME
+                      || fCType == SQL_C_TYPE_TIMESTAMP
+                      || fCType == SQL_C_TIME
+                      || fCType == SQL_C_TIMESTAMP)
+                    && (fSqlType == SQL_TYPE_TIME || fSqlType == SQL_TIME ))
+                    break;
+                if (( fCType == SQL_C_TYPE_DATE
+                      || fCType == SQL_C_TYPE_TIMESTAMP
+                      || fCType == SQL_C_DATE
+                      || fCType == SQL_C_TIMESTAMP)
+                    && (fSqlType == SQL_TYPE_DATE || fSqlType == SQL_DATE))
+                    break;
+                retcode = SQL_ERROR;
+                pa60PutError( hstmt, API_ODBC_07006, NULL);
+                goto exit_1_lock;
+                break;
+            }
+            break;
+            }
+            break;
+        }
+        default: {  
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1003, NULL);
+            goto exit_1_lock;
+            break;
+        }
+        }
+        /* check argument value            */
+        if (rgbValue == NULL && pcbValue == NULL ) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1009, NULL); /* invalid argument
+                                                         * value */
+            goto exit_1_lock;
+        }	
+        if ( ipar == 0 ) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1093, NULL); /* invalid parameter
+                                                         * value */
+            goto exit_1_lock;
+        }
+        /* check input scale               */
+        if (ibScale < 0) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1094, NULL); /* invalid scale
+                                                         * value  */
+            goto exit_1_lock;
+        }
+        api_retcode = pa20ReallocRecords( stmt_block_ptr->apdPtr, ipar );
+        if (api_retcode != API_OK) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1001, NULL);
+            /* memory allocation failure     */
+            goto exit_1_lock;
+        }; /* if */
+        api_retcode = pa20ReallocRecords( &stmt_block_ptr->ipd, ipar );
+        if (api_retcode != API_OK) {
+            retcode = SQL_ERROR;
+            pa60PutError( hstmt, API_ODBC_S1001, NULL);
+            /* memory allocation failure     */
+            goto exit_1_lock;
+        }; /* if */
+        allocated_input_attr = (UWORD) (ipar + API_BIND_INC);
+     
+        /* SQL data type FLOAT is handled  */
+        /* as type DOUBLE (ODBC book, 469) */
+        switch (fSqlType) {
+        case SQL_FLOAT: {
+            type = SQL_DOUBLE;
+            break;
+        }
+        case SQL_NUMERIC: {
+            type = SQL_DECIMAL;
+            break;
+        }
+        case SQL_VARCHAR: {
+            type = SQL_CHAR;
+            break;
+        }
+        default: {
+            type = fSqlType;
+            break;
+        }
+        }
+
+        if (retcode == SQL_SUCCESS) {
+            if (stmt_block_ptr -> ipd.count < ipar) {
+                stmt_block_ptr -> ipd.count = ipar;
+                stmt_block_ptr -> apdPtr->count = ipar;
+            }; /* if */
+            appl_rec_ptr = pa20GetRecord( stmt_block_ptr->apdPtr, ipar );
+            API_ASSERT_PTR( appl_rec_ptr );
+            impl_rec_ptr = pa20GetRecord( &stmt_block_ptr->ipd, ipar );
+            API_ASSERT_PTR( appl_rec_ptr );
+            
+            appl_rec_ptr -> bound          = API_TRUE;
+            pa21SetCType( appl_rec_ptr, fCType );
+            appl_rec_ptr -> octetLengthPtr = pcbValue;
+            appl_rec_ptr -> dataPtr        = rgbValue;
+      
+            if (pcbValue != NULL)
+                appl_rec_ptr -> length = *pcbValue;
+            else
+                appl_rec_ptr -> length = 0;	 	 
+            appl_rec_ptr -> precision = cbColDef;
+            appl_rec_ptr -> scale     = ibScale;
+            pa21SetSQLType( impl_rec_ptr, type );
+        }
+
+    exit_1_lock:
+#endif    
+    } /* of if hstmt valid */
+    API_TRACE(API_TR_EXIT,PA10_FN_SQLSETPARAM,0);
+    API_TRACE(API_TR_RETCODE,"retcode",&retcode);
+
+    return (retcode);
+} /* SQLSetParam */
+
+#endif  /* ifndef _UNICODE_ODBC */
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

@@ -1,0 +1,390 @@
+#! python
+# STDDIFF.diffscr
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+import sys
+import string
+import re
+
+from undiffLib import Undiffer, change
+
+class MonitorUndiff:
+    """
+    """
+    def __init__ (self, undiffer, allowedDiff = 1):
+        self.undiffer = undiffer
+        self.allowedDiff = allowedDiff
+
+    def buildRegex (self, entryList):
+        fmt = '%c %s *[|] *([0-9]+) *'
+        if len (entryList) == 1:
+            org = fmt % ('<', entryList [0])
+            new = fmt % ('>', entryList [0])
+            result = ('[0-9]+c[0-9]+\n'
+                + org + '\n---\n'
+                + new)
+        else:
+            orgList = []
+            newList = []
+            for entry in entryList:
+                orgList.append (fmt % ('<', entry))
+                newList.append (fmt % ('>', entry))
+            result = ('[0-9]+,[0-9]+c[0-9]+,[0-9]+\n'
+                + string.join (orgList, '\n')
+                + '\n---\n'
+                + string.join (newList, '\n'))
+        return result
+
+    def diffOK (self, match):
+        extracts = match.groups ()
+        numbers = map (int, extracts)
+        half = len (numbers) / 2
+        # first half contains values from reference run
+        orgValues = numbers [:half]
+        # second half contains differences
+        diffValues = numbers [half:]
+        # compare all pairs
+        for i in xrange (half):
+            diff = orgValues [i] - diffValues [i]
+            if not (-self.allowedDiff <= diff <= self.allowedDiff):
+                # first real difference defines outcome
+                return None
+        # all diffs were in allowed range
+        return 1
+
+    def removeAll (self, entryList):
+        if type (entryList) == type (''):
+            entryList = [entryList]
+        regex = self.buildRegex (entryList)
+        self.undiffer.removeConditional (self.diffOK, regex)
+
+class NonMonitorUndiff:
+    """
+    """
+    def __init__ (self, undiffer, allowedDiff = 1):
+        self.undiffer = undiffer
+        self.allowedDiff = allowedDiff
+
+    def buildRegex (self, entryList):
+        fmt = '%c %s *[:] *([0-9]+) *'
+        if len (entryList) == 1:
+            org = fmt % ('<', entryList [0])
+            new = fmt % ('>', entryList [0])
+            result = ('[0-9]+c[0-9]+\n'
+                + org + '\n---\n'
+                + new)
+        else:
+            orgList = []
+            newList = []
+            for entry in entryList:
+                orgList.append (fmt % ('<', entry))
+                newList.append (fmt % ('>', entry))
+            result = ('[0-9]+,[0-9]+c[0-9]+,[0-9]+\n'
+                + string.join (orgList, '\n')
+                + '\n---\n'
+                + string.join (newList, '\n'))
+        return result
+
+    def diffOK (self, match):
+        extracts = match.groups ()
+        numbers = map (int, extracts)
+        half = len (numbers) / 2
+        # first half contains values from reference run
+        orgValues = numbers [:half]
+        # second half contains differences
+        diffValues = numbers [half:]
+        # compare all pairs
+        for i in xrange (half):
+            diff = orgValues [i] - diffValues [i]
+            if not (-self.allowedDiff <= diff <= self.allowedDiff):
+                # first real difference defines outcome
+                return None
+        # all diffs were in allowed range
+        return 1
+
+    def removeAll (self, entryList):
+        if type (entryList) == type (''):
+            entryList = [entryList]
+        regex = self.buildRegex (entryList)
+        self.undiffer.removeConditional (self.diffOK, regex)
+
+
+class SyskeySwapper:
+    rex = re.compile ("""[0-9]+c[0-9]+
+< SYSINFOKEY *: *([0-9A-F]{8})[0-9A-F]*
+---
+> SYSINFOKEY *: *([0-9A-F]{8})[0-9A-F]*""")
+
+    def removeAll (self, undiffer):
+        undiffer.removeConditional (self.diffOK, self.rex)
+
+    def diffOK (self, match):
+        value1, value2 = match.group (1, 2)
+        bytes1 = self.stringToBytes (value1)
+        bytes2 = self.stringToBytes (value2)
+        if bytes1 == bytes2:
+            return 1
+        bytes2.reverse ()
+        if bytes1 == bytes2:
+            return 1
+        return None
+
+    def stringToBytes (self, str):
+        result = []
+        for i in xrange (len (str) / 2):
+            result.append (str [i * 2:(i * 2) + 2])
+        return result
+
+class IntegerComparison:
+    def __init__ (self, varname, allowedRange):
+        self.rex = re.compile ("""[0-9]+c[0-9]+
+< """ + varname + """ *: *[0-9]+
+---
+> """ + varname + """ *: *([0-9]+)""")
+        self.allowedRange = allowedRange
+
+    def removeAll (self, undiffer):
+        undiffer.removeConditional (self.diffOK, self.rex)
+
+    def diffOK (self, match):
+        try:
+            actual = int (match.group (1))
+        except ValueError:
+            return None
+        low, high = self.allowedRange
+        if low <= actual <= high:
+            return 1
+        else:
+            return None
+
+def STDundiff (undiffer):
+    # remove all occurences of a regular expression
+    # Warning: characters with special meaning inside the regular expression
+    #          must be quoted, e.g. '[*][+][+]' should match '*++'
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< LOCK INFO[^\n]*
+---
+> LOCK INFO[^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< [^\n]*COSTVALUE[^\n]*
+---
+> [^\n]*COSTVALUE[^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< [^\n]*x_python[^\n]*lsystab[^\n]*
+---
+> [^\n]*x_python[^\n]*lsystab[^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+\,[0-9]+
+< [^\n]*x_python[^\n]*lsystab[^\n]*
+---
+> [^\n]*x_python[^\n]*lsystab[^\n]*\n> [^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+\,[0-9]+c[0-9]+
+< [^\n]*x_python[^\n]*lsystab[^\n]*\n< [^\n]*
+---
+> [^\n]*x_python[^\n]*lsystab[^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< COLUMN ID[ ]*:  [0-9A-F]{16}
+---
+> COLUMN ID[ ]*:  [0-9A-F]{16}"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< 1[ ]{17}:  [0-9A-F]{16}
+---
+> 1[ ]{17}:  [0-9A-F]{16}"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< RUNTIME[ ]*: [^\n]*
+---
+> RUNTIME[ ]*: [^\n]*"""
+    )
+
+    undiffer.removeAll (
+    """[0-9]+c[0-9]+
+< Actual Age[ ]*: [^\n]*
+---
+> Actual Age[ ]*: [^\n]*"""
+    )
+
+    undiffer.removeAll ( change + """
+< Root pno\s+\|\s+\d+
+---
+> Root pno\s+\|\s+\d+"""
+    )
+    
+&IF $OS <> WIN32    
+
+    monitorUndiff = MonitorUndiff (undiffer, allowedDiff = 2)
+    monitorUndiff.removeAll (['Data cache accesses',
+	    'Data cache accesses successful'])
+    monitorUndiff.removeAll (['Data cache sqlpage accesses',
+	    'Data cache sqlpage accesses successful'])
+    monitorUndiff.removeAll (['Data cache accesses successful'])
+    monitorUndiff.removeAll (['Data cache accesses'])
+    monitorUndiff.removeAll (['Data history/undo accesses',
+	    'Data history/undo accesses successful'])
+    monitorUndiff.removeAll (['Data history/undo accesses'])
+    monitorUndiff.removeAll (['Data history/undo accesses successful'])
+    monitorUndiff.removeAll (['File directory cache accesses successful'])
+    monitorUndiff.removeAll (['Catalog cache accesses successful',
+	    'Catalog cache accesses unsuccessful'])
+    monitorUndiff.removeAll (['Catalog cache accesses successful'])
+    monitorUndiff.removeAll (['Catalog cache accesses unsuccessful'])
+    monitorUndiff.removeAll (['Catalog cache accesses'])
+    monitorUndiff.removeAll (['Catalog cache accesses',
+        'Catalog cache accesses successful'])
+    monitorUndiff.removeAll (['Catalog cache hit rate [(]%[)]'])
+    monitorUndiff.removeAll (['SQL commands', 'PREPAREs', 'EXECUTEs'])
+    monitorUndiff.removeAll (['SQL commands', 'PREPAREs'])
+    monitorUndiff.removeAll (['SQL commands'])
+    monitorUndiff.removeAll (['PREPAREs', 'EXECUTEs'])
+    monitorUndiff.removeAll (['SELECTs and FETCHes',
+	    'SELECTs and FETCHes, rows read',
+	    'SELECTs and FETCHes, rows qual'])
+    monitorUndiff.removeAll (['SELECTs and FETCHes'])
+    monitorUndiff.removeAll (['SELECTs and FETCHes, rows read',
+	    'SELECTs and FETCHes, rows qual'])
+    monitorUndiff.removeAll (['SELECTs and FETCHes, rows read'])
+    monitorUndiff.removeAll (['SELECTs and FETCHes, rows qual'])
+    monitorUndiff.removeAll (['Table scans, rows read',
+	    'Table scans, rows qual'])
+    monitorUndiff.removeAll (['Table scans, rows read'])
+    monitorUndiff.removeAll (['Table scans, rows qual'])
+    monitorUndiff.removeAll (['Primary key range accesses, rows read',
+        'Primary key range accesses, rows qual'])
+    monitorUndiff.removeAll (['Primary key range accesses, rows read'])
+    monitorUndiff.removeAll (['Primary key range accesses, rows qual'])
+    monitorUndiff.removeAll (['Sorts by insertion, rows inserted'])
+    monitorUndiff.removeAll (['Isolated index accesses, rows read',
+	    'Isolated index accesses, rows qual'])
+    monitorUndiff.removeAll (['Isolated index accesses, rows read'])
+    monitorUndiff.removeAll (['Isolated index accesses, rows qual'])
+    monitorUndiff.removeAll (['Isolated index range accesses, rows read',
+	    'Isolated index range accesses, rows qual'])
+    monitorUndiff.removeAll (['Isolated index scans, rows read',
+	    'Isolated index scans, rows qual'])
+    monitorUndiff.removeAll (['Isolated index scans, rows read'])
+    monitorUndiff.removeAll (['Isolated index scans, rows qual'])
+    monitorUndiff.removeAll (['Index range accesses, rows read',
+	    'Index range accesses, rows qual'])
+    monitorUndiff.removeAll (['Lock list inserted row   entries',
+        'Lock list inserted table entries'])
+    monitorUndiff.removeAll (['Lock list inserted row   entries'])
+    monitorUndiff.removeAll (['Lock list inserted table entries'])
+    monitorUndiff.removeAll (['Lock list max used entries'])
+    monitorUndiff.removeAll (['Lock list avg used entries'])
+    monitorUndiff.removeAll (['Log queue pages'])
+    monitorUndiff.removeAll (['Log queue inserts'])
+    # monitorUndiff.removeAll (['Log queue max used pages'])
+    monitorUndiff.removeAll (['Virtual  reads', 'Virtual  writes'])
+    monitorUndiff.removeAll (['Virtual  reads'])
+    monitorUndiff.removeAll (['Perm page      physical writes'])
+    monitorUndiff.removeAll (['Catalog        physical writes'])
+    monitorUndiff.removeAll (['Physical writes'])
+    monitorUndiff.removeAll (['Virtual  writes'])
+    monitorUndiff.removeAll (['Catalog        virtual  reads',
+	    'Catalog        virtual  writes'])
+    monitorUndiff.removeAll (['Catalog        virtual  reads'])
+    monitorUndiff.removeAll (['Catalog        virtual  writes'])
+    monitorUndiff.removeAll (['Perm page      virtual  reads',
+	    'Perm page      virtual  writes'])
+    monitorUndiff.removeAll (['Perm page      virtual  writes'])
+    monitorUndiff.removeAll (['Perm page      virtual  reads'])
+    monitorUndiff.removeAll (['Temp page      virtual  reads',
+	    'Temp page      virtual  writes'])
+    monitorUndiff.removeAll (['Temp page      virtual  writes'])
+    monitorUndiff.removeAll (['Temp page      virtual  reads'])
+    monitorUndiff.removeAll (['Leaf page      physical writes'])
+    monitorUndiff.removeAll (['Leaf page      virtual  reads',
+	    'Leaf page      virtual  writes'])
+    monitorUndiff.removeAll (['Leaf page      virtual  reads'])
+    monitorUndiff.removeAll (['Leaf page      virtual  writes'])
+    monitorUndiff.removeAll (['Level1 page    virtual  reads'])
+    monitorUndiff.removeAll (['BD add  record perm', 'BD add  record temp'])
+    monitorUndiff.removeAll (['BD add  record perm'])
+    monitorUndiff.removeAll (['BD add  record temp'])
+    monitorUndiff.removeAll (['BD add  record temp', 'BD repl record perm'])
+    monitorUndiff.removeAll (['BD repl record perm', 'BD repl record temp'])
+    monitorUndiff.removeAll (['BD repl record perm'])
+    monitorUndiff.removeAll (['BD repl record temp'])
+    monitorUndiff.removeAll (['BD del  record perm', 'BD del  record temp'])
+    monitorUndiff.removeAll (['BD del  record perm'])
+    monitorUndiff.removeAll (['BD del  record temp'])
+    monitorUndiff.removeAll (['BD get  record perm', 'BD get  record temp'])
+    monitorUndiff.removeAll (['BD get  record perm'])
+    monitorUndiff.removeAll (['BD get  record temp'])
+    monitorUndiff.removeAll (['BD next record temp'])
+    monitorUndiff.removeAll (['BD del  record temp',
+        'BD get  record perm'])
+    monitorUndiff.removeAll (['BD select next   record'])
+    monitorUndiff.removeAll (['BD del from index list perm'])
+    monitorUndiff.removeAll (['KB calls'])
+    monitorUndiff.removeAll (['PREPAREs'])
+    monitorUndiff.removeAll (['EXECUTEs'])
+    monitorUndiff.removeAll (['DATA_CACHE_ACCESS'])
+    monitorUndiff.removeAll ([' Trace I/O operations locked'])
+    monitorUndiff.removeAll ([' Trace I/O operations',
+        ' Trace I/O operations locked'])
+
+&endif     
+
+    nonmonitorUndiff = NonMonitorUndiff (undiffer, allowedDiff = 2)
+    nonmonitorUndiff.removeAll (['MAXUSEDPAGES', 'USEDPERM'])
+    nonmonitorUndiff.removeAll (['MAX_USED_PAGES', 'USED_PERM_PAGES'])
+    nonmonitorUndiff.removeAll (['UNUSED'])
+    nonmonitorUndiff.removeAll (['USED_PAGES'])
+    nonmonitorUndiff.removeAll (['USED_TEMP_PAGES'])
+    nonmonitorUndiff.removeAll (['USEDTMP'])
+    nonmonitorUndiff.removeAll (['UNUSED_PAGES'])
+    nonmonitorUndiff.removeAll (['USED_BLOCKS'])
+    nonmonitorUndiff.removeAll (['WRITES', 'WRITEPAGES'])
+
+
+
+    SyskeySwapper ().removeAll (undiffer)
+    # from FSUNION: base record size 32bit vs. 64bit
+    IntegerComparison ('SIZE', (208, 240)).removeAll (undiffer)
+    # from RECURSIVE: base record size 32bit vs. 64bit
+    IntegerComparison ('SIZE', (212, 248)).removeAll (undiffer)
+
+    # write changed diff output back to file
+    undiffer.write ()
+
+Undiffer (sys.argv [1]).runSafe (STDundiff)
+

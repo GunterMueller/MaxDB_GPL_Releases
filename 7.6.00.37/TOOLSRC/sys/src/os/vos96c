@@ -1,0 +1,887 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS96C$
+.tt 2 $$$
+.tt 3 $R.Roedling$START/STOP TCP/IP DATABASE SERVER$1997-08-01$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : START/STOP/INSTALL/REMOVE_TCP/IP_DATABASE_SERVER
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1994-11-17
+.sp
+.cp 3
+Version : 1994-11-17
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-08-01
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS96C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define TIMEOUT                   120
+#define START_SLEEP_TIME          15000
+
+#if defined(DEBUG)
+ #define STATIC
+#else
+ #define STATIC static
+#endif
+
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+#if defined(_WIN32)
+ static LONG          sql96_check_service_params  ( VOID );
+#endif
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+#if defined(_WIN32)
+ APIRET sql96_start_service ( PSZ  pszNodeName )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_start_service"
+   LONG                    rc                         = NO_ERROR;
+   SC_HANDLE               schService                 = NULL;
+   ULONG                   ulTimeout                  = TIMEOUT;
+   SC_HANDLE               schSCManager;
+   SERVICE_STATUS          ssSeviceStatus;
+
+   DBGIN;
+
+   sql60_open_event_log ( XSERV_TITLE, XSERVER_DIAG_ID );
+
+   schSCManager = OpenSCManager( pszNodeName, NULL, SC_MANAGER_CONNECT );
+
+   if ( schSCManager != NULL )
+     {
+     schService = OpenService(schSCManager, XSERV_TITLE,
+                              SERVICE_START | SERVICE_QUERY_STATUS);
+
+     if (schService == NULL)
+       rc = GetLastError();
+     else
+       {
+       if ( pszNodeName == NULL )
+         {
+         rc = sql96_check_service_params ( );
+
+         if ( rc != NO_ERROR )
+           {
+           CloseServiceHandle(schService);
+           CloseServiceHandle(schSCManager);
+
+           DBGOUT;
+           return ( rc );
+           }
+        }
+
+       if ( !StartService(schService, 0, NULL) )
+         rc = GetLastError();
+       else
+         {
+         do
+           {
+           SLEEP( 1000 );
+           ulTimeout--;
+
+           if ( !QueryServiceStatus( schService, &ssSeviceStatus ))
+             rc = GetLastError();
+           else if ( ssSeviceStatus.dwCurrentState == SERVICE_RUNNING )
+             break;
+           else if ( ssSeviceStatus.dwCurrentState == SERVICE_STOPPED )
+             {
+             MSGCD(( ERR_XSER_STOPPED_EV_LOG ));
+             DBGOUT;
+             return( (APIRET)-2 );
+             }
+
+           if ( ulTimeout == 0 )
+             rc = ERROR_TIMEOUT;
+           }
+         while ( rc == NO_ERROR );
+         }
+       CloseServiceHandle(schService);
+       }
+     CloseServiceHandle(schSCManager);
+     }
+   else
+     rc = GetLastError();
+
+   switch (rc)
+     {
+     case NO_ERROR:                        break;
+     case ERROR_FILE_NOT_FOUND:
+     case ERROR_PATH_NOT_FOUND:            MSGALL (( INFO_SERVICE_NOT_INST_CORR ));
+                                           break;
+     case ERROR_SERVICE_DOES_NOT_EXIST:    MSGALL (( ERR_SERVICE_UNKNOWN, XSERV_TITLE ));
+                                           break;
+     case ERROR_SERVICE_ALREADY_RUNNING:   MSGCD (( ERR_XSER_ALREADY_RUNNING ));
+                                           break;
+     case RPC_S_SERVER_UNAVAILABLE:        MSGALL (( ERR_SERVER_NODE_UNKNOWN, pszNodeName ));
+                                           break;
+     case ERROR_ACCESS_DENIED:             MSGALL (( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ));
+                                           break;
+     default:                              MSGALL (( ERR_XSER_CANNOT_START, rc ));
+                                           break;
+     }
+
+   sql60_close_event_log ();
+
+   DBGOUT;
+   return ( rc );
+   }
+
+ /*------------------------------*/
+
+ APIRET sql96_stop_service ( PSZ  pszNodeName )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_stop_service"
+   LONG                    rc                         = NO_ERROR;
+   SC_HANDLE               schService                 = NULL;
+   ULONG                   ulTimeout                  = TIMEOUT;
+   SC_HANDLE               schSCManager;
+   SERVICE_STATUS          ssSeviceStatus;
+
+   DBGIN;
+
+   sql60_open_event_log ( XSERV_TITLE, XSERVER_DIAG_ID );
+
+   schSCManager = OpenSCManager( pszNodeName, NULL, SC_MANAGER_CONNECT );
+
+   if ( schSCManager != NULL )
+     {
+     schService = OpenService(schSCManager, XSERV_TITLE,
+                              SERVICE_STOP | SERVICE_QUERY_STATUS);
+
+     if (schService == NULL)
+       rc = GetLastError();
+     else
+       {
+       if (!ControlService(schService, SERVICE_CONTROL_STOP, &ssSeviceStatus))
+         rc = GetLastError();
+       else
+         {
+         do
+           {
+           SLEEP( 1000 );
+           ulTimeout--;
+
+           if ( !QueryServiceStatus( schService, &ssSeviceStatus ))
+             rc = GetLastError();
+           else if ( ssSeviceStatus.dwCurrentState == SERVICE_STOPPED )
+             break;
+
+           if ( ulTimeout == 0 )
+             rc = ERROR_TIMEOUT;
+           }
+         while ( rc == NO_ERROR );
+         }
+       CloseServiceHandle(schService);
+       }
+     CloseServiceHandle(schSCManager);
+     }
+   else
+     rc = GetLastError();
+
+   switch (rc)
+     {
+     case NO_ERROR:                     break;
+     case ERROR_ACCESS_DENIED:          MSGALL (( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ));
+                                        break;
+     case ERROR_SERVICE_DOES_NOT_EXIST: MSGALL (( ERR_SERVICE_UNKNOWN, XSERV_TITLE ));
+                                        break;
+     case RPC_S_SERVER_UNAVAILABLE :    MSGALL (( ERR_SERVER_NODE_UNKNOWN, pszNodeName ));
+                                        break;
+     case ERROR_SERVICE_NOT_ACTIVE :    MSGCD (( ERR_XSER_NOT_STARTED ));
+                                        break;
+     default:                           MSGALL (( ERR_XSER_CANNOT_STOP, rc ));
+                                        break;
+     }
+
+   sql60_close_event_log ();
+
+   DBGOUT;
+   return ( rc );
+   }
+
+#endif
+
+/*------------------------------*/
+
+APIRET sql96_start_server ( PSZ  pszCmdLine,
+                            BOOL fSuppressActiveMsg )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96_start_server"
+  LONG                    rc                     = NO_ERROR;
+  HEV                     hevSemXserv            = 0;
+  CHAR                    szCmdLine[512];
+  #if defined(_WIN32)
+   static STARTUPINFO     StartupInfo            = {sizeof(STARTUPINFO)};
+   PROCESS_INFORMATION    ProcessInfo;
+   CHAR                   szCommandFile[MAX_PATH];
+  #else
+   STARTDATA              stdataSession;
+   PSZ                    pszDBRoot;
+   CHAR                   szPgmTitle[32];
+   PATHNAME               szIconFile;
+   PATHNAME               szPgmName;
+   ULONG                  idSession;
+   PID                    idProcess;
+   HEV                    hevSemXserv  = 0;   // --- should be zero
+   UCHAR                  ObjBuf[100]; // Object buffer to hold
+                                       // DosExecPgm fail causes
+  #endif
+
+  DBGIN;
+
+  if (strlen(pszCmdLine) + 3 >= sizeof(szCmdLine))
+    {
+    MSGCD (( ERR_CMD_LINE_TOO_LONG ));
+    DBGOUT;
+    return ( 1 );
+    }
+
+  strcpy(szCmdLine, pszCmdLine);
+  strcat(szCmdLine, " -R");
+
+  rc = sql41c_open_event_sem ( &hevSemXserv, SEM_XSERVER, "", NO_ERROR);
+
+  if (rc == NO_ERROR)
+    {
+    sql41c_close_event_sem ( hevSemXserv, XSERV_TITLE );
+
+    if ( fSuppressActiveMsg == FALSE )
+      MSGCD (( ERR_XSER_ALREADY_RUNNING ));
+
+    DBGOUT;
+    return( rc );
+    }
+
+  #if defined(_WIN32)
+   if (GetModuleFileName(NULL, szCommandFile, sizeof(szCommandFile)))
+       pszCmdLine = szCommandFile;
+   else
+       pszCmdLine = NULL;
+
+   StartupInfo.dwFlags     = STARTF_USESHOWWINDOW;
+   StartupInfo.wShowWindow = SW_SHOWMINNOACTIVE;
+
+   if (!CreateProcess(pszCmdLine,
+                      szCmdLine,
+                      NULL,
+                      NULL,
+                      FALSE,
+                      CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE,
+                      NULL,
+                      NULL,
+                      &StartupInfo,
+                      &ProcessInfo))
+     {
+     if (!pszCmdLine)
+       pszCmdLine = XSERV_TITLE;
+
+     rc = GetLastError();
+
+     MSGCD (( ERR_XSER_CANNOT_START, rc ));
+     }
+  #else
+   if ( sql01c_get_dbroot (&pszDBRoot) == FALSE )
+     {
+     MSGCD (( ERR_DBROOT_NOT_SET ));
+     }
+   else
+     {
+     strcpy (szPgmTitle, XSERV_TITLE);
+
+     strcpy (szPgmName, pszDBRoot);
+     strcat (szPgmName, "\\"DB_XSERVER_FILE_NAME);
+
+     strcpy (szIconFile, pszDBRoot);
+     strcat (szIconFile, "\\"DB_ICON_FILE_NAME);
+
+     stdataSession.Length      = sizeof(STARTDATA);
+     stdataSession.Related     = SSF_RELATED_INDEPENDENT;
+     stdataSession.FgBg        = SSF_FGBG_BACK;
+     stdataSession.TraceOpt    = SSF_TRACEOPT_NONE;
+     stdataSession.PgmTitle    = szPgmTitle;
+     stdataSession.PgmName     = szPgmName;
+     stdataSession.PgmInputs   = szCmdLine;
+     stdataSession.TermQ       = 0;
+     stdataSession.Environment = 0;
+     stdataSession.InheritOpt  = SSF_INHERTOPT_PARENT;
+     stdataSession.SessionType = SSF_TYPE_DEFAULT;
+     stdataSession.IconFile    = szIconFile;
+     stdataSession.PgmHandle   = 0;
+     stdataSession.PgmControl  = SSF_CONTROL_INVISIBLE;
+     stdataSession.InitXPos    = 0;
+     stdataSession.InitYPos    = 0;
+     stdataSession.InitXSize   = 100;
+     stdataSession.InitYSize   = 100;
+     stdataSession.Reserved    = 0;
+     stdataSession.ObjectBuffer = ObjBuf;
+     stdataSession.ObjectBuffLen = sizeof(ObjBuf);
+
+     DBG3 ((MF__, "Starting XServer: %s", szPgmName ));
+     rc = DosStartSession (&stdataSession, &idSession, &idProcess);
+
+     if ( rc == ERROR_SMG_INVALID_ICON_FILE )
+       {
+       stdataSession.IconFile    = NULL;
+       rc = DosStartSession (&stdataSession, &idSession, &idProcess);
+       }
+
+     if ( rc != NO_ERROR)
+       MSGCD (( ERR_XSER_CANNOT_START, rc ))
+     }
+  #endif
+
+  if ( rc == NO_ERROR)
+    {
+    SLEEP ( START_SLEEP_TIME );
+
+    // --- check if XSERVER is still active
+    rc = sql41c_open_event_sem ( &hevSemXserv, SEM_XSERVER, "",
+                                ERROR_ACCESS_DENIED);
+
+    if ( rc == ERROR_SEM_NOT_FOUND )
+      MSGCD (( ERR_XSER_STOPPED_DIAG ))
+    else if ( rc == NO_ERROR )
+      sql41c_close_event_sem ( hevSemXserv, XSERV_TITLE );
+    else
+      rc = NO_ERROR;
+    }
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+APIRET sql96_stop_server ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96_stop_server"
+  HEV                     hevSemXserv  = 0;   // --- should be zero
+  APIRET                  rc           = NO_ERROR;
+
+  DBGIN;
+
+  rc = sql41c_open_event_sem ( &hevSemXserv, SEM_XSERVER, "",
+                               ERROR_ACCESS_DENIED);
+
+  if (rc == ERROR_ACCESS_DENIED)
+    MSGCD(( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ))
+  else if (rc == ERROR_SEM_NOT_FOUND)
+    MSGCD (( ERR_XSER_NOT_STARTED ))
+  else if ( rc == NO_ERROR )
+    {
+    rc = sql41c_post_event_sem ( hevSemXserv, XSERV_TITLE );
+
+    sql41c_close_event_sem ( hevSemXserv, XSERV_TITLE );
+    }
+
+  DBGOUT;
+  return (rc);
+  }
+
+ /*------------------------------*/
+
+#if defined(_WIN32)
+
+ INT sql96_update_service ( PSZ  pszNodeName,
+                            PSZ  pszDBRoot )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_update_service"
+   LONG                    rc            = NO_ERROR;
+   SC_HANDLE               schService    = NULL;
+   SC_HANDLE               schSCManager;
+
+   sql60_open_event_log ( XSERV_TITLE, XSERVER_DIAG_ID );
+
+   schSCManager = OpenSCManager( pszNodeName, NULL, SC_MANAGER_ALL_ACCESS );
+
+   if ( schSCManager != NULL )
+     {
+     if (schService = OpenService(schSCManager, XSERV_TITLE, SERVICE_START))
+       {
+       CloseServiceHandle(schService);
+       CloseServiceHandle(schSCManager);
+
+       rc = sql96_remove_service ( pszNodeName );
+
+       if ( rc == NO_ERROR )
+        rc = sql96_install_service ( pszNodeName, pszDBRoot );
+
+       sql60_close_event_log ();
+
+       DBGOUT;
+       return ( rc );
+
+       }
+     else if ( GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST )
+       rc = sql96_install_service ( pszNodeName, pszDBRoot );
+     }
+   else
+     {
+     rc = GetLastError();
+
+     if (rc == ERROR_ACCESS_DENIED)
+       MSGALL(( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ))
+     else if ( rc == RPC_S_SERVER_UNAVAILABLE )
+       MSGALL(( ERR_SERVER_NODE_UNKNOWN, pszNodeName ))
+     else
+       MSGALL (( ERR_INSTALL_SERVICE, XSERV_TITLE, rc ))
+     }
+
+   sql60_close_event_log ();
+
+   DBGOUT;
+   return ( rc );
+   }
+
+ /*------------------------------*/
+
+ INT sql96_install_service ( PSZ  pszNodeName,
+                             PSZ  pszDBRoot )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_install_service"
+   LONG                    rc            = NO_ERROR;
+   SC_HANDLE               schService    = NULL;
+   PSECURITY_DESCRIPTOR    pSD           = NULL;
+   CHAR                    szCommandFile[256 + 1];
+   SC_HANDLE               schSCManager;
+   PATHNAME                szKey;
+   PATHNAME                szMsgFile;
+   ULONG                   dwTypesSupported;
+   REG_ENTRY_REC           RegistryEntries[3];
+   C40C                    szRTEVersion;
+   RTE_VERSION_ID          RTEVersionID;
+
+   DBGIN;
+
+
+   schSCManager = OpenSCManager( pszNodeName, NULL, SC_MANAGER_ALL_ACCESS );
+
+   if ( schSCManager != NULL )
+     {
+     lstrcpy(szCommandFile, pszDBRoot);
+     if ( pszDBRoot[strlen(pszDBRoot) - 1] != '\\' )
+       lstrcat(szCommandFile, "\\");
+
+     lstrcat(szCommandFile, DB_XSERVER_FILE_NAME);
+
+     schService = CreateService( schSCManager,
+                                 XSERV_TITLE,
+                                 XSERV_TITLE,
+                                 SERVICE_ALL_ACCESS,
+                                 SERVICE_WIN32_OWN_PROCESS,
+                                 SERVICE_DEMAND_START,
+                                 SERVICE_ERROR_NORMAL,
+                                 szCommandFile,
+                                 NULL,
+                                 NULL,
+                                 NULL,
+                                 NULL,
+                                 NULL);
+
+     if (schService == NULL)
+       rc = GetLastError();
+     else
+       {
+       rc = sql49c_alloc_and_init_service_SD ( &pSD, schService );
+
+       if ( ( rc == NO_ERROR ) && ( pSD != NULL ))
+         {
+         if (!SetServiceObjectSecurity( schService, DACL_SECURITY_INFORMATION, pSD ))
+           {
+           rc = GetLastError ();
+           }
+         }
+
+       CloseServiceHandle(schService);
+
+       if ( rc == NO_ERROR )
+         {
+         // ---- insert version string and DBROOT entry into registry database
+         strcpy ( szRTEVersion, sql02_get_RTE_version_string() );
+
+         sql02_get_RTE_version ( &RTEVersionID );
+
+         RegistryEntries[0].pszValueName = REG_VN_VERSION;
+         RegistryEntries[0].pValue       = szRTEVersion;
+         RegistryEntries[0].ulValueSize  = strlen(szRTEVersion);
+         RegistryEntries[0].ulValueType  = REG_SZ;
+
+         RegistryEntries[1].pszValueName = REG_VN_VERSION_ID;
+         RegistryEntries[1].pValue       = &RTEVersionID;
+         RegistryEntries[1].ulValueSize  = sizeof(RTEVersionID);
+         RegistryEntries[1].ulValueType  = REG_BINARY;
+
+         RegistryEntries[2].pszValueName = REG_VN_DBROOT;
+         RegistryEntries[2].pValue       = pszDBRoot;
+         RegistryEntries[2].ulValueSize  = strlen(pszDBRoot);
+         RegistryEntries[2].ulValueType  = REG_SZ;
+
+
+         strcpy ( szKey, XSERV_TITLE );
+         strcat ( szKey, "\\"REG_SK_SERVICE_PARAM );
+
+         rc = sql50_reg_put_service_values ( pszNodeName, szKey, 3,
+                                             RegistryEntries );
+
+         if ( rc == NO_ERROR )
+           {
+           //
+           // --- insert message dll entry into the eventlog subkey of
+           //     registry database
+           //
+           strcpy ( szKey, REG_SK_EVENT_LOG );
+           strcat ( szKey, "\\" );
+           strcat ( szKey, XSERVER_DIAG_ID );
+
+           memset ( szMsgFile, 0, sizeof(szMsgFile));
+           sql01c_build_pgm_path ( pszDBRoot, szMsgFile ) ;
+           strcat ( szMsgFile, REG_MSG_FILE );
+
+           dwTypesSupported = EVENTLOG_ERROR_TYPE |
+                             EVENTLOG_WARNING_TYPE |
+                             EVENTLOG_INFORMATION_TYPE;
+
+           RegistryEntries[0].pszValueName = REG_VN_MSG_FILE;
+           RegistryEntries[0].pValue       = szMsgFile;
+           RegistryEntries[0].ulValueSize  = strlen(szMsgFile) + 1;
+           RegistryEntries[0].ulValueType  = REG_EXPAND_SZ;
+
+           RegistryEntries[1].pszValueName = REG_VN_EV_TYPES;
+           RegistryEntries[1].pValue       = &dwTypesSupported;
+           RegistryEntries[1].ulValueSize  = sizeof (DWORD);
+           RegistryEntries[1].ulValueType  = REG_DWORD;
+
+           rc = sql50_reg_put_service_values ( pszNodeName, szKey, 2,
+                                               RegistryEntries );
+           }
+         }
+       }
+     CloseServiceHandle(schSCManager);
+     }
+   else
+     rc = GetLastError();
+
+   if ( rc == ERROR_SERVICE_EXISTS )
+     MSGCD(( INFO_SERVICE_ALREADY_INST, XSERV_TITLE ))
+   else if (rc == ERROR_ACCESS_DENIED)
+     MSGALL(( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ))
+   else if ( rc == RPC_S_SERVER_UNAVAILABLE )
+     MSGALL(( ERR_SERVER_NODE_UNKNOWN, pszNodeName ))
+   else if ( rc != NO_ERROR )
+     MSGALL (( ERR_INSTALL_SERVICE, XSERV_TITLE, rc ))
+   else
+     MSGCD (( INFO_SERVICE_INSTALLED, XSERV_TITLE ));
+
+   sql60_close_event_log ();
+
+   DBGOUT;
+   return ( rc );
+   }
+
+ /*------------------------------*/
+
+ INT sql96_remove_service ( PSZ  pszNodeName )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_remove_service"
+   LONG                    rc                         = NO_ERROR;
+   SC_HANDLE               schService                 = NULL;
+   ULONG                   ulTimeout                  = TIMEOUT;
+   SC_HANDLE               schSCManager;
+   SERVICE_STATUS          ssSeviceStatus;
+
+   DBGIN;
+
+   sql60_open_event_log ( XSERV_TITLE, XSERVER_DIAG_ID );
+
+   schSCManager = OpenSCManager( pszNodeName, NULL, SC_MANAGER_CONNECT );
+
+   if ( schSCManager != NULL )
+     {
+     schService = OpenService(schSCManager, XSERV_TITLE,
+                              DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS);
+
+     if (schService == NULL)
+       rc = GetLastError();
+     else
+       {
+       ControlService(schService, SERVICE_CONTROL_STOP, &ssSeviceStatus);
+
+       do
+         {
+         SLEEP( 1000 );
+         ulTimeout--;
+
+         if ( !QueryServiceStatus( schService, &ssSeviceStatus ))
+           rc = GetLastError();
+         else if ( ssSeviceStatus.dwCurrentState == SERVICE_STOPPED )
+           break;
+
+         if ( ulTimeout == 0 )
+           rc = ERROR_TIMEOUT;
+         }
+       while ( rc == NO_ERROR );
+
+       if ( !DeleteService(schService) )
+         rc = GetLastError();
+
+       CloseServiceHandle(schService);
+       }
+     CloseServiceHandle(schSCManager);
+     }
+   else
+     rc = GetLastError();
+
+
+   if ( rc != NO_ERROR )
+     {
+     if (rc == ERROR_ACCESS_DENIED)
+       MSGALL(( ERR_ACCESS_DENIED_ON_XX, XSERV_TITLE ))
+     else if ( rc == ERROR_SERVICE_DOES_NOT_EXIST )
+       MSGCD (( ERR_SERVICE_UNKNOWN, XSERV_TITLE  ))
+     else if ( rc == RPC_S_SERVER_UNAVAILABLE )
+       MSGALL(( ERR_SERVER_NODE_UNKNOWN, pszNodeName ))
+     else
+       MSGALL(( ERR_REMOVE_SERVICE, XSERV_TITLE, rc ));
+     }
+   else
+     MSGCD (( INFO_SERVICE_REMOVED, XSERV_TITLE ));
+
+   sql60_close_event_log ();
+
+   DBGOUT;
+   return ( rc );
+   }
+#endif
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+ static LONG sql96_check_service_params ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96_check_service_params"
+   PATHNAME                szSubKey;
+   REG_ENTRY_REC           RegistryEntries[2];
+   C40C                    szRTEVersion;
+   PSZ                     pszRTEVersion;
+   PATHNAME                szDBRoot;
+   PSZ                     pszDBRoot;
+   LONG                    rc  = NO_ERROR;
+   RTE_VERSION_ID          RTEVersionID;
+
+   DBGIN;
+
+   if ( sql01c_get_dbroot (&pszDBRoot) == FALSE )
+     pszDBRoot = NULL;
+
+   pszRTEVersion = sql02_get_RTE_version_string();
+
+   strcpy ( szSubKey, XSERV_TITLE );
+   strcat ( szSubKey, "\\"REG_SK_SERVICE_PARAM );
+
+   RegistryEntries[0].pszValueName = REG_VN_VERSION;
+   RegistryEntries[0].pValue       = szRTEVersion;
+   RegistryEntries[0].ulValueSize  = sizeof(szRTEVersion);
+   RegistryEntries[0].ulValueType  = REG_SZ;
+   RegistryEntries[0].rc           = NO_ERROR;
+
+   RegistryEntries[1].pszValueName = REG_VN_VERSION_ID;
+   RegistryEntries[1].pValue       = &RTEVersionID;
+   RegistryEntries[1].ulValueSize  = sizeof(RTEVersionID);
+   RegistryEntries[1].ulValueType  = REG_BINARY;
+   RegistryEntries[1].rc           = NO_ERROR;
+
+   sql50_reg_get_service_values ( NULL, szSubKey, 2, RegistryEntries );
+
+   if ( RegistryEntries[0].rc != NO_ERROR )
+     {
+     strcpy ( szRTEVersion, "???" );
+     MSGALL (( WRN_XSER_CANNOT_READ_REG, REG_VN_VERSION ))
+     }
+   if ( RegistryEntries[1].rc != NO_ERROR )  // - no version id enty found?
+     {
+     // --- If thre is no no version id entry, check the version strings.
+     if ( strcmp ( szRTEVersion, pszRTEVersion ))
+       {
+       MSGALL (( ERR_XSER_WRONG_VERSION, szRTEVersion, pszRTEVersion ))
+       DBGOUT;
+       return ( !NO_ERROR );
+       }
+     else
+       MSGALL (( WRN_XSER_CANNOT_READ_REG, REG_VN_VERSION_ID ));
+     }
+   else if ( sql02_this_RTE_version_is_older( &RTEVersionID) )
+     {
+     MSGALL (( ERR_XSER_WRONG_VERSION, szRTEVersion, pszRTEVersion ))
+     DBGOUT;
+     return ( !NO_ERROR );
+     }
+   else if (( pszDBRoot != NULL) &&
+            ( sql02_RTE_versions_are_equal( &RTEVersionID) ))
+     {
+     RegistryEntries[0].pszValueName = REG_VN_DBROOT;
+     RegistryEntries[0].pValue       = szDBRoot;
+     RegistryEntries[0].ulValueSize  = sizeof(szDBRoot);
+     RegistryEntries[0].ulValueType  = REG_SZ;
+
+     rc = sql50_reg_get_service_values ( NULL, szSubKey, 1, RegistryEntries );
+
+     if ( rc != NO_ERROR )
+       {
+       MSGALL (( WRN_XSER_CANNOT_READ_REG, REG_VN_DBROOT ));
+       }
+     else if ( strcmp ( szDBRoot, pszDBRoot ))
+       {
+       MSGALL (( WRN_XSER_WRONG_DBROOT, szDBRoot ));
+       }
+     }
+
+   DBGOUT;
+   return ( NO_ERROR );
+   }
+
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20
+.PA

@@ -1,0 +1,629 @@
+(* @(#)optimizer/optm1.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm1.p *)
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../common/hdg.def"
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../optimizer/gl_decls.i"
+#include "../common/csg.i"
+#include "../common/csg.h"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../optimizer/set_util.h"
+#include "../optimizer/temp_util.h"
+
+
+(* 1993-May-17  undefined; assumed irrelevant, made into comment
+ * function is_structured
+ *    (t: SymbolTableRange)
+ *    : boolean;
+ * external;
+ *)
+
+procedure BumpSymPtr;
+external;
+
+
+(* export *)
+
+#include "../optimizer/optm1.h"
+
+
+(* routines *)
+
+
+   procedure gl_InitSym;
+
+      procedure NewOptimizerSymbol
+         (id,
+          typ: integer;
+          kind: KINDTYPE;
+          level,
+          card: integer);
+
+      begin
+         BumpSymPtr;
+
+         STab[SymPtr].SName := id;
+         STab[SymPtr].SType := typ;
+         STab[SymPtr].SKind := kind;
+         STab[SymPtr].SLevel := level;
+         STab[SymPtr].SCard := card;
+
+         STab [SymPtr].DummyInfo.dummy1 := -1;
+         STab [SymPtr].DummyInfo.dummy2 := -1;
+         STab [SymPtr].DummyInfo.dummy3 := -1;
+
+      end  (* NewOptimizerSymbol *);
+
+
+      function InitSym
+         (kind: KINDTYPE;
+          t: integer)
+         : integer;
+	 (* enters initial entries into the symbol table *)
+
+      begin
+         NewOptimizerSymbol (0, t, kind, 0, 0);
+         InitSym := SymPtr;
+      end  (* InitSym *);
+
+
+   begin
+
+      gl_IntegerPtr := InitSym (TypeDcl,IntegerType);
+      STab [gl_IntegerPtr].SLowRange := minint;
+      STab [gl_IntegerPtr].SHighRange := maxint;
+      STab [gl_IntegerPtr].TypeInfo.SAlign := IntegerAlignment;
+      STab [gl_IntegerPtr].TypeInfo.SSize := IntegerSize;
+
+      gl_AnyPtrPtr := InitSym (TypeDcl,PointerType);
+      STab [gl_AnyPtrPtr].SDomain := gl_IntegerPtr;
+      STab [gl_AnyPtrPtr].TypeInfo.SAlign := PointerAlignment;
+      STab [gl_AnyPtrPtr].TypeInfo.SSize := PointerSize;
+
+   end  (* gl_InitSym *);
+
+
+   procedure PrintDescriptor;
+      (* print a descriptor *)
+   begin
+      if NodeIndex = -1 then begin
+         write (output, '*** ', msg:20, ' = (');
+      end
+      else begin
+         write (output, '*** ', msg:20, '(', NodeIndex, ') = (');
+      end  (* if *);
+      PrintSet (desc1.def);
+      write (output, ';');
+      PrintSet (desc1.ref);
+      write (output, ')');
+      if desc1.continue then write (output, ' cont');
+      if desc1.break then write (output, ' brk');
+      if desc1.return then write (output, ' ret');
+      if desc1.goto_label then write (output, ' lab');
+      writeln (output);
+      flush (output);
+   end  (* PrintDescriptor *);
+
+
+      procedure ListDescTab;
+
+      var
+	 DescPtr: DescriptorRange;
+
+      begin
+         writeln;
+         writeln ('ListDescTab called');
+         writeln;
+      end;
+
+
+   procedure temp_list (list: DescriptorRange);
+   var i: integer;
+   begin
+      i := 0;
+      while list <> nil do begin
+         i := i + 1;
+         write (ord (list));
+         if i = 8 then begin writeln; i := 0; end;
+         list := list^.next;
+      end;
+      if i <> 0 then writeln;
+   end;
+
+
+   function AvailableDescriptor
+      : DescriptorRange;
+
+     (* this function searches for the first empty descriptor in the *)
+     (* available descriptors chain.                                 *)
+
+   var
+      t: DescriptorRange;
+
+   begin
+      if FreeDescriptorList = nil then begin
+#ifdef FLEX
+	 X_NEW (t, s_desc);
+         set_Descript ( t );
+#else
+	 new(t);
+#endif
+      end
+      else begin
+         t := FreeDescriptorList;
+         FreeDescriptorList := FreeDescriptorList^.next;
+      end;
+      if BusyDescriptorList <> nil then begin
+         BusyDescriptorList^.prev := t;
+      end;
+      t^.next := BusyDescriptorList;
+      BusyDescriptorList := t;
+      AvailableDescriptor := t;
+   end  (* AvailableDescriptor *);
+
+
+   procedure FreeDescriptor
+      (desc: DescriptorRange);
+
+   begin
+
+      (* remove from busy list *)
+
+      if desc = BusyDescriptorList then begin
+         (* remove from head *)
+         BusyDescriptorList := desc^.next;
+      end
+      else begin
+         (* remove from middle *)
+         desc^.prev^.next := desc^.next;
+         if desc^.next <> nil then begin
+            desc^.next^.prev := desc^.prev;
+         end;
+      end;
+
+      (* add to free list *)
+
+      desc^.next := FreeDescriptorList;
+      FreeDescriptorList := desc;
+   end  (* FreeDescriptor *);
+
+
+   procedure ClearDescriptor;
+      (* this procedure initializes the passed descriptor to empty.*)
+
+   begin
+      Clear_this_Set(descriptor.ref);
+      Clear_this_Set(descriptor.def);
+      descriptor.continue := false;
+      descriptor.break := false;
+      descriptor.return := false;
+      descriptor.goto_label := false;
+      descriptor.hash_code := 0;
+   end  (* ClearDescriptor *);
+
+
+   procedure ClearDescriptorFull;
+      (* this procedure initializes the passed descriptor to empty.*)
+
+   begin
+      ClearFull(descriptor.ref);
+      ClearFull(descriptor.def);
+      descriptor.continue := false;
+      descriptor.break := false;
+      descriptor.return := false;
+      descriptor.goto_label := false;
+      descriptor.hash_code := 0;
+   end  (* ClearDescriptorFull *);
+
+
+   procedure ClearEntryDescriptors;
+      (* this procedure clears all the entry descriptors. *)
+   var i : DescriptorRange;
+
+   begin
+      i := BusyDescriptorList;
+      while i <> nil do begin
+         ClearDescriptor (i^.EntryDescriptor);
+         i := i^.next;
+      end;
+   end  (* ClearEntryDescriptors*);
+
+
+
+   procedure ClearExitDescriptors;
+      (* this procedure frees all the exit descriptors and makes *)
+      (* them all available for use.                             *)
+   var i : DescriptorRange;
+
+   begin
+      PasCerror ('ClearExitDescriptors called');
+   end  (* ClearExitDescriptors*);
+
+
+   procedure UnionDescriptors;
+      (* this procedure performs the union on descriptors desc1 and desc2  *)
+      (* and stores the result in desc.                                    *)
+
+   begin
+      Union_Sets (desc.def, desc1.def, desc2.def);
+      Union_Sets (desc.ref, desc1.ref, desc2.ref);
+      desc.continue := desc1.continue or desc2.continue;
+      desc.break := desc1.break or desc2.break;
+      desc.return := desc1.return or desc2.return;
+      desc.goto_label := desc1.goto_label or desc2.goto_label;
+      desc.hash_code := desc1.hash_code + desc2.hash_code;
+   end  (*UnionDescriptors*);
+
+
+   procedure AssignDescriptors;
+      (* asign descriptors:  desc1 := desc2    *)
+
+   begin
+      Assign_Set_to_Set (desc1.def, desc2.def);
+      Assign_Set_to_Set (desc1.ref, desc2.ref);
+      desc1.continue := desc2.continue;
+      desc1.break := desc2.break;
+      desc1.return := desc2.return;
+      desc1.goto_label := desc2.goto_label;
+      desc1.hash_code := desc2.hash_code;
+   end  (* AssignDescriptors *);
+
+
+   function  EqualDescriptors;
+
+   begin
+      if (Equal_two_Sets (desc1.def, desc2.def)) and
+	 (Equal_two_Sets (desc1.ref, desc2.ref)) and
+         (desc1.continue = desc2.continue) and
+         (desc1.break = desc2.break) and
+         (desc1.return = desc2.return) and
+         (desc1.goto_label = desc2.goto_label)
+      then begin
+         EqualDescriptors := true;
+      end
+      else begin
+         EqualDescriptors := false;
+      end  (* if *);
+   end  (* EqualDescriptors *);
+
+
+   function DescriptorFlags
+      (var desc1: NodeDescriptorType)
+      : boolean;
+
+   begin
+      DescriptorFlags :=
+         desc1.continue or
+         desc1.break or
+         desc1.return or
+         desc1.goto_label;
+   end  (* DescriptorFlags *);
+
+
+   function IsOptimizible
+      (NodeIndex: HdgRange)
+      : boolean;
+
+   begin
+      case MinorOperator of
+
+         LoadOp: begin
+            NodeIndex := Unary1operand;
+            if MinorOperator = IdOp then begin
+(* 1993-May-17  undefined; assumed irrelevant, made into comment
+ * #ifdef PYRAMID
+ *                if is_structured (STab [Node1parameter].SType) then begin
+ *                   IsOptimizible := false;
+ *                end
+ *                else begin
+ *                   case STab [Node1parameter].SClass of
+ *                      SNULL,
+ *                      EXTERN,
+ *                      FILESTATIC,
+ *                      LOCALSTATIC,
+ *                      EXTDEF: begin
+ *                         IsOptimizible := true;
+ *                      end;
+ *                      AUTO: begin
+ *                         IsOptimizible :=
+ *                            STab [Node1parameter].SLevel <
+ *                            STab [ProcedureName].SLevel + 1;
+ *                      end;
+ * 'ParamDcl' is undefined since long, obviously 'PYRAMID' was not defined.
+ * I doubt whether this branch is relevant at all, so I hide it as comment
+ * and add an 'otherwise' to set 'IsOptimizible' to 'false'.
+ *                   REGISTER: begin
+ *                      if STab [Node1parameter].SKind = ParamDcl then begin
+ *                         IsOptimizible :=
+ *                            (STab [Node1parameter].SSubClass = ByRefParm)
+ *                         or
+ *                            (STab [Node1parameter].SLevel <>
+ *                            STab [ProcedureName].SLevel + 1);
+ *                      end
+ *                      else begin
+ *                         IsOptimizible :=
+ *                            STab [Node1parameter].SLevel <
+ *                            STab [ProcedureName].SLevel + 1;
+ *                      end;
+ *                   end;
+ *                      PARAM: begin
+ *                         IsOptimizible :=
+ *                            (STab [Node1parameter].SSubClass = ByRefParm)
+ *                         or
+ *                            (STab [Node1parameter].SLevel <>
+ *                            STab [ProcedureName].SLevel + 1);
+ *                      end;
+ *                   end;
+ *                end;
+ * #else
+ * direct all machines here:
+ *)
+	      IsOptimizible := false
+(* #endif *)
+            end
+            else begin
+              IsOptimizible := true;
+            end;
+         end;
+
+         LoadadrOp: begin
+            NodeIndex := Unary1operand;
+            if (MinorOperator = IdOp)
+#ifndef PYRAMID_DOUBTFUL
+	       or
+	       (MinorOperator = SubscriptOp)
+	       or
+	       (MinorOperator = ElementOp)
+	       or
+	       (MinorOperator = DerefOp)
+#endif
+	     then begin
+{
+               case STab [Node1parameter].SClass of
+                  SNULL,
+                  EXTERN,
+                  FILESTATIC,
+                  LOCALSTATIC,
+                  EXTDEF: begin
+                     IsOptimizible := false;
+                  end;
+                  AUTO,
+                  REGISTER,
+                  PARAM: begin
+                     IsOptimizible := true;
+                  end;
+               end;
+}
+               IsOptimizible := false;
+            end
+            else begin
+              IsOptimizible := true;
+            end;
+         end;
+
+         IdOp,
+         StorepOp,
+         StorepadrOp: begin
+            IsOptimizible := false;
+         end;
+
+         SubscriptOp,
+         ElementOp,
+         DerefOp: begin
+            IsOptimizible := false;
+         end;
+{
+         SubscriptOp,
+         ElementOp: begin
+            NodeIndex := Bin1operand;
+            if MinorOperator = IdOp then begin
+               case STab [Node1parameter].SClass of
+#ifndef PYRAMID_DOUBTFUL
+		  AUTONR,
+#endif
+                  AUTO: begin
+                     IsOptimizible := true;
+                  end;
+                  PARAM: begin
+                     IsOptimizible :=
+                        STab [Node1parameter].SSubClass = ByValueParm;
+                  end;
+               end;
+            end
+            else begin
+               IsOptimizible := true;
+            end;
+         end;
+
+         DerefOp: begin
+            NodeIndex := Unary1operand;
+            IsOptimizible := MinorOperator <> IdOp;
+         end;
+}
+
+         ConvertOp: begin
+            case STab [TypeField].SType of
+               IntegerType,
+               LongType,
+               UnsignedType,
+	       UlongType,
+               PointerType: begin
+                  case STab [TypeFieldOf (Unary1operand)].SType of
+                     IntegerType,
+                     LongType,
+                     UnsignedType,
+		     UlongType,
+                     PointerType: begin
+                        IsOptimizible := false;
+                     end;
+                     otherwise begin
+                        IsOptimizible := true;
+                     end;
+                  end;
+               end;
+               otherwise begin
+                  IsOptimizible := true;
+               end;
+            end;
+         end;
+
+         otherwise begin
+            IsOptimizible := true;
+         end;
+
+      end  (* case *);
+   end  (* IsOptimizible *);
+
+
+   function IsLvalOp
+      (NodeIndex: HdgRange)
+      : boolean;
+
+   begin
+      case MinorOperator of
+         IdOp,
+         SubscriptOp,
+         ElementOp,
+         DerefOp: begin
+            IsLvalOp := true;
+         end;
+         otherwise begin
+            IsLvalOp := false;
+         end;
+      end;
+   end  (* IsLvalOp *);
+
+
+   function CreateAddrOfLval
+      (NodeIndex: HdgRange)
+      : HdgRange;
+
+   begin
+      if MinorOperator = DerefOp then begin
+         CreateAddrOfLval := Unary1operand;
+      end
+      else begin
+         CreateAddrOfLval := UnaryExpression (
+            LoadadrOp,
+            TypeField,
+            NodeIndex,
+            0,
+            0);
+      end;
+   end  (* CreateAddrOfLval *);
+
+
+   function CreateAssignmentStatement
+      (PtrToExpr,
+       NextStmnt: HdgRange;
+       target: SymbolTableRange;
+       IndexExp: HdgRange)
+      : HdgRange;
+
+   (* this function assigns an expression to a variable.  the hdg *)
+   (* location of the new assignment statement is returned.       *)
+
+   var
+      NodeIndex: HdgRange;
+
+   begin
+      NodeIndex := LongStatement (
+         StoreOp,
+         STab [target].SType,
+         node3 (IdOp, STab [target].SType, target, 0),
+         PtrToExpr,
+         0,
+         0,
+         -1);
+      NextLink := NextStmnt;
+      CreateAssignmentStatement := NodeIndex;
+   end  (* CreateAssignmentStatement *);
+
+
+   function CreateLoadNode
+      (source: SymbolTableRange)
+      : HdgRange;
+
+   begin
+      CreateLoadNode := UnaryExpression (
+         LoadOp,
+         STab [source].SType,
+         node3 (IdOp, STab [source].SType, source, 0),
+         0,
+         0);
+   end  (* CreateLoadNode *);
+
+
+   function EndTraverse
+      (NodeIndex: HdgRange)
+      : boolean;
+
+   begin
+      if NodeIndex = -1 then begin
+         EndTraverse := true;
+      end
+      else begin
+         case MinorOperator of
+            LabelOp,
+            GotoOp,
+            ContinueOp,
+            BreakOp: begin
+               EndTraverse := true;
+            end;
+            otherwise begin
+               EndTraverse := false;
+            end;
+         end;
+      end;
+   end  (* EndTraverse *);
+
+
+   function NextCase
+      (NodeIndex: HdgRange)
+      : HdgRange;
+   begin
+      while (NodeIndex <> -1) and (MajorOperator <> Case) do begin
+         NodeIndex := NextLink;
+      end;
+      NextCase := NodeIndex;
+      if NodeIndex <> -1 then begin
+         NodeIndex := NextLink;
+         while (NodeIndex <> -1) and (MajorOperator = Case) do begin
+            NextCase := NodeIndex;
+            NodeIndex := NextLink;
+         end;
+      end;
+   end  (* NextCase *);
+
+
+
+
+

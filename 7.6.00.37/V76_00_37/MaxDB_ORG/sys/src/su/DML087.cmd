@@ -1,0 +1,44 @@
+connect flater identified by flater sqlmode ansi !
+pars_then_ex !
+* Test0518 !
+     SELECT COUNT(*) INTO :tmpcnt FROM DV1 !
+     DECLARE POIU CURSOR FOR 
+              SELECT HOURS FROM DV1
+              ORDER BY HOURS DESC !
+     FETCH POIU INTO :cnt1 !
+     COMMIT WORK !
+* Test0519 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS2 WHERE C1 = 0 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS2 WHERE C1 = 1 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS3 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS4 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS5 !
+     SELECT COUNT(*) INTO :tmpcnt
+       FROM VS6 !
+     COMMIT WORK !
+* Test0520 !
+     SELECT COUNT(*) INTO :cnt1 FROM USIG WHERE C1 = 0 !
+     SELECT COUNT(*) INTO :cnt2 FROM USIG WHERE C1 = 2 !
+     SELECT COUNT(*) INTO :cnt3 FROM USIG WHERE C_1 = 0 !
+     SELECT COUNT(*) INTO :cnt4 FROM USIG WHERE C_1 = 2 !
+     SELECT COUNT(*) INTO :cnt1 FROM USIG WHERE C1 = 4 !
+     SELECT COUNT(*) INTO :cnt2 FROM U_SIG WHERE C1 = 0 !
+     SELECT COUNT(*) INTO :cnt3 FROM U_SIG WHERE C1 = 4 !
+     SELECT COUNT(*) INTO :cnt1 FROM HU.STAFF U_CN
+       WHERE U_CN.GRADE IN (SELECT UCN.GRADE FROM HU.STAFF UCN
+         WHERE UCN.GRADE > 10) !
+     DECLARE UCRSR CURSOR FOR
+       SELECT COUNT(*) FROM HU.STAFF WHERE GRADE > 10 !
+     DECLARE U_CRSR CURSOR FOR
+       SELECT COUNT(*) FROM HU.STAFF WHERE GRADE < 10 !
+     FETCH UCRSR INTO :cnt2 !
+     CLOSE UCRSR !
+     FETCH U_CRSR INTO :cnt3 !
+     CLOSE U_CRSR !
+pars_execute !
+     COMMIT WORK RELEASE !

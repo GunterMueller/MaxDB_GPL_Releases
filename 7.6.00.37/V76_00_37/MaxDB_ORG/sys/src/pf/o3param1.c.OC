@@ -1,0 +1,312 @@
+/*!**********************************************************************
+
+  module: o3param1.c
+
+  -----------------------------------------------------------------------
+
+  responsible:  Holger Bischoff (D027451 - Holger.Bischoff@SAP-AG.de)
+
+  special area: ODBC-Tests
+
+  description:  Bind array of parameters by row.
+
+  -----------------------------------------------------------------------
+
+                         Copyright (c) 2000-2005 SAP AG
+
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+************************************************************************/
+
+#define PROGNAME "o3param1"
+
+#define ODBCVER 0x0350
+
+#include "o3util.c"
+
+#define CHAR_LEN 200
+#define NUM_VALUES 7
+#define PARAMSET_SIZE 5
+
+
+struct valueStruct
+{
+    SDWORD  id;
+    SQLLEN  idLen;
+    UCHAR   val[CHAR_LEN];
+    SQLLEN  valLen;
+};
+
+VOID InitGlobals();
+RETCODE InsertValues();
+RETCODE ReadValues();
+
+/* globals */
+HDBC    hdbc  = SQL_NULL_HDBC;
+
+struct valueStruct values[PARAMSET_SIZE];
+
+SQLUSMALLINT paramStatusArray[PARAMSET_SIZE];
+SQLUINTEGER  paramsProcessed;
+
+
+int MAIN( int argc, char **argv) {
+    RETCODE retcode;
+    HENV    henv  = SQL_NULL_HENV;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    char    textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+
+    StartTest( PROGNAME );
+
+    retcode = FullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+    retcode = CreateTable( hdbc,
+                           PROGNAME, "( id int, val varchar(200))" );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    InitGlobals();
+    retcode = InsertValues();
+    retcode = ReadValues();
+    
+exit:
+    retcode = DropTable( hdbc, PROGNAME );
+    FullDisconnect( &henv, &hdbc );
+
+    EndTest( PROGNAME );
+    return 0;    
+}; /* MAIN */
+
+
+VOID InitGlobals()
+{
+    SDWORD i;
+    
+    for (i = 0; i < PARAMSET_SIZE; i++) {
+        paramStatusArray[i] = SQL_PARAM_UNUSED;
+    };
+    paramsProcessed = 0;
+} /* InitGlobals */
+
+
+SQLRETURN InsertValues()
+{
+    RETCODE retcode;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    char    textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    SDWORD  i;
+    
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    PRINTF("insert into "PROGNAME" values (?,?)\n" );
+    retcode = SQLPrepare( hstmt,
+                          "insert into "PROGNAME" values (?,?)",
+                          SQL_NTS );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- Prepare   \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLBindParameter( hstmt, 1,
+                                SQL_PARAM_INPUT, SQL_C_ULONG, SQL_INTEGER,
+                                10, 0,
+                                &values[0].id,
+                                sizeof(SDWORD),
+                                &values[0].idLen );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- BindParameter\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLBindParameter( hstmt, 2,
+                                SQL_PARAM_INPUT, SQL_C_CHAR, SQL_CHAR,
+                                CHAR_LEN, 0,
+                                &values[0].val, CHAR_LEN, &values[0].valLen );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- BindParameter\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    /* bind array of parameters by row */
+    retcode = SQLSetStmtAttr( hstmt,
+                              SQL_ATTR_PARAM_BIND_TYPE,
+                              (SQLPOINTER) sizeof( struct valueStruct), 0);
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SetStmtAttr \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+    retcode = SQLSetStmtAttr( hstmt,
+                              SQL_ATTR_PARAMSET_SIZE,
+                              (SQLPOINTER) PARAMSET_SIZE, 0 );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SetStmtAttr \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+    retcode = SQLSetStmtAttr( hstmt,
+                              SQL_ATTR_PARAM_STATUS_PTR,
+                              paramStatusArray, 0 );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SetStmtAttr \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+    retcode = SQLSetStmtAttr( hstmt,
+                              SQL_ATTR_PARAMS_PROCESSED_PTR,
+                              &paramsProcessed, 0 );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SetStmtAttr \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    /* set values */
+    for ( i = 0; i<PARAMSET_SIZE; i++) {
+        values[i].id = i;
+        values[i].idLen = sizeof( values[i].id );
+        strcpy( &values[i].val[0], "123456789012345678901234567890" );
+        values[i].valLen = 2*i;
+    };
+
+    /* execute statement */
+    retcode = SQLExecute( hstmt );
+    SPRINTF( textBuffer,
+             "InsertValues\t -- SQLExecute\t\t  retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    SPRINTF( textBuffer, "paramsProcessed = %d\n",
+             paramsProcessed );
+    PRINTF( textBuffer );
+
+    return retcode;
+} /* InsertValues */
+
+
+SQLRETURN ReadValues()
+{
+    RETCODE retcode;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    char    textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    UDWORD  intValue  = 17;
+    SQLLEN  intLen  = sizeof(UDWORD);
+    char    charValue1[CHAR_LEN+1];
+    SQLLEN  charLen1 = 0;
+
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt );
+    SPRINTF( textBuffer,
+             "ReadValues\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLBindCol( hstmt, 1, SQL_C_ULONG, &intValue, 0, &intLen );
+    SPRINTF( textBuffer,
+             "ReadValue\t -- BindCol \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLExecDirect( hstmt, "select * from "PROGNAME" order by id", SQL_NTS );
+    SPRINTF( textBuffer,
+             "ReadValue\t -- ExecDirect \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLBindCol( hstmt, 2, SQL_C_CHAR, &charValue1, CHAR_LEN, &charLen1 );
+    SPRINTF( textBuffer,
+             "ReadValues\t -- BindCol\t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    while (retcode == SQL_SUCCESS) {
+        retcode = SQLFetch( hstmt );
+        SPRINTF( textBuffer,
+                 "ReadValues\t -- ExtendedFetch \t\t retcode: %s"CRLF,
+                 cnvret( retcode ));
+        PRINTF( textBuffer );
+        ErrorCheck( SQL_HANDLE_STMT, hstmt );
+        if (retcode != SQL_NO_DATA_FOUND) {
+            if (retcode != SQL_SUCCESS) {
+                return retcode;
+            }; /* if */
+            SPRINTF( textBuffer, "intValue = %d; intLen = %d\n", intValue, intLen );
+            PRINTF( textBuffer );
+            SPRINTF( textBuffer, "charValue1 = %s; charLen1 = %d\n",
+                     charValue1, charLen1 );
+            PRINTF( textBuffer );
+        }; /* if */
+    }; /* while */
+
+    retcode = SQLFreeHandle( SQL_HANDLE_STMT, hstmt );
+
+    return retcode;
+} /* ReadValues */

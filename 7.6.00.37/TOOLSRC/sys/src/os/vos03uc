@@ -1,0 +1,1535 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$vos03uc$
+.tt 2 $$$
+.tt 3 $R.Roedling$component-kernel-communication$1997-04-29$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : component_kernel_communication
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1992-01-21
+.sp
+.cp 3
+Version : 1994-01-27
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-04-29
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+/*
+ * INCLUDE FILES
+ */
+
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS3UC : "
+#define MF__   MOD__"UNDEFINED"
+
+#define LOCK    TRUE
+#define UNLOCK  FALSE
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+#if defined ( _WIN32 ) && defined ( WINTERM )
+ typedef struct async_parameter_record
+   {
+   HANDLE                         hThrd;
+   TID                            Tid;
+   HEV                            hevSem;
+
+   PCOMM_PACKET_REC               pResPacket;
+   ULONG                          ulResDataLen;
+   ULONG                          ulCommState;
+   ERRORTEXT                      *pErrText;
+   } ASYNC_PARAMETER_REC;
+#endif
+
+//
+// --- User connection info record
+//
+typedef struct user_connect_info_record
+  {
+  ULONG                           ulPacketCnt;
+  ULONG                           ulClientRef;
+  ULONG                           ulConnStatus;
+  ULONG                           ulProtocol;
+  ULONG                           ulMaxCmdDataLen;
+  PCOMM_PACKET_REC                pCommPacketList[MAX_SQL_PACKETS];
+
+  #if defined ( _WIN32 ) && defined ( WINTERM )
+   ASYNC_PARAMETER_REC            Async;
+  #endif
+
+  SHM_CONNECT_INFO_REC            Shm;   // - vos33c, internal use only!
+  TCPIP_CONNECT_INFO_REC          TCPIP; // - vos23c, internal use only!
+  } USER_CONNECT_INFO_REC;
+
+typedef USER_CONNECT_INFO_REC     *PUSER_CONNECT_INFO_REC;
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+extern BOOLEAN    bRuntimeComponent;
+extern BOOL       fCannotStartThread;
+
+/*
+ *  EXPORTED VARIABLES
+ */
+SQL_NODEIDC      szLocalNodeName = "";
+
+/*
+ * LOCAL VARIABLES
+ */
+static  PVOID                     pHandles;
+static  BOOL                      fInitialized         = FALSE;
+static  ULONG                     ulCurrClientRef      = (ULONG)UNDEF;
+static  BOOL                      fTCPIP_Installed     = FALSE;
+static  LONG                      lDumpReference       = UNDEF;
+static  RTE_VERSION_ID            TCPIPRTEVersion;
+
+#if defined(_WIN32)
+ static  SECURITY_ATTRIBUTES      WorldSA;
+ static  SECURITY_ATTRIBUTES      LockSA;
+#else
+ static  SIGNALFUNCTYPE           FetchedSigInt          = SIG_DFL;
+#endif
+
+/*
+ * EXTERNAL FUNCTION PROTOTYPES
+ */
+#if defined ( _WIN32 ) && defined ( WINTERM )
+VOID          sql90_async_loop       ( ULONG                  ulClientRef );
+VOID          sql90_finish_loop      ( VOID );
+#endif
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+LONG          sql03u_get_protocol    ( PSZ                    pszServerNode,
+                                       PSZ                    pszServerDB,
+                                       PULONG                 pulProtocol,
+                                       ERRORTEXT              pErrText );
+
+VOID _System  sql03u_exithandler     ( ULONG                  ulTermCode );
+
+ULONG         sql03u_connect         ( PSZ                    pszServerNode,
+                                       PSZ                    pszServerDB,
+                                       ULONG                  ulServiceType,
+                                       ULONG                  ulPacketCnt,
+                                       PULONG                 pulMaxCmdDataLen,
+                                       PVOID                  pSQLPacketList[],
+                                       PULONG                 pulClientRef,
+                                       PSZ                    pszServerDBRoot,
+                                       PSZ                    pszServerPgm,
+                                       ERRORTEXT              pErrText );
+
+ULONG         sql03u_cancel          ( ULONG                  ulClientRef,
+                                       ERRORTEXT              pErrText );
+
+ULONG         sql03u_release         ( ULONG                  ulClientRef,
+                                       ERRORTEXT              pErrText );
+
+ULONG         sql03u_request         ( ULONG                  ulClientRef,
+                                       PVOID                  pCmdData,
+                                       ULONG                  ulCmdDataLen,
+                                       ERRORTEXT              pErrText );
+
+#if defined ( _WIN32 ) && defined ( WINTERM )
+VOID _System  sql03u_receiver        ( PUSER_CONNECT_INFO_REC pConnInfo );
+ULONG         sql03u_async_receive   ( PUSER_CONNECT_INFO_REC pConnInfo,
+                                       PCOMM_PACKET_REC       *ppResPacket,
+                                       PULONG                 pulResDataLen,
+                                       ERRORTEXT              pErrText );
+#endif
+ULONG         sql03u_replyavailable  ( ULONG                  ulClientRef,
+                                       ERRORTEXT              pErrText );
+ULONG         sql03u_receive         ( ULONG                  ulClientRef,
+                                       PVOID                  *ppResData,
+                                       PULONG                 pulResDataLen,
+                                       ERRORTEXT              pErrText );
+
+#if defined(_WIN32)
+ BOOL WINAPI  sql03u_catch_cancel_sig( DWORD                  dwCtrlType );
+#else
+ VOID _CDECL  sql03u_catch_cancel_sig( INT                    SigType );
+#endif
+
+
+ULONG         sql03u_dump            ( ULONG                  ulClientRef,
+                                       ERRORTEXT              pErrText );
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+VOID sqlaconnect ( PROCESS_ID                      pid,
+                   SQL_NODEID                      servernode,
+                   SQL_DBNAME                      serverdb,
+                   SQL_SERVICE                     service,
+                   INT4                            packet_cnt,
+                   INT4                            *reference,
+                   INT4                            *sql_packet_size,
+                   PVOID                           sql_packet_list[],
+                   ERRORTEXT                       errtext,
+                   tsp_comm_error                  *returncode )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlaconnect"
+  SQL_NODEIDC     szServerNode;
+  SQL_DBNAMEC     szServerDB;
+
+  DBGIN;
+
+  // ---  convert pascal names to null terminated strings
+  sql47c_ptoc ( szServerNode, servernode,  sizeof(SQL_NODEID) );
+  sql47c_ptoc ( szServerDB,   serverdb,    sizeof(SQL_DBNAME) );
+
+
+  // ---  If no node name is given, split database name into node/dbname parts.
+  if ( szServerNode [ 0 ] == '\0' )
+    sql17u_split_dbname ( szServerDB, szServerNode );
+
+  DBG3 (( MF__, "pszServerNode '%s'", szServerNode ));
+  DBG3 (( MF__, "pszServerDB   '%s'", szServerDB ));
+
+  *returncode = (tsp_comm_error)sql03u_connect ( szServerNode,
+                                                 szServerDB,
+                                                 (ULONG) service,
+                                                 (ULONG) packet_cnt,
+                                                 (PULONG) sql_packet_size,
+                                                 sql_packet_list,
+                                                 reference,
+                                                 NULL,
+                                                 NULL,
+                                                 errtext );
+
+  if ( *returncode == SQLOK )
+    lDumpReference = *reference;
+
+  DBGOUT
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sqlarelease ( INT4  reference )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlarelease"
+  ERRORTEXT  ErrText;
+
+  DBGIN;
+
+  lDumpReference = UNDEF;
+
+  sql03u_release ( reference, ErrText );
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sqlarequest ( INT4                      reference,
+                   PVOID                     sql_packet_addr,
+                   INT4                      sql_packet_length,
+                   ERRORTEXT                 errtext,
+                   tsp_comm_error            * returncode )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlarequest"
+
+  DBGIN;
+
+  lDumpReference = reference;
+
+  ulCurrClientRef = (ULONG)UNDEF;
+
+  * returncode = (tsp_comm_error)sql03u_request ( reference, sql_packet_addr,
+                                                  sql_packet_length, errtext );
+
+  ulCurrClientRef = (ULONG)reference;
+
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sqlareplyavailable ( INT4                            reference,
+                          ERRORTEXT                       errtext,
+                          tsp_comm_error                  * returncode )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlareplyavailable"
+
+  DBGIN;
+
+ *returncode = (tsp_comm_error)sql03u_replyavailable ( reference, errtext );
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+
+VOID sqlareceive ( INT4                            reference,
+                   PVOID                           * res_packet_ptr,
+                   INT4                            * res_packet_length,
+                   ERRORTEXT                       errtext,
+                   tsp_comm_error                  * returncode )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlareceive"
+
+  DBGIN;
+
+  lDumpReference   = reference;
+
+  *returncode = (tsp_comm_error)sql03u_receive ( reference, res_packet_ptr,
+                                                 (PULONG)res_packet_length,
+                                                 errtext );
+
+  ulCurrClientRef = (ULONG)UNDEF;
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sqlacancel ( INT4  reference )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlacancel"
+  ERRORTEXT                       ErrText;
+
+  DBGIN;
+
+  sql03u_cancel ( reference, ErrText );
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sqladump ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqladump"
+  ERRORTEXT                       ErrText;
+
+  DBGIN;
+
+  if ( lDumpReference != UNDEF )
+    sql03u_dump ( lDumpReference, ErrText );
+
+
+  DBGOUT;
+  return;
+  }
+
+
+/*------------------------------*/
+
+VOID sql03u_init ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_init"
+  #if defined(_WIN32)
+   static  BOOL           fInitializeSecurity  = TRUE;
+   static  BOOL           fCtrlHandlerSet      = FALSE;
+   ACCESS_RIGHTS_REC      Access;
+  #endif
+  static  BOOL            fAddFinishToExitList = TRUE;
+  static  BOOL            fInitializeHandleDir = TRUE;
+  APIRET                  rc;
+
+
+  DBGIN;
+
+  if ( fInitialized == TRUE )
+    {
+    MSGCD (( ERR_CONN_INFO_INIT_TWICE ));
+    ABORT();
+    }
+  else
+    {
+    fInitialized = TRUE;
+
+    if ( fInitializeHandleDir == TRUE )
+      {
+      fInitializeHandleDir = FALSE;
+
+      if ( !sql09c_init_handle_dir ( &pHandles, MAXCONNECTIONS ) )
+        {
+        MSGCD (( ERR_RESERVE_HANDLE_VALUES ));
+        ABORT();
+        }
+      }
+
+    #if defined(_WIN32)
+     if ( fInitializeSecurity  == TRUE )
+       {
+       fInitializeSecurity = FALSE;
+
+       sql49c_set_sync_access ();
+
+       WorldSA.nLength           = sizeof(WorldSA);
+       WorldSA.bInheritHandle    = TRUE;       // why not...
+
+       memset ( &Access, 0, sizeof (Access) );   // - this must be done first!
+       Access.World.ulAccess     = SPECIFIC_RIGHTS_ALL |
+                                   STANDARD_RIGHTS_ALL;
+
+       rc = sql49c_alloc_and_init_SD( &Access, &WorldSA.lpSecurityDescriptor );
+
+       if ( rc != NO_ERROR )
+         ABORT();
+
+       LockSA.nLength            = sizeof(LockSA);
+       LockSA.bInheritHandle     = TRUE;       // why not...
+
+       memset ( &Access, 0, sizeof (Access) );   // - this must be done first!
+       rc = sql49c_alloc_and_init_SD( &Access, &LockSA.lpSecurityDescriptor );
+
+       if ( rc != NO_ERROR )
+         ABORT();
+       }
+    #endif
+
+    // --- is a TCP/IP installed?
+    fTCPIP_Installed = sql43c_tcpip_init ( &TCPIPRTEVersion );
+
+    if ( fAddFinishToExitList )
+      {
+      fAddFinishToExitList = FALSE;
+
+      rc = sql02u_add_exit_list ( sql03u_exithandler );
+
+      if ( rc != NO_ERROR )
+        {
+        DBG1  (( MF__, "Set exit handler failed %d", rc ));
+        MSGCD (( ERR_SET_EXIT_HANDLER_FAILED, rc ));
+        ABORT();
+        }
+      }
+
+
+    #if defined(_WIN32)
+      if (( fCtrlHandlerSet          == FALSE  ) &&
+          ( bRuntimeComponent        == FALSE  ) &&
+          ( fCannotStartThread       == FALSE ))  // - 16 Bit environment?
+        {
+        if (SetConsoleCtrlHandler( sql03u_catch_cancel_sig, TRUE ))
+          fCtrlHandlerSet = TRUE;
+        }
+    #else
+     if ( FetchedSigInt != (SIGNALFUNCTYPE) sql03u_catch_cancel_sig )
+       FetchedSigInt = signal ( SIGINT, sql03u_catch_cancel_sig );
+    #endif
+
+    }
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sql03u_finish ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_finish"
+  ULONG                           ulReference = 0;
+  ERRORTEXT                       ErrText;
+
+  DBGIN;
+
+  // --- search for open connections
+  while ( sql09c_find_next_handle ( pHandles, &ulReference ))
+    {
+    sql03u_release ( ulReference, ErrText );
+    }
+
+  fInitialized = FALSE;
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sql03u_xconnect (PSZ               pszServerNode,
+                      PSZ               pszServerDB,
+                      PSZ               pszServerDBRoot,
+                      PSZ               pszServerPgm,
+                      PULONG            pulMaxCmdDataLen,
+                      PVOID             pSQLPacketList[],
+                      PULONG            pulClientRef,
+                      PULONG            pRC,
+                      ERRORTEXT         pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_xconnect"
+
+  DBGIN;
+
+  *pRC = sql03u_connect (pszServerNode,
+                          pszServerDB,
+                          SQL_CONTROL,
+                          1,
+                          pulMaxCmdDataLen,
+                          pSQLPacketList,
+                          pulClientRef,
+                          pszServerDBRoot,
+                          pszServerPgm,
+                          pErrText);
+  DBGOUT;
+  }
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static ULONG sql03u_connect ( PSZ              pszServerNode,
+                              PSZ              pszServerDB,
+                              ULONG            ulServiceType,
+                              ULONG            ulPacketCnt,
+                              PULONG           pulMaxCmdDataLen,
+                              PVOID            pSQLPacketList[],
+                              PULONG           pulClientRef,
+                              PSZ              pszServerDBRoot,
+                              PSZ              pszServerPgm,
+                              ERRORTEXT        pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_connect"
+  static PID                      pidClientPid = (PID)UNDEF;
+  ULONG                           ulCommState;
+  ULONG                           ulRetry;
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  CONNECT_PARAM_REC               ConnParam;
+  APIRET                          rc;
+  UINT                            i;
+
+  DBGIN;
+
+  *pulClientRef = (ULONG)UNDEF;
+
+  // --- allocate space for the internal communication structure
+  rc = ALLOC_MEM ((PPVOID)&pConnInfo, sizeof(USER_CONNECT_INFO_REC) );
+
+  if( rc != NO_ERROR )
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_ALLOC_MEMORY, rc );
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  // --- Get a new handle and combine it with the pointer to the
+  //     internal communication structure.
+  if ( !sql09c_reserve_handle ( pHandles, pulClientRef)    ||
+       !sql09c_put_handle_data( pHandles, *pulClientRef,
+                                (PVOID)pConnInfo,
+                                (ULONG)UNDEF, (ULONG)UNDEF ) )
+    {
+    MSGD (( ERR_TO_MANY_SESSIONS ));
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_TO_MANY_SESSIONS, 0 );
+
+    FREE_MEM ( pConnInfo );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  // --- initialize internal communication structure
+  memset (pConnInfo, 0, sizeof (*pConnInfo) );
+  pConnInfo->ulClientRef  = *pulClientRef;
+  pConnInfo->ulConnStatus = CON_INITIALIZED;
+  pConnInfo->ulProtocol   = 0;
+  pConnInfo->ulPacketCnt  = ulPacketCnt;
+
+  // --- Determine the protocol to use with the database kernel.
+  if ( sql03u_get_protocol ( pszServerNode, pszServerDB,
+                             &pConnInfo->ulProtocol, pErrText ) != NO_ERROR )
+    {
+    sql09c_free_handle  ( pHandles, *pulClientRef );
+    FREE_MEM ( pConnInfo );
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  #if defined ( _WIN32 ) && defined ( WINTERM )
+   // --- Create event semaphore (SET) for ASYNC RECEIVE
+   rc = sql41c_create_event_sem ( &pConnInfo->Async.hevSem, NULL,
+                                 "ASYNC RECEIVE", 0, FALSE, NULL );
+
+   if (rc != NO_ERROR)
+     {
+     sql46c_build_error_string ( pErrText, ERRMSG_CREATING_REC_SEM, rc );
+
+     sql09c_free_handle  ( pHandles, *pulClientRef );
+     FREE_MEM ( pConnInfo );
+
+     DBGOUT;
+     return ( SQLNOTOK );
+     }
+
+   rc = CREATE_THREAD(&pConnInfo->Async.Tid,
+                      &pConnInfo->Async.hThrd,
+                      sql03u_receiver,
+                      pConnInfo, 0, 0 );
+
+   if ( rc != NO_ERROR )
+     {
+     MSGD (( ERR_CREATING_REC_THREAD ));
+     sql46c_build_error_string ( pErrText, ERRMSG_CREATING_REC_THREAD, rc );
+
+     sql41c_close_event_sem ( pConnInfo->Async.hevSem, "ASYNC RECEIVE" );
+     sql09c_free_handle  ( pHandles, *pulClientRef );
+     FREE_MEM ( pConnInfo );
+
+     DBGOUT;
+     return ( SQLNOTOK );
+     }
+  #endif
+
+  if ( pidClientPid == (PID)UNDEF )
+    GETPROCESSID (&pidClientPid);
+
+  // --- Initialize connect parameter
+  memset ( &ConnParam, 0, sizeof(ConnParam) );
+  ConnParam.ulPacketCnt       = ulPacketCnt;
+  ConnParam.ulClientRef       = *pulClientRef;
+  ConnParam.ulServiceType     = ulServiceType;
+  ConnParam.pWorldSA          = &WorldSA;          // PROT_SHM only
+  ConnParam.pLockSA           = &LockSA;           // PROT_SHM only
+  ConnParam.ulConnTimeout     = LOCAL_CONN_TIMEOUT;// PROT_SHM only
+  ConnParam.pszServerDB       = pszServerDB;
+  ConnParam.pszServerNode     = pszServerNode;     // PROT_SOCKET only
+  ConnParam.pszClientNode     = NULL;              // comm. xserver/kernel only
+  ConnParam.ulPacketSize      = 0;
+  ConnParam.ulMaxDataLen      = 0;
+  ConnParam.pidClientPID      = pidClientPid;
+  ConnParam.ulCommFlagNo      = (ULONG)UNDEF;
+  ConnParam.pszServerDBRoot   = pszServerDBRoot;
+  ConnParam.pszServerPgm      = pszServerPgm;
+  ConnParam.fAcknowledge      = FALSE;
+
+  // --- Try to connect
+  for ( ulCommState = SQLTASKLIMIT, ulRetry = 0;
+        ( ulCommState == SQLTASKLIMIT )  && ( ulRetry <= RETRYCOUNT );
+        ulRetry++ )
+    {
+    // ---  Call the connect function for the requested protocol.
+    switch ( pConnInfo->ulProtocol )
+      {
+      case PROT_SHM :
+          ulCommState = sql33c_connect( &ConnParam, &pConnInfo->Shm,
+                                        pErrText );
+          break;
+
+      case PROT_SOCKET :
+          ulCommState = sql23c_connect( &ConnParam, &pConnInfo->TCPIP,
+                                        pErrText );
+          break;
+
+      default :
+          MSGCD (( ERR_UNSUPPORTED_PROT, pConnInfo->ulProtocol ));
+          ABORT();
+      }
+
+    if (( ulCommState == SQLTASKLIMIT )  && ( ulRetry <= RETRYCOUNT ))
+      {
+      if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+        SLEEP(3000);
+      else
+        SLEEP(1500);
+      }
+    }
+
+  if ( ulCommState == SQLOK )
+    {
+    // --- evaluate the return values
+    pConnInfo->ulMaxCmdDataLen = ConnParam.ulMaxDataLen -
+                                 ConnParam.ulMinReplySize;
+    *pulMaxCmdDataLen          = pConnInfo->ulMaxCmdDataLen;
+
+    for ( i = 0; i < ulPacketCnt; i++ )
+      {
+      pConnInfo->pCommPacketList[i] = ConnParam.pCommPacketList[i];
+      pSQLPacketList[i] = (PVOID)&ConnParam.pCommPacketList[i]->pDataPart;
+      }
+
+    // --- Set connection status.
+    pConnInfo->ulConnStatus = CON_CONNECTED;
+    }
+  else
+    {
+    #if defined ( _WIN32 ) && defined ( WINTERM )
+     KILL_THREAD( pConnInfo->Async.Tid,
+                  pConnInfo->Async.hThrd );
+     sql41c_close_event_sem ( pConnInfo->Async.hevSem, "ASYNC RECEIVE" );
+    #endif
+
+    sql09c_free_handle  ( pHandles, *pulClientRef );
+    FREE_MEM ( pConnInfo );
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql03u_request ( ULONG             ulClientRef,
+                              PVOID             pCmdData,
+                              ULONG             ulCmdDataLen,
+                              ERRORTEXT         pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_request"
+  ULONG                           ulCommState;
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulPacket;
+  ULONG                           ulTmp;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if (( pConnInfo->ulConnStatus != CON_CONNECTED )  &&
+      ( pConnInfo->ulConnStatus != CON_RECEIVED  )  &&
+      ( pConnInfo->ulConnStatus != CON_CANCELLED ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_CONN_STATE, 0 );
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  //
+  // --- find current communication packet containing the
+  //     requested command data
+  //
+  for( ulPacket = 0; ulPacket < pConnInfo->ulPacketCnt; ulPacket++ )
+    {
+    if (pCmdData == (PVOID)pConnInfo->pCommPacketList[ulPacket]->pDataPart)
+      break;
+    }
+
+  if ( ulPacket >= pConnInfo->ulPacketCnt )
+    {
+    DBG1 (( MF__, "ERROR: Invalid CmdData pointer" ));
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_PACKET_ADDR, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  // --- check the command packet length
+  if (( ulCmdDataLen > pConnInfo->ulMaxCmdDataLen ) ||
+      ( ulCmdDataLen % SQL_PACKET_ALIGNMENT ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_PACKET_LEN, 0 );
+
+    if ( ulCmdDataLen % SQL_PACKET_ALIGNMENT )
+      {
+      DBGOUT;
+      return ( SQLNOTOK );
+      }
+    else
+      {
+      DBGOUT;
+      return ( SQLPACKETLIMIT );
+      }
+    }
+
+  switch ( pConnInfo->ulProtocol )
+     {
+    case PROT_SHM :
+      ulCommState = sql33c_request ( &pConnInfo->Shm, ulPacket,
+                                     ulCmdDataLen, pErrText );
+      break;
+
+    case PROT_SOCKET :
+      ulCommState = sql23c_request ( &pConnInfo->TCPIP, ulPacket,
+                                     ulCmdDataLen, pErrText );
+      break;
+    default :
+      MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+      ABORT();
+    }
+
+  if ( ulCommState == SQLOK )
+    pConnInfo->ulConnStatus = CON_REQUESTED;
+  else
+    ulCommState = SQLTIMEOUT;  // --- force application to try a reconnect
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+#if defined ( _WIN32 ) && defined ( WINTERM )
+
+ VOID _System  sql03u_receiver ( PUSER_CONNECT_INFO_REC pConnInfo )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql03u_receiver"
+   APIRET       rc;
+
+   DBGIN;
+
+   for (;;)
+     {
+     rc =  sql41c_wait_event_sem ( pConnInfo->Async.hevSem,
+                                   UNDEF, "ASYNC RECEIVE");
+
+    if ( rc != NO_ERROR )
+      ABORT();
+
+    switch ( pConnInfo->ulProtocol )
+       {
+       case PROT_SHM :
+        pConnInfo->Async.ulCommState =
+                             sql33c_receive ( &pConnInfo->Shm,
+                                              &pConnInfo->Async.pResPacket,
+                                              &pConnInfo->Async.ulResDataLen,
+                                              pConnInfo->Async.pErrText );
+        break;
+
+      case PROT_SOCKET :
+        pConnInfo->Async.ulCommState =
+                             sql23c_receive ( &pConnInfo->TCPIP,
+                                              &pConnInfo->Async.pResPacket,
+                                              &pConnInfo->Async.ulResDataLen,
+                                              pConnInfo->Async.pErrText );
+        break;
+
+      default :
+        MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+        ABORT();
+      }
+
+     // --- signal that we have received any data
+     sql90_finish_loop ();
+     }
+
+   DBGOUT;
+   return;
+   }
+
+ /*------------------------------*/
+
+ static ULONG sql03u_async_receive ( PUSER_CONNECT_INFO_REC  pConnInfo,
+                                     PCOMM_PACKET_REC        *ppResPacket,
+                                     PULONG                  pulResDataLen,
+                                     ERRORTEXT               pErrText )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql03u_async_receive"
+   ULONG   ulCommState;
+   APIRET  rc;
+
+   DBGIN;
+
+   // --- set pointer to the variable
+   pConnInfo->Async.pErrText = pErrText;
+
+   // --- wake up the async receiver thread
+   rc = sql41c_post_event_sem ( hevServerSem, "Server" );
+
+   if (( rc != NO_ERROR ) && ( rc != ERROR_ALREADY_POSTED ))
+     {
+     sql46c_build_error_string ( pErrText, ERRMSG_COM_POST_ASYNC_SEM, rc );
+     ulCommState = SQLNOTOK;
+     }
+   else
+     {
+     sql90_async_loop ( pConnInfo->ulClientRef );
+
+     // --- get the received packet pointer and packet length
+     //     and the communication state
+     *ppResPacket   = pConnInfo->Async.pResPacket;
+     *pulResDataLen = pConnInfo->Async.ulResDataLen;
+     }
+
+   DBGOUT;
+   return ( ulCommState );
+   }
+
+#endif
+
+/*------------------------------*/
+
+static ULONG sql03u_replyavailable ( ULONG             ulClientRef,
+                                     ERRORTEXT         pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_replyavailable"
+  ULONG                           ulCommState;
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulTmp;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if (( pConnInfo->ulConnStatus != CON_REQUESTED ) &&
+      ( pConnInfo->ulConnStatus != CON_CANCELLED ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_CONN_STATE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  switch ( pConnInfo->ulProtocol )
+    {
+    case PROT_SHM :
+      ulCommState = sql33c_replyavailable( &pConnInfo->Shm, pErrText );
+      break;
+
+    case PROT_SOCKET :
+      ulCommState = sql23c_replyavailable( &pConnInfo->TCPIP, pErrText );
+      break;
+
+    default :
+      MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+      ABORT();
+    }
+
+
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql03u_receive ( ULONG             ulClientRef,
+                              PVOID             *ppResData,
+                              PULONG            pulResDataLen,
+                              ERRORTEXT         pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_receive"
+  ULONG                           ulCommState;
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulTmp;
+  PCOMM_PACKET_REC                pResPacket;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if (( pConnInfo->ulConnStatus != CON_REQUESTED ) &&
+      ( pConnInfo->ulConnStatus != CON_CANCELLED ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_CONN_STATE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  #if defined ( _WIN32 ) && defined ( WINTERM )
+   ulCommState = sql03u_async_receive ( pConnInfo, pResPacket,
+                                        pulResDataLen, pErrText );
+  #else
+   switch ( pConnInfo->ulProtocol )
+      {
+     case PROT_SHM :
+       ulCommState = sql33c_receive( &pConnInfo->Shm, &pResPacket,
+                                     pulResDataLen, pErrText );
+       break;
+
+     case PROT_SOCKET :
+       ulCommState = sql23c_receive( &pConnInfo->TCPIP, &pResPacket,
+                                     pulResDataLen, pErrText );
+       break;
+
+     default :
+       MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+       ABORT();
+     }
+  #endif
+
+
+  if ( ulCommState == SQLOK )
+    {
+    *ppResData              = (PVOID)pResPacket->pDataPart;
+    pConnInfo->ulConnStatus = CON_RECEIVED;
+    }
+  else
+    *pulResDataLen = 0;
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql03u_release ( ULONG            ulClientRef,
+                              ERRORTEXT        pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_release"
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulCommState;
+  LONG                            rc;
+  ULONG                           ulTmp;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if ( pConnInfo->ulConnStatus == CON_INITIALIZED )
+    {
+    return ( SQLNOTOK );
+    }
+
+  pConnInfo->ulConnStatus = CON_RELEASED;
+
+  switch ( pConnInfo->ulProtocol )
+    {
+    case PROT_SHM :
+      ulCommState = sql33c_release ( &pConnInfo->Shm, pErrText );
+      break;
+
+    case PROT_SOCKET :
+      ulCommState = sql23c_release ( &pConnInfo->TCPIP, pErrText );
+      break;
+
+    default :
+      MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+      ABORT();
+
+    }
+  sql09c_free_handle  ( pHandles, ulClientRef );
+
+  #if defined ( _WIN32 ) && defined ( WINTERM )
+   rc = KILL_THREAD( pConnInfo->Async.Tid,
+                     pConnInfo->Async.hThrd );
+
+   if ( rc != NO_ERROR )
+     {
+     MSGD (( ERR_KILL_REC_THREAD ));
+     sql46c_build_error_string ( pErrText, ERRMSG_KILL_REC_THREAD, rc );
+     ulCommState = SQLNOTOK;
+     }
+
+   rc = sql41c_close_event_sem ( pConnInfo->Async.hevSem, "ASYNC RECEIVE" );
+
+   if ( rc != NO_ERROR )
+     {
+     sql46c_build_error_string ( pErrText, ERRMSG_CLOSE_REC_SEM, rc );
+     ulCommState = SQLNOTOK;
+     }
+  #endif
+
+  rc = FREE_MEM ( pConnInfo );
+
+  if ( rc != NO_ERROR )
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_CANT_FREE_MEM, rc );
+    ulCommState = SQLNOTOK;
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+
+/*------------------------------*/
+
+
+static ULONG sql03u_cancel ( ULONG            ulClientRef,
+                             ERRORTEXT        pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_cancel"
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulCommState;
+  ULONG                           ulTmp;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if ( pConnInfo->ulConnStatus != CON_REQUESTED )
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_CONN_STATE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  switch ( pConnInfo->ulProtocol )
+    {
+    case PROT_SHM :
+      ulCommState = sql33c_cancel_dump ( &pConnInfo->Shm, SQL_RTE_CANCEL,
+                                         pErrText );
+      break;
+
+    case PROT_SOCKET :
+      ulCommState = sql23c_cancel_dump ( &pConnInfo->TCPIP, SQL_RTE_CANCEL,
+                                         pErrText );
+      break;
+
+    default :
+      MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+      ABORT();
+    }
+
+  pConnInfo->ulConnStatus = CON_CANCELLED;
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG     sql03u_dump ( ULONG            ulClientRef,
+                               ERRORTEXT        pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_dump"
+  PUSER_CONNECT_INFO_REC          pConnInfo;
+  ULONG                           ulCommState;
+  ULONG                           ulTmp;
+
+  DBGIN;
+
+  // --- get the pointer to the internal communication structure
+  if ( !sql09c_get_handle_data  ( pHandles, ulClientRef,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_REFERENCE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  if ( pConnInfo->ulConnStatus <= CON_INITIALIZED )
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_WRONG_CONN_STATE, 0 );
+    return ( SQLNOTOK );
+    }
+
+  switch ( pConnInfo->ulProtocol )
+    {
+    case PROT_SHM :
+      ulCommState = sql33c_cancel_dump ( &pConnInfo->Shm, SQL_RTE_DUMP,
+                                         pErrText );
+      break;
+
+    case PROT_SOCKET :
+      ulCommState = sql23c_cancel_dump ( &pConnInfo->TCPIP, SQL_RTE_DUMP,
+                                         pErrText );
+      break;
+
+    default :
+      MSGCD (( ERR_WRONG_PROTOCOL, pConnInfo->ulProtocol ));
+      ABORT();
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+
+/*------------------------------*/
+
+static LONG sql03u_get_protocol ( PSZ                    pszServerNode,
+                                  PSZ                    pszServerDB,
+                                  PULONG                 pulProtocol,
+                                  ERRORTEXT              pErrText )
+
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_get_protocol"
+  ULONG                   ulServerNodeLen;
+  ULONG                   ulServerDBLen;
+  PSZ                     pszTmp;
+  FILE                    *fp;
+  PATHNAME                szServerTypeFile;
+  CHAR                    szServerDB [ sizeof ( SQL_NODEID ) + sizeof (SQL_DBNAME)  + 2 ];
+  CHAR                    szLine[ 256 ];
+  PSZ                     pszDBRoot;
+  SQL_NODEIDC             szNodeName;
+  LONG                    rc;
+
+  DBGIN;
+
+  ulServerNodeLen = strlen ( pszServerNode );
+  ulServerDBLen   = strlen ( pszServerDB );
+
+  if ( ulServerNodeLen )
+    {
+    if ( szLocalNodeName[0] == '\0' )
+      {
+      rc = sql43c_get_my_host_name ( szNodeName, sizeof(szNodeName) );
+
+      if (( rc == NO_ERROR ) && ( fTCPIP_Installed ))
+        {
+        rc = sql43c_get_official_node_name ( szNodeName, szLocalNodeName,
+                                            sizeof(szLocalNodeName));
+
+        if ( rc != NO_ERROR )
+          strcpy ( szLocalNodeName, szNodeName );
+        }
+      DBG3 (( MF__, "Local node: '%s'", szLocalNodeName ));
+      }
+
+    rc = sql43c_get_official_node_name ( pszServerNode, szNodeName,
+                                         sizeof(szNodeName) );
+
+    if ( rc != NO_ERROR )
+      strcpy ( szNodeName, pszServerNode );
+    }
+
+  // ---  Default server type
+  if (( ulServerNodeLen ) &&
+      ( stricmp ( szNodeName, szLocalNodeName ) ))
+    {
+    *pulProtocol = PROT_SOCKET;
+    DBG3 (( MF__, "Remote connection", 0 ));
+    }
+  else
+    {
+    *pulProtocol = PROT_SHM;
+    DBG3 (( MF__, "Local connection", 0 ));
+    }
+
+  // --- Prepare [node:]dbname
+  if ( ulServerNodeLen + ulServerDBLen >= sizeof(szServerDB)- 2  )
+    {
+    MSGD (( WRN_NODE_PL_DBNAME_TOO_LONG, sizeof(szServerDB)- 2 ));
+    sql46c_build_error_string ( pErrText, WRNMSG_COM_NODE_PL_DBNAME_TOO_LONG, 0 );
+    DBGOUT;
+    return ( -1 );
+    }
+
+  memcpy ( szServerDB, pszServerNode, ulServerNodeLen );
+
+  // --- use ':' only if server node is present
+  if ( ulServerNodeLen )
+    szServerDB [ ulServerNodeLen ++ ] = ':';
+
+  // --- including '\0'
+  memcpy ( szServerDB + ulServerNodeLen,
+           pszServerDB, ulServerDBLen + 1 );
+
+  // --- ulServerDBLen represents total length from here on
+  ulServerDBLen += ulServerNodeLen;
+
+  if ( sql01c_get_dbroot (&pszDBRoot) )
+    {
+    strcpy ( szServerTypeFile, pszDBRoot );
+    strcat ( szServerTypeFile, "\\"SERVER_TYPE_FILENAME );
+
+    fp = fopen ( szServerTypeFile, "r" );
+
+    if ( fp != NULL )
+      {
+      // ---  Step through the file, searching [node:]dbname
+      while ( (pszTmp = fgets(szLine, sizeof(szLine), fp) ) != NULL )
+        {
+        for (; isspace(* pszTmp); pszTmp++) {;}
+
+        if (( strncmp ( pszTmp, szServerDB, ulServerDBLen ) ) ||
+            ( ! isspace ( pszTmp[ ulServerDBLen ] )         )) continue;
+
+        for ( pszTmp += ulServerDBLen; isspace(* pszTmp); pszTmp ++) {;}
+        if ( * pszTmp == '/' ) break;
+        }
+
+      fclose ( fp );
+
+      // ---  If not found, then 'pszTmp' is NULL.
+      if (  pszTmp )
+        {
+        pszTmp++;
+
+        if ( isupper(* pszTmp) )
+          *pszTmp = tolower(* pszTmp);
+
+        switch ( * pszTmp )
+          {
+          case 'c' :
+              if ( ulServerNodeLen )
+                *pulProtocol = PROT_SOCKET;
+              else
+                *pulProtocol = PROT_SHM;
+              break;
+
+          case 'p' :
+              if ( ulServerNodeLen )
+                *pulProtocol = PROT_PASREM;
+              else
+                *pulProtocol = PROT_PASLCL;
+              break;
+
+          default :
+              MSGCD (( WRN_WRONG_SERV_TYPE_LINE, szLine ));
+              ABORT();
+              break;
+          }
+        }
+
+
+     #ifdef  DEBUG
+      switch ( *pulProtocol )
+        {
+        case PROT_SOCKET :
+            DBG3 (( MF__, "remote C connect" ));
+            break;
+        case PROT_SHM :
+            DBG3 (( MF__, "local C connect" ));
+            break;
+        default :
+            DBG3 (( MF__, "Illegal protocol type %d ", *pulProtocol ));
+            break;
+        }
+     #endif
+      }
+    }
+
+  if (( fTCPIP_Installed == FALSE ) && (*pulProtocol != PROT_SHM ))
+    {
+    if ( sql02_this_RTE_version_is_older(&TCPIPRTEVersion) )
+      {
+      MSGD (( ERR_WRONG_TCPIP_VERSION ));
+      sql46c_build_error_string ( pErrText, ERRMSG_WRONG_TCPIP_VERSION, 0 );
+      }
+    else
+      {
+      MSGD (( ERR_NO_TCPIP_INSTALLED ));
+      sql46c_build_error_string ( pErrText, ERRMSG_NO_TCPIP_INSTALLED, 0 );
+      }
+    return ( -1 );
+    }
+
+
+  DBGOUT;
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static VOID _System sql03u_exithandler ( ULONG   ulTermCode )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql03u_exithandler"
+
+
+  DBGIN;
+
+  DBG3 (( MF__, "ulTermCode = %d", ulTermCode ));
+
+  sql03u_finish ();
+
+  sql02u_next_exit_func ();
+
+  DBGOUT;
+
+  return;
+  }
+
+/*------------------------------*/
+
+#if defined(_WIN32)
+
+ static BOOL WINAPI sql03u_catch_cancel_sig ( DWORD dwCtrlType )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql03u_catch_cancel_sig"
+   ERRORTEXT          ErrText;
+
+   DBGPAS;
+
+   switch ( dwCtrlType )
+     {
+     case CTRL_C_EVENT:
+       if ( ulCurrClientRef != (ULONG)UNDEF )
+         {
+         sql03u_cancel ( ulCurrClientRef, ErrText );
+         ulCurrClientRef = (ULONG)UNDEF;
+         }
+       break;
+     }
+
+   return (FALSE);
+   }
+
+#else
+
+ VOID _CDECL sql03u_catch_cancel_sig ( INT SigType )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql03u_catch_cancel_sig"
+   ERRORTEXT          ErrText;
+
+   DBGPAS;
+
+   signal ( SigType, SIG_IGN );
+
+   if ( ulCurrClientRef != (ULONG)UNDEF )
+     {
+     sql03u_cancel ( ulCurrClientRef, ErrText );
+     ulCurrClientRef = (ULONG)UNDEF;
+     }
+
+   if ( FetchedSigInt != SIG_DFL &&
+        FetchedSigInt != SIG_IGN &&
+        FetchedSigInt != SIG_ERR &&
+        FetchedSigInt != (SIGNALFUNCTYPE) sql03u_catch_cancel_sig )
+     {
+     FetchedSigInt ( SigType );
+     }
+   else
+     {
+     EXITPROCESS ( 5 );
+     }
+
+
+   signal ( SigType, sql03u_catch_cancel_sig );
+
+   return;
+   }
+#endif
+
+/*
+ * =============================== END ========================================
+ */
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+.PA

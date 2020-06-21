@@ -1,0 +1,475 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by Software AG, 1994$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$veo11uc$
+.tt 2 $$$
+.tt 3 $$                                       $1997-07-25$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       create_xparam_from_save
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  :
+.sp
+.cp 3
+Created : 1990-03-12
+.sp
+.cp 3
+Version : 1995-06-02
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-07-25
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+#define MOD__ "VEO11C : "
+
+
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+
+/* !!!!!!!!!!!!!!!!!!! vgg00 !!!!!!!!!!!!!!!!!!!!! */
+
+typedef  struct tgg_page_header 
+{
+ tsp_page_no ggh_id;
+ tsp_int1    ggh_pt;
+ tsp_int1    ggh_pt2;
+ tsp_int1    ggh_check;
+ tsp_int1    ggh_pmode;
+} tgg_page_header , tgg_page_trailer;
+
+
+#define  PT2_XPARAM  17
+#define  PT_SAVE      5
+#define  PT_DATA      8
+
+/* !!!!!!!!!!!!!!!!!!!! vkb003 !!!!!!!!!!!!!!!!!!!!! */
+#define  CKB3_MAX_XP_DATA  (MAXPAGELENGTH -                       \
+                            sizeof(tgg_page_header) -             \
+                            sizeof(tsp_int4) - sizeof(tsp_int4) - \
+                            sizeof(tsp_int4) -                    \
+                            sizeof(tgg_page_trailer) )
+
+typedef  struct tkb3_xp_page {
+ tgg_page_header header ; 
+ tsp_int4 xp_length;
+ tsp_int4 xp_max_length;
+ char xp_data[ CKB3_MAX_XP_DATA ] ;
+ tsp_int4 checksum ;
+ tgg_page_trailer trailer ; 
+} tkb3_xp_page;
+
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
+
+#define IS_PARAM_PAGE( page ) \
+  ( page->header.ggh_pt == PT_SAVE && page->header.ggh_pt2 == PT2_XPARAM )
+
+#define IS_DATA_PAGE( page )  ( page->header.ggh_pt  == PT_DATA   )
+
+#define ERRTEXT(v,t)  { DBG3(((char*)t,v));\
+		      SQL47_CTOP((char*)v,(char*)t,(tsp_int4)MAXERRORTEXT); }
+
+static char BAD_BLOCKSIZE_GIVEN []            = "bad blocksize given";
+static char DBROOT_NOT_SET      []            = "DBROOT not set";
+static char CREATE_ERRTEXT      []            = "XPARAM Create ERROR";
+static char BAD_BLOCKSIZE_READ  []            = "bad blocksize read";
+static char NO_PARAMDATA_FOUND  []            = "no data for param found";
+static char MALLOC_FAILED       []            = "not enough memory";
+static char PARAMSIZE_MISMATCH  []            = "paramsize mismatch";
+static char CHECKSUM_ERROR      []            = "checksum error";
+static char CANT_GET_DBNAME     []            = "Serverdbname not found" ;
+
+/***************************************************************/
+#if _WIN32 || OS2
+/***************************************************************/
+
+#define CLOSE_XPARAM_FILE( _XpFd, _Error, _Errtext ) \
+  sql11c_CloseXParam ( _XpFd , !XP_FLUSH, _Errtext , _Error );
+
+/***************************************************************/
+#else
+/***************************************************************/
+
+#define CLOSE_XPARAM_FILE( _XpFd, _Error, _Errtext ) \
+    sql11c_close_xparam_file ( _XpFd , FALSE ) ;
+
+/***************************************************************/
+#endif
+/***************************************************************/
+
+/* ====================== LOCAL FUNCTIONS PROTOTYPES ======================== */
+
+static	void CreateXparamFile ( tsp_dbname     DBName,
+                                char           *XparamBuf,
+                                tsp_int4       XparamSize,
+                                tsp_vf_return  *Error,
+                                tsp_errtext    Errtext ) ;
+
+static	void GetXparamDBName  ( tsp_dbname     DBName,
+                                char           *XparamBuf,
+                                tsp_int4       XparamSize,
+                                tsp_vf_return  *Error,
+                                tsp_errtext    Errtext );
+
+static	void OpenXparamFile (   tsp_dbname     DBName,
+                                tsp_int4       * XparamFileNo,
+                                tsp_vf_return  *Error,
+                                tsp_errtext    Errtext ) ;
+
+static int checksum( tkb3_xp_page *XparamPage ) 
+       { return ( XparamPage->checksum ) ; } 
+
+/* ========================== GLOBAL FUNCTIONS ============================ */
+
+void	sqlextract_xparamfile ( tsp_vfilename                   SaveFile ,
+                                tsp_int2                        BufCnt ,
+                                tsp_dbname                      DBName ,
+                                tsp_vf_return                   * error ,
+                                tsp_errtext                     errtext )
+
+{
+  #undef  MF__
+  #define MF__ MOD__"sqlcreate_param"
+
+  tsp_int4             PoolName = 0;
+  tsp_int4             SaveFileNo ;
+  tsp_longint          BytesRead,
+                       RecLen = BufCnt * MAXPAGELENGTH;
+  char                 *Buf = NULL ;
+  char                 *ParamBuf = NULL ;
+  tsp5_rte_fileerror   RteError ;
+  ULONG                rc;
+
+  DBGIN;
+
+  DBG3 ((MF__, "SaveFile = %s", SaveFile )) ;
+  DBG3 ((MF__, "sqlcreate_param: BufCnt   = %d", BufCnt   )) ;
+  DBG3 ((MF__, "sqlcreate_param: DBName   = %.8s\n", DBName   )) ;
+
+  if ( BufCnt < 1 )
+    { *error = VF_NOTOK  ;
+       ERRTEXT( errtext, BAD_BLOCKSIZE_GIVEN );
+    }
+  else
+      *error = VF_OK  ;
+
+  if ( *error == VF_OK )
+    { sqlfopenp ( SaveFile, SP5VF_BINARY, SP5VF_READ,
+                SP5BK_UNBUFFERED, &SaveFileNo, &RteError ) ;
+      if ( ( *error = RteError.sp5fe_result ) != VF_OK )
+        ERRTEXT( errtext, RteError.sp5fe_text )
+      else
+        {
+        rc = ALLOC_MEM( &Buf, RecLen );
+
+        if ( rc != NO_ERROR )
+          { *error = VF_NOTOK ;
+            ERRTEXT( errtext, MALLOC_FAILED );
+          }
+        }
+    }
+
+  if ( *error == VF_OK )
+    { BOOLEAN ParamDataFound = FALSE, EndOfParam = FALSE ;
+      tsp_int4 TotParamSize, ActParamSize = 0,
+               ActBlock, TotalReads = 0 ;
+      do
+        { sqlfreadc ( SaveFileNo, Buf, RecLen, &BytesRead , &RteError ) ;
+
+          DBG3 ((MF__, " %8d.sqlfread : %d Bytes", ++TotalReads, BytesRead )) ;
+
+
+          if ( ( *error = RteError.sp5fe_result ) == VF_OK && BytesRead > 0 )
+            { tkb3_xp_page *XparamPage = (tkb3_xp_page *) Buf ;
+              ActBlock = 0 ;
+
+              if ( !ParamDataFound )
+                { for ( ; ActBlock < BufCnt &&
+                          !(EndOfParam     = IS_DATA_PAGE(  XparamPage )) &&
+                          !(ParamDataFound = IS_PARAM_PAGE( XparamPage )) ;
+                          ActBlock++, XparamPage++ ) ;
+                  if ( ParamDataFound )
+                    { DBG3 ((MF__, "ParamDataFound at block %d / %d",
+                                    TotalReads , ActBlock )) ;
+                      TotParamSize = XparamPage->xp_max_length ;
+
+                      rc = ALLOC_MEM( &ParamBuf, TotParamSize );
+
+                      if ( rc != NO_ERROR )
+                        { *error = VF_NOTOK ;
+                          ERRTEXT( errtext, MALLOC_FAILED );
+                        }
+                    }
+                }
+
+              if ( ParamDataFound && *error == VF_OK )
+                for ( ; ActBlock < BufCnt &&
+                        !(EndOfParam = !IS_PARAM_PAGE( XparamPage )) ;
+                        ActBlock++, XparamPage++ )
+                  { DBG3 ((MF__,"param page %d found, data len = %d",
+                           XparamPage->header.ggh_id, XparamPage->xp_length ));
+                    if ( XparamPage->checksum != checksum(XparamPage) )
+                      { *error = VF_NOTOK ;
+                        ERRTEXT( errtext, CHECKSUM_ERROR );
+                        DBG3 ((MF__,"checksum error: page=%d, build=%d",
+                               XparamPage->checksum, checksum(XparamPage) ));
+                      }
+                    else
+                    if ( ActParamSize + XparamPage->xp_length <= TotParamSize )
+                      { memcpy ( ParamBuf + ActParamSize,
+                                 XparamPage->xp_data, XparamPage->xp_length ) ;
+                        ActParamSize += XparamPage->xp_length ;
+                      }
+                    else
+                      { *error = VF_NOTOK ;
+                         DBG3 ((MF__,"len mismatch: act=%d, add=%d, tot=%d",
+                                ActParamSize, XparamPage->xp_length, 
+                                TotParamSize));
+                         ERRTEXT( errtext, PARAMSIZE_MISMATCH );
+                      }
+                  }
+            }
+          else
+            if ( *error != VF_OK )
+              ERRTEXT( errtext, RteError.sp5fe_text )
+            else
+              { *error = VF_NOTOK ;
+                ERRTEXT( errtext, BAD_BLOCKSIZE_READ );
+              }
+        }
+      while ( *error == VF_OK && !EndOfParam ) ;
+
+      sqlfclosec ( SaveFileNo, SP5VF_CLOSE_NORMAL, &RteError);
+
+      if ( *error == VF_OK )
+        if ( !ParamDataFound )
+          { *error = VF_NOTOK ;
+            ERRTEXT( errtext, NO_PARAMDATA_FOUND );
+          }
+        else
+          CreateXparamFile ( DBName, ParamBuf, TotParamSize, error, errtext );
+    }
+  if ( ParamBuf != NULL ) FREE_MEM ( ParamBuf ) ;
+  if ( Buf      != NULL ) FREE_MEM ( Buf ) ;
+  DBGOUT ;
+}
+
+/* ========================== LOCAL  FUNCTIONS ============================ */
+
+static	void CreateXparamFile ( tsp_dbname     DBName,
+                                char           *XparamBuf,
+                                tsp_int4       XparamSize,
+                                tsp_vf_return  *Error,
+                                tsp_errtext    Errtext )
+
+{
+  #undef  MF__
+  #define MF__ MOD__"CreateXParamFile"
+
+  tsp_int4         XparamFileNo , BytesWritten;
+  tsp_vf_return    DummyError ;
+  tsp_errtext      DummyErrtext ;
+
+  DBGIN;
+
+  GetXparamDBName ( DBName, XparamBuf, XparamSize, Error, Errtext );
+
+  if ( *Error == VF_OK )
+    { OpenXparamFile( DBName, &XparamFileNo, Error, Errtext );
+
+      if ( XparamFileNo >= 0 )
+        { sql11c_SeqBinWriteXParam ( XparamFileNo, XparamBuf, XparamSize,
+                                     &BytesWritten, Errtext, Error ) ;
+
+          DBG3 ((MF__, "%d of %d Bytes written to paramfile",
+                       XparamSize, BytesWritten));
+
+          CLOSE_XPARAM_FILE ( XparamFileNo, &DummyError, DummyErrtext );
+        }
+    }
+  else
+    ERRTEXT( Errtext, CANT_GET_DBNAME );
+
+  DBGOUT ;
+}
+
+/*==========================================================================*/
+
+static	void GetXparamDBName ( tsp_dbname     DBName,
+                               char           *XparamBuf,
+                               tsp_int4       XparamSize,
+                               tsp_vf_return  *Error,
+                               tsp_errtext    Errtext )
+
+{
+  #undef  MF__
+  #define MF__ MOD__"GetXparamDBName"
+
+  XP_HFILE XpFd ;
+
+  DBGIN;
+
+  if ( (XpFd = sql11c_InitXparamStruc ( XparamBuf, XparamSize)) >= 0 )
+    {
+      XP_KEY_TYPE       xp_key ;
+      XP_VALUE_REC      xp_value ;
+      XP_KEY_TYPEC      ParamId ;
+      XP_RETURNCODE     xp_ret = XP_OK ;
+
+      if ( *DBName == ' ' || *DBName == '\0' )  /* get DBName form Save */
+        { do
+            {
+              sql11c_SeqNextXParam ( XpFd, xp_key, &xp_value, Errtext, &xp_ret);
+              if ( xp_ret == XP_OK )
+  	        { SQL47_PTOC ( ParamId , xp_key , sizeof(xp_key) )  ;
+                  DBG3 ((MF__, "xp_key = '%.18s'" , xp_key ));
+                }
+            }
+          while ( xp_ret == XP_OK && strcmp( ParamId , PAN_SERVERDB ) ) ;
+          if ( xp_ret == XP_OK )
+            { memcpy ( DBName, (char *)&xp_value.xp_type,
+                       sizeof ( tsp_dbname ) ) ;
+              DBG3 ((MF__, "found DBName = '%.8s'" , DBName  ));
+            }
+        }
+      else                                      /* take over given DBame */
+        { SQL47_CTOP ( xp_key , PAN_SERVERDB,  sizeof(xp_key) )  ;
+          memset ( &xp_value, 0, sizeof ( xp_value ) );
+          xp_value.xp_value_t = XP_C8_TYPE ;
+          SQL47_CTOP ( (char *)&xp_value.xp_type, DBName, sizeof(tsp_dbname) ) ;
+          sqlputxparam ( XpFd, xp_key , &xp_value , Errtext , &xp_ret ) ;
+        }
+
+      if ( xp_ret != XP_OK )
+        *Error = VF_NOTOK  ;
+
+      sql11c_FreeXparamStruc ( XpFd ) ;
+    }
+
+  DBGOUT ;
+}
+
+/*==========================================================================*/
+
+static	void OpenXparamFile ( tsp_dbname     DBName,
+                              tsp_int4       * XparamFileNo,
+                              tsp_vf_return  *Error,
+                              tsp_errtext    Errtext )
+
+{
+  #undef  MF__
+  #define MF__ MOD__"OpenXParamFile"
+
+/***************************************************************/
+#if _WIN32 || OS2
+/***************************************************************/
+ PSZ pszDBRoot ;
+ if ( !sql01c_get_dbroot ( &pszDBRoot ) )
+   { *Error = VF_NOTOK  ;
+     ERRTEXT( Errtext, DBROOT_NOT_SET );
+   }
+ else
+   sql11c_OpenXParam ( pszDBRoot, DBName, XparamFileNo, Errtext,
+                       XP_CREATE | XP_OPEN_BIN, Error );
+/***************************************************************/
+#else
+/***************************************************************/
+  *XparamFileNo = sql11c_open_xparam_file ( DBName, XP_CREATE | XP_OPEN_BIN);
+/***************************************************************/
+#endif
+/***************************************************************/
+
+  if ( *XparamFileNo < 0 )
+    { *Error = VF_NOTOK  ;
+      ERRTEXT( Errtext, CREATE_ERRTEXT );
+    }
+  else
+     *Error = VF_OK ;
+
+  DBGOUT ;
+}
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :
+*-PRETTY-*  lines of code :
+*-PRETTY-*  lines in file :
+.pa

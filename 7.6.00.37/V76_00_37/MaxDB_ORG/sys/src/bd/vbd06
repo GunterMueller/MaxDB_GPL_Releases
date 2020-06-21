@@ -1,0 +1,1684 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.TT 1 $SQL$Project Distributed Database System$VBD06$
+.tt 2 $$$
+.TT 3 $JuergenP$error_text_handling$$$2000-10-12$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+MODULE  : error_text_handling
+=========
+.sp
+Purpose : storing and retrieving errortexts
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        VAR
+              b06check_rec : boolean;
+ 
+        PROCEDURE
+              b06check_mxbd (VAR ok : boolean);
+ 
+        PROCEDURE
+              b06check_vresume_cnt (pid : tsp00_TaskId);
+ 
+        PROCEDURE
+              b06create_errortext_file (VAR t : tgg00_TransContext);
+ 
+        PROCEDURE
+              b06get_errtxt (VAR t : tgg00_TransContext;
+                    VAR errlen    : integer;
+                    VAR etexttype : tgg04_ErrorText;
+                    VAR b_error   : tgg00_BasisError;
+                    VAR errtxt    : tsp00_C256);
+ 
+        PROCEDURE
+              b06init_errtxt;
+ 
+        PROCEDURE
+              b06put_errtxt (
+                    VAR t         : tgg00_TransContext;
+                    taskId        : tsp00_TaskId;
+                    errlen        : integer;
+                    etexttype     : tgg04_ErrorText;
+                    b_err_in      : tgg00_BasisError;
+                    VAR errtxt    : tsp00_C256;
+                    VAR b_err_out : tgg00_BasisError);
+ 
+        PROCEDURE
+              b06write_filename_and_root (VAR file_id : tgg00_FileId);
+&       ifdef TRACE
+ 
+        PROCEDURE
+              b06record_check (
+                    VAR rec    : tgg00_Rec;
+                    VAR fileId : tgg00_FileId;
+                    VAR b_err  : tgg00_BasisError);
+&       endif
+ 
+        PROCEDURE
+              b06file_opmsg (
+                    msg_no     : tsp00_Int4;
+                    VAR fileId : tgg00_FileId);
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4 (* ptocSynonym const char* *);
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tbd_univ_ptr(* ptocSynonym void* *);
+                    curr_buf_cnt   : integer);
+ 
+        PROCEDURE
+              bd06CorruptedTreeHandling (
+                    VAR fileId : tgg00_FileId;
+                    msgNo      : tsp00_Int4;
+                    trError    : tgg00_BasisError);
+              (*ptocExport hbd06_1.h*)
+ 
+        PROCEDURE
+              bd06IllegalRootAccess (
+                    VAR trans       : tgg00_TransContext;
+                    VAR fileId      : tgg00_FileId;
+                    bWriteBacktrace : boolean);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              KB_Logging : vkb560;
+ 
+        FUNCTION
+              kb560IsCatalogTable(
+                    VAR tabId : tgg00_Surrogate) : boolean;
+ 
+        FUNCTION
+              kb560IsSys1CatalogTable(
+                    VAR tabId : tgg00_Surrogate) : boolean;
+ 
+        FUNCTION
+              kb560IsSys2CatalogTable(
+                    VAR tabId : tgg00_Surrogate) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id    : tgg00_FileId;
+              b01blankfilename : tsp00_VFilename;
+ 
+      ------------------------------ 
+ 
+        FROM
+              nodehandling : VBD13;
+ 
+        PROCEDURE
+              b13r_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree;
+                    lru_info    : tbd_lru_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filedirectory : VBD17;
+ 
+        PROCEDURE
+              b17state_fdir (VAR fn : tgg00_Filename;
+                    VAR fi          : tbd_fileinfo;
+                    concurrent_file : boolean;
+                    VAR t           : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              treehandling : VBD30;
+ 
+        PROCEDURE
+              bd30GetTree (
+                    VAR trans            : tgg00_TransContext;
+                    VAR fileId           : tgg00_FileId;
+                    VAR current          : tbd_current_tree;
+                    messType             : tgg00_MessType;
+                    bLockTreeExcl        : boolean;
+                    bSynchronizeExclLock : boolean);
+ 
+        PROCEDURE
+              bd30ReleaseTree (
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              bd30SearchRecord(
+                    VAR current       : tbd_current_tree;
+                    VAR recKey        : tsp00_Key;
+                    recKeyLen         : tsp00_Int4;
+                    bLockLeafExcl     : boolean;
+                    VAR nptr          : tbd_node_ptrs;
+                    VAR recIndex      : tsp00_Int4;
+                    VAR neighbs       : tbd_neighbors;
+                    VAR searchResult  : tbd_searchresult);
+ 
+      ------------------------------ 
+ 
+        FROM
+              leafhandling : VBD31;
+ 
+        PROCEDURE
+              b31add_to_leaf (
+                    VAR b       : tbd06_ErrorTextRecord;
+                    VAR nptr    : tbd_node_ptrs;
+                    index       : integer;
+                    left        : tsp00_PageNo;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              bd31AppendToLeaf (
+                    VAR b           : tbd06_ErrorTextRecord;
+                    VAR nptr        : tbd_node_ptrs;
+                    index           : integer;
+                    left            : tsp00_PageNo;
+                    VAR current     : tbd_current_tree;
+                    useBeforeRef    : boolean;
+                    VAR beforeRef   : tgg91_PageRef);
+ 
+        PROCEDURE
+              b31repl_in_leaf (
+                    VAR b       : tbd06_ErrorTextRecord;
+                    VAR nptr    : tbd_node_ptrs;
+                    index       : integer;
+                    left        : tsp00_PageNo;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              b31get_from_leaf (
+                    VAR nptr     : tbd_node_ptrs;
+                    index        : integer;
+                    with_kb_lock : boolean;
+                    VAR b        : tbd06_ErrorTextRecord;
+                    VAR current  : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              FileDir_Wrapper : VBD998;
+ 
+        PROCEDURE
+              bd998CreateNamedTempFile(
+                    VAR trans          : tgg00_TransContext;
+                    VAR fileNo         : tgg00_Surrogate(*ptocConst*);
+                    VAR tempFileId     : tgg00_FileId;
+                    isExtendedTempFile : boolean;
+                    tempFileType       : tgg00_TfnTemp);
+ 
+        PROCEDURE
+              bd998NewTempFileNo (
+                    VAR file_no : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace : tgg00_VtraceState;
+ 
+        PROCEDURE
+              g01optextmsg (msg_prio : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C40);
+ 
+        PROCEDURE
+              g01abort (msg_no : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C24;
+                    bad_value : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        FUNCTION
+              g04inv_tfn (tfn : tgg00_Tfn) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Regions_and_Longwaits : VGG08;
+ 
+        VAR
+              g08config : tsp00_RegionId;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedFill (
+                    size        : tsp00_Int4;
+                    m           : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4;
+                    len         : tsp00_Int4;
+                    fillchar    : char);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_edit_routines : VGG17;
+ 
+        PROCEDURE
+              g17hexto_line (c : char;
+                    VAR ln_len : integer;
+                    VAR ln     : tsp_c40);
+ 
+        PROCEDURE
+              g17nameto_line (n : tsp00_Name;
+                    VAR ln_len  : integer;
+                    VAR ln      : tsp_c40);
+ 
+        PROCEDURE
+              g17trimint4_to_line (int : tsp00_Int4;
+                    VAR ln_len : integer;
+                    VAR ln     : tsp_c40);
+ 
+        PROCEDURE
+              g17basis_err_to_line (b_err : tgg00_BasisError;
+                    VAR ln_len : integer;
+                    VAR ln     : tsp00_C40);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        FUNCTION
+              visresume (pid : tsp00_TaskId) : boolean;
+ 
+        PROCEDURE
+              vbegexcl (pid : tsp00_TaskId;
+                    region : tsp00_RegionId);
+ 
+        PROCEDURE
+              vendexcl (pid : tsp00_TaskId;
+                    region : tsp00_RegionId);
+ 
+        PROCEDURE
+              vfclose (hostfileno : tsp00_Int4;
+                    VAR error         : tsp00_VfReturn;
+                    VAR errtext       : tsp00_ErrText);
+ 
+        PROCEDURE
+              vfopen (VAR hostfile : tsp00_VFilename;
+                    VAR hostfileno : tsp00_Int4;
+                    VAR error      : tsp00_VfReturn;
+                    VAR errtext    : tsp00_ErrText);
+ 
+        PROCEDURE
+              vfwrite (hostfileno : tsp00_Int4;
+                    buf               : tsp_vf_bufaddr;
+                    VAR error         : tsp00_VfReturn;
+                    VAR errtext       : tsp00_ErrText);
+ 
+        PROCEDURE
+              vtracestack;
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-20 : vsp20;
+ 
+        PROCEDURE
+              s20int4_to_buf (val : tsp00_Int4;
+                    VAR dest : tsp_key;
+                    di       : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+&       ifdef TRACE
+        PROCEDURE
+              t01basis_error (layer : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01buf  (layer : tgg00_Debug;
+                    VAR errtxt : tsp00_C256;
+                    start_pos  : integer;
+                    stop_pos   : integer);
+ 
+        PROCEDURE
+              t01buf1 (debug : tgg00_Debug;
+                    VAR buf  : tgg00_Rec;
+                    startpos : integer;
+                    endpos   : integer);
+ 
+        PROCEDURE
+              t01int4 (layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+ 
+        PROCEDURE
+              t01mxerrmsg (nam : tsp00_Name;
+                    int_wrong  : tsp00_Int4;
+                    int_ok     : tsp00_Int4);
+ 
+        PROCEDURE
+              t01name (layer : tgg00_Debug;
+                    nam : tsp00_Name);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              b31add_to_leaf;
+ 
+              tgg00_Rec tbd06_ErrorTextRecord
+ 
+        PROCEDURE
+              bd31AppendToLeaf;
+ 
+              tgg00_Rec tbd06_ErrorTextRecord
+ 
+        PROCEDURE
+              b31repl_in_leaf;
+ 
+              tgg00_Rec tbd06_ErrorTextRecord
+ 
+        PROCEDURE
+              b31get_from_leaf;
+ 
+              tgg00_Rec tbd06_ErrorTextRecord
+ 
+        PROCEDURE
+              g17hexto_line;
+ 
+              tsp00_Line tsp_c40
+ 
+        PROCEDURE
+              g17nameto_line;
+ 
+              tsp00_Line tsp_c40
+ 
+        PROCEDURE
+              g17trimint4_to_line;
+ 
+              tsp00_Line tsp_c40
+ 
+        PROCEDURE
+              g17basis_err_to_line;
+ 
+              tsp00_Line tsp00_C40
+ 
+        PROCEDURE
+              s20int4_to_buf;
+ 
+              tsp00_MoveObj tsp_key
+&             ifdef TRACE
+ 
+        PROCEDURE
+              t01buf;
+ 
+              tsp00_Buf tsp00_C256
+ 
+        PROCEDURE
+              t01buf1;
+ 
+              tsp00_Buf tgg00_Rec
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenP
+.sp
+.cp 3
+Created : 1984-08-21
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 2000-10-12
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+.nf
+b06init_errtxt
+.sp;.fo
+Initializing error-text table; the table contains no entries.
+.sp 2;.nf
+b06put_errtxt (procid,errlen,errtxt)
+.sp;.fo
+For the process procid, an error text errtxt of the length errlen
+is entered in the table.  If a message related to this process
+already exists, it is overwritten by the new message.
+Exception : An existing message containing an high priority error
+( kb_location_error, kb_work_rolled_back ) is not overwritten.
+.sp 2;.nf
+b06get_errtxt (procid,errlen,errtxt)
+.sp;.fo
+Searches the table to determine whether an error message for the
+process procid is stored.  If yes, the message is sent to errtxt
+and the message length is entered in errlen; the message is
+automatically removed.  If no, 0 is entered in errlen.
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+TYPE
+ 
+      tbd06_ErrorTextRecord = RECORD
+            CASE integer OF
+                1  :
+                    (etrBuf_bd00 : PACKED ARRAY [1..ERRTEXTREC_MXBD00] OF char);
+                2 :
+                    (etrRecLen_bd00      : tsp00_Int2;
+                    etrKeyLen_bd00       : tsp00_Int2;
+                    etrVarcolOffset_bd00 : tsp00_Int2;
+                    etrVarcolCnt_bd00    : tsp00_Int2;
+                    etrTaskId_bd00       : tsp00_TaskId;
+                    etrNotZero_bd00      : boolean;
+                    etrType_bd00         : tgg04_ErrorText;
+                    etrBasisError_bd00   : tgg00_BasisError;
+                    etrText_bd00         : tsp00_C256);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+CONST
+      c_error_key_length   = 5;
+      c_err_info_fixed_len = 3;
+      (* *)
+      c_withBeforeRef = true;
+ 
+VAR
+      bd06ErrorTextFileId : tgg00_FileId;
+ 
+      b06errortext_cold : RECORD
+            err_text : tsp00_C256;
+            len      : tsp00_Int2;
+            err_type : tgg04_ErrorText;
+            filler   : boolean
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06check_mxbd (VAR ok : boolean);
+ 
+VAR
+      body_begin       : tsp00_Int4;
+      body_end         : tsp00_Int4;
+      fullcovering     : tsp00_Int4;
+      halfcovering     : tsp00_Int4;
+      node_head_len    : tsp00_Int4;
+      node_trail_len   : tsp00_Int4;
+      maxbottom        : tsp00_Int4;
+      maxpointerindex  : tsp00_Int4;
+      pnos_per_page    : tsp00_Int4;
+      record_mx        : tsp00_Int4;
+      std_fdirentry_mx : tsp00_Int4;
+      fdir_entry       : tbd00_FDirEntry;
+      node             : tbd_node;
+ 
+BEGIN
+&ifdef TRACE
+(*-----  TBD_NODE  -----*)
+IF  sizeof (node) <> sizeof (tsp00_Page)
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('sizeof(tbd_node)  ',
+          sizeof (node), sizeof (tsp00_Page))
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_BODY_BEG  -----*)
+WITH node DO
+    BEGIN
+    node_head_len := sizeof (nd_id)
+          +          sizeof (nd_pt)
+          +          sizeof (nd_pt2)
+          +          sizeof (nd_checktype)
+          +          sizeof (nd_pmode)
+          +          sizeof (nd_bottom)
+          +          sizeof (nd_record_cnt)
+          +          sizeof (nd_level)
+          +          sizeof (nd_file_state)
+          +          sizeof (nd_sorted)
+          +          sizeof (nd_root)
+          +          sizeof (nd_right)
+          +          sizeof (nd_left)
+          +          sizeof (nd_last)
+          +          sizeof (nd_filler2)
+          +          sizeof (nd_conv_version)
+          +          sizeof (ndStrVersion_bd00)
+          +          sizeof (nd_file_version)
+          +          sizeof (nd_history_info)
+          +          sizeof (ndPageVersion_bd00)
+          +          sizeof (ndInvUsageCnt_bd00)
+          +          sizeof (ndLeafCount_bd00)
+          +          sizeof (ndTreeLeaves_bd00)
+          +          sizeof (nd_trans_id)
+          +          sizeof (nd_filler4)
+          +          sizeof (ndInvRoot_bd00) (* PTS 1120695 UH 2003-10-27 *)
+          +          sizeof (nd_write_cnt)
+    END;
+(*ENDWITH*) 
+body_begin := node_head_len + 1;
+IF  BODY_BEG_BD00 <> body_begin
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('BODY_BEG_BD00     ', BODY_BEG_BD00, body_begin)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_BODY_END  -----*)
+node_trail_len := sizeof (node.nd_full_trailer);
+body_end       := sizeof (node) - node_trail_len;
+IF  BODY_END_BD00 <> body_end
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('BODY_END_BD00     ', BODY_END_BD00, body_end)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_MAXBOTTOM  -----*)
+maxbottom := body_end + 1;
+IF  MAX_BOTTOM_BD00 <> maxbottom
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('MAX_BOTTOM_BD00   ', MAX_BOTTOM_BD00, maxbottom)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_FULLCOVERING  -----*)
+fullcovering := sizeof (node) - node_head_len -
+      node_trail_len;
+IF  FULLCOVERING_BD00 <> fullcovering
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('FULLCOVERING_BD00 ', FULLCOVERING_BD00, fullcovering)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_HALFCOVERING  -----*)
+halfcovering := fullcovering DIV 2;
+IF  HALF_COVERING_BD00 <> halfcovering
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('HALF_COVERING_BD00', HALF_COVERING_BD00, halfcovering)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_MAXBSTRCOVERING  -----*)
+IF  MAX_BSTR_COVERING_BD00 <> fullcovering
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('MAX_BSTR_COVERING_', MAX_BSTR_COVERING_BD00,
+          fullcovering)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_MAXPOINTERINDEX  -----*)
+maxpointerindex := fullcovering DIV POINTERSIZE_BD00;
+IF  MAX_POINTERINDEX_BD00 <> maxpointerindex
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('MAX_POINTERINDEX_B', MAX_POINTERINDEX_BD00,
+          maxpointerindex)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_POINTERSIZE  -----*)
+IF  POINTERSIZE_BD00 <> sizeof (node.nd_pointer_list [1])
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('POINTERSIZE_BD00  ', POINTERSIZE_BD00,
+          sizeof (node.nd_pointer_list [1]))
+    END;
+(*ENDIF*) 
+;
+(*-----  MXGG_RECORD  -----*)
+record_mx := BUF_MXSP00;
+IF  MAX_RECLEN_GG00 > record_mx
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('MAX_RECLEN_GG00   ', MAX_RECLEN_GG00, record_mx)
+    END;
+(*ENDIF*) 
+;
+(*-----  CBD_PNOS_PER_PAGE  -----*)
+pnos_per_page := fullcovering DIV sizeof (tsp00_PageNo);
+IF  PNOS_PER_PAGE_BD00 <> pnos_per_page
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('PNOS_PER_PAGE_BD00', PNOS_PER_PAGE_BD00, pnos_per_page)
+    END;
+(*ENDIF*) 
+;
+(*-----  MXBD_NODE_HEADER  -----*)
+IF  NODE_HEADER_MXBD00 <> node_head_len
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('NODE_HEADER_MXBD00', NODE_HEADER_MXBD00,
+          node_head_len)
+    END;
+(*ENDIF*) 
+;
+(*-----  MXBD_FDIRENTRY  -----*)
+IF  FDIRENTRY_MXBD00 <> sizeof (tbd00_FDirEntry)
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('FDIRENTRY_MXBD00  ', FDIRENTRY_MXBD00,
+          sizeof (tbd00_FDirEntry))
+    END;
+(*ENDIF*) 
+;
+(*-----  MXBD_STD_FDIRENTRY  -----*)
+WITH fdir_entry, fdirFileInfo_bd00 DO
+    BEGIN
+    std_fdirentry_mx := sizeof (fdirEntryLength_bd00)
+          +             sizeof (fdirFileNameLength_bd00)
+          +             sizeof (fdirFill1_bd00)
+          +             sizeof (fdirFill2_bd00)
+          +             sizeof (fdirFileName_bd00)
+          +             sizeof (fi_type)
+          +             sizeof (fi_state)
+          +             sizeof (fi_fill1)
+          +             sizeof (fi_descr)
+          +             sizeof (fi_root)
+          +             sizeof (fi_vers)
+          +             sizeof (fi_col_cnt)
+    END;
+(*ENDWITH*) 
+IF  STD_FDIRENTRY_MXBD00 <> std_fdirentry_mx
+THEN
+    BEGIN
+    ok := false;
+    t01mxerrmsg ('STD_FDIRENTRY_MXBD', STD_FDIRENTRY_MXBD00, std_fdirentry_mx)
+    END;
+&endif
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06check_vresume_cnt (pid : tsp00_TaskId);
+ 
+BEGIN
+IF  visresume (pid)
+THEN
+    BEGIN
+    IF  g01vtrace.vtrAll_gg00
+    THEN
+        g01abort (csp3_bd_msg, csp3_n_btree, 'ResumeCounter <> 0 Task:', pid)
+    ELSE
+        g01optextmsg (sp3p_knldiag, sp3m_error, csp3_bd_msg,
+              csp3_n_btree, 'ResumeCount is not zero                 ');
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06create_errortext_file (VAR t : tgg00_TransContext);
+ 
+CONST
+      c_isExtendedTempFile = true;
+ 
+BEGIN
+&ifdef TRACE
+t01name (bi, '====> creat errtxt');
+&endif
+WITH bd06ErrorTextFileId DO
+    BEGIN
+    fileType_gg00 := fileType_gg00 + [ ftsConcurrent_egg00, ftsShared_egg00 ];
+    fileName_gg00 := cgg_zero_fn;
+    fileTfn_gg00  := tfnTemp_egg00;
+    bd998NewTempFileNo (fileTabId_gg00);
+    bd998CreateNamedTempFile (t, fileTabId_gg00, bd06ErrorTextFileId,
+          c_isExtendedTempFile, ttfnErrorText_egg00);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06get_errtxt (
+            VAR t         : tgg00_TransContext;
+            VAR errlen    : integer;
+            VAR etexttype : tgg04_ErrorText;
+            VAR b_error   : tgg00_BasisError;
+            VAR errtxt    : tsp00_C256);
+ 
+CONST
+      bWithSQLLock = true;
+ 
+VAR
+      searchResult    : tbd_searchresult;
+      dummyError      : tgg00_BasisError;
+      recIndex        : tsp00_Int4;
+      nptr            : tbd_node_ptrs;
+      neighbs         : tbd_neighbors;
+      errorEntry      : tbd06_ErrorTextRecord;
+      fileId          : tgg00_FileId;
+      current         : tbd_current_tree;
+      errorKey        : tgg00_Lkey;
+ 
+BEGIN
+&ifdef TRACE
+t01name        (bi, '====> bd get errtx');
+t01basis_error (bi, 'input error ', b_error);
+&endif
+t.trError_gg00 := e_ok;
+nptr.np_ptr    := NIL;
+nptr.np_cbptr  := NIL;
+errlen         := 0;
+fileId         := bd06ErrorTextFileId;
+WITH t DO
+    BEGIN
+    IF  fileId.fileRoot_gg00 = NIL_PAGE_NO_GG00
+    THEN
+        BEGIN
+        errlen    := b06errortext_cold.len;
+        etexttype := b06errortext_cold.err_type;
+        errtxt    := b06errortext_cold.err_text
+        END
+    ELSE
+        BEGIN
+        s20int4_to_buf (trTaskId_gg00, errorKey.keyVal_gg00, 1);
+        errorKey.keyVal_gg00 [c_error_key_length] := chr(ord(true));
+        errorKey.keyLen_gg00                      := c_error_key_length;
+        (* *)
+        bd30GetTree (t, bd06ErrorTextFileId, current, m_get,
+              NOT LOCK_TREE_EXCL_BD00, NOT SYNC_TREE_LOCK_BD00);
+        IF  trError_gg00 = e_ok
+        THEN
+            bd30SearchRecord (current, errorKey.keyVal_gg00, errorKey.keyLen_gg00,
+                  NOT LOCK_LEAF_EXCL_BD00, nptr, recIndex, neighbs, searchResult);
+        (*ENDIF*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            IF  searchResult <> thisfound
+            THEN
+                b13r_release_node (nptr, current, lru_normal)
+            ELSE
+                BEGIN
+                b31get_from_leaf (nptr, recIndex, NOT bWithSQLLock, errorEntry, current);
+                IF  trError_gg00 = e_ok
+                THEN
+                    WITH errorEntry DO
+                        BEGIN
+                        IF  (b_error = e_work_rolled_back  ) AND
+                            (
+                            (etrBasisError_bd00 = e_rollb_log_full) OR
+                            (etrBasisError_bd00 = e_release_caused_by_shutdown)
+                            )
+                        THEN
+                            b_error := etrBasisError_bd00;
+                        (*ENDIF*) 
+                        IF  b_error = etrBasisError_bd00
+                        THEN
+                            BEGIN
+                            errlen := etrRecLen_bd00 - cgg_rec_key_offset -
+                                  c_error_key_length - c_err_info_fixed_len;
+                            etexttype := etrType_bd00;
+                            SAPDB_PascalMove ('VBD06 ',   1,    
+                                  errlen, sizeof (etrText_bd00),
+                                  @etrText_bd00, 1, @errtxt, 1, errlen, trError_gg00)
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  (trError_gg00 <> e_ok) AND (nptr.np_ptr <> NIL)
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        bd30ReleaseTree (current);
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+t01buf         (bi, errtxt, 1, errlen);
+t01int4        (bi, 'errtexttype ', ord(etexttype));
+t01basis_error (bi, 'output error', b_error);
+t01basis_error (bi, 'get errtxt e', t.trError_gg00);
+&endif
+IF  t.trError_gg00 = e_ok
+THEN
+    b06put_errtxt (t, t.trTaskId_gg00, 0, errtext_char, e_ok, errtxt, dummyError);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06init_errtxt;
+ 
+BEGIN
+b06errortext_cold.len      := 0;
+b06errortext_cold.err_type := errtext_char;
+SAPDB_PascalForcedFill (sizeof (b06errortext_cold.err_text),
+      @b06errortext_cold.err_text, 1, mxsp_c256, ' ');
+b06errortext_cold.filler   := false;
+bd06ErrorTextFileId        := b01niltree_id;
+bd06ErrorTextFileId.fileType_gg00 := [ ftsTemp_egg00 ];
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06put_errtxt (
+            VAR t         : tgg00_TransContext;
+            taskId        : tsp00_TaskId;
+            errlen        : integer;
+            etexttype     : tgg04_ErrorText;
+            b_err_in      : tgg00_BasisError;
+            VAR errtxt    : tsp00_C256;
+            VAR b_err_out : tgg00_BasisError);
+ 
+VAR
+      storedError    : tgg00_BasisError;
+      searchResult    : tbd_searchresult;
+      recPos          : tsp00_Int4;
+      recIndex        : tsp00_Int4;
+      pRec            : tgg00_RecPtr;
+      pUniv           : tbd_univ_ptr;
+      nptr            : tbd_node_ptrs;
+      neighbs         : tbd_neighbors;
+      errorEntry      : tbd06_ErrorTextRecord;
+      storedEntry     : tbd06_ErrorTextRecord;
+      fileId          : tgg00_FileId;
+      current         : tbd_current_tree;
+      errorKey        : tgg00_Lkey;
+      dummyRef        : tgg91_PageRef;
+ 
+BEGIN
+&ifdef TRACE
+t01name        (bi, '====> bd put errtx');
+t01basis_error (bi, 'input error ', b_err_in);
+t01buf         (bi, errtxt, 1, errlen);
+&endif
+t.trError_gg00 := e_ok;
+storedError    := e_ok;
+nptr.np_ptr    := NIL;
+nptr.np_cbptr  := NIL;
+fileId         := bd06ErrorTextFileId;
+WITH  t  DO
+    BEGIN
+    IF  fileId.fileRoot_gg00 = NIL_PAGE_NO_GG00
+    THEN
+        BEGIN
+        b06errortext_cold.len      := errlen;
+        b06errortext_cold.err_type := etexttype;
+        b06errortext_cold.err_text := errtxt;
+        b_err_out                  := b_err_in
+        END
+    ELSE
+        BEGIN
+        s20int4_to_buf (trTaskId_gg00, errorKey.keyVal_gg00, 1);
+        errorKey.keyVal_gg00 [c_error_key_length] := chr(ord(true));
+        errorKey.keyLen_gg00                      := c_error_key_length;
+        (* *)
+        WITH errorEntry DO
+            BEGIN
+            etrRecLen_bd00       := cgg_rec_key_offset + c_error_key_length +
+                  errlen + c_err_info_fixed_len;
+            etrKeyLen_bd00       := c_error_key_length;
+            etrVarcolOffset_bd00 := 0;
+            etrVarcolCnt_bd00    := 0;
+            etrTaskId_bd00       := trTaskId_gg00;
+            etrNotZero_bd00      := true;
+            etrType_bd00         := etexttype;
+            SAPDB_PascalMove ('VBD06 ',   2,    
+                  errlen, sizeof (etrText_bd00),
+                  @errtxt, 1, @etrText_bd00, 1, errlen, trError_gg00);
+            IF   b_err_in = e_rollback_wanted
+            THEN
+                etrBasisError_bd00 := e_work_rolled_back
+            ELSE
+                etrBasisError_bd00 := b_err_in;
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+        (* *)
+        fileId.fileBdUse_gg00 := fileId.fileBdUse_gg00 + [bd_write_acc];
+        (* *)
+        bd30GetTree (t, fileId, current, m_insert,
+              LOCK_TREE_EXCL_BD00, NOT SYNC_TREE_LOCK_BD00);
+        IF  trError_gg00 = e_ok
+        THEN
+            bd30SearchRecord (current, errorKey.keyVal_gg00, errorKey.keyLen_gg00,
+                  LOCK_LEAF_EXCL_BD00, nptr, recIndex, neighbs, searchResult);
+        (*ENDIF*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            IF  searchResult <> thisfound
+            THEN
+                BEGIN
+                CASE searchResult OF
+                    nonefound :
+                        b31add_to_leaf (errorEntry, nptr,
+                              FIRST_REC_INDEX_BD00, neighbs.ln, current);
+                    nextfound :
+                        b31add_to_leaf (errorEntry, nptr, recIndex, neighbs.ln, current);
+                    lastfound :
+                        bd31AppendToLeaf (errorEntry, nptr, recIndex, neighbs.ln,
+                              current, NOT c_withBeforeRef, dummyRef);
+                    OTHERWISE:
+                        ;
+                    END;
+                (*ENDCASE*) 
+                END
+            ELSE
+                BEGIN
+                IF  (errlen = 0) AND (b_err_in = e_ok)
+                THEN
+                    (* ref. b06get_errtxt *)
+                    b31repl_in_leaf (errorEntry, nptr, recIndex, neighbs.ln, current)
+                ELSE
+                    BEGIN
+                    (* Do not overwrite high priority errors : *)
+                    storedEntry.etrBasisError_bd00 := e_ok;
+                    recPos := nptr.np_ptr^.nd_pointer_list [MAX_POINTERINDEX_BD00 - recIndex];
+                    pRec   := @nptr.np_ptr^.nd_body [recPos];
+                    SAPDB_PascalMove ('VBD06 ',   3,    
+                          sizeof (nptr.np_ptr^), sizeof (storedEntry),
+                          @nptr.np_ptr^, recPos, @storedEntry, 1,
+                          pRec^.recLen_gg00, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00   := e_data_page_corrupted;
+                        pUniv.nodeaddr := nptr.np_ptr;
+                        b06dump_bad_page (trTaskId_gg00, 'd',
+                              FILE_EXT_COR_BD00, nptr.np_ptr^.nd_id, pUniv, 1)
+                        END
+                    ELSE
+                        BEGIN
+                        storedError := storedEntry.etrBasisError_bd00;
+                        IF  ((storedError <> e_work_rolled_back) AND
+                            ( storedError <> e_rollb_log_full  ))
+                            OR
+                            (NOT (tsErrTextExist_egg00 IN trState_gg00))
+                        THEN
+                            BEGIN
+                            storedError := e_ok;
+                            b31repl_in_leaf (errorEntry, nptr, recIndex, neighbs.ln, current)
+                            END
+                        ELSE
+                            b13r_release_node (nptr, current, lru_normal)
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        bd30ReleaseTree (current);
+        (* *)
+        fileId.fileBdUse_gg00 := fileId.fileBdUse_gg00 - [bd_write_acc];
+        (* *)
+        IF  storedError = e_ok
+        THEN
+            b_err_out := errorEntry.etrBasisError_bd00
+        ELSE
+            b_err_out := storedError;
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+t01basis_error (bi, 'put errtxt e', t.trError_gg00);
+&endif
+IF  t.trError_gg00 = e_ok
+THEN
+    t.trState_gg00 := t.trState_gg00 + [tsErrTextExist_egg00]
+(*ENDIF*) 
+END;
+ 
+&ifdef TRACE
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06record_check (
+            VAR rec    : tgg00_Rec;
+            VAR fileId : tgg00_FileId;
+            VAR b_err  : tgg00_BasisError);
+ 
+VAR
+      check_00      : boolean;
+      check_longvar : boolean;
+      ivarcol_cnt   : integer;
+      ivarcol_pos   : integer;
+      ivarcol_len   : integer;
+      i2            : tsp_int_map_c2;
+ 
+BEGIN
+check_00 := true;
+check_longvar := false;
+WITH fileId DO
+    IF  ftsPerm_egg00 in fileType_gg00
+    THEN
+        BEGIN
+        IF  NOT b06check_rec
+        THEN
+            check_00 := false
+        ELSE
+            IF  kb560IsCatalogTable (fileTabId_gg00)
+            THEN
+                check_00 := false
+            ELSE
+                (* PTS 1104430 E.Z. *)
+                IF  fileTfn_gg00 = tfnShortScol_egg00
+                THEN
+                    check_00 := false
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  ftsTemp_egg00 in fileType_gg00
+        THEN
+            check_00 := false;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+WITH rec DO
+    BEGIN
+    IF  b_err = e_ok
+    THEN
+        IF  recLen_gg00 < cgg_rec_key_offset + recKeyLen_gg00
+        THEN
+            b_err := e_illegal_entrypos
+        ELSE
+            IF  recVarcolCnt_gg00 = 0
+            THEN
+                BEGIN
+                IF  recVarcolOffset_gg00 <> 0
+                THEN
+                    BEGIN
+                    IF  recVarcolOffset_gg00 < 0
+                    THEN
+                        b_err := e_illegal_entrypos
+                    ELSE
+                        IF  cgg_rec_key_offset + recKeyLen_gg00 + recVarcolOffset_gg00 <>
+                            recLen_gg00
+                        THEN
+                            BEGIN
+                            ivarcol_pos := cgg_rec_key_offset +
+                                  recKeyLen_gg00 + recVarcolOffset_gg00 + 1;
+                            check_longvar := true
+                            END
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  check_00
+                    THEN
+                        IF  cgg_rec_key_offset + recKeyLen_gg00 <> recLen_gg00
+                        THEN
+                            BEGIN
+                            ivarcol_pos := cgg_rec_key_offset + recKeyLen_gg00 + 1;
+                            check_longvar := true
+                            END
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END
+            ELSE
+                IF  recVarcolCnt_gg00 < 0
+                THEN
+                    b_err := e_illegal_entrypos
+                ELSE
+                    IF  recVarcolOffset_gg00 < 0
+                    THEN
+                        b_err := e_illegal_entrypos
+                    ELSE
+                        IF  cgg_rec_key_offset + recKeyLen_gg00 + recVarcolOffset_gg00 >=
+                            recLen_gg00
+                        THEN
+                            b_err := e_illegal_entrypos
+                        ELSE
+                            BEGIN
+                            ivarcol_pos := cgg_rec_key_offset +
+                                  recKeyLen_gg00 + recVarcolOffset_gg00 + 1;
+                            FOR ivarcol_cnt := 1 TO recVarcolCnt_gg00 DO
+                                BEGIN
+                                ivarcol_len := ord(recBuf_gg00[ ivarcol_pos ]);
+                                IF  ivarcol_len <= 0
+                                THEN
+                                    b_err := e_illegal_entrypos
+                                ELSE
+                                    ivarcol_pos := ivarcol_pos + 1 + ivarcol_len;
+                                (*ENDIF*) 
+                                END;
+                            (*ENDFOR*) 
+                            IF  ivarcol_pos > recLen_gg00 + 1
+                            THEN
+                                b_err := e_illegal_entrypos
+                            ELSE
+                                IF  ivarcol_pos <> recLen_gg00 + 1
+                                THEN
+                                    check_longvar := true;
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                            IF  (ivarcol_pos <> recLen_gg00 + 1) AND NOT check_longvar
+                            THEN
+                                b_err := e_illegal_entrypos
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  check_longvar
+    THEN
+        BEGIN
+        REPEAT
+            (* jetzt sind höchstens noch st_varlongchar_cols da *)
+            i2.map_c2[1] := recBuf_gg00[ ivarcol_pos ];
+            i2.map_c2[2] := recBuf_gg00[ ivarcol_pos + 1 ];
+            ivarcol_len := i2.map_int;
+            IF  ivarcol_len <= 0
+            THEN
+                b_err := e_illegal_entrypos
+            ELSE
+                ivarcol_pos := ivarcol_pos + 2 + ivarcol_len;
+            (*ENDIF*) 
+        UNTIL
+            (ivarcol_pos > recLen_gg00)
+            OR
+            (b_err = e_illegal_entrypos);
+        (*ENDREPEAT*) 
+        IF  ivarcol_pos <> recLen_gg00 + 1
+        THEN
+            b_err := e_illegal_entrypos
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  b_err = e_illegal_entrypos
+    THEN
+        BEGIN
+        t01buf1 (td_always, rec, 1, recLen_gg00);
+        g01abort (e_illegal_entrypos,
+              'REC_OFFS', 'Record-Layout illegal   ',  recVarcolOffset_gg00)
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+&endif
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06write_filename_and_root (VAR file_id : tgg00_FileId);
+ 
+VAR
+      i          : integer;
+      ln_len     : integer;
+      msg_len    : integer;
+      msg_text12 : tsp00_C12;
+      msg_text40 : tsp00_C40;
+ 
+BEGIN
+(* *)
+(* --- Filename ---*)
+(* *)
+ln_len     := 0;
+msg_text40 := bsp_c40;
+FOR i := 1 TO sizeof (file_id.fileName_gg00) DO
+    g17hexto_line (file_id.fileName_gg00 [i], ln_len, msg_text40);
+(*ENDFOR*) 
+g01optextmsg (sp3p_knldiag, sp3m_error, csp3_bd_msg, csp3_n_btree,
+      msg_text40);
+(* *)
+(* --- Root --- *)
+(* *)
+ln_len       := 1;
+msg_text40   := bsp_c40;
+CASE file_id.fileTfn_gg00 OF
+    tfnColumn_egg00,tfnShortScol_egg00:
+        BEGIN
+        msg_text12 := 'Long Root   ';
+        msg_len    := 10;
+        END;
+    tfnMulti_egg00,tfnInvSubtree_egg00:
+        BEGIN
+        msg_text12 := 'Index Root  ';
+        msg_len    := 11;
+        END;
+    tfnTable_egg00:
+        BEGIN
+        msg_text12 := 'Table Root  ';
+        msg_len    := 11;
+        END;
+    tfnUndoLog_egg00:
+        BEGIN
+        msg_text12 := 'UNDO ROOT   ';
+        msg_len    := 10;
+        END;
+    tfnRedoLog_egg00:
+        BEGIN
+        msg_text12 := 'REDO ROOT   ';
+        msg_len    := 10;
+        END;
+    tfnOpenTrans_egg00:
+        BEGIN
+        msg_text12 := 'OPENTRS ROOT';
+        msg_len    := 12;
+        END;
+    tfnHistory_egg00:
+        BEGIN
+        msg_text12 := 'HIST ROOT   ';
+        msg_len    := 10;
+        END;
+    tfnHistoryDirectory_egg00:
+        BEGIN
+        msg_text12 := 'HISTDIR ROOT';
+        msg_len    := 12;
+        END;
+    OTHERWISE
+        BEGIN
+        msg_text12 := 'Root        ';
+        msg_len    := 5;
+        END
+    END;
+(*ENDCASE*) 
+SAPDB_PascalForcedMove (
+      sizeof (msg_text12), sizeof (msg_text40),
+      @msg_text12, 1, @msg_text40, ln_len, msg_len);
+ln_len   := ln_len + msg_len;
+g17trimint4_to_line (file_id.fileRoot_gg00, ln_len, msg_text40);
+g01optextmsg (sp3p_knldiag, sp3m_error, csp3_bd_msg, csp3_n_btree, msg_text40)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06file_opmsg (
+            msg_no     : tsp00_Int4;
+            VAR fileId : tgg00_FileId);
+ 
+VAR
+      msg_label : tsp00_C8;
+      msg_prio  : tsp3_priority;
+      msg_type  : tsp3_msg_type;
+      len       : integer;
+      n         : tsp00_Name;
+      msg       : tsp00_C40;
+ 
+BEGIN
+msg_prio := sp3p_console;
+msg      := bsp_c40;
+len      := 0;
+CASE msg_no OF
+    csp3_bd30_reset_bad_file:
+        BEGIN
+        msg_type := sp3m_info;
+        n        := 'Reset Bad File:   ';
+        END;
+    csp3_bad_file, csp3_bd30_1_bad_file, csp3_bd30_2_bad_file:
+        BEGIN
+        msg_type := sp3m_error;
+        n        := 'Bad File:         ';
+        END;
+    csp3_bad_index:
+        BEGIN
+        msg_type := sp3m_error;
+        n        := 'Bad Index         ';
+        END;
+    csp3_bad_long:
+        BEGIN
+        msg_type := sp3m_error;
+        n        := 'Bad Long:         ';
+        END;
+    csp3_check_file:
+        BEGIN
+        msg_prio := sp3p_knldiag;
+        msg_type := sp3m_info;
+        CASE fileId.fileTfn_gg00 OF
+            tfnSys_egg00:
+                BEGIN
+                IF  kb560IsSys1CatalogTable (fileId.fileTabId_gg00)
+                THEN
+                    n := 'Check Catalog1:   '
+                ELSE
+                    BEGIN
+                    IF  kb560IsSys2CatalogTable (fileId.fileTabId_gg00)
+                    THEN
+                        n := 'Check Catalog2:   '
+                    ELSE
+                        n := 'Check File:       '
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END;
+            tfnColumn_egg00, tfnShortScol_egg00:
+                n := 'Check Long:       ';
+            tfnOmsInv_egg00:
+                n := 'Check OmsIndex:   ';
+            tfnMulti_egg00:
+                n := 'Check Index:      ';
+            tfnTable_egg00:
+                n := 'Check Table:      ';
+            tfnUndoLog_egg00:
+                n := 'Check Undo:       ';
+            tfnObj_egg00, tfnContObj_egg00 :
+                n := 'Check Oms :       ';
+            OTHERWISE
+                n := 'Check File:       ';
+            END;
+        (*ENDCASE*) 
+        END;
+    csp3_index_not_restored:
+        BEGIN
+        msg_type := sp3m_warning;
+        n        := 'Index not restored';
+        END;
+    OTHERWISE
+        BEGIN
+        msg_type := sp3m_error;
+        n        := bsp_name;
+        END;
+    END;
+(*ENDCASE*) 
+g17nameto_line (n, len, msg);
+len := len + 1;
+g17trimint4_to_line (fileId.fileRoot_gg00, len, msg);
+len := len + 1;
+g17nameto_line ('(Root)            ', len, msg);
+CASE fileId.fileTfn_gg00 OF
+    tfnObj_egg00, tfnContObj_egg00, tfnOmsInv_egg00 :
+        msg_label := csp3_n_obj;
+    tfnUndoLog_egg00, tfnRedoLog_egg00, tfnOpenTrans_egg00 :
+        msg_label := csp3_n_log;
+    tfnHistory_egg00, tfnHistoryDirectory_egg00 :
+        msg_label := csp3_n_history;
+    OTHERWISE :
+        BEGIN
+        IF  g04inv_tfn( fileId.fileTfn_gg00 )
+        THEN
+            msg_label := csp3_n_index
+        ELSE
+            msg_label := csp3_n_btree;
+        (*ENDIF*) 
+        END
+    END;
+(*ENDCASE*) 
+g01optextmsg (msg_prio, msg_type, msg_no, msg_label, msg)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b06dump_bad_page (pid : tsp00_TaskId;
+            page_type_flag : char;
+            file_ext       : tsp00_C4;
+            bad_pno        : tsp00_Int4;
+            buf_ptr        : tbd_univ_ptr;
+            curr_buf_cnt   : integer);
+ 
+VAR
+      fileformat : tsp00_VfFormat;
+      host_error : tsp00_VfReturn;
+      rec_len    : tsp00_Int4;
+      fn_len     : integer;
+      i          : integer;
+      hostfile   : tgg00_VfFileref;
+      n          : tsp00_Name;
+      aux_c40    : tsp00_C40;
+      dump_fn    : tsp00_VFilename;
+      errtext    : tsp00_ErrText;
+ 
+BEGIN
+fileformat       := vf_record;
+rec_len          := sizeof (buf_ptr.nodeaddr^);
+hostfile.buf_cnt := 0;
+aux_c40          := bsp_c40;
+dump_fn          := b01blankfilename;
+n                := bsp_name;
+fn_len           := 1;
+i                := 1;
+aux_c40 [fn_len] := page_type_flag;
+g17trimint4_to_line (bad_pno, fn_len, aux_c40);
+SAPDB_PascalForcedMove (sizeof (file_ext), sizeof (n),
+      @file_ext, 1, @n, 1, sizeof (file_ext));
+g17nameto_line (n, fn_len, aux_c40);
+SAPDB_PascalForcedMove (sizeof (aux_c40), sizeof (dump_fn),
+      @aux_c40, 1, @dump_fn, 1, fn_len);
+vbegexcl (pid, g08config);
+vfopen (dump_fn, hostfile.no, host_error, errtext);
+WHILE  (host_error = vf_ok) AND (i <= curr_buf_cnt) DO
+    BEGIN
+    vfwrite (hostfile.no, @buf_ptr.plistaddr^ [i], host_error, errtext);
+    i := i + 1;
+    END;
+(*ENDWHILE*) 
+IF  (host_error = vf_ok) OR (host_error = vf_eof)
+THEN
+    vfclose (hostfile.no, host_error, errtext);
+(*ENDIF*) 
+vendexcl (pid, g08config);
+(* CRS 1104573 AK 29/02/2000 *)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd06CorruptedTreeHandling (
+            VAR fileId : tgg00_FileId;
+            msgNo      : tsp00_Int4;
+            trError    : tgg00_BasisError);
+ 
+VAR
+      msgLen  : tsp00_Int4;
+      msgLine : tsp00_C40;
+ 
+BEGIN
+b06write_filename_and_root( fileId );
+msgLine := bsp_c40;
+msgLen  := 0;
+g17nameto_line ('Base error:       ', msgLen, msgLine);
+msgLen  := msgLen + 1;
+g17basis_err_to_line (trError, msgLen, msgLine);
+g01optextmsg (sp3p_knldiag, sp3m_error, msgNo, csp3_n_btree, msgLine);
+g01abort (msgNo, csp3_n_btree, 'Corrupted b*tree index  ', 0);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd06IllegalRootAccess (
+            VAR trans       : tgg00_TransContext;
+            VAR fileId      : tgg00_FileId;
+            bWriteBacktrace : boolean);
+ 
+VAR
+      auxError : tgg00_BasisError;
+      fileInfo : tbd_fileinfo;
+ 
+BEGIN
+WITH trans DO
+    BEGIN
+    IF  (trError_gg00 = e_no_converter_entry   ) OR
+        (trError_gg00 = e_invalid_root         ) OR
+        (trError_gg00 = e_page_in_wrong_tree   ) OR
+        (trError_gg00 = e_inconsistent_nodetype)
+    THEN
+        BEGIN
+        IF  fileId.fileName_gg00 <> cgg_zero_fn
+        THEN
+            BEGIN
+            auxError     := trError_gg00;
+            trError_gg00 := e_ok;
+            b17state_fdir (fileId.fileName_gg00, fileInfo,
+                  ftsShared_egg00 IN fileId.fileType_gg00, trans);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  (fileId.fileRoot_gg00 <> fileInfo.fi_root) AND
+                    (
+                    (fileId.fileTfn_gg00 = tfnTable_egg00    ) OR
+                    (fileId.fileTfn_gg00 = tfnMulti_egg00    ) OR
+                    (fileId.fileTfn_gg00 = tfnTemp_egg00     )
+                    )
+                THEN
+                    trError_gg00 := e_old_fileversion
+                ELSE
+                    BEGIN
+                    IF  bWriteBacktrace
+                    THEN
+                        BEGIN
+                        b06write_filename_and_root (fileId);
+                        vtracestack;
+                        END;
+                    (*ENDIF*) 
+                    trError_gg00 := auxError
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

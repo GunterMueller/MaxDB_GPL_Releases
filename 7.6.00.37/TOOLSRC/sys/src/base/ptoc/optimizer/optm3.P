@@ -1,0 +1,213 @@
+(* @(#)optimizer/optm3.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm3.p *)
+
+   (* this module contains the procedures that construct the node *)
+   (* entry descriptors.                                          *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../optimizer/more_csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/_shifts.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+
+
+(* export *)
+
+#include "../optimizer/optm3.h"
+
+
+(* privates *)
+(* initial *)
+(* routines *)
+
+   procedure EntryTraverse;
+      (* this procedure traverses the hdg tree. if a node is not an ex- *)
+      (* cluded node, then entry descriptors are constructed for it.    *)
+
+   begin
+      while NodeIndex <> -1 do begin
+          (* record cost of optimization *)
+          NoNodesTraversed := NoNodesTraversed + 1;
+          if NodeIndex <> ExcludedNode then begin
+             (* build the entry descriptors *)
+             BuildEntryDescriptors(NodeIndex,PrevNode);
+	     if MajorOperator <> node then begin (* 07.03.88 *)
+                PrevNode := NodeIndex;
+	     end;
+          end  (* if *);
+          NodeIndex := NextLink;
+      end  (* while *);
+   end  (*EntryTraverse*);
+
+
+   procedure BuildEntryDescriptors;
+      (* this  procedure constructs entry descriptors for a particular node  *)
+      (* by performing union on the entry descriptors and exit descriptors   *)
+      (* of its predecessor node. this is done before the node is traversed. *)
+      (* if the node contains other nodes it calls the procedure "Entry     *)
+      (* traverse"  to go down the tree.                                     *)
+   label
+      1;
+   var
+      DescPtr,PrevDescPtr : DescriptorRange;
+
+
+   procedure ConstructEntryDsc;
+
+      var
+         CreatedEmptyDesc: boolean;
+
+      begin
+         if MajorOperator <> node then begin
+            (* construct entry descriptor by forming union of entry and exit *)
+            (* descriptors of previous node. node nodes do not  *)
+            (* have node descriptors.                                        *)
+
+            DescPtr := ptr (DscField);
+            if PrevNode <> -1  then begin
+               PrevDescPtr := ptr (PrevDescField);
+               if PrevDescPtr <> nil then begin
+                  CreatedEmptyDesc := false;
+               end
+               else begin
+                  PrevDescPtr := AvailableDescriptor;
+                  ClearDescriptor (PrevDescPtr^.ExitDescriptor);
+		  ClearDescriptor (PrevDescPtr^.EntryDescriptor);
+                  CreatedEmptyDesc := true;
+               end;
+            end
+            else begin
+               PrevDescPtr := AvailableDescriptor;
+               ClearDescriptor (PrevDescPtr^.ExitDescriptor);
+	       ClearDescriptor (PrevDescPtr^.EntryDescriptor);
+               CreatedEmptyDesc := true;
+            end  (* if *);
+
+            UnionDescriptors (
+               DescPtr^.EntryDescriptor,
+               PrevDescPtr^.EntryDescriptor,
+               PrevDescPtr^.ExitDescriptor);
+
+            if control ['V'] then begin
+               PrintDescriptor (NodeIndex, 'entry', DescPtr^.EntryDescriptor);
+            end;
+
+            if CreatedEmptyDesc then begin
+               FreeDescriptor (PrevDescPtr);
+            end;
+
+         end  (* if *);
+
+      end (*ConstructEntryDsc*);
+
+
+   begin
+      if (NodeIndex = ExcludedNode) or
+	 (NodeIndex = -1)              then begin
+       goto 1;
+      end;
+
+      ConstructEntryDsc;
+      case MajorOperator of
+         node: begin
+            (* no descriptors for node nodes *)
+         end;
+         spec: begin
+            (* don't' have to traverse *)
+         end;
+         ShortStmnt: begin
+            EntryTraverse(Ss1operand,PrevNode);
+         end;
+         UnaryExp: begin
+            EntryTraverse(Unary1operand,PrevNode);
+         end;
+         BinaryExp: begin
+            EntryTraverse(Bin1operand,PrevNode);
+            if (MajorOperatorOf(Bin1operand) <> node)  then begin
+               EntryTraverse(Bin2operand,Bin1operand);
+	    end
+	    else begin
+               EntryTraverse(Bin2operand,PrevNode);	
+            end;
+	 end;
+         ExpList: begin
+            EntryTraverse (ListHeadField,PrevNode);
+         end;
+         LongStmnt: begin
+            EntryTraverse(Ls2operand,PrevNode);
+            EntryTraverse(Ls1operand,PrevNode);
+         end;
+         ifthenelse: begin
+            EntryTraverse(IfCondField,PrevNode);
+            if not OptimizedIf then begin
+               EntryTraverse(IfTrueField,IfCondField);
+               if IfFalseField <> -1  then begin
+                  EntryTraverse(IfFalseField,IfCondField);
+               end  (* if *);
+            end  (* if *);
+         end;
+         loop: begin
+            UnionDescriptors (
+               DescPtr^.EntryDescriptor,
+               DescPtr^.EntryDescriptor,
+               DescPtr^.ExitDescriptor);
+            if not OptimizedLoop then begin
+               EntryTraverse (WhileTestField, NodeIndex);
+               EntryTraverse (WhileBodyField, NodeIndex);
+            end  (* if *);
+         end;
+         Switch: begin
+            EntryTraverse(SwitchTest,PrevNode);
+            EntryTraverse(SwitchBody,SwitchTest);
+         end;
+         Case: begin
+         end;
+         RepeatUntil: begin
+            UnionDescriptors (
+               DescPtr^.EntryDescriptor,
+               DescPtr^.EntryDescriptor,
+               DescPtr^.ExitDescriptor);
+            if not OptimizedLoop then begin
+               EntryTraverse(RepeatBody,NodeIndex);
+               EntryTraverse(RepeatTest,NodeIndex);
+            end  (* if *);
+         end;
+         Proc: begin
+            EntryTraverse(ProcBody,PrevNode);
+         end;
+         OpenProc: begin
+            EntryTraverse(ProcBody,PrevNode);
+         end;
+      end  (* case *);
+      1:
+   end  (*BuildEntryDescriptors*);

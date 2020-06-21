@@ -1,0 +1,151 @@
+#!/usr/bin/perl
+# @(#) sutall   3.1.3   1994-02-11   kern   admin
+#
+# Es wird ein vollstaendiger Datenbank-Test durchgefuehrt,
+# d.h. fuer jedes von der 8890 uebernommene Protokoll
+# ("nnn.pibm") wird der entsprechende Teststrom ("nnn.vdnts")
+# ausgefuehrt und die Ergebnisse verglichen.
+#
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Carp;
+use File::Copy;
+use ToolLib;
+use Getopt::Std;
+do "$TOOL/bin/sutvars$TOOLEXT";
+
+$USAGE="usage: sutall [-n <node> -R <remote root>] [-pars] [-withoutstack] [-s <startletter>] version program [dbname]\n";
+
+my (%sutall_opts);
+if ( !getopts('s:n:R:p:w:', \%sutall_opts) ) { print $USAGE; exit }
+my $StartLetter = defined $sutall_opts{s} ?  uc($sutall_opts{s}) : "A";
+
+if ( (@ARGV < 2) or (@ARGV > 3) ) {
+    croak "$USAGE";
+}
+
+$VERSION = shift;
+$PROGRAM = shift;
+$PROGRAM .= $PROG_EXT if $PROGRAM !~ /^.+$PROG_EXT$/;
+
+if ( @ARGV ) { $DBNAME = shift } else { die "$USAGE\n" unless $DBNAME = $SERVERDB }
+
+if ( $VERSION !~ /^(fast|quick|slow)/i) {
+    print "$USAGE";
+    die "version: fast|quick|slow\n";
+}
+
+$PROG = "$DBROOT/pgm/$PROGRAM";
+if ( ! -x $PROG ) {
+    print "$USAGE";
+    die "program $PROG not executable\n";
+}
+
+chdir($SUT) || die "Can't change directory: $!\n";
+
+# ermittle $ProtDir in Abhängigkeit von $VERSION, $DBUNICODE,
+# $DEFCODE und $LEVEL
+
+$Level = ToolLib::GetConnectLevel();
+
+$ProtDir = lc $VERSION;
+$ProtDir = "lvl_$Level" if ( $Level != 1 );
+if ( $DBUNICODE )
+{
+  if ($RELVER lt "R77") 
+  { $ProtDir = "dbuni"}
+  else
+  { $ProtDir = "fast"} ;
+  $ProtDir = "uni"    if ( $DEFCODE   =~ /^unicode$/i );
+  $ProtDir = "xci"    if ( $DBUNICODE =~ /^xci$/i );
+  $ProtDir = "alluni" if ( ( $DBUNICODE =~ /^xci$/i ) && ( $DEFCODE   =~ /^unicode$/i ) );
+}
+$ProtDir = "$SUT/$ProtDir";
+
+unlink (<$ProtDir/*.core>);
+unlink (<$ProtDir/*.dump>);
+unlink (<$ProtDir/*.rtedump>);
+unlink (<$ProtDir/*.prot>);
+unlink (<$ProtDir/*.pdiff>);
+unlink (<$ProtDir/*.vprot>);
+unlink (<$ProtDir/*.syserr>);
+
+open(FILE_OUT, ">>$AllSut");
+if ( $ENV{DBUNICODE} )
+{
+  if ($RELVER lt "R77") 
+  { $lprotdir = "dbuni"}
+  else
+  { $lprotdir = "fast"} ;
+  $lprotdir = "uni"    if ($ENV{DEFCODE}   =~ /^unicode$/i);
+  $lprotdir = "xci"    if  ($ENV{DBUNICODE} =~ /^xci$/i );
+  $lprotdir = "alluni" if (($ENV{DBUNICODE} =~ /^xci$/i ) && ($ENV{DEFCODE} =~ /^unicode$/i));
+}
+print FILE_OUT "--------------------------------------------------------\n";
+print FILE_OUT ToolLib::Timestamp(1), "\tsutall $VERSION $PROGRAM $DBNAME $lprotdir\n";
+print FILE_OUT "--------------------------------------------------------\n";
+close(FILE_OUT);
+
+print "\n==============================\n";
+print "Liste der Teststroeme erzeugen\n";
+print "==============================\n";
+
+
+open(ISUT, "<$SUT/ISUT") || die "can't open $SUT/ISUT\n";
+my @AllFiles = <ISUT>;
+close (ISUT);
+@AllFiles = sort map  { ($_) = /^D\d+\s+([^\s]*)/i; $_ .= ".vdnts" } @AllFiles;
+my @NormalFiles = grep  /^[$StartLetter-VZ].*\.vdnts/i && !/^VZLCTEST\.vdnts/i && !/^H01SAVE\.vdnts/i, @AllFiles;
+my @YFiles = grep  /^Y.*\.vdnts/i && !/^YINIT\.vdnts/i, @AllFiles;
+
+my   @alltest;
+push @alltest, "XINITDB.vdnts"; 
+push @alltest, @NormalFiles;
+push @alltest, "YINIT.vdnts";
+push @alltest, @YFiles;
+push @alltest, "H01SAVE.vdnts";
+
+
+# X...   = Init Config fuer die SUTs
+# Y...   = spezielle Behandlung, Strategie-/Index-Tests auf grosser DB
+# ENTRY* = macht kaum Sinn fuer Verteilungstests.
+
+print "\nJeden Teststrom aufrufen ($VERSION $PROGRAM)\n";
+print "==============================================\n";
+
+open(FILE_OUT, ">$AllTest");
+print FILE_OUT join "\n", @alltest;
+close(FILE_OUT);
+
+@ARGV = ( $VERSION, $PROGRAM, $DBNAME, @alltest);
+@ARGV = ("-pars ", @ARGV) if ( $sutall_opts{p} );
+@ARGV = ("-withoutstack ", @ARGV) if ( $sutall_opts{w} );
+@ARGV = ("-R $sutall_opts{R}", @ARGV) if ( $sutall_opts{R} );
+@ARGV = ("-n $sutall_opts{n}", @ARGV) if ( $sutall_opts{n} );
+do "$TOOL/bin/sutsingle$TOOLEXT"; 
+if ( $@ ) { die "Error while executing sutsingle:\n", "$@"; exit }
+
+print "\n=======================================\n";
+print "Alle Tests fertig ($VERSION $PROGRAM)\n";
+print "=======================================\n\n";
+

@@ -1,0 +1,281 @@
+#!/usr/bin/perl
+#
+# @(#) nacht   15-01-2001   S. Paeck
+#
+# Das Shellscript aktiviert den Nachtlauf für die IA64 Cross-Compilation. Dies umfasst
+# das 64 Bit-Uebersetzung aller Sourcen, die am heutigen Tage auf den Kernserver 
+# hochgeschrieben wurden.
+#
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+BEGIN
+{
+	$PERL5LIB="$ENV{TOOL}/lib/Perl";
+	push @INC, $PERL5LIB;
+	push @INC, "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+#	use lib "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+}
+
+use Env;
+use igme;
+
+$Mode=shift @ARGV;
+$Release=shift @ARGV;
+
+$|=1;
+
+print "=====================================================================\n";
+print " Cross Compilation 64 Bit of release $Release", scalar localtime(),"\n";
+print "=====================================================================\n";
+
+do "D:\\SAPDevelop\\Remuser\\remuserEnv_ia64.pl" || die "Can't execute local Env 'remuserEnv_ia64.pl'\n";
+
+#-----------------------------    Prepare OWN ---------------------------------
+$OWN=$Releases."\\".$Release;
+$ENV{OWN}=$OWN;
+
+
+#------------------------------    Update IgmeVersion dependend on release ----
+my  $IgmeAPI = igme::api::new();
+if ( ! defined $IgmeAPI ) 
+{
+    print "Parsing profile information failed... Giving up\n";
+    exit;
+}
+
+
+$IgmeVersion="";
+$IgmeRelease = $Release;
+$IgmeRelease =~s/(.)(.).*/$1\.$2/;   #e.g.  74 -> 7.4, 741 -> 7.4
+
+if (length ($Release) <= 2)
+{
+    # Create the most actual develop iprofile for this release
+    foreach ( $IgmeAPI->list() ) 
+    {
+        $currentEntry = substr($_, 0, 14);
+        if ( $currentEntry =~ /develop/ ) 
+        {
+            if ( $currentEntry =~ /^$IgmeRelease/ ) 
+            {
+                if ( $currentEntry gt $IgmeVersion ) 
+                {
+                    $IgmeVersion = $currentEntry;
+                }
+            }
+        }
+    }
+	
+}
+else
+{
+    $IgmeBuild = $Release;
+    $IgmeBuild =~s/[0-9]{2}(.*)/$1/;        #e.g.  74 ->    , 741 -> 1
+
+    if ( $IgmeBuild lt 10 )
+    {
+        $IgmeVersion=$IgmeRelease.".0".$IgmeBuild.".develop";
+    }
+    else
+    {
+        $IgmeVersion=$IgmeRelease.".".$IgmeBuild.".develop";
+    }
+}
+
+#------------------------------ Using Perforce? and setting the Development Enviroment ----
+
+$UsePerforce=undef;
+foreach my $line ( $IgmeAPI->cat($IgmeVersion) ) 
+{
+    if ( $line =~ /^depot:/ ) 
+    {
+        $UsePerforce="depot:";
+        last;
+    }
+}
+
+
+
+if ( "$UsePerforce" eq "depot:" ) 
+{
+    @GMEARG = ( "-p", "$Releases/$Release"."SRC//", "-x" );
+    print "\n... Sync Perforce depot : \n";
+    system ("p4 -c p31821 -u d032964 sync $Releases/$Release"."SRC/...");
+} 
+else 
+{
+    @GMEARG = ();
+}
+
+
+push @GMEARG, $IgmeVersion, "-noobjcopy", "-o", $^O;
+%GME = $IgmeAPI->igme (@GMEARG);
+while (($key, $value) = each %GME) 
+{
+  if ($key eq "VMAKE_PATH") 
+  {
+    $OWN = $ENV{"OWN"};
+    $value =~ s/\$OWN/$OWN/;
+
+  }
+  $ENV{$key} = $value; 
+}
+
+require $Skeleton;
+#----------------------------------------------------------------------------------------
+
+if ($Release == "741")
+{
+    print "Doing imf -E dcom\n";
+    print "--------------\n";
+    local @ARGV = ("-E","dcom");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing ims -E allknl\n";
+    print "----------------\n";
+    local @ARGV = ("-E","allknl");
+    do $ENV{'TOOL'}."/bin/ims".$ENV{'TOOLEXT'}; # || die "Can't execute 'ims'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing ims$TOOLEXT: $@ \n";
+    }
+}
+
+print "Doing imf -E all\n";
+print "-------------\n";
+local @ARGV = ("-E","all");
+do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+if ( $@ ) 
+{ 
+    warn "Error while executing imf$TOOLEXT: $@ \n";
+}
+
+
+if ($Release == "741")
+{
+
+    #Temporarily for ThomasS
+    print "Doing imf -Ue cpc\n";
+    print "-------------\n";
+    local @ARGV = ("-Ue","cpc");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    if ($Mode eq "weekend")
+    {
+        print "Doing imq -E quickknl\n";
+        print "----------------\n";
+        local @ARGV = ("-E","quickknl");
+        do $ENV{'TOOL'}."/bin/imq".$ENV{'TOOLEXT'}; # || die "Can't execute 'imq'\n";
+        if ( $@ ) 
+        { 
+            warn "Error while executing imq$TOOLEXT: $@ \n";
+        }
+    }
+
+    print "Doing imf sut\n";
+    print "-------------\n";
+    local @ARGV = ("sut");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing imf jdbc\n";
+    print "-------------\n";
+    local @ARGV = ("jdbc");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing imf alltest\n";
+    print "-------------\n";
+    local @ARGV = ("alltest");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+}
+
+print "=====================================================================\n";
+print " end-of-job ", scalar localtime(),"\n";
+print "=====================================================================\n";
+
+if ($Release == "741")
+{
+    print "======================================================================\n";
+    print " Copy the compiled sourcecode to the Itanium test machine\n";
+    print "======================================================================\n";
+    #The next steps have to be done because the XServer is running as a service on the remote
+    #machine and therefore the access to serv.exe and sqltcp.dll (used from serv.exe) is denied.
+
+    #SERV.EXE
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_serv.exe\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_serv.exe");
+    print ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\serv.exe _serv.exe\n");
+    system ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\serv.exe _serv.exe");
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\serv.exe\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\serv.exe");
+    #SAPNI.DLL
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_sapni.dll\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_sapni.dll");
+    print ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sapni.dll _sapni.dll\n");
+    system ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sapni.dll _sapni.dll");
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sapni.dll\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sapni.dll");
+    #SQLTCP.DLL
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_sqltcp.dll\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\_sqltcp.dll");
+    print ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sqltcp.dll _sqltcp.dll\n");
+    system ("ren \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sqltcp.dll _sqltcp.dll");
+    print ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sqltcp.dll\n");
+    system ("del \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\pgm\\sqltcp.dll");
+
+
+    print ("Stopping Database (DB_STOP): LC741, SUT741, MU741");
+    system ("d:\\sapdevelop_32Bit\\7.4.1\\usr\\pgm\\dbmcli -n PINTEL64_03 -d LC741 -u dbm,dbm db_stop");
+    system ("d:\\sapdevelop_32Bit\\7.4.1\\usr\\pgm\\dbmcli -n PINTEL64_03 -d SUT741 -u superdba,colduser db_stop");
+    system ("d:\\sapdevelop_32Bit\\7.4.1\\usr\\pgm\\dbmcli -n PINTEL64_03 -d MU741 -u dbm,dbm db_stop");
+
+    system ("D:\\SAPDevelop\\robocopy.exe D:\\SAPDevelop\\$Release\\usr \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr /XF *.f *.q *.s /XD wrk config  /e");
+    system ("D:\\SAPDevelop\\robocopy.exe D:\\SAPDevelop\\$Release\\test \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\test /XF *.f *.q *.s /XD wrk config  /e");
+
+    #--- has only to be done as long as we perform XCompilation
+#    print ("copy /Y \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\runtime\\7401\\pgm\\* \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\runtime\\7401\\pgm\\pgm64\n");
+#    system ("copy /Y \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\runtime\\7401\\pgm\\* \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\usr\\runtime\\7401\\pgm\\pgm64");
+
+}
+
+
+
+

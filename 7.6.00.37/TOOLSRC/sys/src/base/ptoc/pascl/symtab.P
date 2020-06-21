@@ -1,0 +1,1885 @@
+(* @(#)pascl/symtab.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* symtab.p *)
+
+(* defines *)
+
+#include "../common/machdep.h"
+#include "../common/csg.def"
+#include "../common/hdg.def"
+#include "../pascl/sflags.def"
+
+
+(* imports *)
+
+#include "../common/globals.i"
+#include "../common/fold.h"
+#include "../common/stab.h"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../pascl/globals1.i"
+#include "../pascl/init.h"
+#include "../pascl/p1m2.h"
+#include "../pascl/semutil.h"
+#include "../pascl/sysprocs.h"
+#include "../pascl/decls.h"
+#include "../pascl/pascalalloc.h"
+
+
+procedure BumpSymPtr;
+external;
+
+function IsConstantExpr(n:HdgRange):boolean;
+external;
+
+function GenConstName(n: integer): integer;
+external;
+
+(* export *)
+
+#include "../pascl/symtab.h"
+
+
+(* privates *)
+
+type
+   n_s_t = record
+      symbol: SymbolTableRange;
+      field: SymbolTableRange;
+   end;
+
+var
+   NameSpace: array [0..StabLimit] of n_s_t;
+   ExternalString,
+   ForwardString,
+   StringString: integer;
+#ifdef PYRAMID_DOUBTFUL
+#else
+   UnsignedPtr: SymbolTableRange;
+#endif
+   TypNmBottom,
+   TypNmTop: integer;
+   MainPtr: SymbolTableRange;			(* EF4: 01-11-86 WB *)
+
+
+(* initial *)
+
+procedure SymtabI;
+
+var
+   i: integer;
+
+begin
+   SymPtr := -1;
+   ProcIndex := -1;
+   ProcMark := 0;
+   LevelNo := 0;
+   WithRecs [LevelNo] := -1;
+   ConstPtr := -1;				(* EF4: 01-11-86 WB *)
+   TagPtr := -1;
+   ForWithLevel := 1;
+end;
+
+
+(* routines *)
+
+
+   function PrimType
+      (t: SymbolTableRange)
+      : SymbolTableRange;
+
+    begin
+      if (t > 0) and (t <= SymPtr) and (STab [t].SKind = TypeDcl) then begin
+         while STab [t].SType > -1 do begin
+            t := STab [t].SType;
+         end  (* while *);
+         PrimType := t;
+      end
+      else begin
+         PrimType := t;
+      end;
+   end  (* PrimType *);
+
+
+   procedure ChkEqualType;
+      (* check for equal types *)
+
+   begin
+      if TypeType [p1] <> TypeType [p2] then begin
+         ErrorMsg (0, ColNo [p2]); (* type conflict *)
+      end  (* if *);
+   end (*ChkEqualType*);
+
+
+   procedure  IdPtrIncr;
+      (* increment pointer into IdList *)
+
+   begin
+      IdPtr := IdPtr + 1;
+      if IdPtr > IdListSize then begin
+         PasCerror ('identifier list overflow');
+      end  (* if *);
+   end (*IdPtrIncr*);
+
+
+   procedure ParmPtrIncr;
+
+   begin
+      ParmPtr := ParmPtr + 1;
+      if ParmPtr > ParmTableSize then begin
+         PasCerror ('parameter list overflow');
+      end  (* if *);
+   end  (* ParmPtrIncr *);
+
+
+   procedure IncrExpPtr;
+      (* increment pointer into expression list *)
+
+   begin
+      ExpPtr := ExpPtr+1;
+      if ExpPtr > ExpListSize then begin
+         PasCerror ('expression list overflow');
+      end  (* if *);
+   end (*IncrExpPtr*);
+
+
+   procedure IncrConstPtr;			(* EF4: 01-11-86 WB *)
+      (* increment pointer into expression list *)
+
+   begin
+      ConstPtr := ConstPtr+1;
+      if ConstPtr > ConstListSize then begin
+         PasCerror ('constant list overflow');
+      end  (* if *);
+   end (*IncrExpPtr*);
+
+
+   procedure IncrLabelPtr;			(* EF4: 01-11-86 WB *)
+      (* increment pointer into expression list *)
+
+   begin
+      LabelPtr := LabelPtr+1;
+      if LabelPtr > LabelStackSize then
+         PasCerror ('Label stack overflow');
+   end (*IncrExpPtr*);
+
+
+   procedure  MoveStacks;
+      (* move stack entries *)
+
+   begin
+      g1 [To] := g1 [From];
+      g2 [To] := g2 [From];
+      val [To] := val [From];
+      SubType [To] := SubType [From];
+      TypeType [To] := TypeType [From];
+      StartCnt [To] := StartCnt [From];
+      cnt [To] := cnt [From];
+      ColNo [To] := ColNo [From];
+      CardNum [To] := CardNum [From];
+      SaveProcmark [To] := SaveProcmark [From];
+      SaveProcindex [To] := SaveProcindex [From];	(* EG5: 02-07-86 WB *)
+      SaveParct [To] := SaveParct [From];
+      SaveReturnedType [To] := SaveReturnedType [From];
+      NameofType [To] := NameofType [From];
+      NameofConst [To] := NameofConst [From];
+   end (*MoveStacks *);
+
+
+   (*********************************************************************)
+   (*                                                                   *)
+   (*       scope handlers                                              *)
+   (*                                                                   *)
+   (*********************************************************************)
+
+
+   procedure  PopScope;
+      (* exit a scope level            *)
+      (* restore symbol table pointers *)
+   var
+      i,
+      ss_name: integer;
+
+   begin
+      if p <> -1 then begin
+         i := ProcMark;
+         while i <= SymPtr do begin
+            with STab [i] do begin
+               if SLevel = LevelNo then begin
+                  ss_name := StringSemantics (SName);
+                  if (ss_name <> -1) and
+                     (NameSpace [ss_name].symbol = i)
+                  then begin
+                     NameSpace [ss_name].symbol := SLink;
+                     if GetFlag (i, ForwardFlag) then begin
+                        DclError (SName, SCard, SFile, 3);
+                     end;
+						(* EF4: 01-11-86 WB *)	
+		     if SKind = LabelDcl then
+			SParent := -1;
+                  end  (* if *);
+               end
+		(* EG5: 06-07-87 WB; Fix unresolved pointer reference bug *)
+	       else begin
+		  if (STab [i].SKind = TypeNameDcl) and
+		     GetFlag (i, ForwardFlag) then begin
+		     DclError (SName, SCard, SFile, 3);
+		  end;
+	       end;  (* if *);
+               i := STab [i].SNext;
+            end;  (* with *)
+         end  (* while *);
+         if STab [ProcIndex].SKind <> TypeDcl then begin
+            STab [STab [STab [ProcIndex].SType].SBlock].SLastEntry := SymPtr;
+         end;
+         ProcMark := SaveProcmark [p];
+         ProcIndex := SaveProcindex [p];		(* EG5: 02-07-86 WB *)
+         parct := SaveParct [p];
+         ReturnedType := SaveReturnedType [p];
+	 LabelPtr := LabelScopePtr -1;			(* EF4: 01-11-86 WB *)
+	 LabelScopePtr := LabelStack [LabelScopePtr].LIndex;
+      end;
+      WithRecs [LevelNo] := -1;
+      LevelNo := LevelNo - 1;
+   end  (* PopScope *);
+
+
+   procedure  upscope;
+      (* save symbol table pointers *)
+
+   begin
+      if p <> -1 then begin
+         SaveProcmark[p] := ProcMark;
+         SaveProcindex[p] := ProcIndex;			(* EG5: 02-07-86 WB *)
+         SaveParct[p] := parct;
+         SaveReturnedType[p] := ReturnedType;
+         ProcMark := STab [SymPtr].SNext;
+         ProcIndex := SymPtr;
+	 IncrLabelPtr;					(* EF4: 01-11-86 WB *)
+	 LabelStack [LabelPtr].LIndex := LabelScopePtr;
+	 LabelScopePtr := LabelPtr;
+      end;
+      LevelNo := LevelNo + 1;
+      WithRecs [LevelNo] := -1;
+   end (*upscope *);
+
+
+   procedure  CloseRec;
+
+   var
+      i,
+      ss_name: integer;
+
+   begin
+      i := ProcMark;
+      while i <= SymPtr do begin
+         if STab [i].SLevel = LevelNo then begin
+            ss_name := StringSemantics (STab [i].SName);
+            if NameSpace [ss_name].field = i then begin
+               NameSpace [ss_name].field := STab [i].SLink;
+            end  (* if *);
+         end  (* if *);
+         i := STab [i].SNext;
+      end  (* while *);
+      WithRecs [LevelNo] := -1;
+      LevelNo := LevelNo - 1;
+   end  (* CloseRec *);
+
+
+   procedure  OpenRec;
+
+   begin
+      LevelNo := LevelNo + 1;
+      WithRecs [LevelNo] := -1;
+   end  (* OpenRec *);
+
+
+   (*********************************************************************)
+   (*                                                                   *)
+   (*    utility routines                                               *)
+   (*                                                                   *)
+   (*********************************************************************)
+
+
+   procedure NewSymbol
+      (id,
+       typ: integer;
+       kind: KINDTYPE;
+       level,
+       card: integer);
+
+   (* fills in a symbol table entry *)
+
+   begin
+      BumpSymPtr;
+      (* common front end fields *)
+      STab [SymPtr].SName := id;
+      STab [SymPtr].SLink := -1;
+      STab [SymPtr].SCard := card;
+      STab [SymPtr].SFile := CurrentFile;
+      STab [SymPtr].SType := typ;
+      STab [SymPtr].SLevel := level;
+      STab [SymPtr].SFlags := 0;
+      STab [SymPtr].SKind := kind;
+      STab [SymPtr].STname:= 0;
+      STab [SymPtr].STmyname:= 0;
+      STab [SymPtr].SOrder:= 0;
+      STab [SymPtr].SRecVar:= 0;
+      STab [SymPtr].SFeld1:= 0;
+      STab [SymPtr].SFeld2:= 0;
+      STab [SymPtr].SFeld3:= 0;
+      STab [SymPtr].SFeld4:= 0;
+      (* code generation fields *)
+      STab [SymPtr].DummyInfo.dummy1 := -1;
+      STab [SymPtr].DummyInfo.dummy2 := -1;
+      STab [SymPtr].DummyInfo.dummy3 := -1;
+
+   end  (* NewSymbol *);
+
+
+   procedure LinkName
+      (symp,
+       StrPtr: integer);
+
+   var
+      ss_name: integer;
+
+   begin
+      ss_name := StringSemantics (StrPtr);
+      STab [symp].SLink := NameSpace [ss_name].symbol;
+      NameSpace [ss_name].symbol := symp;
+   end  (* LinkName *);
+
+
+   function FindSymbol
+      (id: integer)
+      : integer;
+
+   var
+      level: integer;
+      NodeIndex: HdgRange;
+      entry: integer;
+      strsem: integer;
+
+   begin
+      strsem := StringSemantics (id);
+      if strsem <> -1 then begin
+          if WithRecs [LevelNo] = -1 then begin
+      		FindSymbol := NameSpace [strsem].symbol;
+          end
+          else begin
+       		level := LevelNo;
+      		NodeIndex := WithRecs [level];
+      		repeat
+      		    entry := FindQSymbol (TypeField, id);
+        	    if entry <> -1 then begin
+            		STab [entry].SLevel := level;
+            		NodeIndex := -1;
+                    end
+            	    else begin
+               		level := level - 1;
+               		NodeIndex := WithRecs [level];
+            	    end;
+         	until NodeIndex = -1;
+	        if entry <> -1 then begin
+           	    FindSymbol := entry;
+         	end
+         	else begin
+            	    FindSymbol := NameSpace [strsem].symbol;
+         	end;
+	  end;
+      end
+      else begin
+	  FindSymbol := -1;
+      end
+   end  (* FindSymbol *);
+
+
+   function FindQSymbol
+      (rec,
+       id: integer)
+      : integer;
+
+   label
+      100;
+
+   var
+      i,
+      j: integer;
+
+   begin
+      i := STab [rec].SFirstField;
+      while i <> -1 do begin
+         if STab [i].SName = id then begin
+            FindQSymbol := i;
+            goto 100;
+         end;
+         i := STab [i].SNextField;
+      end;
+      j := STab [rec].SFirstVariant;
+      while j <> -1 do begin
+         i := FindQSymbol (j, id);
+         if i <> -1 then begin
+            FindQSymbol := i;
+            goto 100;
+         end;
+         j := STab [j].SNextVariant;
+      end;
+      FindQSymbol := -1;
+      100:
+   end  (* FindQSymbol *);
+
+
+   function duplicate
+      (id,
+       col: integer)
+      : boolean;
+
+   (* check for duplicate declaration *)
+
+   var
+      i: integer;
+
+   begin
+      if id = 0 then begin
+         duplicate := false ;
+      end
+      else begin
+         i := FindSymbol (id);
+         (* procmark points to first entry in new scope *)
+	 if (i = MainPtr) and (LevelNo = 1) then begin
+	    ErrorMsg (140, col);
+	    duplicate := false;
+	 end else
+         if i >= ProcMark then begin
+            ErrorMsg (102, col); (* duplicate declaration *)
+            duplicate := true;
+         end
+         else begin
+            duplicate := false;
+         end  (* if *);
+      end  (* if *);
+   end (*duplicate *);
+
+
+   procedure EntSymbol
+      (id,
+       typ: integer;
+       kind: KINDTYPE;
+       card: integer);
+
+   (* insert data into symbol table *)
+
+   begin
+      NewSymbol (id, typ, kind, LevelNo, card);
+      if id <> 0 then begin
+         LinkName (SymPtr, id);
+      end;
+   end  (* EntSymbol *);
+
+
+   function EntModule
+      (p: ParseStackRange;
+       ModuleKind: KINDTYPE):integer;
+
+   var
+      s: STRING;
+      id: integer;					(* EF4: 01-11-86 WB *)
+      TypePtr : integer;
+   begin
+      s := 'main';
+      id := EnterString (s [0], 4);			(* EF4: 01-11-86 WB *)
+      AllocNameSpace (id);
+      EntSymbol (id, 0, ModuleKind, CardNum [p]);
+      SetFlag (SymPtr, ExternalFlag);
+      with STab [SymPtr] do begin
+         SType := SNext;
+#ifdef PYRAMID_DOUBTFUL
+         SClass := SNULL;
+#else
+         SClass := EXTERN;
+#endif
+         SSubClass := UninitializedVar;
+         SParent := -1;
+      end;
+      MainPtr := SymPtr;				(* EF4: 01-11-86 WB *)
+      upscope (p);
+      EntSymbol (0, ProcedureType, TypeDcl, CardNum [p]);
+      with STab [SymPtr] do begin
+         SResult := IntegerPtr;
+         SParmCnt := 3;
+         SBlock := -1;
+      end;
+      TypePtr := SymPtr;
+      s := '.argc.';
+      id := EnterString (s [0], 6);
+      AllocNameSpace (id);
+      EntSymbol (id, IntegerPtr, ParmDcl, CardNum [p]);
+      with STab [SymPtr] do begin
+         SClass := PARAM;
+         SSubClass := ByValueParm;
+         SParent := -1;
+      end;
+      ArgcPtr := SymPtr;
+      s := '.argv.';
+      id := EnterString (s [0], 6);
+      AllocNameSpace (id);
+      EntSymbol (id, AnyPtrPtr, ParmDcl, CardNum [p]);
+      with STab [SymPtr] do begin
+         SClass := PARAM;
+         SSubClass := ByValueParm;
+         SParent := -1;
+      end;
+      ArgvPtr := SymPtr;
+      s := '.envp.';
+      id := EnterString (s [0], 6);
+      AllocNameSpace (id);
+      EntSymbol (id, AnyPtrPtr, ParmDcl, CardNum [p]);
+      with STab [SymPtr] do begin
+         SClass := PARAM;
+         SSubClass := ByValueParm;
+         SParent := -1;
+      end;
+      EnvpPtr := SymPtr;
+      EntModule := TypePtr;
+   end  (* EntModule *);
+
+
+   procedure EntBlock
+      (p: ParseStackRange);
+
+   begin
+      EntSymbol (0, 0, BlockDcl, CardNum [p]);
+      STab [SymPtr].SFuncBlock := ProcIndex;
+      STab [STab [ProcIndex].SType].SBlock := SymPtr;
+   end  (* EntBlock *);
+
+
+   procedure EntConstant
+      (id,
+       p: integer);
+
+   var
+      NodeIndex: integer;
+      t: integer;
+   begin
+      if not duplicate (id, -1) then begin
+	 EntSymbol (id, TypeType [p], ConDcl, CardNum[p]);
+	 NodeIndex := g1 [p];
+         if NodeIndex <> -1 then begin
+	    (* if we have a scalar constant declaration, remember the   *)
+	    (* expression node in Feld3.  Problem: we have to check     *)
+	    (* if the expression is a constant expression, even if it   *)
+	    (* contains IdOp nodes. I do not want to touch FoldTree      *)
+
+            NodeIndex := FoldTree (NodeIndex);
+            STab [SymPtr].SFeld3 := NodeIndex;
+            if IsConstant (NodeIndex) then begin
+               STab [SymPtr].SCon1val := Node1parameter;
+               STab [SymPtr].SCon2val := Node2parameter;
+            end
+            else begin
+		if (not IsOrdinal(PrimType(STab[SymPtr].SType))) or (not IsConstantExpr(NodeIndex)) then begin
+                   ErrorMsg (100, ColNo [p]);
+	        end
+	    end
+         end;
+      end;
+   end  (* EntConstant *);
+
+
+   procedure EntVariable;
+      (* enter identifiers in IdList                    *)
+      (* cnt[p1] specifies no. of elements in list       *)
+      (* TypeType [p2] specifies type                 *)
+      (* val[p3] <- (StatBase, ModuleBase, LocalBase, *)
+      (*             StackPntr);                        *)
+      (*stor(p3) <- (UninitializedVar, ValueParm, RefParm      *)
+
+   var
+      i, id: integer;
+      typ: SymbolTableRange;
+      card: integer;
+
+   begin
+      if STab [TypeType [p2]].SType = VoidType then begin
+	 ErrorMsg (1, ColNo [p2]);
+      end;
+      typ := SubType [p2];
+      card := CardNum [p2];
+      for i := StartCnt [p1] + 1 to StartCnt [p1] + cnt [p1] do begin
+	 id := IdList [i];
+	 if not duplicate (id, ColNo [p1]) then begin
+	    EntSymbol (id, typ, VarDcl, card);
+	    STab[SymPtr].STname := NameofType[p2];
+	    if LevelNo = 1 then begin
+	       STab [SymPtr].SClass := EXTERN;
+	       STab [SymPtr].SSubClass := UninitializedVar;
+	    end
+	    else begin
+	       STab [SymPtr].SClass := AUTO;
+	       if control ['f'] then
+		  FillVar(SymPtr)
+	       else
+		  STab [SymPtr].SSubClass := UninitializedVar;
+	    end;
+	    STab [SymPtr].SParent := -1;
+	 end  (* if *);
+      end;
+   end  (* EntVariable *);
+
+
+   procedure   EntField
+      (p1,
+       p2: integer);
+
+   label
+      100;
+
+   var
+      i, k, id, ss_id : integer ;
+
+   begin
+      k := 1;
+      while k <= cnt[p1] do begin
+         i := StartCnt[p1] + k;
+         k := k+1;
+         id := IdList[i];
+         ss_id := StringSemantics (id);
+
+         (* duplicate field *)
+         i := NameSpace [ss_id].field;
+         if i >= ProcMark then begin
+            ErrorMsg (102, ColNo [p1]);
+            goto 100;
+         end  (* if *);
+
+         (* create field entry *)
+         NewSymbol (
+            id,
+            SubType [p2],
+            RecordElementDcl,
+            LevelNo,
+            CardNum [p2]);
+         STab [SymPtr].SNextField := -1;
+	 STab[SymPtr].STname := NameofType[p2];
+
+         (* link name *)
+         STab [SymPtr].SLink := NameSpace [ss_id].field;
+         NameSpace [ss_id].field := SymPtr;
+
+         if HeadFieldLink = -1 then begin
+            HeadFieldLink := SymPtr;
+            TailFieldLink := SymPtr;
+         end
+         else begin
+            STab [TailFieldLink].SNextField := SymPtr;
+            TailFieldLink := SymPtr;
+         end  (* if *);
+      end  (* while *);
+      100:  (* return label *)
+   end  (* EntField *);
+
+
+   procedure   EntVariant;
+
+   begin
+      NewSymbol (BlankString, RecordType, RecordVariantDcl, LevelNo, CardNum[p2]);
+      STab [SymPtr].SFirstField := g1 [p2];
+      STab [SymPtr].SFirstVariant := g2 [p2];
+      STab [SymPtr].SNextVariant := -1;
+      STab [SymPtr].STname := NameofConst [p1];
+      if ContainsFile (g1 [p2]) then
+	  SetFlag (SymPtr, FileFlag);
+      if HeadFieldLink = -1 then begin
+         HeadFieldLink := SymPtr;
+         TailFieldLink := SymPtr;
+      end
+      else begin
+         STab [TailFieldLink].SNextVariant := SymPtr;
+         TailFieldLink := SymPtr;
+      end  (* if *);
+   end  (* EntVariant *);
+
+
+   procedure LabelName
+      (lab: integer;
+       var name: STRING;
+       var len: integer);
+
+   var
+      i,
+      place: integer;
+
+   begin
+      place := 10;
+      while place <= lab do place := place * 10;
+      i := 0;
+      repeat
+         place := place div 10;
+         name [i] := chr ((lab div place) + ord ('0'));
+         lab := lab mod place;
+         i := i + 1;
+      until place = 1;
+      len := i;
+   end  (* LabelName *);
+
+
+   procedure EntLabel;
+
+   var
+      lab,
+      len: integer;
+      s: STRING;
+
+   begin
+      lab := val [p1];
+      if (lab < 0) or (lab > 9999) then begin
+         ErrorMsg (35, ColNo [p1]);
+      end
+      else begin
+         LabelName (lab, s, len);
+         lab := EnterString (s [0], len);
+         AllocNameSpace (lab);
+         if not duplicate (lab, ColNo [p1]) then begin
+            EntSymbol (lab, 0, LabelDcl, CardNum [p1]);
+            if LevelNo = 1 then begin
+               STab [SymPtr].SClass := SNULL;
+            end
+            else begin
+               STab [SymPtr].SClass := LOCALSTATIC;
+            end;
+            STab [SymPtr].SSubClass := UninitializedVar;
+						(* EF4: 01-11-86 WB *)	
+	    IncrLabelPtr;
+            STab [SymPtr].SParent := LabelPtr;
+	    with LabelStack [LabelPtr] do begin
+	       LIndex := SymPtr;
+	       DefLevel := 0;
+	       RefLevel := 0;
+	       end;
+            SetFlag (SymPtr, ForwardFlag);
+         end;
+      end;
+   end  (* EntLabel *);
+
+
+   (*********************************************************************)
+   (*                                                                   *)
+   (*    type routines                                                  *)
+   (*                                                                   *)
+   (*********************************************************************)
+
+
+   procedure InitSystem;
+   (* initialize the symbol table entries for system routine call *)
+
+   type
+      String20 = packed array [0..19] of char;
+
+   var
+      i,
+      j,
+      id,
+      SaveSymPtr,
+      TypeFileptr: SymbolTableRange;
+      s: String20;
+      nflag: boolean;
+      isymid: integer;
+
+      function InitSym
+         (str: String20;
+          kind: KINDTYPE;
+          t: integer)
+         : integer;
+
+      (* enters initial entries into the symbol table *)
+
+      var
+         i: integer;
+
+      begin
+         i := -1;
+         repeat
+            i := i + 1;
+         until (str [i] = ' ') or (str [i] = chr (0));
+         isymid := EnterString (str [0], i);
+         NewSymbol (isymid, t, kind, LevelNo, 0);
+         if isymid <> 0 then begin
+            AllocNameSpace (isymid);
+            LinkName (SymPtr, isymid);
+         end;
+         InitSym := SymPtr;
+      end  (* InitSym *);
+
+
+   begin
+
+      nflag := control ['n'];
+
+      (* directives *)
+
+      s := 'external';
+      ExternalString := EnterString (s [0], 8);
+      TypNmBottom := ExternalString;
+      s := 'forward';
+      ForwardString := EnterString (s [0], 7);
+      s := 'string';
+      StringString := EnterString (s [0], 6);
+      s := 'oct';
+      OctString := EnterString (s [0], 3);
+      s := 'hex';
+      HexString := EnterString (s [0], 3);
+      s := ' ';
+      BlankString := EnterString (s [0], 1);
+
+      (* dummy entry *)
+
+      NewSymbol (0,0,DummyDcl,0,0);  (* dummy *)
+
+      (* scalar types *)
+
+      IntegerPtr := InitSym ('#integer',TypeDcl,IntegerType);
+      STab [IntegerPtr].SLowRange := LowValue;
+      STab [IntegerPtr].SHighRange := HighValue;
+      TypeSize (IntegerPtr);
+      i := InitSym ('longint',TypeNameDcl,IntegerPtr);
+#ifdef PYRAMID_DOUBTFUL
+#else
+      UnsignedPtr := InitSym ('#unsigned',TypeDcl,UnsignedType);
+      STab [UnsignedPtr].SLowRange := 0;
+      STab [UnsignedPtr].SHighRange := HighValue * 2 + 1;
+      TypeSize (UnsignedPtr);
+#endif
+      ShortPtr := InitSym ('#short',TypeDcl,ShortType);
+      STab [ShortPtr].SLowRange := -32768;
+      STab [ShortPtr].SHighRange := 32767;
+      TypeSize (ShortPtr);
+      i := InitSym ('shortint',TypeNameDcl,ShortPtr);
+      UshortPtr := InitSym ('#ushort',TypeDcl,UshortType);
+      STab [UshortPtr].SLowRange := 0;
+      STab [UshortPtr].SHighRange := 65535;
+      TypeSize (UshortPtr);
+
+      (* default integer to longint *)
+      i := InitSym ('integer',TypeNameDcl,IntegerPtr);
+
+      BytePtr := InitSym ('#byte',TypeDcl,CharType);
+      STab [BytePtr].SLowRange := -128;
+      STab [BytePtr].SHighRange := 127;
+      TypeSize (BytePtr);
+      UbytePtr := InitSym ('#ubyte',TypeDcl,UcharType);
+      STab [UbytePtr].SLowRange := 0;
+      STab [UbytePtr].SHighRange := 255;
+      TypeSize (UbytePtr);
+      BooleanPtr := InitSym ('#boolean',TypeDcl,BooleanType);
+      STab [BooleanPtr].SLowRange := FalseValue;
+      STab [BooleanPtr].SHighRange := TrueValue;
+      TypeSize (BooleanPtr);
+      i := InitSym ('false',ConDcl,BooleanPtr);
+      STab [i].SCon1val := FalseValue;
+      i := InitSym ('true',ConDcl,BooleanPtr);
+      STab [i].SCon1val := TrueValue;
+      i := InitSym ('boolean',TypeNameDcl,BooleanPtr);
+      i := InitSym ('Boolean',TypeNameDcl,BooleanPtr);
+      CharPtr := InitSym ('#char',TypeDcl,CharacterType);
+      STab [CharPtr].SLowRange := 0;
+      STab [CharPtr].SHighRange := 255;
+      (*
+       * if nflag then begin
+       *    STab [CharPtr].SHighRange := 255;
+       * end
+       * else begin
+       *    STab [CharPtr].SHighRange := 127;
+       * end;
+       *)
+      TypeSize (CharPtr);
+      i := InitSym ('char',TypeNameDcl,CharPtr);
+      FloatPtr := InitSym ('#float',TypeDcl,FloatType);
+      TypeSize (FloatPtr);
+      i := InitSym ('float',TypeNameDcl,FloatPtr);
+      DoublePtr := InitSym ('#double',TypeDcl,DoubleType);
+      TypeSize (DoublePtr);
+      i := InitSym ('double',TypeNameDcl,DoublePtr);
+
+      LongPtr := InitSym ('#long',TypeDcl,LongType);
+      TypeSize (LongPtr);
+      i := InitSym ('long',TypeNameDcl,LongPtr);
+
+      (* real defaults to float *)
+      i := InitSym ('real',TypeNameDcl,FloatPtr);
+
+      TextPtr := InitSym ('#text',TypeDcl,FileType);
+      STab [TextPtr].SComponent := CharPtr;
+      TypeSize (TextPtr);
+      i := InitSym ('text',TypeNameDcl,TextPtr);
+
+      i := InitSym ('#pac_range',TypeDcl,IntegerPtr);
+      STab [i].SLowRange := 0;
+      STab [i].SHighRange := -1;
+      PacPtr := InitSym ('#pac',TypeDcl,ArrayType);
+      STab [PacPtr].SIndex := i;
+      STab [PacPtr].SElement := CharPtr;
+      TypeSize (PacPtr);
+
+      AnyPacPtr := InitSym ('#anypac',TypeDcl,VoidType);
+      i := InitSym ('anyPAC',TypeNameDcl,AnyPacPtr);
+      AnyPacLenPtr := InitSym ('#anypaclen',TypeDcl,VoidType);
+      i := InitSym ('anyPAClen',TypeNameDcl,AnyPacLenPtr);
+      AnyFilePtr := InitSym ('#anyfile',TypeDcl,VoidType);
+      i := InitSym ('anyfile',TypeNameDcl,AnyFilePtr);
+
+      i := InitSym ('#alfa_range',TypeDcl,IntegerPtr);
+      STab [i].SLowRange := 1;
+      STab [i].SHighRange := 10;
+      j := InitSym ('#alfa',TypeDcl,ArrayType);
+      STab [j].SIndex := i;
+      STab [j].SElement := CharPtr;
+      TypeSize (j);
+      i := InitSym ('alfa',TypeNameDcl,j);
+
+      StringPtr := InitSym ('#string',TypeDcl,StringType);
+      STab [StringPtr].SLength := 256;
+      TypeSize (StringPtr);
+
+      i := InitSym ('#intset_base',TypeDcl,IntegerPtr);
+      STab [i].SLowRange := 0;
+      STab [i].SHighRange := 127;
+      TypeSize (i);
+      j := InitSym ('#intset',TypeDcl,SetType);
+      STab [j].SBase := i;
+      TypeSize (j);
+      s := 'intset';
+      IntsetIndex := EnterString (s [0], 6);
+      AllocNameSpace (IntsetIndex);
+      i := InitSym (s,TypeNameDcl,j);
+
+      i := InitSym ('#anyset_base',TypeDcl,IntegerPtr);
+      STab [i].SLowRange := 0;
+      STab [i].SHighRange := 0;
+      TypeSize (i);
+      j := InitSym ('#anyset',TypeDcl,SetType);
+      STab [j].SBase := i;
+      TypeSize (j);
+      AnySetPtr := j;
+
+      AnyPtrPtr := InitSym ('#anyptrptr',TypeDcl,PointerType);
+      STab [AnyPtrPtr].SDomain := IntegerPtr;
+      TypeSize (AnyPtrPtr);
+
+      PtrToCharPtr := InitSym ('#ptrtocharptr',TypeDcl,PointerType);
+      STab [PtrToCharPtr].SDomain := CharPtr;
+      TypeSize (PtrToCharPtr);
+
+      i := InitSym ('maxint',ConDcl,IntegerPtr);
+      STab [i].SCon1val := HighValue;
+      i := InitSym ('minint',ConDcl,IntegerPtr);
+      STab [i].SCon1val := LowValue;
+
+      i := InitSym ('maxchar',ConDcl,CharPtr);
+      if nflag then begin
+         STab [i].SCon1val := 255;
+      end
+      else begin
+         STab [i].SCon1val := 127;
+      end;
+      i := InitSym ('minchar',ConDcl,CharPtr);
+      STab [i].SCon1val := 0;
+      i := InitSym ('bell',ConDcl,CharPtr);
+      STab [i].SCon1val := $07;
+      i := InitSym ('tab',ConDcl,CharPtr);
+      STab [i].SCon1val := $09;
+
+      InputPtr := InitSym ('sql__input',VarDcl,TextPtr);
+      SetFlag (InputPtr, ExternalFlag);
+      STab [InputPtr].SClass := SNULL;
+      STab [InputPtr].SSubClass := UninitializedVar;
+      STab [InputPtr].SParent := -1;
+(*JH*) InputPtr := InitSym ('input',VarDcl,TextPtr);
+(*JH*) SetFlag (InputPtr, ExternalFlag);
+(*JH*) STab [InputPtr].SClass := SNULL;
+(*JH*) STab [InputPtr].SSubClass := UninitializedVar;
+(*JH*) STab [InputPtr].SParent := -1;
+      OutputPtr := InitSym ('sql__output',VarDcl,TextPtr);
+      SetFlag (OutputPtr, ExternalFlag);
+      STab [OutputPtr].SClass := SNULL;
+      STab [OutputPtr].SSubClass := UninitializedVar;
+      STab [OutputPtr].SParent := -1;
+(*JH*) OutputPtr := InitSym ('output',VarDcl,TextPtr);
+(*JH*) SetFlag (OutputPtr, ExternalFlag);
+(*JH*) STab [OutputPtr].SClass := SNULL;
+(*JH*) STab [OutputPtr].SSubClass := UninitializedVar;
+(*JH*) STab [OutputPtr].SParent := -1;
+      TypNmTop := isymid;
+      ErrorPtr := InitSym ('sql__err',VarDcl,TextPtr);
+      SetFlag (ErrorPtr, ExternalFlag);
+      STab [ErrorPtr].SClass := SNULL;
+      STab [ErrorPtr].SSubClass := UninitializedVar;
+      STab [ErrorPtr].SParent := -1;
+
+      _ArgcPtr := InitSym ('_argc',VarDcl,IntegerPtr);
+      STab [_ArgcPtr].SClass := SNULL;
+      STab [_ArgcPtr].SSubClass := UninitializedVar;
+      STab [_ArgcPtr].SParent := -1;
+      SetFlag (_ArgcPtr, ExternalFlag);
+      _ArgvPtr := InitSym ('_argv',VarDcl,AnyPtrPtr);
+      STab [_ArgvPtr].SClass := SNULL;
+      STab [_ArgvPtr].SSubClass := UninitializedVar;
+      STab [_ArgvPtr].SParent := -1;
+      SetFlag (_ArgvPtr, ExternalFlag);
+      _EnvpPtr := InitSym ('_envp',VarDcl,AnyPtrPtr);
+      STab [_EnvpPtr].SClass := SNULL;
+      STab [_EnvpPtr].SSubClass := UninitializedVar;
+      STab [_EnvpPtr].SParent := -1;
+      SetFlag (_EnvpPtr, ExternalFlag);
+
+      TypeFileptr := InitSym ('  ',TypeDcl,PointerType);
+      STab [TypeFileptr].SDomain := CharPtr;
+      TypeSize (TypeFileptr);
+      TypeFbuf := InitSym ('  ',TypeDcl,PointerType);
+      STab [TypeFbuf].SDomain := IntegerPtr;
+      TypeSize (TypeFbuf);
+      SaveSymPtr := SymPtr + 1;
+      i := InitSym ('#fileptr',RecordElementDcl,TypeFileptr);
+      STab [i].SNextField := SymPtr + 1;
+      i := InitSym ('#lcount',RecordElementDcl,IntegerPtr);
+      STab [i].SNextField := SymPtr + 1;
+      i := InitSym ('#llimit',RecordElementDcl,IntegerPtr);
+      STab [i].SNextField := SymPtr + 1;
+      i := InitSym ('#fbuf',RecordElementDcl,SaveSymPtr-1);
+      STab [i].SNextField := -1;
+      ElementFbuf := i;
+      i := InitSym ('  ',TypeDcl,RecordType);
+      STab [i].SFirstField := SaveSymPtr;
+      STab [i].SFirstVariant := -1;
+      TypeIorechd := i;
+      TypeSize (TypeIorechd);
+      i := InitSym ('#iorechd',TypeNameDcl,TypeIorechd);
+      TypePtrIorechd := InitSym ('  ',TypeDcl,PointerType);
+      STab [TypePtrIorechd].SDomain := i;
+      TypeSize (TypePtrIorechd);
+							(* EF4: 01-11-86 WB *)
+      WFormatPtr := InitSym ('#wformat',TypeDcl,ShortPtr);
+      STab [WFormatPtr].SLowRange := 1;
+      STab [WFormatPtr].SHighRange := 4096;
+
+      for i := SysFirst to SysLast do begin
+         id := InitSym (SysSproc [i], SysProcDcl, IntegerPtr);
+         STab [id].SSysSpecific := i;
+      end;
+
+      ProcMark := STab [SymPtr].SNext;
+      LevelNo := 1;
+      WithRecs [LevelNo] := -1;
+
+   end  (* InitSystem *);
+
+
+   procedure ChkTypeDefn
+      (t:integer;		/* DK 26.08.88 */
+       p1,
+       p2,
+       p3: ParseStackRange);
+
+   var
+      t1,
+      t2,
+      i,
+      j,
+      k,
+      id,
+      c1,
+      c2: integer;
+      SaveSymPtr: SymbolTableRange;
+
+
+   function EntTsym
+      (typ,
+       card: integer)
+      : SymbolTableRange;
+
+   begin
+      NewSymbol (0, typ, TypeDcl, LevelNo, card);
+      EntTsym := SymPtr;
+   end  (* EntTsym *);
+
+
+   begin
+      case t of
+
+         EnumerativeType: begin
+            SaveSymPtr := EntTsym (t, CardNum [p1]);
+            STab [SaveSymPtr].SLowRange := 0;
+            STab [SaveSymPtr].SHighRange := cnt [p2] - 1;
+            STab [SymPtr].SFirstEnum := STab [SymPtr].SNext;
+            for k := 1 to cnt [p2] do begin
+               i := StartCnt [p2] + k;
+               id := IdList [i];
+               if not duplicate (id, -1) then begin
+                  EntSymbol (id, SaveSymPtr, ConDcl, CardNum [p1]);
+                  STab [SymPtr].SCon1val := k - 1;
+                  STab [SymPtr].SNextEnum := STab [SymPtr].SNext;
+               end  (* if *);
+            end  (* for *);
+            STab [SymPtr].SNextEnum := -1;
+         end;
+
+         SubRangeType: begin
+	    c1 := ConstExp (g1 [p1]);
+	    c2 := ConstExp (g1 [p2]);
+            val [p1] := c1;
+            val [p2] := c2;
+            ChkEqualType (p1, p2);
+	    t1 := TypeType [p1];
+            t1 := STab [t1].SType;
+            if t1 = IntegerType then begin
+               if control ['q'] then begin
+                  if c1 < 0 then begin
+                     if (-128 <= c1) and (c2 < 128) then begin
+			TypeType [p1] := BytePtr;
+                     end
+                     else if (-32768 <= c1) and (c2 < 32768) then begin
+			TypeType [p1] := ShortPtr;
+                     end;
+                  end
+                  else begin
+                     if c2 < 256 then begin
+			TypeType [p1] := UbytePtr;
+                     end
+                     else if c2 < 32768 then begin
+			TypeType [p1] := UshortPtr;
+                     end;
+                  end;
+               end;
+            end
+            else if
+               (t1 <> EnumerativeType) and
+               (t1 <> CharacterType) and
+               (t1 <> BooleanType)
+            then begin
+               ErrorMsg (1, ColNo [p1]); (* illegal type *)
+            end  (* if *);
+            if c2 < c1 then begin
+               ErrorMsg (1, ColNo [p2]); (* illegal type *)
+            end  (* if *);
+	    SaveSymPtr := EntTsym (TypeType [p1], CardNum [p1]);
+            STab [SaveSymPtr].SLowRange := c1;
+            STab [SaveSymPtr].SHighRange := c2;
+         end;
+
+         ArrayType: begin
+	    if not IsOrdinal (TypeType [p1]) then begin
+               ErrorMsg (1, ColNo [p1]); (* illegal type *)
+               end;
+            SaveSymPtr := EntTsym (t, CardNum [p1]);
+            STab [SaveSymPtr].SIndex := SubType [p1];
+            STab [SaveSymPtr].SElement := SubType [p2];
+	    if val [p3] = 1 then begin
+	       SetFlag (SaveSymPtr, PackedFlag);
+	    end;
+         end;
+
+         RecordType: begin
+            (* link fields of a record in symbol table *)
+            SaveSymPtr := EntTsym (t, CardNum [p1]);
+	    STab [SaveSymPtr].SFirstField := g1 [p2];
+            STab [SaveSymPtr].SFirstVariant := g2 [p2];
+	    if g2 [p2] <> -1 then
+               STab [SaveSymPtr].STname := STab [NameofType [p2]].SName;
+	    if (ContainsFile (g1 [p2])) or (ContainsFile (g2 [p2])) then
+		SetFlag (SaveSymPtr, FileFlag);
+         end;
+
+         FileType: begin
+            SaveSymPtr := EntTsym (FileType, CardNum [p1]);
+	    t1 := PrimType (SubType [p2]);
+	    if IsFile (t1) or FileInRec (t1) then
+		ErrorMsg (137, ColNo [p2]);
+            STab [SaveSymPtr].SComponent := SubType [p2];
+         end;
+
+         PointerType: begin
+            id := val [p2];
+            i := FindSymbol (id);
+				(* EG5: 02-07-87 WB; fix recursive pointer bug *)
+            if ((i = -1) or (i < ProcIndex) and (not GetFlag (i, ImplicitFlag)))
+	    then begin
+                  EntSymbol (id, 0, TypeNameDcl, CardNum [p2]);
+                  if i = -1 then begin
+                     SetFlag (SymPtr, ForwardFlag);
+                  end
+                  else begin
+                     if STab [i].SKind = TypeNameDcl then begin
+                        STab [SymPtr].SType := STab [i].SType;
+                     end
+                     else begin
+                        SetFlag (SymPtr, ForwardFlag);
+                     end;
+                  end;
+                  SetFlag (SymPtr, ImplicitFlag);
+                  i := SymPtr;
+            end;
+            if STab [i].SKind = TypeNameDcl then begin
+               SaveSymPtr := EntTsym (PointerType, CardNum [p2]);
+               STab [SaveSymPtr].SDomain := i;
+            end
+            else begin
+               ErrorMsg (2, ColNo [p2]);
+               SaveSymPtr := IntegerPtr;
+            end;
+         end;
+
+         SetType: begin
+	    if IsOrdinal (TypeType [p2]) then begin
+               if (SubType [p2] = IntegerPtr) or
+                  (SubType [p2] = ShortPtr) or
+		  (SubType [p2] = UshortPtr)
+               then begin
+                  SaveSymPtr := FindIntset;
+               end
+               else begin
+                  SaveSymPtr := EntTsym (SetType, CardNum [p1]);
+                  STab [SaveSymPtr].SBase := SubType [p2];
+               end;
+            end
+            else begin
+               ErrorMsg (1, ColNo [p2]);
+               SaveSymPtr := IntegerPtr;
+            end;
+         end;
+
+         StringType: begin
+            if val [p1] = StringString then begin
+	       if TypeType [p2] = IntegerPtr then begin
+		  i := ConstExp (g1 [p2]);
+                  if (i >= 1) and (i <= 255) then begin
+                     SaveSymPtr := EntTsym (StringType, CardNum [p1]);
+                     STab [SaveSymPtr].SLength := i + 1;
+                  end
+                  else begin
+                     ErrorMsg (100, ColNo [p2]);
+                     SaveSymPtr := StringPtr;
+                  end;
+               end
+               else begin
+                  ErrorMsg (100, ColNo [p2]);
+                  SaveSymPtr := StringPtr;
+               end;
+            end
+            else begin
+               ErrorMsg (1, ColNo [p1]);
+               SaveSymPtr := IntegerPtr;
+            end;
+         end;
+
+      end  (* case *);
+
+      TypeSize (SaveSymPtr);
+      SubType [p1] := SaveSymPtr;
+      TypeType [p1] := PrimType (SaveSymPtr);
+      NameofType[p1] := 0;
+
+   end  (* ChkTypeDefn *);
+
+
+   procedure TypName;
+      (* enter type name  *)
+
+   var
+      i,
+      id,
+      symp : integer ;
+
+   begin
+      id := val [p1];
+      symp := SubType [p2];
+      i := FindSymbol (id);
+      if i < ProcMark then begin
+         EntSymbol (id, symp, TypeNameDcl, CardNum [p1]);
+	 STab[SymPtr].STname := NameofType[p2];
+      end
+      else if STab [i].SKind = TypeNameDcl then begin
+         if GetFlag (i, ImplicitFlag) then begin
+            ClearFlag (i, ImplicitFlag);
+            ClearFlag (i, ForwardFlag);
+            STab [i].SType := symp;
+	    STab[i].STname := NameofType[p2];
+         end
+         else begin
+            ErrorMsg (102, ColNo [p1]);
+         end;
+      end
+      else begin
+         ErrorMsg (102, ColNo [p2]);
+      end  (* if *);
+   end  (* TypName *);
+
+
+   procedure CheckType;
+      (* var(p) specifies identifier          *)
+      (* identifier must be a type            *)
+      (* set Type [p] to SytType.             *)
+      (* set val[p] to point to symbol table  *)
+      (* set to appropriate vectors           *)
+
+   var
+      i: integer;
+      s: integer;
+
+   begin
+      i := FindSymbol (val [p]);
+      s := i;	
+      if i = -1 then begin
+         ErrorMsg (2, ColNo [p]);
+         i := IntegerPtr;
+      end
+      else if STab [i].SKind <> TypeNameDcl then begin
+         ErrorMsg (2, ColNo [p]);
+         i := IntegerPtr;
+      end
+      else begin
+         i := STab [i].SType;
+         if STab [i].SKind <> TypeDcl then begin
+            ErrorMsg (2, ColNo [p]); (* not a type *)
+            i := IntegerPtr;
+         end;
+      end  (* if *);
+      SubType [p] := i;
+      TypeType [p] := PrimType (i);
+      NameofType[p] := s;
+   end  (* CheckType *);
+
+
+   (*********************************************************************)
+   (*                                                                   *)
+   (*    procedures                                                     *)
+   (*                                                                   *)
+   (*********************************************************************)
+
+   procedure CheckForwardDefn
+      (p: integer);
+      (* enter as forward definition*)
+
+   begin
+      if val [p] = ExternalString then begin
+         if STab [ProcIndex].SLevel = 1 then begin
+            SetFlag (ProcIndex, ExternalFlag);
+         end
+         else begin
+            ErrorMsg (122, -1);
+         end;
+      end
+      else if val [p] = ForwardString then begin
+         SetFlag (ProcIndex, ForwardFlag);
+      end
+      else begin
+         ErrorMsg (123, ColNo [p]);
+      end;
+      if STab [ProcIndex].SKind = ProcDcl then begin
+         STab [ProcIndex].SKind := ForwardProcDcl;
+      end
+      else begin
+         if STab [ProcIndex].SKind = FuncDcl then begin
+            STab [ProcIndex].SKind := ForwardFuncDcl;
+         end
+         else begin
+            ErrorMsg (102, -1); (* duplicate declaration *)
+         end  (* if *);
+      end  (* if *);
+   end  (* CheckForwardDefn *);
+
+   function ProcDuplicate
+       (id: integer;
+       kind: KINDTYPE;
+       result: SymbolTableRange;
+       p2: ParseStackRange)
+       : SymbolTableRange;
+      (* checks if proc matchs forward dcl *)
+
+   label
+      100;
+
+   var
+      i,
+      j,
+      k,
+      proc,
+      count: integer;
+
+   begin
+      ProcDuplicate := 0;
+      if id = 0 then begin
+         goto 100;
+      end  (* if *);
+
+      proc := FindSymbol (id);
+      count := cnt [p2];
+
+      if proc >= ProcMark then begin
+         if (STab [proc].SKind <> ForwardProcDcl) and
+            (STab [proc].SKind <> ForwardFuncDcl) then begin
+            ErrorMsg (102, -1); (* duplicate declaration *)
+            goto 100;
+         end  (* if *);
+         if STab [proc].SKind = ForwardProcDcl then begin
+            if kind <> ProcDcl then begin
+               ErrorMsg (101, -1); (* conflict with entry declare *)
+            end  (* if *);
+         end
+         else begin
+            if kind <> FuncDcl then begin
+               ErrorMsg (101, -1); (* conflict with entry declare *)
+            end  (* if *);
+         end  (* if *);
+         i := STab [proc].SType;
+         if (result <> STab [i].SResult) or
+            ((count <> 0) and (count <> STab [i].SParmCnt))
+         then begin
+            ErrorMsg (101, -1); (* conflict with entry declare *)
+         end  (* if *);
+         if LevelNo <> STab [proc].SLevel then begin
+            ErrorMsg (6, -1); (* illegal scope level *)
+         end  (* if *);
+
+         (* cancel info in symbol table for forward dcl *)
+         (* and check parameters match                  *)
+
+         ClearFlag (proc, ForwardFlag);
+         NameSpace [StringSemantics (id)].symbol := STab [proc].SLink;
+         if count = STab [i].SParmCnt then begin
+            j := STab [i].SNext;
+            for k := StartCnt [p2] + 1 to StartCnt [p2] + count do begin
+               if (STab [j].SName <> ParmId [k]) or
+                  (STab [j].SType <> ParmType[k]) or
+                  (STab [j].SSubClass <> ord (ParmPassedBy [k]))
+               then begin
+                  ErrorMsg (101, -1); (* conflict with entry declare *)
+               end;
+               j := STab [j].SNext;
+            end;
+         end
+         else if count = 0 then begin
+            count := STab [i].SParmCnt;
+            cnt [p2] := count;
+            j := STab [i].SNext;
+            for k := 1 to count do begin
+               ParmPtrIncr;
+               ParmId [ParmPtr] := STab [j].SName;
+               ParmType [ParmPtr] := STab [j].SType;
+               ParmPassedBy [ParmPtr] := chr (STab [j].SSubClass);
+	       ParmNameofType [ParmPtr] := STab[j].STname;
+               j := STab [j].SNext;
+            end;
+         end;
+	 ProcDuplicate := proc;
+      end  (* if *);
+
+      100:  (* return label *)
+
+   end (*ProcDuplicate *);
+
+
+   procedure DclParms
+      (p: ParseStackRange);
+
+   var
+      i,
+      id,
+      parm_kind: integer;
+      typ: SymbolTableRange;
+
+   begin
+      for i := StartCnt [p] + 1 to StartCnt [p] + cnt [p] do begin
+         id := ParmId [i];
+         typ := ParmType [i];
+         if not duplicate (id, -1) then begin
+            if STab [typ].SType = PointerType then begin
+               case STab [STab [typ].SDomain].SType of
+                  FunctionType: begin
+                     parm_kind := FuncParmDcl;
+                  end;
+                  ProcedureType: begin
+                     parm_kind := ProcParmDcl;
+                  end;
+                  otherwise begin
+                     parm_kind := ParmDcl;
+                  end;
+               end;
+            end
+            else begin
+               parm_kind := ParmDcl;
+            end;
+            EntSymbol (id, typ, parm_kind, CardNum [p]);
+	    STab[SymPtr].STname := ParmNameofType[i];
+            with STab [SymPtr] do begin
+               SClass := PARAM;
+               SSubClass := ord (ParmPassedBy [i]);
+               SParent := -1;
+            end;
+         end  (* if *);
+      end  (* for *);
+   end  (* DclParms *);
+
+
+   function DclProc
+      (p1,
+       p2: ParseStackRange;
+       kind: KINDTYPE;
+       result: SymbolTableRange):integer;
+
+   (* enter the procedure attributes into the symbol table *)
+
+   var
+      id: integer;
+      TypePtr : integer;
+      fwp: SymbolTableRange;
+   begin
+      id := val [p1];
+      fwp := ProcDuplicate (id, kind, result, p2);
+      EntSymbol(id, 0, kind, CardNum [p1]);	
+      with STab [SymPtr] do begin
+	 SOrder := fwp;
+         SType := SNext;
+         if LevelNo <= 1 then begin
+#ifdef PYRAMID_DOUBTFUL
+            SClass := SNULL;
+#else
+            SClass := EXTERN;
+#endif
+            SParent := -1;
+         end
+         else begin
+            SClass := FILESTATIC;
+            SParent := ProcIndex;
+         end;
+         SSubClass := UninitializedVar;
+      end;
+      upscope (p1);
+      if kind = ProcDcl then begin
+         EntSymbol (0, ProcedureType, TypeDcl, CardNum [p1]);
+      end
+      else begin
+         EntSymbol (0, FunctionType, TypeDcl, CardNum [p1]);
+      end;
+      with STab [SymPtr] do begin
+         SResult := result;
+         SParmCnt := cnt [p2];
+         SBlock := -1;
+      end;
+      TypePtr := SymPtr;
+      parct := cnt [p2];
+      SubType [p1] := result;
+      TypeType [p1] := PrimType (result);
+      NameofType [p1] := 0;
+      ReturnedType := TypeType [p1];
+      DclParms (p2);
+      DclProc := TypePtr;
+   end  (* DclProc *);
+
+
+function EntParameterList
+   (p1,
+    p2,
+    p3: ParseStackRange;
+    col: integer):
+   integer;
+
+var
+   i,
+   j,
+   id,
+   PassedBy: integer;
+   s: STRING;
+   typ: integer;
+   tnam:integer;
+
+procedure NewParm (id, typ, tnam, PassedBy: integer);
+begin
+   ParmPtrIncr;
+   ParmId [ParmPtr] := id;
+   ParmType [ParmPtr] := typ;
+   ParmNameofType [ParmPtr] := tnam;
+   ParmPassedBy [ParmPtr] := chr (PassedBy);
+end  (* NewParm *);
+
+begin
+   PassedBy := TypeType [p1];
+   typ := SubType[p3];	
+   tnam:= NameofType[p3];
+
+   for i := StartCnt [p2] + 1 to StartCnt [p2] + cnt [p2] do begin
+      NewParm (IdList [i], typ, tnam, PassedBy);
+      if typ = AnyPacLenPtr then begin
+         GetString (IdList [i], s [0]);
+         j := GetStringLength (IdList [i]);
+         s [j] := BUILDNAME_CHAR;
+         s [j + 1] := 'l';
+         s [j + 2] := 'e';
+         s [j + 3] := 'n';
+         s [j + 4] := chr (0);
+         id := EnterString (s [0], i + 4);
+         AllocNameSpace (id);
+         NewParm (id, IntegerPtr, 0, ByValueParm);
+         end;
+      if (PassedBy = ByValueParm) and (FileInRec (typ) or
+				       IsFile (typ)) then
+	 ErrorMsg (137, col);
+   end;
+   if typ = AnyPacLenPtr then begin
+      EntParameterList := 2 * cnt [p2];
+   end
+   else begin
+      EntParameterList := cnt [p2];
+   end;
+end  (* EntParameterList *);
+
+
+procedure FormalProcType
+   (p1,
+    p2: ParseStackRange;
+    prim_type,
+    tnam,
+    res_typ: SymbolTableRange);
+
+var
+   SaveSymPtr: SymbolTableRange;
+
+begin
+   EntSymbol (0, prim_type, TypeDcl, CardNum [p1]);
+   with STab [SymPtr] do begin
+      STname := tnam;
+      SResult := res_typ;
+      SParmCnt := cnt [p2];
+      SBlock := -1;
+   end;
+   SaveSymPtr := SymPtr;
+   upscope (p1);
+   DclParms (p2);
+   PopScope (p1);
+   EntSymbol (0, PointerType, TypeDcl, CardNum [p1]);
+   STab [SymPtr].SDomain := SaveSymPtr;
+   TypeSize (SymPtr);
+   TypeType [p1] := SymPtr;
+end  (* FormalProcType *);
+
+
+function EntProcParm
+   (p1: ParseStackRange):
+   integer;
+
+var
+   i,
+   id: integer;
+   s: STRING;
+   SaveSymPtr: SymbolTableRange;
+
+begin
+   id := val [p1];
+   ParmPtrIncr;
+   ParmId [ParmPtr] := id;
+   ParmType [ParmPtr] := TypeType [p1];
+   ParmNameofType [ParmPtr] := 0;
+   ParmPassedBy [ParmPtr] := chr (ByValueParm);
+   if control ['x'] then
+   begin
+      GetString (id, s [0]);
+      i := GetStringLength (id);
+      s [i] := BUILDNAME_CHAR;
+      s [i + 1] := 's';
+      s [i + 2] := 's';
+      s [i + 3] := 'l';
+      s [i + 4] := chr (0);
+      id := EnterString (s [0], i + 4);
+      AllocNameSpace (id);
+      ParmPtrIncr;
+      ParmId [ParmPtr] := id;
+      ParmType [ParmPtr] := IntegerPtr;
+      ParmNameofType [ParmPtr] := 0;
+      ParmPassedBy [ParmPtr] := chr (ByValueParm);
+      EntProcParm := 2;
+   end
+   else
+      EntProcParm := 1;
+end  (* EntProcParm *);
+
+
+   (*********************************************************************)
+   (*                                                                   *)
+   (*    lookup  routines                                               *)
+   (*                                                                   *)
+   (*********************************************************************)
+
+   function IdLookup;
+      (* look up the identifier at p in the analysis stack in  *)
+      (* the symbol table and initialize certain stacks.       *)
+
+   var
+      i: integer;
+
+   begin
+      i := FindSymbol (val [p]);
+      if (i > -1) then begin
+         case (STab [i].SKind) of
+
+            ConDcl,
+            VarDcl,
+            ParmDcl,
+            RecordElementDcl: begin
+               val [p] := i;
+               SubType [p] := STab [i].SType;
+	       TypeType [p] := PrimType (SubType [p]);
+               IdLookup := i;
+            end;
+
+            FuncDcl,
+            ForwardFuncDcl: begin
+               val [p] := i;
+               SubType [p] := STab [STab [i].SType].SResult;
+	       TypeType [p] := PrimType (SubType [p]);
+               IdLookup := i;
+            end;
+
+            FuncParmDcl: begin
+               val [p] := i;
+               SubType [p] := STab [STab [STab [i].SType].SDomain].SResult;
+	       TypeType [p] := PrimType (SubType [p]);
+               IdLookup := i;
+            end;
+
+            ProcDcl,
+            ForwardProcDcl,
+            ProcParmDcl: begin
+               val [p] := i;
+               SubType [p] := VoidType;
+	       TypeType [p] := VoidType;
+               IdLookup := i;
+            end;
+
+            TypeNameDcl: begin
+               val [p] := i;
+               SubType [p] := VoidType;
+	       TypeType [p] := VoidType;
+               IdLookup := i;
+            end;
+
+            otherwise begin
+               val [p] := i;
+               SubType [p] := VoidType;
+	       TypeType [p] := VoidType;
+               IdLookup := i;
+            end;
+
+         end  (* case *);
+      end
+      else begin
+         ErrorMsg (3, ColNo [p]); (* not declared *)
+	 val [p] := -1;
+	 TypeType [p] := VoidType;
+         SubType [p] := VoidType;
+         IdLookup := -1;
+      end  (* if *);
+   end (*IdLookup *);
+
+
+   function QidLookup;
+      (* lookup the identifier at p2 in the symbol table *)
+      (* p1 points to the record *)
+
+   var
+      i: integer;
+
+   begin
+      if (STab [TypeType [p1]].SType <> RecordType) then begin
+         ErrorMsg (19, ColNo [p1]);
+	 TypeType [p2] := IntegerPtr;
+      end
+      else begin
+	 i := FindQSymbol (TypeType [p1], val [p2]);
+         if (i > -1) then begin
+            val [p2] := i;
+            SubType[p2] := STab [i].SType;
+	    TypeType [p2] := PrimType (SubType [p2]);
+            QidLookup := i;
+         end
+         else begin
+            ErrorMsg (3, ColNo [p2]); (* not declared *)
+	    TypeType [p2] := IntegerPtr;
+            QidLookup := -1;
+         end  (* if *);
+      end  (* if *);
+   end  (* QidLookup *);
+
+
+function FindIntset
+   : SymbolTableRange;
+
+var
+   i,
+   j: SymbolTableRange;
+
+begin
+   i := NameSpace [StringSemantics (IntsetIndex)].symbol;
+   j := STab [i].SType;
+   while STab [j].SType <> SetType do begin
+      i := STab [i].SLink;
+      j := STab [i].SType;
+   end;
+   FindIntset := j;
+end;
+
+
+procedure CheckCaseConst;
+
+var
+    cval,			(* Constant value *)
+    t1, t2,			(* Type values *)
+    i, j, p,
+    NodeIndex,
+    low, high : integer;	(* low, high value of Type *)
+
+begin
+    t1 := TagType [TagPtr];
+    low := STab [t1].SLowRange;
+    high := STab [t1].SHighRange;
+    p := StartCnt [p1];
+
+    for i := 1 to cnt [p1] do begin
+	t2 := ExpStype [p];
+	if not CompatibleTypes(PrimType (t1), PrimType (t2)) then
+	    ErrorMsg (1, ExpColNo [p])
+	else begin
+	    NodeIndex := ExpVal [p];
+	    cval := ConstExp(NodeIndex);
+	    if not IsPrimConstant(NodeIndex) then
+	       NameofConst [p1] := GenConstName (cval);
+	    if (cval < low) or (cval > high) then
+	        ErrorMsg (135, ExpColNo [p]);
+	    for j := StartConst [TagPtr] + 1 to ConstPtr do
+	        if (cval = ConstVal [j]) then
+		    ErrorMsg (131, ExpColNo [p]);
+	    IncrConstPtr;
+	    ConstVal [ConstPtr] := cval;
+	    end;
+        p := p + 2;
+        end;
+end;

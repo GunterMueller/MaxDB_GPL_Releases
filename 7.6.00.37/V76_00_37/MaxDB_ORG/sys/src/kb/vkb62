@@ -1,0 +1,1320 @@
+/****************************************************************************
+  module      : vkb62
+  author      : JuergenA
+  responsible : UweH
+  special area: Logging
+  see also    :
+  description :
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+*****************************************************************************/
+ 
+.tt 1 $SAP$LiveCache$VKB62$
+.tt 3 $UweH$KB_inv_link_trigger_handling$2000-01-10$
+ 
+Module  : KB_inv_link_trigger_handling
+ 
+Define  :
+ 
+        PROCEDURE
+              k62CallCatalogCacheTrigger (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+        PROCEDURE
+              k62drop_linkfile (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62late_unique_check (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62link_handling (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+        PROCEDURE
+              k62last_multi_inv_st (
+                    VAR stack_desc : tgg00_StackDesc;
+                    first_st    : integer;
+                    VAR last_st : integer);
+ 
+        PROCEDURE
+              k62linkfile_create (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62one_trigger_handling (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec;
+                    triggerNo   : integer);
+ 
+        PROCEDURE
+              k62prepare_late_unique_check (
+                    VAR t       : tgg00_TransContext;
+                    VAR inv_id  : tgg00_FileId;
+                    VAR inv_key : tgg00_Lkey);
+ 
+        PROCEDURE
+              k62return_trigger (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62trigger_handling (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+.CM *-END-* define --------------------------------------
+ 
+Use     :
+ 
+        FROM
+              SQLManager : vak101;
+ 
+        PROCEDURE
+              a101_CreateGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    tempFileType   : tgg00_TfnTemp);
+ 
+        PROCEDURE
+              a101_ResetGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    tempFileType   : tgg00_TfnTemp);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFiles(
+                    VAR trans      : tgg00_TransContext;
+                    fileType       : tgg00_TfnTemp(*ptocConst*);
+                    level          : tsp00_Int4(*ptocConst*);
+                    subLevel       : tsp00_Int2(*ptocConst*);
+                    VAR fileName   : tgg00_Filename);
+ 
+        PROCEDURE
+              a101_GetTempFileInstance(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_GetGroupedFileForFileId (
+                    VAR trans         : tgg00_TransContext;
+                    VAR fileId        : tgg00_FileId;
+                    tempFileType      : tgg00_TfnTemp;
+                    VAR logicalFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              CatalogWrapper : VAK103;
+ 
+        PROCEDURE
+              a103CallCatalogCacheDeleteTrigger(
+                    TaskId          : tsp00_TaskId;
+                    FuncIdx         : integer;
+                    VAR BeforeImage : tgg00_Rec;
+                    VAR e           : tgg00_BasisError);
+ 
+        PROCEDURE
+              a103CallCatalogCacheInsertTrigger(
+                    TaskId          : tsp00_TaskId;
+                    FuncIdx         : integer;
+                    VAR AfterImage  : tgg00_Rec);
+ 
+        PROCEDURE
+              a103CallCatalogCacheUpdateTrigger(
+                    TaskId          : tsp00_TaskId;
+                    FuncIdx         : integer;
+                    VAR BeforeImage : tgg00_Rec;
+                    VAR AfterImage  : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_get : VKB71;
+ 
+        PROCEDURE
+              k71trigger_qualification_test (
+                    VAR m       : tgg00_MessBlock;
+                    VAR new_rec : tgg00_Rec;
+                    VAR old_rec : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        PROCEDURE
+              b01filestate (
+                    VAR t         : tgg00_TransContext;
+                    VAR file_id   : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_3 : VBD03;
+ 
+        PROCEDURE
+              b03get_inv (
+                    VAR t              : tgg00_TransContext;
+                    VAR act_tree_id    : tgg00_FileId;
+                    VAR lk             : tgg00_Lkey;
+                    VAR rk             : tgg00_Lkey;
+                    VAR stop_rk        : tgg00_Lkey;
+                    VAR CurrentPrimKey : tgg00_Lkey;
+                    VAR bd_inv_info    : tgg00_BdInvSet;
+                    count_only         : boolean;
+                    wanted_lock        : tgg00_LockReqMode;
+                    VAR b              : tgg00_KeylistBuf;
+                    VAR primkeycnt     : tsp00_Int4;
+                    VAR ll             : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_7 : VBD07;
+ 
+        PROCEDURE
+              b07cadd_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR file_id     : tgg00_FileId;
+                    VAR b           : tgg00_Rec);
+ 
+        PROCEDURE
+              b07cnext_record (
+                    VAR t          : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    VAR rk         : tgg00_Lkey;
+                    VAR set_result : tgg00_BdSetResultRecord;
+                    VAR tree_pos   : tgg00_FilePos;
+                    VAR b          : tsp00_Buf);
+ 
+        PROCEDURE
+              b07crepl_record (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId;
+                    VAR b       : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              FileDir_Wrapper : vbd998;
+ 
+        FUNCTION
+              bd998GetExtendedTempFileType(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        PROCEDURE
+              g01int4incr (VAR int : tsp00_C4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04build_temp_tree_id (
+                    VAR curr : tgg00_FileId;
+                    VAR t : tgg00_TransContext);
+ 
+        PROCEDURE
+              g04index_tree_build (
+                    VAR file_id    : tgg00_FileId (*ptocConst*);
+                    VAR index_tree : tgg00_FileId;
+                    index_no       : tsp00_Int2);
+ 
+        PROCEDURE
+              g04locate_col (
+                    VAR st         : tgg00_StackEntry;
+                    rec_buf        : tgg00_RecPtr;
+                    VAR varcol_pos : tgg00_VarColPosList;
+                    VAR col_pos    : integer;
+                    VAR col_len    : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id     : tsp00_C6;
+                    mod_num    : tsp00_Int4;
+                    size       : tsp00_Int4;
+                    buf        : tsp00_MoveObjPtr;
+                    pos        : tsp00_Int4;
+                    length     : tsp00_Int4;
+                    fillchar   : char;
+                    VAR err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalUnicodeFill (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    fill_char      : tsp00_C2;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id     : tsp00_C6;
+                    mod_num    : tsp00_Int4;
+                    source_upb : tsp00_Int4;
+                    destin_upb : tsp00_Int4;
+                    source     : tsp00_MoveObjPtr;
+                    source_pos : tsp00_Int4;
+                    destin     : tsp00_MoveObjPtr;
+                    destin_pos : tsp00_Int4;
+                    length     : tsp00_Int4;
+                    VAR err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id     : tsp00_C6;
+                    mod_num    : tsp00_Int4;
+                    source_upb : tsp00_Int4;
+                    destin_upb : tsp00_Int4;
+                    source     : tsp00_MoveObjPtr;
+                    source_pos : tsp00_Int4;
+                    destin     : tsp00_MoveObjPtr;
+                    destin_pos : tsp00_Int4;
+                    length     : tsp00_Int4;
+                    VAR err    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-80 : VSP80;
+ 
+        PROCEDURE
+              s80uni_trans
+                    (src_ptr        : tsp00_MoveObjPtr;
+                    src_len         : tsp00_Int4;
+                    src_codeset     : tsp00_Int2;
+                    dest_ptr        : tsp00_MoveObjPtr;
+                    VAR dest_len    : tsp00_Int4;
+                    dest_codeset    : tsp00_Int2;
+                    trans_options   : tsp8_uni_opt_set;
+                    VAR rc          : tsp8_uni_error;
+                    VAR err_char_no : tsp00_Int4);
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname (*ptocSynonym const char**);
+                    int4     : tsp00_Int4);
+ 
+        PROCEDURE
+              t01messtype (
+                    debug        : tgg00_Debug;
+                    nam          : tsp00_Sname;
+                    mess_type    : tgg00_MessType);
+ 
+        PROCEDURE
+              t01stackentry (
+                    debug          : tgg00_Debug;
+                    VAR st         : tgg00_StackEntry;
+                    entry_index    : integer);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+ 
+Synonym :
+ 
+        PROCEDURE
+              b07cnext_record;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Specification:
+ 
+Procedure K62INV_HANDLING
+ 
+This procedure inserts or deletes the inversions of a record
+during normal processing, restart or rollback.  It requires that
+the tree id FILE_ID and the record key REC_KEY be specified.
+PART1 contains the column description for individual index
+columns and the multi-inv description for the combined index
+from several columns. OLD_REC contains the record with the
+original columns for DELETE and UPDATE and NEW_REC contains the
+record with the new columns for INSERT and UPDATE.
+MESS_TYPE indicates whether the record should be inserted, updated
+or deleted.
+ 
+Procedure K62LATE_UNIQUE_CHECK
+ 
+This is called, if an expression update effected at least one
+unique index containing an column to the left and the right of
+the expression. In this case the unique check cannot be
+made when a row is updated. The unique test instead is delayed
+until the update operation has been finished.
+To verify the unique constraint, the procedure uses the content
+of the temp files created by kb62prepare_late_unique_check.
+ 
+ 
+Procedure K62MULTI_INV_PARAM
+ 
+For multiple index, starting from the stack entry with
+the position FIRST_ST, the procedure assignes the number of the last
+stack entry to LAST_ST and the name of the tree id of the
+inversion file to INV_ID.
+ 
+ 
+Procedure K62UNIQUE_HANDLING
+ 
+This procedure checks whether there are still no entries present in
+the relevant invdex file for all unique inversions that must be
+newly inserted. In addition, a KEY_WRITE lock is set on every
+inversion key.
+ 
+ 
+Procedure KB62BUILD_TRIGGER_INFO
+ 
+Used once only in K62TRIGGER_HANDLING.
+ 
+ 
+Procedure KB62CHECKING_LATE_UNIQUE
+ 
+Verifies, that an index does not contain duplicate secondary
+keys. The secondary keys that have to be checked are stored
+in a temporary file created by an update execution.
+For each secondary key stored in the temporary file b03get_inv is
+called in order to count the number of keys of the list.
+If the number is greater
+than 1 e_duplicate_secondary_key is returned.
+ 
+ 
+Procedure KB62INV_ADD_DEL
+ 
+Adds an INV_KEY to the inversion list or deletes it from the
+inversion list.  K is the record key and INV_KEY is the value
+of the inversion field. In the case of a restart, B_OK is
+also sent if the inversion list does not exist, in the case of an
+'add' if the key is already present or in the case of a 'delete'
+if it is not found.
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+Description:
+.CM *-END-* description ---------------------------------
+***********************************************************
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+**********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_count_only = true;
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62CallCatalogCacheTrigger (
+            VAR m       : tgg00_MessBlock;
+            VAR old_rec : tgg00_Rec;
+            VAR new_rec : tgg00_Rec);
+ 
+BEGIN
+CASE m.mb_type OF
+    m_delete :
+        a103CallCatalogCacheDeleteTrigger(m.mb_trns^.trTaskId_gg00,
+              m.mb_qual^.mcachetrigger, old_rec, m.mb_trns^.trError_gg00);
+    m_update :
+        a103CallCatalogCacheUpdateTrigger(m.mb_trns^.trTaskId_gg00,
+              m.mb_qual^.mcachetrigger, old_rec, new_rec);
+    OTHERWISE
+        a103CallCatalogCacheInsertTrigger(m.mb_trns^.trTaskId_gg00,
+              m.mb_qual^.mcachetrigger, new_rec);
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62create_trigger_file (VAR m : tgg00_MessBlock);
+ 
+BEGIN
+WITH m.mb_qual^.mtrigger_info DO
+    BEGIN
+    tiqb_tree_id.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+    IF  hsCreateFile_egg00 in tiqb_tree_id.fileHandling_gg00
+    THEN
+        a101_ResetGroupedTempFile (m.mb_trns^, tiqb_tree_id,
+              bd998GetExtendedTempFileType (m.mb_trns^, tiqb_tree_id))
+    ELSE
+        (* PTS 1111445 E.Z. *)
+        BEGIN
+        a101_GetTempFileInstance (m.mb_trns^, tiqb_tree_id);
+        b01filestate (m.mb_trns^, tiqb_tree_id);
+        IF  m.mb_trns^.trError_gg00 = e_file_not_found
+        THEN
+            a101_ResetGroupedTempFile (m.mb_trns^, tiqb_tree_id,
+                  bd998GetExtendedTempFileType (m.mb_trns^, tiqb_tree_id))
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62drop_linkfile (VAR m : tgg00_MessBlock);
+ 
+VAR
+      init_err : tgg00_BasisError;
+ 
+BEGIN
+IF  bd998GetExtendedTempFileType (m.mb_trns^, m.mb_qual^.mlinktree) <> ttfnInto_egg00
+THEN
+    BEGIN
+    init_err := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFile (m.mb_trns^, m.mb_qual^.mlinktree);
+    m.mb_trns^.trError_gg00 := init_err
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62late_unique_check (VAR m : tgg00_MessBlock);
+ 
+VAR
+      col      : integer;
+      last_col : integer;
+      aux_err  : tgg00_BasisError;
+      inv_tree : tgg00_FileId;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+col := m.mb_qual^.mmult_pos;
+WHILE (m.mb_trns^.trError_gg00 = e_ok) AND
+      (col < m.mb_qual^.mmult_pos + m.mb_qual^.mmult_cnt) DO
+    BEGIN
+    m.mb_qual^.mst_addr := m.mb_st;
+    m.mb_qual^.mst_max  := m.mb_st_max;
+    k62last_multi_inv_st (m.mb_qual^.mstack_desc, col, last_col);
+    IF  (m.mb_st^[col].eop = op_late_asc_unique_check) OR
+        (m.mb_st^[col].eop = op_late_desc_unique_check)
+    THEN
+        BEGIN
+        g04index_tree_build (m.mb_qual^.mtree, inv_tree,
+              ord(m.mb_st^[col].ecol_tab [1]));
+        inv_tree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+        inv_tree.fileBdUse_gg00     := [ ];
+        kb62checking_late_unique (m, inv_tree)
+        END;
+    (*ENDIF*) 
+    col := last_col + 1
+    END;
+(*ENDWHILE*) 
+IF  m.mb_trns^.trError_gg00 <> e_ok
+THEN
+    BEGIN
+    aux_err := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFiles (m.mb_trns^, ttfnLateUniqueCheck_egg00,
+          -1, -1, m.mb_qual^.mtree.fileName_gg00);
+    m.mb_trns^.trError_gg00 := aux_err;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62link_handling (
+            VAR m       : tgg00_MessBlock;
+            VAR old_rec : tgg00_Rec;
+            VAR new_rec : tgg00_Rec);
+ 
+VAR
+      curr       : integer;
+      varcol_pos : tgg00_VarColPosList;
+      link_rec   : tgg00_Rec;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+varcol_pos.vpl_last := -1;
+SAPDB_PascalOverlappingMove ('VKB62 ',   1,    
+      sizeof(new_rec.buf), sizeof(link_rec.buf),
+      @new_rec.buf, 1, @link_rec.buf, 1,
+      cgg_rec_key_offset + new_rec.keylen, m.mb_trns^.trError_gg00);
+link_rec.len := link_rec.keylen + cgg_rec_key_offset;
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    WITH m, mb_qual^ DO
+        FOR curr := mlink_pos TO mlink_pos + mlink_cnt - 1 DO
+            IF  mb_st^[curr].eop_new_rec
+            THEN
+                kb62one_link_column (mb_st^[curr], varcol_pos,
+                      new_rec, link_rec, m.mb_trns^.trError_gg00)
+            ELSE
+                kb62one_link_column (mb_st^[curr], varcol_pos,
+                      old_rec, link_rec, m.mb_trns^.trError_gg00);
+            (*ENDIF*) 
+        (*ENDFOR*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    link_rec.recVarcolOffset_gg00 := link_rec.len -
+          cgg_rec_key_offset - link_rec.keylen;
+    link_rec.recVarcolCnt_gg00    := 0;
+    a101_GetTempFileInstance (m.mb_trns^, m.mb_qual^.mlinktree);
+    b07cadd_record (m.mb_trns^, m.mb_qual^.mlinktree, link_rec);
+    END;
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_duplicate_key
+THEN
+    BEGIN
+    a101_GetTempFileInstance (m.mb_trns^, m.mb_qual^.mlinktree);
+    b07crepl_record (m.mb_trns^, m.mb_qual^.mlinktree, link_rec);
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62last_multi_inv_st (
+            VAR stack_desc : tgg00_StackDesc;
+            first_st    : integer;
+            VAR last_st : integer);
+ 
+VAR
+      last_col_reached : boolean;
+ 
+BEGIN
+last_st          := first_st;
+last_col_reached := false;
+REPEAT
+    IF  last_st >= stack_desc.mmult_pos + stack_desc.mmult_cnt - 1
+    THEN
+        last_col_reached := true
+    ELSE
+        IF  stack_desc.mst_addr^[first_st ].ecol_tab [1] =
+            stack_desc.mst_addr^[last_st+1].ecol_tab [1]
+        THEN
+            last_st := last_st + 1
+        ELSE
+            last_col_reached := true
+        (*ENDIF*) 
+    (*ENDIF*) 
+UNTIL
+    last_col_reached
+(*ENDREPEAT*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62linkfile_create (VAR m : tgg00_MessBlock);
+ 
+BEGIN
+m.mb_qual^.mlinktree.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+a101_GetTempFileInstance (m.mb_trns^, m.mb_qual^.mlinktree);
+IF  hsCreateFile_egg00 in m.mb_qual^.mlinktree.fileHandling_gg00
+THEN
+    BEGIN
+    IF  (bd998GetExtendedTempFileType (m.mb_trns^, m.mb_qual^.mlinktree)
+        <> ttfnInto_egg00)
+    THEN
+        BEGIN
+        a101_ResetGroupedTempFile (m.mb_trns^, m.mb_qual^.mlinktree,
+              bd998GetExtendedTempFileType (m.mb_trns^, m.mb_qual^.mlinktree))
+        END
+    ELSE
+        b01filestate (m.mb_trns^, m.mb_qual^.mlinktree)
+    (*ENDIF*) 
+    END
+ELSE
+    b01filestate (m.mb_trns^, m.mb_qual^.mlinktree)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62prepare_late_unique_check (
+            VAR t       : tgg00_TransContext;
+            VAR inv_id  : tgg00_FileId;
+            VAR inv_key : tgg00_Lkey);
+ 
+VAR
+      late_tree : tgg00_FileId;
+      rec       : tgg00_Rec;
+ 
+BEGIN
+kb62late_check_tree_id (t, inv_id, late_tree);
+rec.keylen := inv_key.len;
+rec.recVarcolOffset_gg00 := 0;
+rec.recVarcolCnt_gg00    := 0;
+SAPDB_PascalMove ('VKB62 ',   2,    
+      sizeof (inv_key.k), sizeof (rec.buf),
+      @inv_key.k, 1,
+      @rec.buf, cgg_rec_key_offset + 1,
+      inv_key.len, t.trError_gg00);
+IF  t.trError_gg00 <> e_move_error
+THEN
+    BEGIN
+    rec.len := cgg_rec_key_offset + rec.keylen;
+    a101_GetTempFileInstance (t, late_tree);
+    b07cadd_record (t, late_tree, rec)
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_file_not_found
+THEN
+    BEGIN
+    a101_CreateGroupedTempFile (t, late_tree,
+          bd998GetExtendedTempFileType (t, late_tree));
+    IF  t.trError_gg00 = e_ok
+    THEN
+        b07cadd_record (t, late_tree, rec)
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62return_trigger (VAR m : tgg00_MessBlock);
+ 
+VAR
+      destroy_file : boolean;
+      init_err     : tgg00_BasisError;
+      res_tree     : tgg00_FileId;
+ 
+BEGIN
+WITH m.mb_qual^.mtrigger_info DO
+    BEGIN
+    destroy_file := true;
+    res_tree     := tiqb_tree_id;
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        IF  tiqb_key <> tiqb_init_key
+        THEN
+            BEGIN (* at least one row inserted into trigger file *)
+            destroy_file                 := false;
+            m.mb_type                    := m_return_result;
+            m.mb_type2                   := mm_trigger;
+            m.mb_struct                  := mbs_result;
+            res_tree.fileTriggerKey_gg00 := tiqb_key;
+            res_tree.fileResultSite_gg00 := cgg_zero_c2;
+            m.mb_qual^.mr_restree        := res_tree;
+            (*
+                  IF  m.mb_qual^.mstring_cnt = 0
+                  THEN
+                  m.mb_qual_len  :=
+                  MB_PART1_HEAD_MXGG00 + MB_PART1_RETURN_MXGG00;
+                  *)
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  destroy_file AND (hsCreateFile_egg00 in tiqb_tree_id.fileHandling_gg00)
+    THEN
+        BEGIN
+        init_err := m.mb_trns^.trError_gg00;
+        a101_DestroyGroupedTempFile (m.mb_trns^, res_tree);
+        m.mb_trns^.trError_gg00 := init_err
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62trigger_handling (
+            VAR m       : tgg00_MessBlock;
+            VAR old_rec : tgg00_Rec;
+            VAR new_rec : tgg00_Rec);
+ 
+VAR
+      idx : integer;
+ 
+BEGIN
+idx := 1;
+WHILE (idx <= m.mb_qual^.mtrigger_info.tiqb_trigger_count) AND
+      (m.mb_trns^.trError_gg00 = e_ok) DO
+    BEGIN
+    k62one_trigger_handling (m, old_rec, new_rec, idx);
+    idx := idx + 1;
+    END;
+(*ENDWHILE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k62one_trigger_handling (
+            VAR m       : tgg00_MessBlock;
+            VAR old_rec : tgg00_Rec;
+            VAR new_rec : tgg00_Rec;
+            triggerNo   : integer);
+ 
+VAR
+      aux_qual_pos : integer;
+      aux_qual_cnt : integer;
+ 
+BEGIN
+WITH m.mb_qual^.mtrigger_info, tiqb_trigger_info[triggerNo] DO
+    BEGIN
+&   ifdef trace
+    t01int4 (bi, 'triggerNo   ', triggerNo);
+    t01messtype (bi, 'tg_messType ', tg_messType);
+    t01messtype (bi, 'm.mb_type   ', m.mb_type);
+&   endif
+    IF  tg_messType = m.mb_type
+    THEN
+        BEGIN
+        IF  tg_qual_cnt > 0
+        THEN
+            BEGIN
+            aux_qual_pos         := m.mb_qual^.mqual_pos;
+            aux_qual_cnt         := m.mb_qual^.mqual_cnt;
+            m.mb_qual^.mqual_pos := tg_qual_pos;
+            m.mb_qual^.mqual_cnt := tg_qual_cnt;
+            k71trigger_qualification_test (m, new_rec, old_rec);
+            m.mb_qual^.mqual_pos := aux_qual_pos;
+            m.mb_qual^.mqual_cnt := aux_qual_cnt
+            END;
+        (*ENDIF*) 
+        IF  m.mb_trns^.trError_gg00 = e_ok
+        THEN
+            kb62build_trigger_info (m, old_rec, new_rec, tiqb_trigger_info[triggerNo])
+        ELSE
+            IF  m.mb_trns^.trError_gg00 = e_qual_violation
+            THEN
+                m.mb_trns^.trError_gg00 := e_ok;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62build_trigger_info (
+            VAR m            : tgg00_MessBlock;
+            VAR old_rec      : tgg00_Rec;
+            VAR new_rec      : tgg00_Rec;
+            VAR trigger_info : tgg00_TriggerInfo);
+ 
+CONST
+      c_is_old = 1;
+ 
+VAR
+      link           : tsp00_C2;
+      col            : integer;
+      i              : integer;
+      varcol_pos_old : tgg00_VarColPosList;
+      varcol_pos_new : tgg00_VarColPosList;
+ 
+      trigger_rec : RECORD
+            CASE integer OF
+                1 :
+                    (tg_len           : tsp00_Int2;
+                    tg_keylen         : tsp00_Int2);
+                2 :
+                    (tg_reckey_offset : ARRAY[1..cgg_rec_key_offset] OF char;
+                    tg_c4_key         : tsp00_C4;
+                    tg_tabid          : tgg00_Surrogate;
+                    tg_link           : tsp00_C2);
+                3 :
+                    (rec              : tgg00_Rec);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+m.mb_trns^.trError_gg00              := e_ok;
+IF  m.mb_qual^.mtrigger_info.tiqb_tree_id.fileRoot_gg00 = NIL_PAGE_NO_GG00
+THEN
+    kb62create_trigger_file (m);
+(*ENDIF*) 
+trigger_rec.rec.len                  := cgg_rec_key_offset + TriggerKeyLen_cgg04;
+trigger_rec.rec.keylen               := TriggerKeyLen_cgg04;
+trigger_rec.rec.recVarcolOffset_gg00 := trigger_rec.rec.len -
+      cgg_rec_key_offset - trigger_rec.rec.keylen;
+trigger_rec.rec.recVarcolCnt_gg00    := 0;
+g01int4incr (m.mb_qual^.mtrigger_info.tiqb_key);
+trigger_rec.tg_c4_key   := m.mb_qual^.mtrigger_info.tiqb_key;
+trigger_rec.tg_tabid    := m.mb_qual^.mtree.fileTabId_gg00;
+varcol_pos_new.vpl_last := -1; (* PTS 1115736 *)
+varcol_pos_old.vpl_last := -1;
+trigger_rec.tg_link     := cgg_zero_c2;
+CASE m.mb_type OF
+    m_delete :
+        link := cgg04_del_trigger_link;
+    m_update :
+        link := cgg04_upd_trigger_link;
+    OTHERWISE
+        link := cgg04_ins_trigger_link;
+    END;
+(*ENDCASE*) 
+IF  mi_internal in trigger_info.tg_misc
+THEN
+    link[2] := chr(ord(link[2]) + 10);
+(*ENDIF*) 
+col := trigger_info.tg_param_pos;
+i   := 1;
+WHILE (i <= trigger_info.tg_param_cnt)
+      AND (m.mb_trns^.trError_gg00 = e_ok) DO
+    BEGIN
+    IF  ord (m.mb_st^[col].ecol_tab [1]) = c_is_old
+    THEN
+        kb62one_trigger_column (m, old_rec, varcol_pos_old (* PTS 1115736 *),
+              col, trigger_rec.rec)
+    ELSE
+        kb62one_trigger_column (m, new_rec, varcol_pos_new (* PTS 1115736 *),
+              col, trigger_rec.rec);
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_buffer_limit
+    THEN
+        BEGIN
+        b07cadd_record (m.mb_trns^,
+              m.mb_qual^.mtrigger_info.tiqb_tree_id, trigger_rec.rec);
+        trigger_rec.rec.len := cgg_rec_key_offset + TriggerKeyLen_cgg04;
+        g01int4incr (m.mb_qual^.mtrigger_info.tiqb_key);
+        trigger_rec.tg_c4_key := m.mb_qual^.mtrigger_info.tiqb_key;
+        END
+    ELSE
+        BEGIN
+        col := col + 1;
+        i   := i   + 1
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    IF  (m.mb_type = m_update) AND (trigger_info.tg_updated_set_size > 0)
+    THEN
+        BEGIN
+        IF  trigger_rec.rec.len + trigger_info.tg_updated_set_size > MAX_RECLEN_GG00
+        THEN
+            BEGIN
+            b07cadd_record (m.mb_trns^,
+                  m.mb_qual^.mtrigger_info.tiqb_tree_id, trigger_rec.rec);
+            trigger_rec.rec.len := cgg_rec_key_offset + TriggerKeyLen_cgg04;
+            g01int4incr (m.mb_qual^.mtrigger_info.tiqb_key);
+            trigger_rec.tg_c4_key := m.mb_qual^.mtrigger_info.tiqb_key;
+            END;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VKB62 ',   3,    
+              sizeof (trigger_info.tg_updated_set), sizeof(trigger_rec),
+              @trigger_info.tg_updated_set, 1, @trigger_rec.rec.recBuf_gg00, trigger_rec.rec.len + 1,
+              trigger_info.tg_updated_set_size,  m.mb_trns^.trError_gg00);
+        trigger_rec.rec.len := trigger_rec.rec.len + trigger_info.tg_updated_set_size;
+        END;
+    (*ENDIF*) 
+    IF  trigger_rec.rec.len MOD 2 = 1
+    THEN (* PTS 1111844, ensure 2 byte alignment *)
+        trigger_rec.rec.len := trigger_rec.rec.len + 1;
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        trigger_rec.tg_link := link;
+        b07cadd_record (m.mb_trns^,
+              m.mb_qual^.mtrigger_info.tiqb_tree_id, trigger_rec.rec)
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62checking_late_unique (
+            VAR m        : tgg00_MessBlock;
+            VAR inv_tree : tgg00_FileId);
+ 
+VAR
+      last_rec_buf : boolean;
+      aux_error    : tgg00_BasisError;
+      bd_inv_info  : tgg00_BdInvSet;
+      inv_keylen   : tsp00_IntMapC2;
+      curr_len     : tsp00_IntMapC2;
+      rec_pos      : integer;
+      rec_len      : integer;
+      primkeycount : tsp00_Int4;
+      listlen      : tsp00_Int4;
+      tree_pos     : tgg00_FilePos;
+      inv_key      : tgg00_Lkey;
+      late_tree    : tgg00_FileId;
+      set_result   : tgg00_BdSetResultRecord;
+      zerokey      : tgg00_Lkey;
+      b            : tsp00_Buf;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+kb62late_check_tree_id (m.mb_trns^, inv_tree, late_tree);
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    a101_GetTempFileInstance (m.mb_trns^, late_tree);
+    b01filestate (m.mb_trns^, late_tree);
+&   ifdef TRACE
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        b01filestate (m.mb_trns^, inv_tree);
+&   endif
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        WITH set_result DO
+            BEGIN
+            bd_key_check_len:= 0;
+            bd_max_rec_cnt  := MAX_INT2_SP00;
+            bd_max_fill_len := BUF_MXSP00;
+            bd_next         := false;
+            END;
+        (*ENDWITH*) 
+        rec_pos              := 1;
+        rec_len              := 0;
+        inv_key.len          := 0;
+        tree_pos.tpsPno_gg00 := NIL_PAGE_NO_GG00;
+        last_rec_buf         := false;
+        REPEAT
+            IF  rec_pos >= rec_len
+            THEN
+                BEGIN
+                rec_pos := 0;
+                IF  last_rec_buf
+                THEN
+                    m.mb_trns^.trError_gg00 := e_no_next_record
+                ELSE
+                    b07cnext_record (m.mb_trns^, late_tree,
+                          inv_key, set_result, tree_pos, b);
+                (*ENDIF*) 
+                IF  (m.mb_trns^.trError_gg00 = e_ok)            OR
+                    (m.mb_trns^.trError_gg00 = e_key_not_found) OR
+                    (m.mb_trns^.trError_gg00 = e_buffer_limit)
+                THEN
+                    BEGIN
+                    IF  m.mb_trns^.trError_gg00 <> e_buffer_limit
+                    THEN
+                        last_rec_buf := true;
+                    (*ENDIF*) 
+                    rec_len           := set_result.bd_fill_len;
+                    m.mb_trns^.trError_gg00 := e_ok
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  m.mb_trns^.trError_gg00 = e_ok
+            THEN
+                BEGIN
+                curr_len  .mapC2_sp00 [1] := b [rec_pos+1];
+                curr_len  .mapC2_sp00 [2] := b [rec_pos+2];
+                inv_keylen.mapC2_sp00 [1] := b [rec_pos+3];
+                inv_keylen.mapC2_sp00 [2] := b [rec_pos+4];
+                inv_key.len           := inv_keylen.mapInt_sp00;
+                SAPDB_PascalMove ('VKB62 ',   4,    
+                      sizeof (b), sizeof (inv_key.k),
+                      @b, cgg_rec_key_offset + rec_pos + 1,
+                      @inv_key.k, 1, inv_key.len,
+                      m.mb_trns^.trError_gg00);
+                zerokey.len := 0;
+                IF  m.mb_trns^.trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    bd_inv_info := [incl_first];
+                    b03get_inv (m.mb_trns^, inv_tree, inv_key,
+                          zerokey, zerokey, zerokey, bd_inv_info,
+                          c_count_only, lckFree_egg00,
+                          m.mb_data^.mbp_4kbuf, primkeycount, listlen)
+                    END;
+                (*ENDIF*) 
+                IF  m.mb_trns^.trError_gg00 = e_ok
+                THEN
+                    IF  primkeycount > 1
+                    THEN
+                        m.mb_trns^.trError_gg00 := e_duplicate_invkey;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                rec_pos := rec_pos + curr_len.mapInt_sp00
+                END
+            (*ENDIF*) 
+        UNTIL
+            m.mb_trns^.trError_gg00 <> e_ok;
+        (*ENDREPEAT*) 
+        IF  m.mb_trns^.trError_gg00 = e_no_next_record
+        THEN
+            aux_error := e_ok
+        ELSE
+            aux_error := m.mb_trns^.trError_gg00;
+        (*ENDIF*) 
+        a101_DestroyGroupedTempFile (m.mb_trns^, late_tree);
+        m.mb_trns^.trError_gg00 := aux_error
+        END
+    ELSE
+        IF  m.mb_trns^.trError_gg00 = e_file_not_found
+        THEN
+            m.mb_trns^.trError_gg00 := e_ok
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62late_check_tree_id (
+            VAR t        : tgg00_TransContext;
+            VAR inv_tree : tgg00_FileId;
+            VAR tree     : tgg00_FileId);
+ 
+BEGIN
+(* PTS 1131843 M.Ki. *)
+g04build_temp_tree_id (tree, t);
+a101_GetGroupedFileForFileId (t, inv_tree, ttfnLateUniqueCheck_egg00,
+      tree);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62one_link_column (
+            st_entry       : tgg00_StackEntry;
+            VAR varcol_pos : tgg00_VarColPosList;
+            VAR rec        : tgg00_Rec;
+            VAR link_rec   : tgg00_Rec;
+            VAR move_error : tgg00_BasisError);
+ 
+VAR
+      col_pos : integer;
+      col_len : integer;
+      fix_len : integer;
+ 
+BEGIN
+g04locate_col (st_entry, @rec.recBuf_gg00[1], varcol_pos,
+      col_pos, col_len);
+IF  col_len > 0
+THEN
+    IF  rec.buf [col_pos] = csp_undef_byte
+    THEN
+        col_len := 0;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  col_len > 0
+THEN
+    SAPDB_PascalOverlappingMove ('VKB62 ',   5,    
+          sizeof(rec.buf), sizeof(link_rec.buf),
+          @rec.buf, col_pos, @link_rec.buf, link_rec.len + 1, col_len,
+          move_error)
+ELSE
+    BEGIN
+    col_len := 1;
+    link_rec.buf [link_rec.len + 1] := csp_undef_byte
+    END;
+(*ENDIF*) 
+fix_len := st_entry.elen_var;
+IF  col_len <> fix_len
+THEN
+    IF  col_len < fix_len
+    THEN
+        IF  link_rec.buf [link_rec.len + 1] = csp_undef_byte
+        THEN
+            SAPDB_PascalFill ('VKB62 ',   6,    
+                  sizeof(link_rec.buf),
+                  @link_rec.buf, link_rec.len + col_len + 1,
+                  fix_len - col_len, chr(0), move_error)
+        ELSE
+            IF  link_rec.buf [link_rec.len + 1] = csp_unicode_def_byte
+            THEN
+                SAPDB_PascalUnicodeFill ('VKB62 ',   7,    
+                      sizeof (link_rec.buf),
+                      @link_rec.buf, link_rec.len + col_len + 1,
+                      fix_len - col_len, csp_unicode_blank, move_error)
+            ELSE
+                SAPDB_PascalFill ('VKB62 ',   8,    
+                      sizeof (link_rec.buf),
+                      @link_rec.buf, link_rec.len + col_len + 1,
+                      fix_len - col_len, link_rec.buf [link_rec.len+1],
+                      move_error);
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+link_rec.len := link_rec.len + fix_len
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb62one_trigger_column (
+            VAR m             : tgg00_MessBlock;
+            VAR rec           : tgg00_Rec;
+            VAR varcol_pos    : tgg00_VarColPosList;
+            stack_index       : integer;
+            VAR trigger_rec   : tgg00_Rec);
+ 
+VAR
+      e           : tsp8_uni_error;
+      err_char_no : tsp00_Int4;
+      col_pos     : integer;
+      col_len     : tsp00_Int4;
+      fix_len     : tsp00_Int4;
+      st_ptr      : tgg00_StEntryAddr;
+ 
+BEGIN
+st_ptr := @m.mb_st^[stack_index];
+&ifdef trace
+t01stackentry (bi, st_ptr^, stack_index);
+&endif
+IF  st_ptr^.eop = op_translate
+THEN (* translation from ascii to unicode *)
+    fix_len := st_ptr^.elen_var * 2 - 1
+ELSE
+    fix_len := st_ptr^.elen_var;
+(*ENDIF*) 
+IF  trigger_rec.len + fix_len > MAX_RECLEN_GG00
+THEN
+    m.mb_trns^.trError_gg00 := e_buffer_limit
+ELSE
+    BEGIN
+    g04locate_col (st_ptr^, @rec.recBuf_gg00[1], varcol_pos,
+          col_pos, col_len);
+    IF  col_len > 0
+    THEN
+        IF  rec.buf [col_pos] = csp_undef_byte
+        THEN
+            col_len := 0;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  col_len > 0
+    THEN
+        BEGIN
+        IF  st_ptr^.eop = op_translate
+        THEN
+            BEGIN (* translate from ascii to unicode *)
+            trigger_rec.buf[trigger_rec.len+1] := csp_unicode_def_byte;
+            fix_len := sizeof (trigger_rec) - trigger_rec.len - 1;
+            s80uni_trans (@rec.buf[col_pos+1], col_len - 1,
+                  csp_ascii, @trigger_rec.buf[trigger_rec.len+2],
+                  fix_len, csp_unicode, [], e, err_char_no);
+            col_len := fix_len + 1
+            END
+        ELSE
+            SAPDB_PascalOverlappingMove ('VKB62 ',   9,    
+                  sizeof(rec.buf), sizeof(trigger_rec.buf),
+                  @rec.buf, col_pos, @trigger_rec.buf,
+                  trigger_rec.len + 1, col_len, m.mb_trns^.trError_gg00)
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        col_len := 1;
+        trigger_rec.buf [trigger_rec.len + 1] := csp_undef_byte
+        END;
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        fix_len := st_ptr^.elen_var;
+        IF  st_ptr^.eop = op_translate
+        THEN (* translation from ascii to unicode *)
+            fix_len := fix_len * 2 - 1;
+        (*ENDIF*) 
+        IF  col_len <> fix_len
+        THEN
+            IF  col_len < fix_len
+            THEN
+                CASE trigger_rec.buf [trigger_rec.len + 1] OF
+                    csp_undef_byte :
+                        SAPDB_PascalFill ('VKB62 ',  10,    
+                              sizeof(trigger_rec.buf), @trigger_rec.buf,
+                              trigger_rec.len + 1 + col_len,
+                              fix_len - col_len, chr(0), m.mb_trns^.trError_gg00);
+                    csp_unicode_def_byte :
+                        SAPDB_PascalUnicodeFill ('VKB62 ',  11,    
+                              sizeof(trigger_rec.buf), @trigger_rec.buf,
+                              trigger_rec.len + col_len + 1,
+                              fix_len - col_len, csp_unicode_blank,
+                              m.mb_trns^.trError_gg00);
+                    OTHERWISE
+                        SAPDB_PascalFill ('VKB62 ',  12,    
+                              sizeof(trigger_rec.buf),
+                              @trigger_rec.buf,
+                              trigger_rec.len + 1 + col_len,
+                              fix_len - col_len,
+                              trigger_rec.buf [trigger_rec.len + 1],
+                              m.mb_trns^.trError_gg00);
+                    END;
+                (*ENDCASE*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        trigger_rec.len := trigger_rec.len + fix_len
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

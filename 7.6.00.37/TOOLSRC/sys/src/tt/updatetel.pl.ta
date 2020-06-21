@@ -1,0 +1,85 @@
+
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+use Env;
+use Getopt::Std;
+
+if (!getopts ('hP:c:') or ($opt_h) ) {
+  print "usage: updatetel [-c p4client] [-P p4pwd]\n";
+  exit 1;
+}
+
+my $P4Exec = "p4";
+$P4Exec = "$P4Exec -P $opt_P " if ($opt_P); 
+$P4Exec = "$P4Exec -c $opt_c " if ($opt_c); 
+
+open (IN, "<\\\\pwww\\InetPub\\wwwroot\\Mitarbeiter\\people.csv") || die "can't open people.csv\n";
+my @People = <IN>;
+close (IN);
+
+UpdateUserData ("tel.pl.tt", @People);
+
+my @NewPeople = map {
+    @cols = split ',', $_; 
+    $cols[0] =~ s/^"(.*)"/$1/;
+    $_ = "$cols[0], $cols[2]\n";  
+} @People;
+
+UpdateUserData ("duser.pm.tt", @NewPeople);
+
+sub UpdateUserData {
+
+    my ($file, @people) = @_;
+    
+    system("$P4Exec  sync $ENV{DEPOT}/.../tt/$file");
+
+    open (PIPE, "$P4Exec -s edit $ENV{DEPOT}/.../tt/$file |") || die "can't open pipe for edit\n"; 
+    while (<PIPE>) {
+        die "error at edit $file: $_\n" if ( m/error:/ );
+    }
+
+    open (IN, "<$SRC/tt/$file") || die "can't open $file for read\n";
+    my @Tel = <IN>;
+    close (IN);
+
+    open (OUT, ">$SRC/tt/$file") || die "can't open $file for write\n";
+    foreach $Line ( @Tel ) {
+        print OUT $Line;
+        last if ( $Line =~ /__DATA__/ );
+    }
+    foreach $Line ( @people ) {
+        print OUT $Line;
+    }
+    close (OUT);
+
+    system("$P4Exec revert -a $ENV{DEPOT}/.../tt/$file");
+
+    open (PIPE, "$P4Exec -s opened $ENV{DEPOT}/.../tt/$file |") || die "can't open pipe for opened info\n"; 
+    while (<PIPE>) {
+        print "submit $_\n" if ( m/error:/ );
+    }
+
+    @ARGV = ("-d 'recreate $file from people.conf",  "$file");
+    do "$TOOL/bin/p4put$TOOLEXT";
+    if ( $@ ) { die "Error while executing p4put:\n", "$@"; exit }
+}
+
+
+

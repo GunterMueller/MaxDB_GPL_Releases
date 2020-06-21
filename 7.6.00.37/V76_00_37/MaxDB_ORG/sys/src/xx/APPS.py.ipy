@@ -1,0 +1,229 @@
+#!/usr/bin/env python
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2003-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+import sys
+import os
+import string
+import sdb.sql
+import sdb.dbm
+
+def install (session, options):
+    """Installing APPS
+    """
+
+    instroot = getInstroot (options.db)
+    sapuser = getSAPUser (options.sapuser)
+
+    loaderCmd (session, 'INSTALLATION ON')
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    stopIfSqlNotErr (session, -6006,
+        'CREATE USER %s PASSWORD %s DBA NOT EXCLUSIVE' %
+        (sapuser[0], sapuser[1]))
+
+    sqlOK (session, "COMMIT")
+
+    allPackages = []
+
+    rc = sqlRC (session,
+        """SELECT "VALUE"
+        FROM SYSDD.ACTIVECONFIGURATION
+        WHERE PARAMETERNAME = 'INSTANCE_TYPE'
+        AND "VALUE" = 'LVC'""")
+
+    if rc == 0:
+        allPackages.append ('dbpinstall')
+        allPackages.append ('SAPAPO')
+        allPackages.append ('SAPATP')
+        allPackages.append ('SAPRPM')
+        allPackages.append ('SAPTS')
+        allPackages.append ('SAPREP')
+        allPackages.append ('SAPSEA')
+        allPackages.append ('SAPSIM')
+        allPackages.append ('SAPLCK')
+        allPackages.append ('SAPTEST')
+
+    rc = sqlRC (session,
+        """SELECT "VALUE"
+        FROM SYSDD.ACTIVECONFIGURATION
+        WHERE PARAMETERNAME = 'INSTANCE_TYPE'
+        AND "VALUE" = 'BW'""")
+
+    if rc == 0:
+        allPackages.append ('dbpinstall')
+        allPackages.append ('sphsapdb')
+
+    loaderCmd (session, 'USE USER %s %s' % (sapuser[0], sapuser[1]))
+
+    delPackages = getExistingPackages (options.db, sapuser[0], sapuser[1])
+    print '  Droping Procedures'
+    print '    %s' % string.upper (sapuser[0])
+
+    for package in delPackages:
+        print '      ' + package
+        dropPackage (session, package)
+
+    print '  Creating Procedures'
+    print '    %s' % string.upper (sapuser[0])
+    for package in allPackages:
+
+        package = string.strip (package)
+        (lstFilename, libFilename) = getFilename (instroot, package)
+
+        if lstFilename:
+            print '      ' + package
+
+            createPackage (session, package, libFilename)
+
+            for proc in open (lstFilename, 'rt').readlines ():
+                proc = string.strip (proc)
+
+                if re.match ('^#', proc):
+                    continue
+
+                if re.match ('^\W*$', proc):
+                    continue
+
+                print '        ' + re.match ('^(\w+)', proc).group (1)
+                createDBProc (session, package, proc)
+
+    sqlOK (session, "COMMIT")
+    switchToDefaultUser (session, options)
+
+def getSAPUser (usrpwd):
+    return re.split (',', usrpwd)
+
+def getInstroot (dbname):
+    if os.name == 'posix' and os.uname()[0] == 'OSF1':
+        return re.sub (os.sep + '\w+' + os.sep + '[\w\.]+$', '', sys.argv[0])
+
+    for line in re.split ('\n', sdb.dbm.DBM ('', dbname).cmd ('dbm_version')):
+        line = string.strip (line)
+
+        match = re.match ('^INSTROOT\s+=\s+(\S.*)$', line)
+        if match:
+            return match.group (1)
+
+    raise 'Could not parse INSTROOT from dbm output'
+
+def getDllExt ():
+    if os.name != 'posix':
+        return '.dll'
+
+    if os.uname()[0] == 'HP-UX' and os.uname()[4] != 'ia64':
+        return '.sl'
+
+    return '.so'
+
+def getFilename (instroot, package):
+    ext = getDllExt ()
+    libdirs = [
+        ('sap', ''),
+        ('lib', ''),
+        ('lib', 'lib64'),
+        ('pgm', ''),
+        ('pgm', 'pgm64'),
+    ]
+    for prefix in ['', 'lib']:
+        package = prefix + package
+        lstFilename = os.path.join (instroot, 'sap', package + '.lst')
+        if os.access (lstFilename, os.R_OK):
+            for dir1, dir2 in libdirs:
+                libFilename = os.path.join (instroot, dir1, dir2, package + ext)
+                if os.access (libFilename, os.R_OK):
+                    return (lstFilename, libFilename)
+    return ('', '')
+
+def dropPackage (session, package):
+    stopIfSqlNotErr (session, -4024, 'DROP PACKAGE %s' % package)
+
+def createPackage (session, package, libFilename):
+    stopIfSqlNotErr (session, -4024, 'DROP PACKAGE %s' % package)
+
+    stopIfSqlNotOK (session,
+    """CREATE PACKAGE %s FILE '%s'
+    INPROC""" % (package, libFilename))
+
+def createDBProc (session, package, proc):
+    mode = re.split ('\W+', proc)
+    proc = mode.pop (0)
+
+    if not mode:
+        mode = 'INPROC'
+
+    elif re.match ('NOWAIT', mode.pop (0)):
+         mode = 'INPROC'
+
+    else:
+         mode = mode.pop(0)
+
+    stopIfSqlNotOK (session,
+        """CREATE DBPROC %s IN %s EXECUTE %s""" % (proc, package, mode))
+
+def getExistingPackages (dbname, username, password):
+    if os.name == 'posix' and os.uname()[0] == 'OSF1':
+        return getExistingPackagesExecProgram (dbname, username, password)
+
+    return getExistingPackagesExecSQL (dbname, username, password)
+
+def getExistingPackagesExecSQL (dbname, username, password):
+    username = string.upper (username)
+    password = string.upper (password)
+
+    session = sdb.sql.connect (username, password, dbname)
+    cursor = session.sql (
+    """SELECT DISTINCT PACKAGE FROM DBPROCEDURES WHERE SCHEMANAME = '%s'""" %
+    username)
+
+    packages = []
+    while 1:
+        row = cursor.next ()
+        if not row:
+            break
+
+        (result,) = row
+        packages.append (result)
+
+    return packages
+
+def getExistingPackagesExecProgram (dbname, username, password):
+    instroot = getInstroot (dbname)
+
+    fd = os.popen (
+    """%s%sbin%sx_python %s%senv%sgetpackages.py -d %s -u %s,%s""" %
+    (instroot, os.sep, os.sep, instroot, os.sep, os.sep,
+    dbname, username, password))
+
+    if not fd:
+        raise IOError, 'cannot execute getpackages.py'
+
+    packages = []
+    for package in fd.readlines ():
+        packages.append (string.strip (package))
+
+    if fd.close () != None:
+        raise IOError, 'error while executing getpackages.py'
+
+    return packages
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)

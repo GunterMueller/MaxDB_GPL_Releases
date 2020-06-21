@@ -1,0 +1,11 @@
+MANIFEST
+MANIFEST.SKIP
+Makefile.PL
+README
+MaxDB.pm
+MaxDB.xs
+dbdimp.c
+dbdimp.h
+GetInfo.pm
+TypeInfoAscii.pm
+TypeInfoUnicode.pm

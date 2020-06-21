@@ -1,0 +1,284 @@
+/*!**********************************************************************
+
+  module: o3lparupd2.c
+
+  -----------------------------------------------------------------------
+
+  responsible:  TTK
+
+  special area: ODBC-Tests
+
+  description:  SQLPutData: update on non-existing line
+                Table from run of o3lparupd is needed.
+               
+
+  -----------------------------------------------------------------------
+
+
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+************************************************************************/
+
+#define PROGNAME "O3LPARUPD"
+
+#define ODBCVER 0x0350
+
+#include "o3util.c"
+
+#define NUM_VALUES 1
+#define CHAR_LEN 500000
+#define BLOCK_SIZE 200000
+#define BLOB_SIZE 500000
+
+RETCODE UpdateLong( HSTMT hstmt, long value );
+
+/* show table contents */
+RETCODE ShowTable( HSTMT hstmt );
+
+int MAIN(int argc, char **argv) {
+    RETCODE retcode;
+    HENV    henv  = SQL_NULL_HENV;
+    HDBC    hdbc  = SQL_NULL_HDBC;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    HSTMT   hstmt2 = SQL_NULL_HSTMT;
+    UCHAR   textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+
+    StartTest( PROGNAME );
+
+    retcode = FullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt2 );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt2 );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    /* this line does not exist */
+    retcode = UpdateLong(hstmt2, 1111 );
+    if (retcode != SQL_SUCCESS) {
+      /*        goto exit; */
+    }; /* if */
+
+    retcode = ShowTable( hstmt2 );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+exit:
+    retcode = DropTable( hdbc, PROGNAME );
+    FullDisconnect( &henv, &hdbc );
+
+    EndTest( PROGNAME );
+    return 0;
+}; /* main */
+
+
+RETCODE UpdateLong( HSTMT hstmt, long value )
+{
+    RETCODE retcode = SQL_SUCCESS;
+    UCHAR   textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    UCHAR   stmtStr[O3UTIL_STMT_LEN];
+    int     i = 0;
+    char    binValue1[CHAR_LEN];
+    char    binValue2[CHAR_LEN];
+    int     intValue;
+    SQLLEN  dataAtExec = SQL_DATA_AT_EXEC;
+    SQLLEN  nextParam;         /* must be as long as a pointer! */
+    SQLLEN len, bufLen;
+    char   *buf;
+
+    bufLen = BLOB_SIZE;
+
+    sprintf (stmtStr, (SQLCHAR*)"UPDATE "PROGNAME" SET a=? WHERE id=%d", value);
+    retcode = SQLPrepare (hstmt, stmtStr, SQL_NTS);
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLPrepare \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+
+    retcode = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_BINARY, SQL_LONGVARBINARY,
+                               bufLen, 0, (SQLPOINTER)1, 0, &len);
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLBindParameter \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    len = SQL_LEN_DATA_AT_EXEC(bufLen);
+
+    retcode = SQLExecute(hstmt);
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLExecute \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+
+    buf = (char*)malloc(bufLen);
+
+    InitLongBuf( buf, bufLen );
+
+    retcode = SQLParamData(hstmt,(SQLPOINTER *) &nextParam);
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLParamData \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    
+    if (retcode == SQL_NEED_DATA) {
+      long size = bufLen, left, start = 0;
+      while(size > 0)
+        {
+          left = BLOCK_SIZE;
+          if(left > size) left = size;
+          retcode = SQLPutData(hstmt, buf + start, left);
+          SPRINTF( textBuffer,
+                   "UpdateLong\t -- SQLPutData(%d) \t\t\t retcode: %s"CRLF,
+                   left, cnvret( retcode ));
+          PRINTF( textBuffer );
+          ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+          size -= left; start += left;
+        }
+    }
+
+    retcode = SQLParamData(hstmt,(SQLPOINTER *) &nextParam);
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLParamData \t\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    free(buf);
+
+
+    retcode = SQLFreeStmt( hstmt, SQL_CLOSE );
+    SPRINTF( textBuffer,
+             "UpdateLong\t -- SQLFreeStmt(CLOSE) \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    return retcode;
+}
+
+
+RETCODE ShowTable( HSTMT hstmt )
+{
+    RETCODE retcode = SQL_SUCCESS;
+    UCHAR     textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    UCHAR     stmtStr[O3UTIL_STMT_LEN];
+    char      binValue1[CHAR_LEN+1];
+    char      binValue2[CHAR_LEN+1];
+    UWORD     intValue;
+    SQLLEN    binIndi1 = 0;
+    SQLLEN    binIndi2;
+    SQLLEN    intIndi;
+
+    /* Prepare select stmt */
+    SPRINTF( stmtStr, "select * from %s", PROGNAME );
+    SPRINTF( textBuffer, "ShowTable\t -- %s"CRLF, stmtStr );
+    PRINTF( textBuffer );
+
+    retcode = SQLExecDirect( hstmt, stmtStr, strlen( stmtStr ) );
+    SPRINTF( textBuffer,
+             "ShowTable\t -- SQLExecDirect\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLBindCol( hstmt, 1,
+                          SQL_C_SHORT, &intValue, 0, &intIndi );
+    SPRINTF( textBuffer,
+             "ShowTable\t -- SQLBindCol(2) \t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    /* show content of table */
+    PRINTF( "ShowTable\t -- Content of table"CRLF );
+    do {
+        retcode = SQLFetch( hstmt );
+        SPRINTF( textBuffer,
+                 "ShowTable\t -- SQLFetch \t\t\t retcode: %s"CRLF,
+                 cnvret( retcode ));
+        PRINTF( textBuffer );
+        ErrorCheck( SQL_HANDLE_STMT, hstmt );
+        if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+            retcode = SQLGetData( hstmt, 2, SQL_C_BINARY, binValue1, CHAR_LEN,
+                                  &binIndi1 );
+            SPRINTF( textBuffer,
+                     "ShowTable\t -- SQLGetData(%d) \t\t retcode: %s"CRLF,
+                     binIndi1, cnvret( retcode ));
+            PRINTF( textBuffer );
+            if (retcode != SQL_NO_DATA_FOUND) {
+                ErrorCheck( SQL_HANDLE_STMT, hstmt );
+            }; /* if */
+            if (binIndi1 != SQL_NULL_DATA) {
+                if (binIndi1>=0) {
+                    binValue1[binIndi1] = '\0';
+                }; /* if */
+                ShowLongChar( binValue1 );
+            } else {
+                printf("NULL\n");
+            }; /* else */
+
+            if (retcode == SQL_NO_DATA_FOUND) {
+                retcode = SQL_SUCCESS; /* we dont want to stop now */
+            }; /* if */
+
+            if (retcode == SQL_NO_DATA_FOUND) {
+                retcode = SQL_SUCCESS; /* we dont want to stop now */
+            }; /* if */
+        } else {
+            ErrorCheck( SQL_HANDLE_STMT, hstmt );
+        }; /* else */
+    } while (retcode == SQL_SUCCESS);
+
+    retcode = SQLFreeStmt( hstmt, SQL_CLOSE );
+    SPRINTF( textBuffer,
+             "ShowTable\t -- SQLFreeStmt(CLOSE)\t\t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+
+    return retcode;
+}; /* ShowTable */

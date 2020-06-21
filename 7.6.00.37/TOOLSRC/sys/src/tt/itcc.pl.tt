@@ -1,0 +1,143 @@
+#!/usr/bin/perl
+# itcc  [-D name] [-rv] parameter...
+#
+# Type check.
+# Errors are written to "$WRK/fast/prot/$fname.chk", where
+# "$fname" is "`basename parameter`".
+#
+# 1993-02-03 CS option -E for $OSSPEC added.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Std;
+use File::Basename;
+
+@DOPTS    = ();
+$SHOW     = "false";
+$REMOVE   = "true";
+$BASEDIR  = "$WRK/fast/prot";
+
+@SAVEARGS = @ARGV;
+
+if ( !getopts('hlrvD:') or $opt_h or (@ARGV == 0) ) {
+
+  print <DATA>;
+  exit 11;
+
+}
+
+$REMOVE = false if defined($opt_r);
+$SHOW   = true  if defined($opt_v);
+$LOCAL  = "-l" if defined($opt_l);
+
+
+while ($_ = $SAVEARGS[0], /^-/) {
+
+    last if /^--$/;
+
+    if (/^-D/) {
+      push @DOPTS, $SAVEARGS[0];
+      shift @SAVEARGS;
+      next;
+    }
+    shift @SAVEARGS;
+
+
+} #while
+
+
+chdir($TMP) || die "Can't change to directory $TMP: $!";
+
+foreach $P ( @ARGV ) {
+
+        $F = basename($P);
+        $O = $F =~ /(.*)\./ ? $1 : $F;
+
+        print "Type check $P...";
+        unlink("$P.check");
+        unlink("$BASEDIR/$O.chk");
+        $cmd     = "$TOOL/pgm/tcc";
+        $cmdopts = "$F $LOCAL -TY -O UNIX -C PTOC -M I386 -E SCO @DOPTS";
+        $pastccRC = system($cmd, $cmdopts);
+        if ($RELVER ge 'R71') {
+            $cmd     = "$PYTHON/python";
+            if ($RELVER eq 'R71') {
+                @cmdopts = ("$TOOL/bin/ptocTcc.py", "-nostrict", "$O");
+            }
+            else {
+                @cmdopts = ("$TOOL/bin/ptocTcc.py", "$O");
+            }
+            $htccRC = system($cmd, @cmdopts);
+        }
+        else {
+            $htccRC = 0;
+        }
+        if  (($pastccRC == 0) && ($htccRC == 0)) {
+
+           $RC = "true";
+           print " O.K.\n";
+
+        } else {
+
+           $RC = "false";
+           print " Errors detected!\n"
+
+        }
+
+        if ( -f "$O.check" ) {
+
+          if ( $SHOW eq "true" ) {
+
+            open(FILE_OUT, "<$O.check");
+            print <FILE_OUT>;
+            close(FILE_OUT);
+
+          }
+
+          if  ( $RC eq "true" and $REMOVE eq "true" ) {
+
+             unlink "$O.check";
+
+          } else {
+
+             unlink "$BASEDIR/$O.chk";
+             rename("$O.check", "$BASEDIR/$O.chk");
+             print "Messages written to $BASEDIR/$O.chk\n";
+          }
+
+       }
+}
+
+
+__DATA__
+
+
+  USAGE: itcc [-rlvh] [-D name]...  <modul>...
+
+  options:
+
+        -r         :   don't remove prot files after check
+        -v         :   print report
+        -l         :   open source in $TMP
+        -h         :   this help information
+
+        -D  <name> :   define for conditional compiling

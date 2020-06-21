@@ -1,0 +1,273 @@
+# h.b.   27.11.1997
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Std;
+use File::Path; 
+use Cwd;
+
+&if $OS = WIN32
+my $NULL = "nul";
+&else
+my $NULL = "/dev/null";
+&endif
+
+my %RelInfo = GetSutInfo();
+
+# list of releases to check by -x option
+my @RelList = sort (keys %RelInfo); 
+
+if ( !getopts ('hdsxao:e:u:f:r:') or $Getopt::Std::opt_h or @ARGV != 0) {
+    print <DATA>;
+    foreach my $rel ( @RelList ) {
+        print "             $rel\n";
+    }
+    exit (1);
+}
+
+# now construct check.exe argument list
+my @CheckArgv;
+push @CheckArgv, ("-d") if ( $Getopt::Std::opt_d );
+push @CheckArgv, ("-s") if ( $Getopt::Std::opt_s );
+push @CheckArgv, ("-a") if ( $Getopt::Std::opt_a );
+push @CheckArgv, ("-o", "$Getopt::Std::opt_o") if ( $Getopt::Std::opt_o );
+push @CheckArgv, ("-e", "$Getopt::Std::opt_e") if ( $Getopt::Std::opt_e );
+push @CheckArgv, ("-u", "$Getopt::Std::opt_u") if ( $Getopt::Std::opt_u );
+push @CheckArgv, ("-f", "$Getopt::Std::opt_f") if ( $Getopt::Std::opt_f );
+
+
+&if $OSSPEC = WIN32
+    my $PERM = 0;
+&else
+    my $PERM = 0775;
+&endif
+mkpath("$ENV{TEST}/kern/sut/tmp/sys/src/su",0,$PERM)  unless -d "$ENV{TEST}/kern/sut/tmp/sys/src/su";
+unlink("$ENV{TEST}/kern/sut/tmp/sys/src/su/*");
+
+my @AllTestDirs;
+if ( $Getopt::Std::opt_o ) { # -o checks who is responsible for a file !
+    @AllTestDirs = ( "slow" );
+} else {
+    @AllTestDirs = ( "slow", "quick", "fast",  
+                        "dbuni", "uni", "xci" , "alluni" );
+}  
+
+
+if ($Getopt::Std::opt_x || $Getopt::Std::opt_r) {
+
+    @RelList = ($Getopt::Std::opt_r) if ( $Getopt::Std::opt_r );
+    
+    foreach my $RelVer ( @RelList ) {
+
+    if ( $RelInfo{$RelVer}{depot} ) {
+        $ENV{SRC}   = GetSrcFromDepot($RelInfo{$RelVer}{depot});
+        $ENV{DEPOT} = "$RelInfo{$RelVer}{depot}";
+    } else {
+        $ENV{OWN}   = "$ENV{TEST}/kern/sut/tmp";
+        $ENV{SRC}   = "$ENV{TEST}/kern/sut/tmp/sys/src";
+        $ENV{DEPOT} = "";
+        $ENV{MGET}  = "y";
+    }
+
+    $ENV{GRP}        = $RelInfo{$RelVer}{grp};
+    $ENV{VMAKE_PATH} = "$ENV{OWN},$RelInfo{$RelVer}{vpath}";
+
+    
+	my $BaseDir = "$ENV{GRP}/test/kern/sut/"; 
+
+    print "check sut on $ENV{GRP}\n";
+	foreach my $TestDir ( @AllTestDirs ) {
+	    if ( -d "$BaseDir$TestDir" ) {
+            chdir("$BaseDir$TestDir");
+            my $cmd = "check @CheckArgv";
+            system ($cmd);
+	    } 
+	}
+    }
+
+} else {
+
+    my @VmakeList    = split (',',$ENV{VMAKE_PATH});
+    $VmakeList[0]    = $ENV{OWN};
+	$ENV{VMAKE_PATH} = join (',', @VmakeList);
+    $ENV{MGET} = "y";
+
+
+    my $BaseDir = "$ENV{GRP}/test/kern/sut/"; 
+
+    print "check sut on $ENV{GRP}\n";
+    foreach my $TestDir ( @AllTestDirs ) {
+        if ( -d "$BaseDir$TestDir" ) {
+            chdir("$BaseDir$TestDir");
+            my $cmd = "check @CheckArgv";
+            system ($cmd);
+        } 
+    }
+}
+
+#####################################################################
+sub GetSrcFromDepot (){
+my ($depot) = @_;
+
+my $tempfile = "$ENV{tmp}/p4client.tmp";
+my ($src, $client, $path, $root);
+
+open(WHEREPIPE, "p4 -s where $depot/sys/src/su/XINITDB.punix |") or die "can't open pipe";
+while (<WHEREPIPE>) {
+    if ( /^error:.*not in client view\.$/i ) {
+        print "release not in client view - modify client view\n";
+        ($path) = $depot =~ /\/\/sapdb(.*)/;
+        open (OUT, ">$tempfile") or die "can't open $tempfile";
+        open(CLIENTPIPE, "p4 client -o |") or die "can't open pipe";
+        while (<CLIENTPIPE>) {
+            if ( /^view:/i ) {
+                print OUT $_;
+                print OUT "\t$depot/sys/src/su/* //$client$path/sys/src/su/*\n";
+            } else {
+                if ( /^client:\s+(\w*)/i ) {
+                   $client = $1;
+                }
+                if ( /^root:\s+(.*)/i ) {
+                   $root = $1;
+                }
+                print OUT $_;
+            }
+        }
+        close (CLIENTPIPE);
+        close (OUT);
+        my $currentDir = cwd();
+        chdir ("$TMP");
+        system("p4 client -i < $tempfile > $NULL");
+        chdir ("$currentDir");
+        unlink ($tempfile);
+        $src = "$root$path/sys/src";
+        last;
+    }
+    if ( m!([^ ]*sys\\src)\\su\\XINITDB.punix$!i ) {
+        $src = $1;
+        last;
+    }
+}
+close (WHEREPIPE);
+$src =~ s/\//\\/g;
+
+return $src;
+}
+
+
+############################################################
+sub GetSutInfo ()
+{
+
+use SAPDBHosts;
+use XML::DOM;
+
+my %SutInfo;
+my $XMLFile   = "$TMP\\releases.xml";
+my $P4Command = "p4 -p perforce5001:5001 -c maxdb_qa print -o $XMLFile -q  //prodprojects/vmake/dev/src/_tools/profiles/releases.xml";
+system ($P4Command) == 0 or
+    die "problem with $P4Command\n";
+
+my $parser = new XML::DOM::Parser;
+my $doc = $parser->parsefile ($XMLFile);
+
+my @vpaths = $doc->getElementsByTagName("vmake_path",1);
+
+
+foreach my $vpath (@vpaths) {
+   
+    if ($vpath->getAttribute("sut")) {
+    
+        # build release identification
+        my $release     = $vpath->getAttribute("release")    . "." .
+                          $vpath->getAttribute("correction") . "." .
+                          $vpath->getAttribute("build")      . "." .
+                          $vpath->getAttribute("state");
+        
+        # build depot info
+        my ($depotnode) = $vpath->getElementsByTagName("depot",1);
+        $SutInfo{$release}{depot} =
+            $depotnode->getFirstChild->getNodeValue if ( defined ($depotnode) );
+        
+        # build vmake path
+        my @layers      = $vpath->getElementsByTagName("layer",1);
+        my @vmakepath   = ();
+        foreach my $layer (@layers) {
+            @vmakepath = (@vmakepath, LayerToString($layer)); 
+        }
+        $SutInfo{$release}{vpath}=join(',',@vmakepath);
+        
+        # build grp
+        $SutInfo{$release}{grp}=$vmakepath[0];
+        
+    }
+}
+
+return %SutInfo;
+
+}
+
+############################################################
+sub LayerToString ()
+{
+    my ($lnode) = @_;
+
+    my ($hnode) = $lnode->getElementsByTagName("host",1);
+    my ($dnode) = $lnode->getElementsByTagName("dir",1);
+   
+    my ($host, $dir);
+    if ( $hnode ) {
+        $host = "\\\\".$hnode->getFirstChild->getNodeValue."\\";
+    }
+    
+    if ( $dnode ) { 
+        $dir  = $dnode->getFirstChild->getNodeValue;
+	    if (($dir =~ /^\$OWN$/) || ($dir =~ /^\%OWN\%$/i)) {
+            return;
+        }
+        $dir =~ tr!\/\/!\\!;
+    }
+
+    return "$host$dir";
+}
+#####################################################################
+
+
+
+
+
+__DATA__
+
+
+USAGE: gcheck [-h] [-x | -r <release>] [check.exe options]
+
+       Checks SUTs on group server for current or all release trees. 
+       (uses the program check.exe, help with 'check -h')
+
+OPTIONS:
+      -h provides this help information
+      -r <release> checks SUTs on <release>
+      -x checks all release trees
+
+      following releases are available:
+

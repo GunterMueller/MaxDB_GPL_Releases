@@ -1,0 +1,316 @@
+/*!**********************************************************************
+
+  module: o3proc.c
+
+  -----------------------------------------------------------------------
+
+  responsible:  Holger Bischoff (D027451 - Holger.Bischoff@SAP-AG.de)
+
+  special area: ODBC-Tests
+
+  description:  Create and execute DB-Procedure with and without
+                result (PTS 1103839).
+
+  -----------------------------------------------------------------------
+
+                         Copyright by SAP AG, 1999
+
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+************************************************************************/
+
+#define PROGNAME "o3proc2"
+
+#define ODBCVER 0x0350
+
+#define SQL_C_ABAPHANDLE 47
+#define  SQL_ABAPHANDLE 47
+
+#include "o3util.c"
+#include "lcstream.h"
+
+typedef struct _TStreamRow {
+    long  msgNo;
+    char  language[3];
+    char  msg[160];
+} TStreamRow;
+
+FILE  *ostream;
+FILE  *istream;
+
+
+long written = 0;
+
+int WriteStream(SQL_LC_StreamParm *StreamParm, void *rgbInStream, int noOfRows, int cbBufSize)
+{
+  long numwritten;
+
+  numwritten = fwrite( rgbInStream, sizeof(TStreamRow), noOfRows, ostream );
+  written+= numwritten;
+  printf ("write stream : %d rows, written %d\n", noOfRows, written);
+  if (numwritten != noOfRows)
+    return SQL_STREAM_ERROR;
+  return(SQL_STREAM_OK);
+}
+
+int ReadStream(SQL_LC_StreamParm *StreamParm, void *rgbOutStream, int cbStreamMax, int *pcbStreamLen, int *pcbNoOfRowsRead)
+{
+     size_t numread;
+     size_t requiredBytes = (cbStreamMax / sizeof (TStreamRow)) * sizeof(TStreamRow);;
+     printf ("read stream : required %d ", requiredBytes);
+     numread = fread(rgbOutStream, 1, requiredBytes, istream );
+     *pcbStreamLen    = numread;
+     *pcbNoOfRowsRead = numread / sizeof(TStreamRow);
+     printf ("read bytes: %d\n", numread);
+     if (numread < requiredBytes)
+         return SQL_STREAM_NO_MORE_DATA;
+     else
+         return (SQL_STREAM_OK);
+}
+
+void readFile() {
+//    sqlvartype	*actvar;
+//    CIStreamDescriptor<TStreamRow, 3> streamDesc(1, &ReadStream);
+//    TStreamRow streamRow;
+//    streamDesc.Describe(streamRow.msgNo);
+//    streamDesc.Describe(streamRow.language, sizeof (streamRow.language));
+//    streamDesc.Describe(streamRow.msg,      sizeof (streamRow.msg));
+//    if( NULL == (istream  = fopen( "data", "rb" )) ) {
+//       printf( "could not open input file\n" );
+//       exit (-1);
+//    }
+//    exec sql delete from newmessages;
+//    outda.sqln = 1;
+//    outda.sqld = 1;
+//    actvar = &outda.sqlvar[0];
+//    strcpy (statement, "CALL INCOPY_MESSAGES(?)");
+//    EXEC SQL PREPARE S_001 FROM :statement;
+//    isSqlOK();
+//    EXEC SQL DECLARE C_001 CURSOR FOR S_001;
+//    EXEC SQL DESCRIBE S_001 INTO &outda;
+//    isSqlOK();
+//    actvar->hostvartype = 47;
+//    actvar->hostvaraddr = (char*) &streamDesc;
+//    EXEC SQL OPEN C_001 USING DESCRIPTOR &outda;
+//    isSqlOK();
+//    fclose( istream );
+}
+
+int MAIN(int argc, char **argv) {
+    RETCODE retcode;
+    HDBC    hdbc  = SQL_NULL_HDBC;
+    HENV    henv  = SQL_NULL_HENV;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    UCHAR   textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    SWORD   intVal;
+    char    byteVal;
+    //   COStreamDescriptor<TStreamRow, 3> streamDesc(1, &WriteStream);
+    SQLStreamDesc streamDesc;
+    SQL_LC_StreamParm *StreamParam;
+    StreamStruct *ss;
+    TStreamRow streamRow;
+
+    char cursorname[128], cmd[256];
+    SQLSMALLINT cnLen, i;
+
+    /* stream descriptor */
+    streamDesc.StreamParam = (SQL_LC_StreamParm*) malloc(sizeof(SQL_LC_StreamParm) - sizeof (OmsTypeStreamMemberDesc) * 256 + sizeof (OmsTypeStreamMemberDesc) * 256);
+
+    StreamParam = streamDesc.StreamParam;
+    if (StreamParam) {
+      StreamParam->C_1.Stream.nilPointer          = (void*) 0;
+      StreamParam->C_1.Stream.hStream.reserved    = 0;
+      StreamParam->C_1.Stream.hStream.ABAPTabId   = 1;
+      StreamParam->C_1.Stream.hStream.size        = sizeof(TStreamRow);
+      StreamParam->C_1.Stream.hStream.memberCount = 3;
+    }
+
+    streamDesc.WriteProc = &WriteStream;
+    streamDesc.ReadProc  = &ReadStream;
+
+
+    StartTest( PROGNAME );
+
+    retcode = FullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+
+
+
+    /* long  msgNo; */
+    StreamParam->C_1.Stream.hStream.colDesc[0].memberType = STYPE_I4;
+    StreamParam->C_1.Stream.hStream.colDesc[0].length     =  sizeof(long);
+    StreamParam->C_1.Stream.hStream.colDesc[0].offset   = 0;
+
+    /* char  language[3] */
+    StreamParam->C_1.Stream.hStream.colDesc[1].memberType = STYPE_CHAR;
+    StreamParam->C_1.Stream.hStream.colDesc[1].length     =  3;
+    StreamParam->C_1.Stream.hStream.colDesc[1].offset   = 
+      StreamParam->C_1.Stream.hStream.colDesc[0].offset +
+      StreamParam->C_1.Stream.hStream.colDesc[0].length;
+
+    /* char  msg[160] */
+    StreamParam->C_1.Stream.hStream.colDesc[2].memberType = STYPE_CHAR;
+    StreamParam->C_1.Stream.hStream.colDesc[2].length     =  160;
+    StreamParam->C_1.Stream.hStream.colDesc[2].offset   = 
+      StreamParam->C_1.Stream.hStream.colDesc[1].offset +
+      StreamParam->C_1.Stream.hStream.colDesc[1].length;
+
+   if( NULL == (ostream  = fopen( "data", "wb" )) ) {
+      printf( "could not open output file\n" );
+      return (-1);
+   }
+
+    retcode = SQLPrepare( hstmt, "CALL OUTCOPY_MESSAGES(?)", SQL_NTS );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLExecDirect(CREATE PROC) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+//     for (i=-12; i<20; i++) {
+//       retcode = SQLBindParameter ( hstmt, 1, SQL_PARAM_INPUT_OUTPUT, i, SQL_ABAPHANDLE,
+//                                    0, 0, &streamDesc, sizeof(streamDesc), NULL);
+
+//       printf("ret: %d\ttype %d\n", retcode, i);
+//     }; /* if */
+
+
+    retcode = SQLBindParameter ( hstmt, 1, SQL_PARAM_INPUT, SQL_C_DEFAULT, SQL_ABAPHANDLE,
+                                0, 0, &streamDesc, sizeof(streamDesc), NULL);
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLBindParameter(CREATE PROC) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    retcode = SQLExecute (hstmt);
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLExecute() \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+
+
+
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    retcode = SQLExecDirect( hstmt, "drop table newmessages", SQL_NTS );
+    retcode = SQLExecDirect( hstmt, "CREATE TABLE newmessages as SELECT * FROM SYSDBA.MESSAGES", SQL_NTS );
+    retcode = SQLExecDirect( hstmt, "delete newmessages", SQL_NTS );
+
+   if( NULL == (istream  = fopen( "data", "rb" )) ) {
+      printf( "could not open input file\n" );
+      exit (-1);
+   }
+
+    retcode = SQLPrepare( hstmt, "CALL INCOPY_MESSAGES(?)", SQL_NTS );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLExecDirect(CREATE PROC) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+//     for (i=-12; i<20; i++) {
+//       retcode = SQLBindParameter ( hstmt, 1, SQL_PARAM_INPUT_OUTPUT, i, SQL_ABAPHANDLE,
+//                                    0, 0, &streamDesc, sizeof(streamDesc), NULL);
+
+//       printf("ret: %d\ttype %d\n", retcode, i);
+//     }; /* if */
+
+
+    retcode = SQLBindParameter ( hstmt, 1, SQL_PARAM_INPUT, SQL_C_DEFAULT, SQL_ABAPHANDLE,
+                                0, 0, &streamDesc, sizeof(streamDesc), NULL);
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLBindParameter(CREATE PROC) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    retcode = SQLExecute (hstmt);
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLExecute() \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+
+   fclose( istream );
+
+
+
+
+
+
+
+
+
+
+
+ exit:
+    FullDisconnect( &henv, &hdbc );
+
+    EndTest( PROGNAME );
+    return 0;
+} /* main */

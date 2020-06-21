@@ -1,0 +1,353 @@
+#!/usr/bin/perl
+# pascal2cpp    *** Tool für Schmitz'schen Pascal--> C++ - Umsetzer
+#
+# @(#)pascal2cpp     1998-07-15
+#
+# Das Tool erzeugt aus einem Pascal_modul (v<fn>), das sich irgendwo in
+# der Hierarchie befinden darf, ein v<fn>.cpp und ein h<fn>.h. Diese
+# befinden sich anschließend in der Sourcedirectory, die zu <fn> gehört,
+# bzw. unter %WRK%\slow\tmp.
+# Außerdem wird ein v<fn>.inc erzeugt. Das braucht man nicht in unserer
+# normalen Umgebung, sondern dieses Tool selber für weitere Module (s.u.).
+#
+# Erwartet wird vom Tool ein $LAYER.com, das sich unter $SRC/$LAYER befindet !!!!
+#
+# In diesem sollten die regular expressions für die Includes zu Fuß aufgelöst sein,
+# da dieser Entpacker nicht jedesmal modifiziert werden soll, wenn wir neue
+# Konstrukte einführen.
+#
+# Außerdem sollten die 00-Papiere, die im h<fn>.h benötigt werden, d.h. dort
+# inkludiert werden sollen, am Anfang stehen und von den nur im Code benötigten
+# 00-Papieren durch ein ';' statt eines ',' getrennt werden.
+#
+# Beispiel:
+#
+# vak01   inc=gsp00,vsp001,ggg00,vak00;vsp008 trace=cccprint shrglob  
+#
+# statt des alten
+# *       inc=gsp00,vsp001,ggg00,vak00 trace=cccprint shrglob 
+# 
+# vak01   inc=+vsp008 
+#
+#
+# Es passiert dann ggf., daß die Tools spucken, daß xyz.inc irgendwas nicht
+# kennen würde. Das kommt daher:
+# aus dem Use-Teil des zu bearbeitenden Moduls werden alle davon angesprochenen
+# Module mit ihrem Namen gesucht, davon unter $WRK\incl das xxx.inc-File erwartet.
+# Ist das nicht da, muß man es mit Hilfe dieses Tools hier erzeugen.
+# Das zieht sich dann schon mal hübsch häßlich rekursiv weiter, sodaß es im
+# Extremfile besser ist, nach einem imf -m slowknl über alle darin enthaltenen
+# Pascal-Module mal dieses Tool hier zu jagen, die .h und .inc-Files nach 
+# %WRK%\incl zu stecken und dann neu loszulegen. 
+# Ist das fehlende Modul allerdings ein 00-Papier, dann braucht man zur
+# Erzeugung des xyz.inc-Files nur imf xyz zu machen.
+# Wenn man dann kein Pascal-File mehr hat, was mindestens den Define-Teil eines
+# C bzw. C++-Files enthält, hat man schlechte Karten. Ggf. kann man mit der 
+# '-u..'-Option was retten. Wenn man aber '-u..' verändert hat, darf man das sich
+# ergebende h-File nicht benutzen, d.h. nicht nach %WRK%\incl schieben. Es ist
+# dann nur ein Notnagel für das Tool hier. Außerdem muß man die includes
+# überprüfen, ob sie dem normalen Muster entsprechen.
+#
+# Hat man dann das h<fn>.h und das v<fn>.cpp, kann man durch 
+#     createcomfile h<fn>.h   h<fn>.h.com
+#     createcomfile v<fn>.cpp v<fn>.cpp.com
+# die Einträge für das passende %LAYER%.com erzeugen, die durch intelligentes
+# kopieren nach %LAYER%.com übernommen werden können.
+#
+# Elke Zabach
+#
+#
+#
+#--------- Beschreibung der Parameterleisten der verwendeten Tools ------------
+# Message-Filter wird z.Z. nicht benutzt.
+#
+#
+# Kurzbeschreibung Entpacker, GNU-P2C und Message-Filter
+# Vorab-Version 22.06.98
+# Rainer A. Schmitz c/o InfoLytics AG, Koeln
+# 
+# 
+# 
+# Dieser Text wird mit einer Vorab-Version geliefert und hat folglich nur eine 
+# voruebergehende Gueltigkeit.
+# 
+# Fuer Fragen (auch zu Ursachen von P2C-Meldungen!) stehe ich i.A. Mo-Fr 09:00-12:00 
+# unter 02224-74312 zur Verfuegung.
+# 
+# 
+# Entpacker
+# 
+# 
+# Der Entpacker verwendet InfoLytics' Pattern Match Service (PMS), der einen Pattern 
+# Definition File (z.Zt. ENTPACK.PMT) liest und die DLLs rte32.dll, mam32.dll und 
+# pms30.dll laedt. (PMS + DLLs Copyright (c) InfoLytics AG ?)
+# 
+# Der Aufruf des Entpackers ist wie folgt:
+# 
+# entpack [ -u[0|1|2] ] -i <inc_dir>  [-l<n>] [-e+] [-c-] 
+# 		<input> -d <descr_dir> [-o <output>] [ -p <PMT-File> ]
+# 
+# -u<n> steuert die Auswertung der USE-Section:
+# 	-u0: ignoriert die Proc.dekl.s, generiert %include h<xyz>.inc
+# 	-u2: kopiert die Proc.dekl.s aus der USE-Section 
+# 	-u1: kopiert nur, wenn h<xyz>.inc in <inc_dir> fehlt
+# Default ist -u0.													(*ATTN:*)
+# 
+# -i <inc_dir>: Directory, der die (schon entpackten !) h<xyz>.inc enthaelt
+# 
+# -l<n> steuert die Ausgabe der Positions-Angabe, -l0 = garnix,
+# 	Default: -l25 = 25 Zeilen / Pos.Ang.							(*ATTN*)
+# 
+# -e+ erhaelt die alten (*ENDIF*) Kommentare etc. was fuer die Fehlerlokalisierung
+# 	noch nuetzlich ist.
+# 
+# -c- gibt die #ifdef's NICHT als (*EMBED...*), sondern 'nackt' aus.
+# 
+# -d <descr_dir>: <descr_dir> ist jetzt das Directory(!) der Descriptions.
+# 	(auch aller im 'USE' referierten Module!)						(*ATTN*)
+# 	
+# 
+# -p <file>: PMT-File, s.o., default: ENTPACK.PMT auf P2C_HOME.		(*ATTN*)
+# 
+# -n  setzt die /NOOUT Option fuer die refer. h<xyz>.inc Files aus der USE-Section.		
+# 	Ohne diesen Switch werden diese immer konvertiert!				(*ATTN*)
+# 
+# Der Default-Output ist <module>.p im Current Directory, bzw. <module>.inc ebenda
+# fuer 00-Papiere und g*Files. Andere, i.A. temporaere Files, sollten jetzt nicht mehr 
+# uerbigbleiben.
+# 
+# Die Output Files Files werden im Output-Path angelegt als <module>.pas 
+# und h<'module+1'>.inc.
+# 
+# Der PMT-File muss z.Zt. noch explizit angegeben werden.
+# 
+# Weitere Optionen und evtl. Output-Files dienen z.Zt. nur Testzwecken o.ae. und
+# werden spaeter noch modifiziert.
+# 
+# 
+# 
+# 
+# Modifizierter GNUP2C
+# 
+# Der Orignial-GNUP2C ist im File p2c.man dokumentiert. Folgende Abweichungen sind 
+# hier relevant:
+# 
+# - Der Default-Output ist <module>.cpp im Current Directory, bzw. <file>.h fuer 
+#   referierte PASCAL Include Files, wenn diese nicht inline ausgegeben werden
+#   (s.u. Config.File p2crc: ExpandIncludes).
+# 
+# - Includes mit dem Switch /NOOUT werden nicht als C Include Files ausgegeben.
+# 
+# - Includes mit dem Switch /KILL werden im Output nicht per #include referiert.
+# 
+# - Fehler etc. werden fuer's Message Filter aufbereitet.
+# 
+# Der Standard-Aufruf ist:
+# 
+# gnup2c <input> [-o <output>] [ > <list-file>]
+# 
+# Folgende Parameter koennen zusaetzlich zu / abweichend von denen im P2C-Manual 
+# angegebenen benutzt werden:
+# 
+# -Rt[+|-]: generiert ROUTINE_DBG_MSP00()s		[Def: +]
+# 
+# -Rg[+|-]: referiert glob.Var.s ueber Pointer.	[Def: -]
+# 
+# -Rp[+|-]: PASARROFF(off) f. Array-Offsets		[Def: +]			(*ATTN*)
+# 
+# -Rs[+|-]: optimiert Set-Operationen				[Def: +]
+# 
+# -Re[+|-]: Messages auf stderr (sonst: stdout)	[Def: -]
+# 
+# -Rc[+|-]: unterdrueckt Typechecking auf			[Def: +]
+# 		VAR-parms & generiert automatisch Typecasts
+# 
+# -Rl<n>: ein (* pascal line ... *) pro <n> LOCs  [Def: 25]			(*ATTN*)
+# 		-Rl0 => garnix!
+# 
+# -q- schaltet den Quiet-Mode aus.									(*ATTN*)
+# 
+# Es erscheint sinnvoll, die Fehlermeldungen zu konkatenieren (">> <list-file>").
+# 
+# GNUP2C erwartet die Umgebungsvariable P2C_HOME, dort wird der Config. File
+# P2CRC gesucht (s. p2c.man). Er sollte i.A. nicht veraendert werden, ausgenommen
+# die Optionen zur Steuerung der Formatierung, womit man experimentieren moege.
+# 
+# Auch erwartet GNUP2C die Umgebungsvariable (*ATTN*) P2C_INCLUDE, hier (und im 
+# Current Directory) werden die referierten Pascal Include Files gesucht.
+# 
+# 
+# 
+# 
+# Message Filter
+# 
+# Das Program MSGFILTER.EXE wird im MS-Dev.Studio installiert (s.u.) und gibt 
+# die Meldungen des GNUP2C umformatiert im Output Window aus, mit Positions-
+# angaben im PASCAL-File, im orig. Modulrahmen und (spaeter) im C-File. Die 
+# Positionsangaben im Modulrahmen sind evtl. ungenau (i.a. +/- 1-2 Zeilen).
+# 
+# Das Program wurde (leider) von mir noch nicht intensiv getestet bzw. genutzt,
+# Abstuerze oder fehlerhafte Umformatierungen sind also nicht ausgeschlossen. 
+# Pardon!
+# 
+# Installation in Tools/Customize/Tools:
+# 
+# Command:   <exe-dir>\msgfilter.exe
+# Arguments: <pascal-dir> <c-dir> $(FilePath) 
+# 			z.B. "...\wrk\slow ...\wrk\slow $(FilePath)"
+# Init.Dir.: NIX
+# "Use Output Window" CHECKED!, 
+# NO "Prompt For Arguments"
+# 
+# Der Pfad fuer den Modulrahmen wird vom Entpacker und von GNUP2C durchgereicht,
+# die anderen Pfade leider nicht, sobald's der Current Directory ist. Fuer den 
+# C-Directory kann in dieser Phase (Source-Entruemplung) ein Dummy eingesetzt 
+# werden. Die Positionierung sollte im PAS-File +/- 1 Zeile, im Module +/- max.
+# 5 Zeilen korrekt sein, im CPP-File evtl.(!) am Anfang der Procedure. Dafuer 
+# steht im C-Module die Meldung an korrekter Stelle (+/- 1 Zeile) nochmal als 
+# Kommentar!
+# 
+# Anwendung:
+# 
+# GNU-P2C's List File, ggf. mehrere konkatentiert, oeffnen, dieses Window 
+# ggf. aktivieren, Tool starten, Daumen druecken, dann froehliches Doppelklicken
+# im Output Window.
+# 
+# 
+# 
+# File List (s.o):
+# 
+# ENTPACK.EXE
+# + ENTPACK.PMT
+# + 3 DLLs
+# 
+# GNUP2C.EXE
+# + P2CRC
+# + PTOCMACS.H
+# + RAS_P2C.H
+# + P2CSTDF.INC
+# 
+# MSGFILTER.EXE
+#
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Carp;
+use File::Copy;
+use FileHandle;
+$USAGE = "usage: pascal2cpp source\n";
+if ( @ARGV != 1 ) { print $USAGE; exit 1 }
+
+$P2C_INCLUDE="$WRK/incl";
+$ENV{'P2C_INCLUDE'}=$P2C_INCLUDE;
+$P2C_HOME="$TOOL/lib";
+$ENV{'P2C_HOME'}=$P2C_HOME;
+copy ("$TOOL/incl/p2cstdf.inc", "$WRK/incl/p2cstdf.inc");
+
+$BASE = $ARGV[0];
+$LAYER = substr $BASE, 1, 2;
+print "File $BASE auf Layer $LAYER\n";
+
+unlink "$TMP/ak.com";
+copy ("$GRP/sys/desc/ak.com", "$TMP/ak.com");
+unlink "$TMP/kb.com";
+copy ("$GRP/sys/desc/kb.com", "$TMP/kb.com");
+unlink "$TMP/bd.com";
+copy ("$GRP/sys/desc/bd.com", "$TMP/bd.com");
+unlink "$TMP/gg.com";
+copy ("$GRP/sys/desc/gg.com", "$TMP/gg.com");
+unlink "$TMP/sp.com";
+copy ("$GRP/sys/desc/sp.com", "$TMP/sp.com");
+unlink "$TMP/en.com";
+copy ("$GRP/sys/desc/en.com", "$TMP/en.com");
+unlink "$TMP/$LAYER.com";
+copy ("$SRC/$LAYER/$LAYER.com", "$TMP/$LAYER.com");
+
+unlink "$WRK/slow/tmp/$BASE";
+$output = `"$TOOLSHELL $TOOL/bin/iview$TOOLEXT -e 0 $BASE"`;
+    @lines = split /^/m, $output;
+    foreach $_ (@lines) {
+        if (/(.*): local source/) {
+            unlink "$WRK/slow/tmp/$BASE";
+            copy ("$SRC/$LAYER/$BASE", "$WRK/slow/tmp/$BASE"); 
+            break;
+        }
+        if (/copied to (.*)$/) {
+            unlink "$WRK/slow/tmp/$BASE";
+            copy ("$TMP/$BASE", "$WRK/slow/tmp/$BASE");
+            # don't break as there may be a local source afterwards
+        }
+    }
+    
+$BASEDIR="$WRK/slow/tmp";
+chdir ($BASEDIR);
+
+system ("$TOOL/pgm/gnuentpack", "-u0", "-i", "-n", "$WRK/incl", "-l0", "-e+", "$WRK/slow/tmp/$BASE", "-d $TMP", "-o $BASE.p", "-p $TOOL/pgm/entpack.PMT") == 0
+         or croak "Error while executing \"$TOOL/pgm/gnuentpack\"\n".
+		"message: $!\n";
+
+@PCFLAGS= ("-Rg-", "-Rl0");
+
+$MY_FN = substr $BASE, 1, 6;
+unlink "$WRK/incl/h$MY_FN.inc";
+copy ("$WRK/slow/tmp/h$MY_FN.inc", "$WRK/incl/h$MY_FN.inc");
+
+print "\n$TOOL/pgm/gnup2c.exe @PCFLAGS $BASE.p -o $BASE.cpp\n";
+system("$TOOL/pgm/gnup2c.exe @PCFLAGS $BASE.p -o $BASE.cpp");
+system ("perl -p -i.bak -e \"s/hta01.h/hta99.h/\" $BASE.cpp");
+unlink "$BASE.cpp.bak";
+system ("perl -p -i.bak -e \"s/externCpp/externC/\" $BASE.cpp");
+unlink "$BASE.cpp.bak";
+    if ( $BASE =~ /vbd01|vbd06|vbd07|vbd10|vbd12|vbd15|vbd20|vbd40|vbd41|vbd46|vbd49|vbd50|vbd51|vbd53|vbd54/i) 
+    { 
+        local $fh_in = new FileHandle;
+        local $fh_out = new FileHandle;
+        $fh_in->open("$BASE.cpp", "r");
+        $fh_out->open("$BASE.cpp.new", "w");
+        while(<$fh_in>)
+        {
+            s!hgg01.h!hgg01.h"\n#include "hgg01_1.h!;
+            $fh_out->print($_);
+        }
+        #system ("perl -p -i.bak -e 's/hgg01.h/hgg01.h\"\n#include \"hgg01_1.h/' $BASE.cpp");
+        $fh_in->close;
+        $fh_out->close;
+        unlink "$BASE.cpp";
+        rename("$BASE.cpp.new", "$BASE.cpp");
+}
+system ("perl -p -i.bak -e \"s/Char/char/\" h$MY_FN.h");
+unlink "h$MY_FN.h.bak";
+system ("perl -p -i.bak -e \"s/externCpp/externC/\" h$MY_FN.h");
+unlink "h$MY_FN.h.bak";
+unlink "$SRC/$LAYER/h$MY_FN.h";
+copy ("$WRK/slow/tmp/h$MY_FN.h", "$SRC/$LAYER/h$MY_FN.h");
+
+if ( $LAYER =~ /BD/i )
+{
+    unlink "$SRC/$LAYER/$BASE.cpp";
+    copy ("$WRK/slow/tmp/$BASE.cpp", "$SRC/$LAYER/$BASE.cpp");
+}
+
+__END__
+
+Hier kann ein langer Kommentar stehen!

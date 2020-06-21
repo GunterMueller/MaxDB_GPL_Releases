@@ -1,0 +1,728 @@
+(* @(#)optimizer/optm2.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm2.p *)
+
+   (* this module contains the procedures that construct the node *)
+   (* exit descriptors and end; *)
+   (* exit descriptors and select candidates for optimization.    *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../optimizer/more_csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+#include "../optimizer/set_util.h"
+
+
+(* export *)
+
+#include "../optimizer/optm2.h"
+
+
+(* privates *)
+
+#define MAXHASH
+#define MOD
+
+(* initial *)
+
+   procedure Optm2I;
+   begin
+   end;
+
+
+(* routines *)
+
+
+   procedure AddToListOfExpressions
+      (NodeIndex,LinkNode: HdgRange);
+
+      (* this procedure adds the node to the list of expressions *)
+      (* which are  candidates for optimization.                 *)
+
+   begin
+      if
+         ExprFlag and
+         (NoExpr < TableSize) and
+         (NoStmnt < TableSize) and
+         IsOptimizible (NodeIndex) and
+	 (NoStmnt <> 0)			/* 08.07.88 */
+      then begin
+         NoExpr := NoExpr + 1;
+         ExprChain [NoExpr] := NodeIndex;
+         ExprLink [NoExpr] := LinkNode;
+         ExprStmnt [NoExpr] := NoStmnt;
+      end  (* if *);
+   end (* AddToListOfExpressions *);
+
+
+   procedure AddToListOfStatements
+      (NodeIndex,
+       LinkNode: HdgRange);
+
+      (* this procedure adds the node to the list of statements *)
+      (* which are candidates for optimization.                 *)
+
+   begin
+      if StmntFlag and (NoStmnt < TableSize) then begin
+         NoStmnt := NoStmnt + 1;
+         StmntChain [NoStmnt] := NodeIndex;
+         StmntLink [NoStmnt] := LinkNode;
+      end  (* if *);
+   end  (* AddToListOfStatements *);
+
+
+   function FindBase
+      (NodeIndex: HdgRange)
+      : SymbolTableRange;
+
+   begin
+      while NodeIndex <> -1 do begin
+         case MinorOperator of
+	    LitOp: begin            /* 14.01.88 */
+	       FindBase := -2;
+               NodeIndex := -1;
+            end;
+            IdOp,
+            LabelOp: begin
+               FindBase := Node1parameter;
+               NodeIndex := -1;
+            end;
+            SubscriptOp,
+            ElementOp: begin
+               NodeIndex := Bin1operand;
+            end;
+            DerefOp: begin
+               FindBase := -1;
+               NodeIndex := -1;
+            end;
+            otherwise begin
+               PasCerror ('illegal tree - FindBase');
+            end;
+         end  (* case *);
+      end  (* while *);
+   end  (* FindBase *);
+
+
+   procedure MakeBaseSet
+      (NodeIndex: HdgRange;
+#ifdef FLEX
+       TempSet : PSet );
+#else
+       var TempSet: Set);
+#endif
+
+   var
+      sym: SymbolTableRange;
+
+   begin
+      sym := FindBase (NodeIndex);
+      if sym <> -1 then begin
+	 Clear_this_Set (TempSet);
+	 if sym <> -2 then begin        /* 14.01.88 */
+	    if STab [sym].SKind <> CBlockElementDcl then begin
+	       Insert_val_into_Set (sym, TempSet);
+	    end
+	    else begin
+	       Insert_val_into_Set (STab [sym].AddrInfo.SRegister, TempSet);
+	    end;
+	 end;
+      end
+      else begin
+	 Fill_whole_Set (TempSet);
+      end;
+   end  (* MakeBaseSet *);
+
+
+   procedure ConstructDesc
+      (NodeIndex: HdgRange;
+       var ExitDesc1: NodeDescriptorType);
+
+      (* this procedure constructs node exit descriptors for operator  *)
+      (* nodes.                                                        *)
+
+   var
+      i,
+      inx: integer;
+      sym: SymbolTableRange;
+      ProcLevel: integer;
+#ifdef FLEX
+      TempSet: PSet;
+      temp_set : Set;
+#else
+      TempSet: Set;
+#endif
+
+   begin
+#ifdef FLEX
+      TempSet := @temp_set;
+#endif
+
+      ClearDescriptor (ExitDesc1);
+
+      case MinorOperator of
+
+         LoadOp: begin
+	    MakeBaseSet (Unary1operand, TempSet);
+	    Union_Sets (ExitDesc1.ref, ExitDesc1.ref, TempSet);
+         end;
+
+         StoreOp: begin
+            MakeBaseSet (Ls1operand, TempSet);
+	    Union_Sets (ExitDesc1.def, ExitDesc1.def, TempSet);
+         end;
+
+         StorepOp: begin
+            if STab [TypeField].SType = PointerType then begin
+               NodeIndex := Unary1operand;
+               if MinorOperator = LoadadrOp then begin
+                  MakeBaseSet (Unary1operand, TempSet);
+		  Union_Sets (ExitDesc1.ref, ExitDesc1.ref, TempSet);
+		  Union_Sets (ExitDesc1.def, ExitDesc1.def, TempSet);
+               end
+               else if MinorOperator <> LoadstrOp then begin
+		  Fill_whole_Set (TempSet);
+		  Union_Sets (ExitDesc1.ref, ExitDesc1.ref, TempSet);
+		  Union_Sets (ExitDesc1.def, ExitDesc1.def, TempSet);
+               end;
+            end;
+         end;
+
+         StorepadrOp: begin
+            MakeBaseSet (Unary1operand, TempSet);
+	    Union_Sets (ExitDesc1.ref, ExitDesc1.ref, TempSet);
+	    Union_Sets (ExitDesc1.def, ExitDesc1.def, TempSet);
+         end;
+
+         ContinueOp: begin
+            ExitDesc1.continue := true;
+            EssentialBit := false;
+         end;
+
+         BreakOp: begin
+            ExitDesc1.break := true;
+            EssentialBit := false;
+         end;
+
+         RtrnOp,
+         RtrnxOp: begin
+            ExitDesc1.return := true;
+            EssentialBit := false;
+         end;
+
+         GotoOp,
+         LabelOp: begin
+            ExitDesc1.goto_label := true;
+            EssentialBit := false;
+         end;
+
+         CallOp: begin
+            sym := FindBase (Ls1operand);
+            if sym > 0 then begin
+               inx := 0;
+               while
+                  (ProcTable[inx].SymTabInx <> sym) and
+                  (inx <= ProcTableSize)
+               do begin
+                  inx := inx + 1;
+               end  (* while *);
+               if
+                  (control ['C']) and
+                  (inx <= ProcTableSize) and
+                  (inx <> NoProc)
+               then begin
+		  AssignDescriptors (ExitDesc1, ProcTable [inx].ProcExitDescr);
+               end
+               else begin
+                  (* procedure not seen yet *)
+                  ProcLevel := STab [sym].SLevel;
+                  i := 1;
+(*                for i := 1 to SymPtr do begin *)
+                  while (i <= SymPtr) do begin
+                     (* assume inner procedures occur before outer procedures *)
+		     if (STab[i].SLevel <= ProcLevel) and
+			((STab[i].SKind = VarDcl)or(STab[i].SKind = ParmDcl))
+			then begin
+			     Insert_val_into_Set (i, ExitDesc1.ref);
+			     Insert_val_into_Set (i, ExitDesc1.def);
+			     end;
+(* Zeile neu *)
+                      i := STab[i].SNext;
+                  end;
+               end;
+            end
+            else begin
+               (* pointer to a procedure *)
+	       (*
+	       for i := 1 to SymPtr do begin
+		  if ((STab[i].SKind = VarDcl) or (STab[i].SKind = ParmDcl))
+		     then begin
+			  Insert_val_into_Set (i, ExitDesc1.ref);
+			  Insert_val_into_Set (i, ExitDesc1.def);
+			  end;
+               end;
+	       *)
+	       Fill_whole_Set(ExitDesc1.ref);
+	       Fill_whole_Set(ExitDesc1.def);
+            end;
+         end;
+
+         Sys0Op: begin
+	    Insert_val_into_Set (0, ExitDesc1.ref);
+	    Insert_val_into_Set (0, ExitDesc1.def);
+         end;
+
+         PrefixOp,
+         PostfixOp: begin
+            MakeBaseSet (Ls1operand, TempSet);
+	    Union_Sets (ExitDesc1.ref, ExitDesc1.ref, TempSet);
+	    Union_Sets (ExitDesc1.def, ExitDesc1.def, TempSet);
+         end;
+
+         AsmOp: begin
+            i :=1;
+(*          for i := 1 to SymPtr do begin *)
+            while (i <= SymPtr) do begin
+	       Fill_whole_Set (ExitDesc1.ref);
+	       Fill_whole_Set (ExitDesc1.def);
+(* Zeile neu *)
+               i := STab[i].SNext;
+            end;
+            ExitDesc1.continue := true;
+            ExitDesc1.break := true;
+            ExitDesc1.return := true;
+            ExitDesc1.goto_label := true;
+            EssentialBit := false;
+         end;
+
+      end  (* case *);
+   end  (* ConstructDesc *);
+
+
+   procedure BuildExitDescriptors
+      (NodeIndex,
+       LinkNode: HdgRange;
+       traversal: TraversalType;
+       var ExitDesc1: NodeDescriptorType);
+
+      (* this procedure builds the node exit descriptors. if the *)
+      (* node contains other nodes it calls the procedure "Exit *)
+      (* traverse"  to go down the tree. it also selects expres- *)
+      (* sions and statements for possible optimization.         *)
+   label
+      1;
+   var
+      ExitDesc2,
+      ExitDesc3: NodeDescriptorType;
+#ifdef FLEX
+      set1, set2, set3, set4: Set;
+#endif
+      DescPtr : DescriptorRange;
+      CnodeIndex: HdgRange;
+      SaveEssentialBit: boolean;
+
+   begin (* BuildExitDescriptors *)
+
+#ifdef FLEX
+      set_Ref ( ExitDesc2, set1 );
+      set_Def ( ExitDesc2, set2 );
+      set_Ref ( ExitDesc3, set3 );
+      set_Def ( ExitDesc3, set4 );
+#endif
+      SaveEssentialBit := EssentialBit;
+
+      if (NodeIndex = ExcludedNode) or
+	 (NodeIndex = -1)              then begin
+       ClearDescriptor ( ExitDesc1 );
+       goto 1;
+       end;
+
+      case MajorOperator of
+
+         node: begin
+            ConstructDesc (NodeIndex, ExitDesc1);
+	    ExitDesc1.hash_code := (Unary1operand) MOD MAXHASH;
+         end;
+
+         spec: begin
+            ConstructDesc (NodeIndex, ExitDesc1);
+	    ExitDesc1.hash_code := (ExitDesc1.hash_code + 1111) MOD MAXHASH;
+         end;
+
+         ShortStmnt: begin
+            AddToListOfStatements (NodeIndex, LinkNode);
+            ConstructDesc (NodeIndex, ExitDesc1);
+            ExitTraverse (Ss1operand, Ss1operandLink, StmntTraversal, ExitDesc2);
+	    ExitDesc1.hash_code := (ExitDesc2.hash_code + 2222) MOD MAXHASH;
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+         end;
+
+         UnaryExp: begin
+            AddToListOfExpressions (NodeIndex, LinkNode);
+            ConstructDesc (NodeIndex, ExitDesc1);
+            ExitTraverse (Unary1operand, Unary1operandLink, ExprTraversal, ExitDesc2);
+	    ExitDesc1.hash_code := (ExitDesc2.hash_code + 3333) MOD MAXHASH;
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+         end;
+
+         BinaryExp: begin
+            AddToListOfExpressions (NodeIndex, LinkNode);
+            ConstructDesc (NodeIndex, ExitDesc1);
+            if (MinorOperator = SubscriptOp) then begin
+                  EssentialBit := false;
+	    end;
+            ExitTraverse (Bin1operand, Bin1operandLink, ExprTraversal, ExitDesc2);
+	    EssentialBit := SaveEssentialBit;
+            if (MinorOperator = AndOp) or (MinorOperator = OrOp) then begin
+                  EssentialBit := false;
+            end;
+            ExitTraverse (Bin2operand, Bin2operandLink, ExprTraversal, ExitDesc3);
+	    ExitDesc1.hash_code := (ExitDesc2.hash_code + ExitDesc3.hash_code
+				    + 4444) MOD MAXHASH;
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc3);
+         end;
+
+         ExpList: begin
+            ExitTraverse (ListHeadField, ListHeadFieldLink, ExprTraversal, ExitDesc1);
+         end;
+
+         LongStmnt: begin
+            if traversal = StmntTraversal then begin
+               AddToListOfStatements (NodeIndex, LinkNode);
+            end
+            else begin
+               AddToListOfExpressions (NodeIndex, LinkNode);
+            end;
+            ConstructDesc (NodeIndex, ExitDesc1);
+            ExitTraverse (Ls1operand, Ls1operandLink, ExprTraversal, ExitDesc2);
+            ExitTraverse (Ls2operand, Ls2operandLink, ExprTraversal, ExitDesc3);
+	    ExitDesc1.hash_code := (ExitDesc2.hash_code + ExitDesc3.hash_code
+				    + 5555) MOD MAXHASH;
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc3);
+         end;
+
+         Case: begin
+         end;
+
+         ifthenelse: begin
+            if traversal = StmntTraversal then begin
+               AddToListOfStatements (NodeIndex, LinkNode);
+            end
+            else begin
+               AddToListOfExpressions (NodeIndex, LinkNode);
+            end;
+            ExitTraverse (IfCondField, IfCondLink, ExprTraversal, ExitDesc1);
+            if
+               OptimizedIf and
+               (traversal = StmntTraversal) and
+               (ExcludedNode = -1) and
+	       (NodeIndex <> OptimizeNode)
+            then begin
+               DescPtr := ptr (DscField);
+               AssignDescriptors (ExitDesc1, DescPtr^.ExitDescriptor);
+            end
+            else begin
+               EssentialBit := false;
+               ExitTraverse (IfTrueField, IfTrueLink, traversal, ExitDesc2);
+               if IfFalseField <> -1 then begin
+                  ExitTraverse (
+                     IfFalseField, IfFalseLink, traversal, ExitDesc3);
+		  ExitDesc1.hash_code := (ExitDesc2.hash_code +
+					  ExitDesc3.hash_code +
+					  6666) MOD MAXHASH;
+		  UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+		  UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc3);
+	       end  (* if *)
+	       else begin
+		  ExitDesc1.hash_code := (ExitDesc2.hash_code +
+					  7777) MOD MAXHASH;
+		  UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+	       end  (* else *);
+            end  (* if *);
+         end;
+
+         loop: begin
+            if
+               OptimizedLoop and
+               (ExcludedNode = -1) and
+	       (NodeIndex <> OptimizeNode)
+            then begin
+               AddToListOfStatements (NodeIndex, LinkNode);
+               DescPtr := ptr (DscField);
+               AssignDescriptors (ExitDesc1, DescPtr^.ExitDescriptor);
+            end
+            else begin
+               AddToListOfStatements (NodeIndex, LinkNode);
+               ExitTraverse (
+                  WhileTestField, WhileTestLink, ExprTraversal, ExitDesc1);
+               ExitTraverse (
+                  WhileBodyField, WhileBodyLink, StmntTraversal, ExitDesc2);
+               ExitDesc2.continue := false;
+               ExitDesc2.break := false;
+	       ExitDesc1.hash_code := (ExitDesc1.hash_code +
+				       ExitDesc2.hash_code +
+				       8888) MOD MAXHASH;
+	       UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+            end  (* if *);
+         end;
+
+         Switch: begin
+            AddToListOfStatements (NodeIndex, LinkNode);
+            ExitTraverse (
+               SwitchTest, SwitchTestLink, ExprTraversal, ExitDesc1);
+            EssentialBit := false;
+            ExitTraverse (
+               SwitchBody, SwitchBodyLink, StmntTraversal, ExitDesc2);
+            ExitDesc2.break := false;
+	    ExitDesc1.hash_code := (ExitDesc1.hash_code +
+				    ExitDesc2.hash_code +
+				    9999) MOD MAXHASH;
+	    UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+         end;
+
+         RepeatUntil: begin
+            if
+               OptimizedLoop and
+               (ExcludedNode = -1) and
+	       (NodeIndex <> OptimizeNode)
+            then begin
+               AddToListOfStatements (NodeIndex, LinkNode);
+               DescPtr := ptr (DscField);
+               AssignDescriptors (ExitDesc1, DescPtr^.ExitDescriptor);
+            end
+            else begin
+               ExitTraverse (
+                  RepeatBody, RepeatBodyLink, StmntTraversal, ExitDesc1);
+               ExitDesc1.continue := false;
+               EssentialBit :=
+                  SaveEssentialBit and (not DescriptorFlags (ExitDesc1));
+               AddToListOfStatements (NodeIndex, LinkNode);
+               ExitTraverse (
+                  RepeatTest, RepeatTestLink, ExprTraversal, ExitDesc2);
+               ExitDesc1.break := false;
+	       ExitDesc1.hash_code := (ExitDesc1.hash_code +
+				       ExitDesc2.hash_code +
+				       11111) MOD MAXHASH;
+	       UnionDescriptors(ExitDesc1,ExitDesc1,ExitDesc2);
+            end  (* if *);
+         end;
+
+         Proc: begin
+            ExitTraverse (ProcBody, ProcBodyLink, StmntTraversal, ExitDesc1);
+	    ExitDesc1.return := false;
+            ExitDesc1.goto_label := false;
+         end;
+
+         OpenProc: begin
+            ExitTraverse (ProcBody, ProcBodyLink, StmntTraversal, ExitDesc1);
+            ExitDesc1.return := false;
+            ExitDesc1.goto_label := false;
+         end;
+
+      end  (* case *);
+
+
+      (* a node's' exit descriptor is the union of the exit descriptors *)
+      (* of its interior nodes                                         *)
+
+
+      EssentialBit := SaveEssentialBit and (not DescriptorFlags (ExitDesc1));
+
+      if MajorOperator <> node then begin
+
+         if ExcludedNode = -1 then begin
+            if (IncludedNode = -1) or (NodeIndex = IncludedNode) then begin
+               (* save the exit descriptor for included nodes only *)
+               if ptr (DscField) <> nil then begin
+                  DescPtr := ptr (DscField);
+               end
+               else begin
+                  DescPtr := AvailableDescriptor;
+                  DscField := ord (DescPtr);
+               end  (* if *);
+               AssignDescriptors (DescPtr^.ExitDescriptor, ExitDesc1);
+               DescPtr^.essential := EssentialBit;
+            end
+            else begin
+               if DscField <> ord (nil) then begin
+                  FreeDescriptor (ptr (DscField));
+                  DscField := ord (nil);
+               end  (* if *);
+            end  (* if *);
+         end  (* if *);
+
+         if control ['V'] then begin
+            PrintDescriptor (NodeIndex, 'exit', ExitDesc1);
+         end  (* if *);
+
+      end  (* if *);
+      1:
+   end  (* BuildExitDescriptors *);
+
+
+   procedure ExitTraverse
+      (NodeIndex,
+       LinkNode: HdgRange;
+       traversal: TraversalType;
+       var ExitDesc1: NodeDescriptorType);
+
+   var
+      ExitDesc2: NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc2, set1 );
+      set_Def ( ExitDesc2, set2 );
+#endif
+
+      ClearDescriptor (ExitDesc1);      (* kein 'clear' beim Aufruf *)
+
+      while NodeIndex <> -1 do begin
+
+         (* record cost of optimization *)
+         NoNodesTraversed := NoNodesTraversed + 1;
+
+         (* do not build exit descriptor for excluded node *)
+         if NodeIndex <> ExcludedNode  then begin
+            BuildExitDescriptors (NodeIndex, LinkNode, traversal, ExitDesc2);
+	    UnionDescriptors (ExitDesc1, ExitDesc1, ExitDesc2);
+         end  (* if *);
+
+         LinkNode := NextLinkLink;
+         NodeIndex := NextLink;  (* points to following csg *)
+
+      end  (* while *);
+   end (*ExitTraverse*);
+
+
+   procedure DeallocateDsc
+      (NodeIndex: HdgRange);
+
+   begin
+      while NodeIndex <> -1 do begin
+          DeallocateCsgDsc(NodeIndex);
+          NodeIndex := NextLink;  (* points to following csg *)
+      end  (* while *);
+   end (*DeallocateDsc*);
+
+
+   procedure DeallocateCsgDsc
+      (NodeIndex: HdgRange);
+
+   begin
+      (* this procedure deallocates node descriptors. *)
+      case MajorOperator of
+
+         RepeatUntil: begin
+            DeallocateDsc(RepeatBody);
+            DeallocateDsc(RepeatTest);
+         end;
+
+         Proc: begin
+            DeallocateDsc(ProcBody);
+         end;
+
+         OpenProc: begin
+            DeallocateDsc(ProcBody);
+         end;
+
+         ExpList: begin
+            DeallocateDsc(ListHeadField);
+         end;
+
+         LongStmnt: begin
+            DeallocateDsc(Ls1operand);
+            DeallocateDsc(Ls2operand);
+         end;
+
+         Case: begin
+         end;
+
+         ifthenelse: begin
+            DeallocateDsc(IfCondField);
+            DeallocateDsc(IfTrueField);
+            if IfFalseField <> -1  then begin
+               DeallocateDsc(IfFalseField);
+            end  (* if *);
+         end;
+
+         loop: begin
+            DeallocateDsc(WhileTestField);
+            DeallocateDsc(WhileBodyField);
+         end;
+
+         Switch: begin
+            DeallocateDsc(SwitchBody);
+         end;
+
+         node: begin
+         end;
+
+         spec: begin
+         end;
+
+         ShortStmnt: begin
+            DeallocateDsc(Ss1operand);
+         end;
+
+         UnaryExp: begin
+            DeallocateDsc(Unary1operand);
+         end;
+
+         BinaryExp: begin
+            DeallocateDsc(Bin1operand);
+            DeallocateDsc(Bin2operand);
+         end;
+
+         otherwise begin
+            PasCerror ('MajorOpcode - DeallocateDsc');
+         end;
+
+      end  (* case *);
+
+      if (MajorOperator <> node) and
+	 (MajorOperator <> RepeatUntil) and
+	 (MajorOperator <> ifthenelse) and
+	 (MajorOperator <> loop) then begin
+         if DscField <> ord (nil) then begin
+            FreeDescriptor (ptr (DscField));
+            DscField := ord (nil);
+         end  (* if *);
+      end;
+
+   end (*DeallocateCsgDsc*);

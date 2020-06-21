@@ -1,0 +1,223 @@
+/*!**********************************************************************
+
+  module: o3desc3.c
+
+  -----------------------------------------------------------------------
+
+  responsible:  TTK
+
+  special area: ODBC-Tests
+
+  description:  get column type of timestamp column (PTS 1116570)
+
+  -----------------------------------------------------------------------
+
+                         Copyright (c) 1998-2005 SAP AG
+
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 1998-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+************************************************************************/
+
+#define PROGNAME "O3DESC5"
+
+#define ODBCVER 0x0350
+
+#define CHAR_LEN   100000
+
+#include "o3util.c"
+#include "o3utdesc.c"
+
+#define ERROR_CHECK(hstmtx)      if (retcode != SQL_SUCCESS && retcode != SQL_STILL_EXECUTING) {\
+                           SQLError(SQL_NULL_HENV, SQL_NULL_HDBC, hstmtx,\
+                              sqlstate, &esq_sql_code, error_txt,\
+                                    sizeof(error_txt), &used_error_txt);\
+                           SPRINTF(textBuffer, " sqlstate: %s"CRLF, sqlstate);\
+                           PRINTF(textBuffer);\
+                           SPRINTF(textBuffer, " esq_sql_code: %ld"CRLF, esq_sql_code);\
+                           PRINTF(textBuffer);\
+                           SPRINTF(textBuffer," error_txt: %s"CRLF, error_txt);\
+                           PRINTF(textBuffer);\
+                  switch (retcode) {\
+                  case(SQL_NO_DATA_FOUND) :\
+                  case(SQL_STILL_EXECUTING) :\
+                          break;\
+                  case(SQL_ERROR) : \
+                     if (!STRCMP(sqlstate,"22005") &&\
+                        !STRCMP(sqlstate,"22003") &&\
+                           !STRCMP(sqlstate,"22008") &&\
+                           !STRCMP(sqlstate,"S0002") &&\
+                              !STRCMP(sqlstate,"07006"))\
+                              { return(16); }\
+                     break;\
+                  case(SQL_SUCCESS_WITH_INFO) : \
+                       if (STRCMP(sqlstate,"01004"))\
+                          if (STRCMP(sqlstate,"22001"))\
+                        { return(16); }\
+                     break;\
+                  default   :\
+                          return(16);\
+                          break; } }
+
+
+
+void DescribeCols (SQLHSTMT, int);
+
+int MAIN(int argc, char **argv) {
+    RETCODE retcode;
+    UCHAR sqlstate  [ 10 ];
+    SDWORD esq_sql_code;
+    UCHAR error_txt  [ 101 ] ;
+    SWORD used_error_txt;
+
+    HENV    henv  = SQL_NULL_HENV;
+    HDBC    hdbc  = SQL_NULL_HDBC;
+    HSTMT   hstmt = SQL_NULL_HSTMT;
+    UCHAR   textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+
+
+    StartTest( PROGNAME );
+
+    /* ODBC 3.0 */
+    retcode = FullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+    retcode = SQLAllocHandle( SQL_HANDLE_STMT, hdbc, &hstmt );
+    SPRINTF( textBuffer,
+             "Main  \t\t -- SQLAllocHandle(STMT) \t retcode: %s"CRLF,
+             cnvret( retcode ));
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_STMT, hstmt );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    retcode = CreateTable( hdbc, PROGNAME, "( a int, b timestamp )" );
+    if (retcode != SQL_SUCCESS) {
+        goto exit;
+    }; /* if */
+
+    DescribeCols (hstmt, 18);    /* result table has 18 columns */
+    FullDisconnect( &henv, &hdbc );
+
+
+    /* ODBC 2.0 */
+    /* Allocate environment, connection, and statement handle  */
+    retcode = SQLAllocHandle (SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
+    SPRINTF(textBuffer, " SQLAllocHandle retcode: %d"CRLF, retcode);
+    PRINTF(textBuffer);
+    ERROR_CHECK(NULL);
+    
+    retcode = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION,
+                            (SQLPOINTER)SQL_OV_ODBC2, 0);
+    SPRINTF(textBuffer, " SQLSetEnvAttr (SQL_OV_ODBC2) retcode: %d"CRLF, retcode);
+    PRINTF(textBuffer);
+    ERROR_CHECK(NULL);
+
+    retcode = SQLAllocHandle (SQL_HANDLE_DBC, henv, &hdbc);
+    SPRINTF(textBuffer, " SQLAllocHandle retcode: %d"CRLF, retcode);
+    PRINTF(textBuffer);
+    ERROR_CHECK(NULL);
+
+    /* Connect to data source                                  */
+    retcode = SQLConnect(hdbc, DBNODE, (SWORD) SQL_NTS, ODBCUSER, (SWORD) SQL_NTS,
+                         ODBCPASSW, (SWORD) SQL_NTS );
+    SPRINTF(textBuffer," SQLConnect retcode: %d"CRLF, retcode);
+    PRINTF(textBuffer);
+    ERROR_CHECK(NULL);
+
+
+    retcode = SQLAllocHandle (SQL_HANDLE_STMT, hdbc, &hstmt);
+    SPRINTF(textBuffer, " SQLAllocHandle retcode: %d"CRLF, retcode);
+    PRINTF(textBuffer);
+    ERROR_CHECK(NULL);
+
+exit:
+
+    DescribeCols (hstmt, 14);    /* result table has 14 columns */
+
+
+    retcode = DropTable( hdbc, PROGNAME );
+    SQLDisconnect(&hdbc );
+     
+    PRINTF( textBuffer );
+
+    EndTest( PROGNAME );
+
+    return 0;
+}; /* MAIN */
+
+
+
+void fetchout (SQLHSTMT hstmt, int cols)
+{
+  RETCODE retcode;
+  UCHAR     textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+  UCHAR state  [ 10 ];
+  SDWORD sql_code;
+  UCHAR error_txt  [ 101 ] ;
+  SWORD txt_len = 100;
+  SWORD used_error_txt;
+
+  SQLCHAR boundVal[18][50];
+  SQLLEN  lengthVal[18];
+  int i;
+
+  for (i=0; i<cols; i++) {
+
+    retcode = SQLBindCol (hstmt, i+1, SQL_C_CHAR, boundVal[i],
+                          sizeof(boundVal[i]), &lengthVal[i]);
+    SPRINTF(textBuffer," SQLBindCol %d retcode: %d"CRLF, i+1, retcode);
+    PRINTF(textBuffer);
+  }
+
+  while (retcode == SQL_SUCCESS) {
+
+    retcode = SQLFetch (hstmt);
+    SPRINTF (textBuffer, "\n");
+    PRINTF (textBuffer);
+
+    if (retcode == SQL_NO_DATA)
+      return;
+
+    for (i=0; i<cols; i++) {
+      SPRINTF (textBuffer, " Fetch(%d):\t%s\t%d\n", i+1, boundVal[i], lengthVal[i]);
+      PRINTF (textBuffer);
+    }
+  }
+}
+
+void DescribeCols (SQLHSTMT hstmt, int cols)
+{
+
+    RETCODE   retcode     = SQL_SUCCESS;
+
+    retcode = SQLColumns (hstmt, NULL, SQL_NTS, ODBCUSER, SQL_NTS,
+                          PROGNAME, SQL_NTS, NULL, SQL_NTS);
+
+    fetchout (hstmt, cols);
+
+}

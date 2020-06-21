@@ -1,0 +1,940 @@
+(* @(#)optimizer/temp_util.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* temp_util.p *)
+
+(* define *)
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/utilities.h"
+#include "../common/csg.i"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/set_util.h"
+#ifdef TRACE
+#include "../common/_shifts.h"
+#include "../common/csg.def"
+#endif
+#include "../optimizer/alloc_comdef.i"
+
+
+(* export *)
+
+#include "../optimizer/temp_util.h"
+
+
+(* privates *)
+
+const
+   gl_NestLimit = 31;
+   gl_TempLimit = 15;
+
+var
+   gl_FreeTemps: array [0..gl_NestLimit] of SymbolTableRange;
+   gl_BusyTemps: SymbolTableRange;
+   gl_NestLevel: integer;
+   gl_TempCount: integer;
+
+
+(* routines *)
+
+function MALLOC ( size,where_from : integer ) : integer;    external;
+procedure FREE ( x,y:integer); external;
+
+procedure gl_InitTemps;
+
+var
+   i: integer;
+
+begin
+   for i := 0 to gl_NestLimit do begin
+      gl_FreeTemps [i] := -1;
+   end;
+   gl_BusyTemps := -1;
+   gl_NestLevel := 0;
+   gl_TempCount := 0;
+end;
+
+
+function gl_FindFreeTemp
+   (TempType: SymbolTableRange)
+   : boolean;
+
+var
+   i: SymbolTableRange;
+   k: integer;
+   found: boolean;
+
+begin
+   found := false;
+   k := gl_NestLevel;
+   while (not found) and (k >= 0) do begin
+      i := gl_FreeTemps [k];
+      while (not found) and (i <> -1) do begin
+         if STab [i].SType = TempType then begin
+            found := true;
+         end
+         else begin
+            i := STab [i].SLink;
+         end;
+      end  (* while *);
+      k := k - 1;
+   end  (* while *);
+   gl_FindFreeTemp := found;
+end  (* gl_FindFreeTemp *);
+
+
+function gl_TempAvail
+   (TempIndex,
+    TempType: SymbolTableRange)
+   : boolean;
+
+begin
+   gl_TempAvail :=
+      (gl_NestLevel <= gl_NestLimit) and
+      ((TempIndex <> -1) or
+       (gl_TempCount < gl_TempLimit) or
+       gl_FindFreeTemp (TempType));
+end  (* gl_TempAvail *);
+
+
+function gl_GetTemporary
+   (TempType: SymbolTableRange)
+   : SymbolTableRange;
+
+var
+   i,
+   j: SymbolTableRange;
+   k,
+   save_k: integer;
+   found: boolean;
+   diff : integer;
+
+begin
+   found := false;
+   k := gl_NestLevel;
+   while (not found) and (k >= 0) do begin
+      i := gl_FreeTemps [k];
+      j := -1;
+      while (not found) and (i <> -1) do begin
+         if STab [i].SType = TempType then begin
+            save_k := k;
+            found := true;
+         end
+         else begin
+            j := i;
+            i := STab [i].SLink;
+         end;
+      end  (* while *);
+      k := k - 1;
+   end  (* while *);
+
+   if found then begin
+      if j = -1 then begin
+         gl_FreeTemps [save_k] := STab [i].SLink;
+      end
+      else begin
+         STab [j].SLink := STab [i].SLink;
+      end;
+      STab [i].SLink := -1;
+   end
+   else begin
+      if STab [TempType].SType = DoubleType then begin
+         gl_TempCount := gl_TempCount + 2;
+      end
+      else begin
+         gl_TempCount := gl_TempCount + 1;
+      end;
+      i := GetTemporary (STab [ProcedureName].SType, TempType, true);
+      diff := i - max_value;
+      if NewVars >= diff
+	 then begin
+	      NewVars := NewVars - diff;
+	      rel_code[i] := max_index;
+	      sym_range[max_index] := i;
+	      max_index := max_index + 1;
+	      max_value := i;
+	      NewWords := (max_index + 31) div 32;
+	      end;
+      /*
+       *  else begin
+       *       rel_code[i] := max_index - 1;
+       *       end;
+       */
+   end;
+   STab [i].SLink := gl_BusyTemps;
+   gl_BusyTemps := i;
+   (* STab [i].SClass := AUTO;    20.08.87 *)
+   gl_GetTemporary := i;
+end  (* gl_GetTemporary *);
+
+
+procedure gl_FreeTemp
+   (Temp: SymbolTableRange);
+
+begin
+   (* STab [Temp].SClass := REGISTER;  20.08.87 *)
+   STab [Temp].SLink := gl_FreeTemps [gl_NestLevel];
+   gl_FreeTemps [gl_NestLevel] := Temp;
+end  (* gl_FreeTemp *);
+
+
+procedure gl_PushNestLevel;
+
+begin
+   gl_NestLevel := gl_NestLevel + 1;
+end  (* gl_NestLevel *);
+
+
+procedure gl_PopNestLevel
+#ifdef FLEX
+   (DefSet: PSet);
+#else
+   (var DefSet: Set);
+#endif
+
+var
+   i,
+   j,
+   next_i: integer;
+
+begin
+   if gl_NestLevel <= gl_NestLimit then begin
+      i := gl_BusyTemps;
+      j := -1;
+      while i <> -1 do begin
+         next_i := STab [i].SLink;
+	 if Member_in_Set (i, DefSet) then begin
+            if j = -1 then begin
+               gl_BusyTemps := STab [i].SLink;
+            end
+            else begin
+               STab [j].SLink := STab [i].SLink;
+            end;
+            gl_FreeTemp (i);
+         end
+         else begin
+            j := i;
+         end;
+         i := next_i;
+      end;
+      i := gl_FreeTemps [gl_NestLevel + 1];
+      gl_FreeTemps [gl_NestLevel + 1] := -1;
+      while i <> -1 do begin
+         next_i := STab [i].SLink;
+         gl_FreeTemp (i);
+         i := next_i;
+      end;
+   end;
+   gl_NestLevel := gl_NestLevel - 1;
+end  (* gl_PopNestLevel *);
+
+
+   function not_SetConst ( index : integer ) : boolean;
+   (*===================================================*)
+   var
+	ret : boolean;
+   begin
+	ret := (STab[index].SSubClass <> InitializedVar) or
+	       (STab[index].SClass <> LOCALSTATIC) or
+	       (STab[index].SName <> 0) or
+	       (BasisTyp(STab[index].SType) <> SetType);
+	not_SetConst := ret;
+   end;
+
+
+
+   function x_new(size : integer) : integer;
+   (*===================================================*)
+   var
+	allsize : integer;
+	arrsize : integer;
+   begin
+#ifdef TRACE
+	c_freopen(TRACE_FILE);
+	writeln;
+	writeln('MOLLOCH VOLL');
+#endif
+	size := size + Overhead;
+	if x_aktheap^.next = nil
+	   then begin
+#ifdef TRACE
+		writeln('NEUER MOLLOCH');
+		writeln;
+#endif
+		arrsize := x_aktheap^.molloch_size;
+		allsize := arrsize + Overhead;
+		x_aktheap^.next := ptr ( MALLOC ( allsize , 5));
+(* don't' try to get smaller pieces
+		while (x_aktheap^.next = nil) and ( arrsize >= size ) do
+		   begin
+		   allsize := allsize div  2;
+		   arrsize := allsize - Overhead;
+		   x_aktheap^.next := ptr ( MALLOC ( allsize , 5));
+		   end;
+*)
+#ifdef TRACE
+		writeln('Groesse des Molloch   : ', allsize);
+		writeln('angeforderte Groesse  : ', size);
+#endif
+		if (x_aktheap^.next <> nil)
+		   then begin
+			x_aktheap^.next^.next := nil;
+			x_aktheap^.next^.molloch_size := arrsize;
+			end
+		   else begin
+			PasCerror( 'no more space ( 1 )');
+			end;
+		end
+	   else begin
+		arrsize := x_aktheap^.next^.molloch_size;
+		allsize := arrsize + Overhead;
+#ifdef TRACE
+		writeln('Groesse des Molloch   : ', allsize);
+		writeln('angeforderte Groesse  : ', size);
+#endif
+		if arrsize < size
+		   then begin
+			PasCerror( 'no more space ( 2 )');
+			end;
+		end;
+	used_space := used_space + allsize;
+	x_aktheap := x_aktheap^.next;
+	x_aktadr := ord4(@ x_aktheap^.arr[1]);
+	x_used   := ord4(@ x_aktheap^.arr[arrsize]);
+	x_new    := x_aktadr;
+	x_aktadr := x_aktadr + size;
+#ifdef TRACE
+	writeln;
+	c_freopen(TRACE_FILE);
+#endif
+   end;
+
+
+
+   procedure init_heapmanager;
+   (*===================================================*)
+   begin
+	s_desc          := sizeof ( NodeDescriptorRecord );
+
+	x_heap          := ptr ( MALLOC ( MaxHeap + Overhead , 5));
+	x_heap^.next    := nil;
+	x_heap^.molloch_size    := MaxHeap;
+	x_aktheap       := x_heap;
+	x_aktadr        := ord4(@ x_heap^.arr[1]);
+	x_used          := ord4(@ x_heap^.arr[MaxHeap]);
+
+	used_space        := MaxHeap + Overhead;
+	Maxused_space        := 0;
+   end;
+
+
+   procedure free_heap (x:Pmolloch);
+   (*===================================================*)
+   begin
+	if x <> nil then
+	   begin
+	   free_heap (x^.next);
+	   FREE (ord4(x),5);
+	   end;
+   end;
+
+
+   procedure close_heapmanager;
+   (*===================================================*)
+   begin
+	free_heap (x_heap);
+	x_heap := nil;
+   end;
+
+
+   procedure reset_heapmanager;
+   (*===================================================*)
+   begin
+	x_aktheap       := x_heap;
+	x_aktadr        := ord4(@ x_heap^.arr[1]);
+	x_used          := ord4(@ x_heap^.arr[x_heap^.molloch_size]);
+   end;
+
+
+   procedure init_optimizer;
+   (*===================================================*)
+   begin
+	init_heapmanager;
+
+	if (first_time) then begin
+	   first_time := false;
+	   NoProc	:= -1;	/* global optimizer */
+#ifdef TRACE
+	   MaxAnz_desc          := 0;
+	   Maxrest              := 0;
+#endif
+	end;
+   end;
+
+
+   procedure close_optimizer;
+   (*===================================================*)
+   begin
+	close_heapmanager;
+
+#ifdef TRACE
+		writeln;
+		writeln;
+		writeln('rest      :' , Maxrest);
+		writeln('used space:' , Maxused_space);
+		writeln;
+		writeln('s_desc          :' , s_desc          );
+		writeln('MaxAnz_desc          :' , MaxAnz_desc      );
+		writeln;
+#endif
+   end;
+
+
+
+   procedure init_proc;
+   (*===================================================*)
+   begin
+      reset_heapmanager;
+      Anz_desc := 0;
+
+
+      BusyDescriptorList := nil;
+      FreeDescriptorList := nil;
+
+      NoExpr  := 0;
+      NoStmnt := 0;
+      ExcludedNode := -1;
+      IncludedNode := -1;
+   end;
+
+
+   procedure close_proc;
+   (*===================================================*)
+   begin
+      used_space := used_space - x_used + x_aktadr;
+      if used_space > Maxused_space
+	 then Maxused_space := used_space;
+#ifdef TRACE
+      if Anz_desc > MaxAnz_desc
+         then MaxAnz_desc := Anz_desc;
+#endif
+   end;
+
+
+
+#ifdef TRACE
+
+   /*****************************
+    *                           *
+    *   dump des Hdg-Baumes     *
+    *   ( C -aehnlich)          *
+    *                           *
+    *****************************/
+
+
+   function ZeilenNr (NodeIndex : HdgRange): integer;
+   (*===================================================*)
+   begin
+      case MajorOperator of
+
+	 ExpList,
+	 ShortStmnt,
+	 UnaryExp,
+	 BinaryExp,
+         node: begin
+	       ZeilenNr := -1;
+         end;
+
+         spec: begin
+	       ZeilenNr := SpecLineNo;
+         end;
+
+	 LongStmnt: begin
+	       ZeilenNr := LsLineNo;
+         end;
+
+         ifthenelse: begin
+	       ZeilenNr := IfLineNo;
+         end;
+
+         loop: begin
+	       ZeilenNr := WhileLineNo;
+         end;
+
+         Switch: begin
+	       ZeilenNr := SwitchLineNo;
+         end;
+
+         Case: begin
+	       ZeilenNr := CaseLineNo;
+         end;
+
+         RepeatUntil: begin
+	       ZeilenNr := RepeatLineNo;
+         end;
+
+	 OpenProc,
+         Proc: begin
+	       ZeilenNr := ProcLineNo;
+	 end;
+      end  (* case *);
+
+   end;
+
+
+   procedure P_node(NodeIndex : HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   RegOp:
+		write('REG' , Node1parameter:1);
+	   IdOp:
+		print_name(Node1parameter);
+	   LitOp:
+		write(Node1parameter:1);
+	   LitSizeOp,
+	   LitOffsetOp,
+	   StaticLinkOp,
+	   NopOp:
+		write('NODE(' , MinorOperator : 3 , ')');
+	end;
+   end;
+
+
+   procedure P_spec(NodeIndex : HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   RtrnOp:
+	      writeln('return;');
+	   ContinueOp:
+	      writeln('continue;');
+	   GotoOp:
+	      begin
+	      write('goto ');
+	      print_name(Spec1parameter);
+	      writeln(';');
+	      end;
+	   LabelOp:
+	      begin
+	      print_name(Spec1parameter);
+	      writeln(':');
+	      end;
+	   BreakOp:
+	      writeln('break;');
+	   RepeatOp:
+	      writeln('repeat;');
+	   AsmOp:
+	      writeln('asm();');
+	   BeginOp:
+	      writeln('{');
+	   EndOp:
+	      writeln('}');
+	   PushOp, PushAdrOp, PopOp, PopAdrOp:
+	      writeln('SPEC(' ,MinorOperator:3, ')' );
+	end;
+   end;
+
+
+   procedure P_LongSt_vor(NodeIndex: HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   CallOp:
+	      write('');
+	   RtrnxOp:
+	      write('return');
+	   Sys0Op:
+	      write('sys');
+	   PrefixOp:
+	      write('');
+	   PostfixOp:
+	      write('');
+	   StoreOp:
+	      write('');
+	   StoreadrOp:
+	      write('');
+	end;
+   end;
+
+
+   procedure P_LongSt_mitte(NodeIndex: HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   CallOp:
+	      write('(');
+	   RtrnxOp:
+	      write('(');
+	   Sys0Op:
+	      write('(');
+	   PrefixOp:
+	      write(' += ');
+	   PostfixOp:
+	      write(' += ');
+	   StoreOp:
+	      write(' = ');
+	   StoreadrOp:
+	      write(' = ');
+	end;
+   end;
+
+
+   procedure P_LongSt_nach(NodeIndex: HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   StoreOp:
+	      write('');
+	   CallOp:
+	      write(')');
+	   RtrnxOp:
+	      write(')');
+	   Sys0Op:
+	      write(')');
+	   PrefixOp:
+	      write('');
+	   PostfixOp:
+	      write('');
+	   StoreadrOp:
+	      write('');
+	end;
+   end;
+
+
+   procedure P_UnaryOp(NodeIndex: HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   StorepOp, StorepadrOp:
+	      begin
+	      end;
+	   LoadOp:
+	      begin
+	      write('');
+	      end;
+	   LoadadrOp:
+	      begin
+	      write(' &');
+	      end;
+	   RangeOp:
+	      begin
+	      write('UNARY(range)');
+	      end;
+	   UminusOp:
+	      write(' -');
+	   NotOp:
+	      write(' !');
+	   AddiOp, SubtiOp, AddixOp, SubtixOp, MultxOp:
+	      write('UNARY(addi)');
+	   BNotOp:
+	      write('UNARY(bnot)');
+	   ConvertOp:
+	      write('(cast)');
+	   DerefOp:
+	      write(' *');
+	end;
+   end;
+
+
+   procedure P_BinaryOp(NodeIndex: HdgRange);
+   (*===================================================*)
+   begin
+	case MinorOperator of
+	   AddOp:
+	      write(' + ');
+	   SubtOp:
+	      write(' - ');
+	   MultOp:
+	      write(' * ');
+	   DivOp:
+	      write(' / ');
+	   OrOp:
+	      write(' || ');
+	   XorOp:
+	      write(' | ');
+	   AndOp:
+	      write(' && ');
+	   ShlOp:
+	      write(' << ');
+	   ShrOp:
+	      write(' >> ');
+	   EqOp:
+	      write(' == ');
+	   LtOp:
+	      write(' < ');
+	   GtOp:
+	      write(' > ');
+	   LeOp:
+	      write(' <= ');
+	   GeOp:
+	      write(' >= ');
+	   NeOp:
+	      write(' != ');
+	   ModOp:
+	      write(' % ');
+	   BAndOp:
+	      write(' | ');
+	   BOrOp:
+	      write(' & ');
+	   ElementOp:
+	      write('.');
+	   SubscriptOp:
+	      write('[ ');
+	   ModuloOp:
+	      write(' modulo ');
+	   RepeatOp:
+	      write(' repeat ');
+	   ComplexOp:
+	      write(' complex ');
+	end;
+   end;
+
+
+   procedure P_line
+   (*===================================================*)
+	( line_num : integer );
+   begin
+	writeln('/* ' , line_num:3 , ' */');
+   end;
+
+
+   procedure PrintTraverse
+   (*===================================================*)
+      (NodeIndex : HdgRange; space: integer; nl: boolean);  forward;
+
+
+   procedure SelectForPrinting
+   (*===================================================*)
+      (NodeIndex : HdgRange; space: integer; nl: boolean);
+
+   var
+	i : integer;
+   begin
+      case MajorOperator of
+
+         node: begin
+	    P_node(NodeIndex);
+         end;
+
+         spec: begin
+	    print_space(space);
+	    P_spec(NodeIndex);
+         end;
+
+         ShortStmnt: begin
+	    writeln('??? (1)');
+         end;
+
+         UnaryExp: begin
+	    P_UnaryOp(NodeIndex);
+	    PrintTraverse (Unary1operand,space, false);
+         end;
+
+         BinaryExp: begin
+	    if MinorOperator <> SubscriptOp
+	       then write('(');
+	    PrintTraverse (Bin1operand, space, false);
+	    P_BinaryOp(NodeIndex);
+	    PrintTraverse (Bin2operand, space, false);
+	    if MinorOperator = SubscriptOp
+	       then begin
+		    write(' + ' ,Bin2parameter:1, ']');
+		    end
+	       else write(')');
+	 end;
+
+         ExpList: begin
+	    NodeIndex := ListHeadField;
+	    if NodeIndex <> -1
+	       then begin
+		    SelectForPrinting (NodeIndex, space, false);
+		    NodeIndex := NextLink;
+		    end;
+	    while NodeIndex <> -1  do
+	       begin
+	       write(' , ');
+	       SelectForPrinting (NodeIndex, space, false);
+	       NodeIndex := NextLink;
+	       end;
+         end;
+
+	 LongStmnt: begin
+	    if (nl)
+	       then begin
+		    print_space(space);
+		    end;
+	    P_LongSt_vor(NodeIndex);
+	    PrintTraverse (Ls1operand, space,false);
+	    P_LongSt_mitte(NodeIndex);
+	    PrintTraverse (Ls2operand, space,false);
+	    P_LongSt_nach(NodeIndex);
+	    if (nl)
+	       then writeln(';');
+         end;
+
+         ifthenelse: begin
+	       if (nl)
+		  then begin
+		       print_space(space);
+		       write('if (');
+		       end
+		  else write(' ( ');
+	       PrintTraverse (IfCondField, space, false);
+	       if (nl)
+		  then writeln(')')
+		  else write(' ? ');
+
+	       PrintTraverse (IfTrueField, space+3, nl);
+
+	       if IfFalseField <> -1
+		  then begin
+		       if (nl)
+			  then begin
+			       print_space(space);
+			       writeln('else');
+			       end
+			  else write(' : ');
+		       PrintTraverse (IfFalseField, space+3, nl);
+		       end;
+	       if (nl)
+		  then begin
+		       print_space(space);
+		       writeln('fi');
+		       end
+		  else write(' ) ');
+         end;
+
+         loop: begin
+	    P_line(WhileLineNo);
+	    print_space(space);
+	    write('while (');
+	    PrintTraverse (WhileTestField, space, false);
+	    writeln(') do');
+
+	    PrintTraverse (WhileBodyField, space+3, nl);
+	    print_space(space);
+	    writeln('done');
+         end;
+
+         Switch: begin
+	    print_space(space);
+	    write('switch (');
+	    PrintTraverse (SwitchTest, space, false);
+	    writeln(')');
+
+	    PrintTraverse (SwitchBody ,space+6, nl);
+         end;
+
+         Case: begin
+	    print_space(space-3);
+	    if MinorOperator = DefaultOp
+	       then writeln('default:')
+	       else begin
+		    write('case ');
+		    write(CaseLowVal:1);
+		    if (CaseHighVal <> CaseLowVal)
+		       then write('..' , CaseHighVal:1);
+		    writeln(':');
+		    end;
+         end;
+
+         RepeatUntil: begin
+	    P_line(RepeatLineNo);
+	    print_space(space);
+	    writeln('do');
+	    PrintTraverse (RepeatBody,space+3, nl);
+	    print_space(space);
+	    write('while (');
+	    PrintTraverse (RepeatTest, space+3, false );
+	    writeln(')');
+         end;
+
+	 OpenProc,
+         Proc: begin
+	    writeln;
+	    writeln;
+	    P_line(ProcLineNo);
+	    print_space(space);
+	    write('function  ');
+	    print_name(ProcLabel);
+	    writeln(';');
+	    PrintTraverse (ProcBody, space+3,nl);
+	    writeln;
+	    writeln;
+	 end;
+      end  (* case *);
+   end  (*SelectForPrinting*);
+
+
+   procedure PrintTraverse
+   (*======================================================*)
+      (NodeIndex : HdgRange; space: integer; nl: boolean);
+
+   var
+      SaveNextLink : HdgRange;
+
+   begin
+      while NodeIndex <> -1 do begin
+	 SelectForPrinting (NodeIndex, space,nl);
+	 NodeIndex := NextLink;
+      end  (* while *);
+   end  (*PrintTraverse*);
+
+
+   procedure print_HDG
+   (*===================================================*)
+      (NodeIndex : HdgRange);
+   begin
+	writeln;
+	writeln ('*************************************************');
+	writeln ('***** Neue Funktion  ****************************');
+	writeln ('*************************************************');
+	writeln;
+	SelectForPrinting(NodeIndex, 0,true);
+   end;
+
+
+   procedure count_rec ( size : integer );
+   (*===================================================*)
+   begin
+	if size = s_desc       then Anz_desc := Anz_desc + 1
+	else rest := rest + size;
+   end;
+
+
+   procedure new_max;
+   (*===================================================*)
+   begin
+	if rest  > Maxrest
+		then Maxrest := rest;
+	if Anz_desc > MaxAnz_desc
+		then MaxAnz_desc := Anz_desc;
+   end;
+
+
+#endif
+
+
+

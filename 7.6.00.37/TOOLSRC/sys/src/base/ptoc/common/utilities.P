@@ -1,0 +1,397 @@
+(* @(#)common/utilities.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* utilities.p *)
+
+(* define *)
+
+#include "../common/csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/opcode.i"
+#include "../common/_shifts.h"
+#include "../common/csg.h"
+
+procedure cerror
+   (var msg : STRING);
+external;
+
+procedure BumpSymPtr;
+external;
+
+procedure TypeSize
+   (t: SymbolTableRange);
+external;
+
+#ifdef RASX /*RAS05 proc.def. */
+procedure EndCheckLoopScopes;
+external;
+#endif
+
+(* export *)
+
+#include "../common/utilities.h"
+
+
+(* privates *)
+
+var
+   FreeTemps: SymbolTableRange;
+   TempNo: integer;
+
+
+(* initial *)
+
+
+procedure UtilitiesI;
+begin
+   FreeTemps := -1;
+   TempNo := 0;
+end;
+
+
+(* routines *)
+
+
+   procedure PasCerror
+      (message: STRING);
+      (* this procedure outputs a compiler error message.   *)
+
+   var
+      i: integer;
+
+   begin
+      i := 255;
+      while message [i] = ' ' do begin
+         i := i - 1;
+      end;
+      message [i + 1] := chr (0);
+      cerror ( message );
+   end  (* PasCerror *);
+
+
+function BaseType
+   (typ: SymbolTableRange)
+   : SymbolTableRange;
+
+begin
+   if typ = -1 then
+      BaseType := -1
+   else if STab [typ].SKind = TypeNameDcl then
+      BaseType := BaseType (STab [typ].SType)
+   else
+      BaseType := typ;
+end  (* BaseType *);
+
+
+function CopyTree
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+(* This function copies hdg trees.  It also follows the NextLink to copy
+   Statement Lists or Procedure Lists. Expression Lists are copied by
+
+*)
+
+var
+  Tree : HdgRange;  (* Local index of TreeCopy.  Used in call to LinkChain *)
+  maj, typ : integer;
+  SaveIndex : HdgRange;
+
+begin
+  if NodeIndex <> -1 then begin
+      case MajorOperator of
+      node :
+        Tree:=node3(MinorOperator,TypeField,Node1parameter,Node2parameter);
+
+      UnaryExp :
+        Tree:=UnaryExpression(MinorOperator,TypeField,
+				  CopyTree(Unary1operand),
+				  Unary1parameter, Unary2parameter);
+
+      BinaryExp : begin
+	Tree := BinaryExpression( MinorOperator, TypeField,
+				      CopyTree(Bin1operand),
+			  	      CopyTree(Bin2operand)  );
+        SetBinaryParameters (Tree, Bin1parameter, Bin2parameter);
+      end;
+      LongStmnt :
+	Tree := LongStatement(MinorOperator, TypeField,
+				  CopyTree(Ls1operand),
+				  CopyTree(Ls2operand),
+				  Ls1parameter,Ls2parameter,LsLineNo);
+
+      ifthenelse, loop, RepeatUntil, Switch :
+	Tree := ComplexStmnt(MajorOperator, TypeField,
+				 CopyTree( Node6field),
+				 CopyTree( Node7field),
+				 CopyTree( Node8field),
+				 Node9field );
+
+      Proc :
+	Tree := ProcNode (Proc,TypeField,CopyTree(ProcBody),
+		CopyTree(ProcProlog), ProcLabel, ProcLineNo);
+
+      Case :
+	Tree := CaseStmnt(MajorOperator, MinorOperator, TypeField,
+			  CaseLowVal, CaseHighVal, CaseLineNo);
+
+       spec :
+	Tree := special(MinorOperator, TypeField, Spec1parameter,SpecLineNo);
+
+       ShortStmnt :
+ 	Tree := ShortStatement(MajorOperator, TypeField,
+				CopyTree(Ss1operand), SsLineNo);
+
+	ExpList :
+	  begin
+	  Tree := MakeList(MajorOperator, TypeField, -1, -1, -1);
+	  maj := MajorOperator;
+	  typ := TypeField;
+	  SaveIndex := NodeIndex;
+	  NodeIndex := ListHeadField;
+	  while NodeIndex <> -1 do begin
+	    AppendList(maj,typ,Tree,CopyTree(NodeIndex));
+	    NodeIndex := NextLink;
+	  end;  (* while *)
+	  NodeIndex := SaveIndex;
+	  end;  (* ExpList *)
+    end;  (* case *)
+
+    CopyTree := Tree;
+
+  end else begin  (* NodeIndex <= -1 *)
+
+    CopyTree := NodeIndex;
+
+  end;  (* if *)
+
+end;  (* CopyTree *)
+
+
+   function demorgan;
+      (* apply demorgans logic rules.  *)
+
+   label 100;
+
+   var op, typ, op1, op2 : integer;
+
+   begin
+
+      case (MajorOperator) of
+
+         BinaryExp: begin
+            op := BinOperator;
+            typ := TypeField;
+            op1 := Bin1operand;
+            op2 := Bin2operand;
+            case (op) of
+
+               OrOp, AndOp: begin
+                  op := (OrOp + AndOp) - op;
+                  op1 := demorgan(op1);
+                  op2 := demorgan(op2);
+                  demorgan := BinaryExpression (op, typ, op1, op2);
+                  goto 100;
+               end;
+
+               EqOp, LtOp, GtOp, LeOp, GeOp, NeOp: begin
+                  op := (EqOp + NeOp) - op;
+                  demorgan := BinaryExpression (op, typ, op1, op2);
+                  goto 100;
+               end ;
+
+               otherwise begin
+               end;
+
+            end  (* case *);
+         end;
+
+         UnaryExp: begin
+            op := UnaryOperator;
+            typ := TypeField;
+            op1 := Unary1operand;
+
+            if (op = NotOp) then begin
+               demorgan := op1;
+               goto 100;
+            end  (* if *);
+         end;
+
+         node: begin
+            if (NodeOperator = LitOp) then begin
+               if (Node1parameter = FalseValue) then begin
+                  Node1parameter := TrueValue;
+               end
+               else begin
+                  Node1parameter := FalseValue;
+               end  (* if *);
+               demorgan := NodeIndex;
+               goto 100;
+            end  (* if *);
+         end;
+
+         otherwise begin
+         end;
+
+      end  (* case *);
+
+      demorgan := UnaryExpression(NotOp,TypeField,NodeIndex,0,0);
+
+      100:  (* return label *)
+
+   end  (* demorgan *);
+
+
+   function is_equal_set (typ_1, typ_2: SymbolTableRange): boolean;
+   begin
+	if (STab[typ_1].SType = SetType) and
+	   (STab[typ_2].SType = SetType)
+	then begin
+	   TypeSize(typ_1);
+	   TypeSize(typ_2);
+	   if (STab[typ_1].TypeInfo.SSize = STab[typ_2].TypeInfo.SSize) and
+	      (STab[typ_1].SLowRange = STab[typ_2].SLowRange) and
+	      (STab[typ_1].SHighRange = STab[typ_2].SHighRange)
+	      then begin
+		 STab[typ_1].SBase := STab[typ_2].SBase;
+	         is_equal_set := true;
+	      end else
+		 is_equal_set := false;
+	end else
+	   is_equal_set := false;
+   end;
+
+
+   function GetTemporary;
+      (* this function is passed the pointer to an expression. it returns *)
+      (* a symbol table index representing a temporary storage for the    *)
+      (* expression. the symbol table temporaries are divided by types,so *)
+      (* the type of the expression must first be determined.             *)
+
+   var
+      i,
+      j: SymbolTableRange;
+      found: boolean;
+
+   begin
+      i := FreeTemps;
+      j := -1;
+      found := false;
+      while (not found) and (i <> -1) do begin
+         if (STab [i].SType = TempType) or
+	    is_equal_set(STab[i].SType,TempType)
+	 then begin
+            found := true;
+         end
+         else begin
+            j := i;
+            i := STab [i].SName;
+         end;
+      end  (* while *);
+      if found then begin
+         if j = -1 then begin
+            FreeTemps := STab [i].SName;
+         end
+         else begin
+            STab [j].SName := STab [i].SName;
+         end;
+         STab [i].SName := 0;
+         GetTemporary := i;
+      end
+      else begin
+         TempNo := TempNo + 1;
+         BumpSymPtr;
+         STab[SymPtr].SName := 0;
+         STab[SymPtr].SLink := -1;
+         STab[SymPtr].SCard := -1;
+         STab[SymPtr].SFile := 0;
+         STab[SymPtr].SType := TempType;
+         STab[SymPtr].SLevel := STab [ProcedureName].SLevel + 1;
+         STab[SymPtr].SFlags := 0;
+         STab[SymPtr].SKind := VarDcl;
+         STab [SymPtr].SClass := AUTO;   (* REGISTER;  20.08.87 *)
+         STab [SymPtr].SSubClass := UninitializedVar;
+         STab [SymPtr].SParent := -1;
+
+         (* code generation fields *)
+         STab [SymPtr].AddrInfo.SRegister := -1;
+         STab [SymPtr].AddrInfo.SOffset := -1;
+
+         (* link up the variables created after parse time so that *)
+         (* the storage allocater can find them                    *)
+         if TempList then begin
+            if STab [ProcedureName].AllocInfo.STempIndex = -1 then begin
+               STab [ProcedureName].AllocInfo.STempIndex := shl (SymPtr, 4);
+            end
+            else begin
+               STab [ProcedureName].AllocInfo.STempIndex :=
+                  STab [ProcedureName].AllocInfo.STempIndex + 1;
+            end  (* if *);
+         end  (* if *);
+
+         GetTemporary := SymPtr;
+
+      end  (* if *);
+   end  (*GetTemporary*);
+
+
+   procedure FreeTemporary;
+
+   begin
+      STab [TempIndex].SName := FreeTemps;
+      FreeTemps := TempIndex;
+   end  (* FreeTemporary *);
+
+
+   procedure ClearTemporarys;
+
+   var
+      i,
+      j: SymbolTableRange;
+
+   begin
+      i := FreeTemps;
+      while i <> -1 do begin
+         j := STab [i].SName;
+         STab [i].SName := 0;
+         i := j;
+      end  (* while *);
+      FreeTemps := -1;
+#ifdef RASX /*RAS05 call EndCheckLoopScopes */
+      EndCheckLoopScopes;
+#endif
+   end  (* ClearTemporarys *);
+
+(* DK 26.08.88: moved here from optm26.P *)
+function BasisTyp(index:integer):integer;
+   (*****************************************************)
+   begin
+	while STab[index].SType > 0 do
+	   index := STab[index].SType;
+	BasisTyp := STab[index].SType;
+   end;
+

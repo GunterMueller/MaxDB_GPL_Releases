@@ -1,0 +1,620 @@
+/*!***************************************************************************
+
+  module:        uninames.c
+
+  -------------------------------------------------------------------------
+
+  responsible:   Anton Arsenov
+
+  special area:  Unicode names tests
+
+  description: 
+  
+  [optional tags]:
+
+  -------------------------------------------------------------------------
+
+  copyright:    Copyright (c) 2001-2005 SAP AG
+
+\if EMIT_LICENCE
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+\endif
+*****************************************************************************/
+
+#define _UNICODE
+#define _ODBC
+/*===========================================================================*
+ *  INCLUDES                                                                 *
+ *===========================================================================*/
+#include "uniutil.c"
+
+/*===========================================================================*
+ *  DEFINES                                                                  *
+ *===========================================================================*/
+#define NAME_TABLE1		"ÀNAMETST_AUTORS"
+#define NAME_TABLE2		"ÀNAMETST_BOOKS"
+#define NAME_T1_COL1	"ÀAUTOR_ID"
+#define NAME_T1_COL2	"ÀAUTOR_NAME"
+#define NAME_T2_COL1	"ÀBOOK_ID"
+#define NAME_T2_COL2	"ÀBOOK_NAME"
+#define NAME_T2_COL3	"ÀAUTOR_ID"
+#define NAME_FK			"ÀAUTOR_FK"
+#define NAME_RS_COL1	"ÀAUTOR_INDEX"
+#define NAME_RS_COL2	"ÀNAME_OF_AUTOR"
+#define NAME_CUR		"ÀNAMETST_CURSOR"
+#define NAME_DBPROC		"ÀNAMETST_PROC"
+#define NAME_PROC_PAR1	"ÀAUTOR"
+#define NAME_PROC_PAR2	"ÀNUM_BOOKS"
+#define NAME_INDEX		"ÀNAMETST_INDEX"
+#define NAME_SEQUENCE	"ÀNAMETST_SEQUENCE"
+#define NAME_SYNONYM	"ÀTABLE_SYNONYM"
+#define NAME_TRIGGER	"ÀNAMETST_TRIGGER"
+
+#define TABS_PATTERN	"ÀNAMETST%"
+#define PROC_PATTERN    "ÀNAMETST%"
+
+#define STMT1 "CREATE TABLE %s(%s INTEGER, %s CHAR(32) UNICODE, PRIMARY KEY(%s))"
+#define STMT2 "CREATE TABLE %s(%s INTEGER, %s CHAR(32) UNICODE, %s INTEGER, PRIMARY KEY(%s), FOREIGN KEY %s(%s) REFERENCES %s ON DELETE CASCADE)"
+#define STMT3 "SELECT %s AS %s, %s AS %s FROM %s"
+#define STMT4 "DROP TABLE %s"
+#define STMT5 "DROP TABLE %s"
+#define STMT6 "CREATE DBPROC %s (IN %s INTEGER, OUT %s INTEGER) AS VAR testvar INTEGER; TRY SELECT COUNT(%s) INTO :%s FROM ODBC.%s WHERE %s = :%s; CATCH SET testvar = 1;"
+#define STMT7 "DROP DBPROC %s"
+#define STMT8 "CREATE INDEX %s ON %s (%s ASC)"
+#define STMT9 "CREATE SEQUENCE %s INCREMENT BY 1 START WITH 1"
+#define STMT10 "DROP SEQUENCE %s"
+#define STMT11 "INSERT INTO %s VALUES (%s.NEXTVAL, 'Lev Tolstoy')"
+#define STMT12 "CREATE SYNONYM %s FOR %s"
+#define STMT13 "CREATE TRIGGER %s FOR %s AFTER INSERT EXECUTE (INSERT INTO ODBC.%s VALUES(1, 'first book', %s.CURRVAL);)"
+#define STMT14 "SELECT * FROM %s"
+
+int WStrCmp(SQLWCHAR *dst, SQLWCHAR *src) {
+	int i = 0;
+	while(TRUE) {
+		if (dst[i] < src[i])
+			return -1;
+		if (dst[i] > src[i])
+			return 1;
+		if (dst[i] == 0)
+			return 0;
+		i++;
+	}
+}
+
+int main(int argc, char **argv) {
+	HENV henv   = SQL_NULL_HENV;
+	HENV *phenv = &henv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC *phdbc = &hdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT *phstmt = &hstmt;
+	SQLLEN pcbValue;
+	RETCODE rc;
+
+	BOOL okflag = TRUE;
+	SQLUINTEGER sq_id;
+
+	SQLCHAR buffer[512];
+	SQLCHAR temp[256];
+	SQLWCHAR unitemp[256];
+	SQLWCHAR unitemp2[256];
+
+	SQLWCHAR var_table1[64];
+	SQLWCHAR var_table2[64];
+	SQLWCHAR var_col1[64];
+	SQLWCHAR var_col2[64];
+	SQLWCHAR var_rs_col1[64];
+	SQLWCHAR var_rs_col2[64];
+	SQLWCHAR var_pk[64];
+	SQLWCHAR var_fk[64];
+	SQLWCHAR var_proc[64];
+	SQLWCHAR var_par1[64];
+	SQLWCHAR var_par2[64];
+	SQLWCHAR var_user[64];
+	SQLWCHAR var_index[64];
+	SQLWCHAR var_sequence[64];
+
+	SQLWCHAR crttab1_stmt[256];
+	SQLWCHAR crttab2_stmt[256];
+	SQLWCHAR crtindx_stmt[256];
+	SQLWCHAR crtsq_stmt[256];
+	SQLWCHAR crtsyn_stmt[256];
+	SQLWCHAR crttrg_stmt[256];
+	SQLWCHAR sel_stmt[256];
+	SQLWCHAR sel2_stmt[256];
+	SQLWCHAR insert_stmt[256];
+	SQLWCHAR droptab1_stmt[256];
+	SQLWCHAR droptab2_stmt[256];
+	SQLWCHAR crtproc_stmt[512];
+	SQLWCHAR dropproc_stmt[256];
+	SQLWCHAR dropsq_stmt[256];
+	
+	/* Creating statements */
+	SPRINTF(buffer, STMT1, NAME_TABLE1, NAME_T1_COL1, NAME_T1_COL2, NAME_T1_COL1);
+	StringToWString(crttab1_stmt, 256, NULL, TRUE, buffer, 256, NULL); 
+	SPRINTF(buffer, STMT2, NAME_TABLE2, NAME_T2_COL1, NAME_T2_COL2, NAME_T2_COL3, NAME_T2_COL1, NAME_FK, NAME_T2_COL3, NAME_TABLE1);
+	StringToWString(crttab2_stmt, 256, NULL, TRUE, buffer, 256, NULL); 
+	SPRINTF(buffer, STMT3, NAME_T1_COL1, NAME_RS_COL1, NAME_T1_COL2, NAME_RS_COL2, NAME_SYNONYM);
+	StringToWString(sel_stmt, 256, NULL, TRUE, buffer, 256, NULL); 
+	SPRINTF(buffer, STMT4, NAME_TABLE1);
+	StringToWString(droptab1_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT5, NAME_TABLE2);
+	StringToWString(droptab2_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT6, NAME_DBPROC, NAME_PROC_PAR1, NAME_PROC_PAR2, NAME_T2_COL1, NAME_PROC_PAR2, NAME_TABLE2, NAME_T2_COL3, NAME_PROC_PAR1);
+	StringToWString(crtproc_stmt, 512, NULL, TRUE, buffer, 512, NULL);
+	SPRINTF(buffer, STMT7, NAME_DBPROC);
+	StringToWString(dropproc_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT8, NAME_INDEX, NAME_TABLE2, NAME_T2_COL3);
+	StringToWString(crtindx_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT9, NAME_SEQUENCE);
+	StringToWString(crtsq_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT10, NAME_SEQUENCE);
+	StringToWString(dropsq_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT11, NAME_TABLE1, NAME_SEQUENCE);
+	StringToWString(insert_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT12, NAME_SYNONYM, NAME_TABLE1);
+	StringToWString(crtsyn_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT13, NAME_TRIGGER, NAME_TABLE1, NAME_TABLE2, NAME_SEQUENCE);
+	StringToWString(crttrg_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+	SPRINTF(buffer, STMT14, NAME_TABLE2);
+	StringToWString(sel2_stmt, 256, NULL, TRUE, buffer, 256, NULL);
+
+	/* Connection to the database */
+	FullConnectW(phenv, phdbc);
+    rc = SQLAllocStmt(hdbc, phstmt);
+    SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+    PRINTF(buffer);
+    ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating tables */
+	WStringToString(temp, 256, NULL, TRUE, crttab1_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crttab1_stmt, WStrLen(crttab1_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	WStringToString(temp, 256, NULL, TRUE, crttab2_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crttab2_stmt, WStrLen(crttab2_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating synonym */
+	WStringToString(temp, 256, NULL, TRUE, crtsyn_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crtsyn_stmt, WStrLen(crtsyn_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating index */
+	WStringToString(temp, 256, NULL, TRUE, crtindx_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crtindx_stmt, WStrLen(crtindx_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating sequence */
+	WStringToString(temp, 256, NULL, TRUE, crtsq_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crtsq_stmt, WStrLen(crtsq_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating trigger */
+	WStringToString(temp, 256, NULL, TRUE, crttrg_stmt, 256, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crttrg_stmt, WStrLen(crttrg_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Creating procedure */
+	WStringToString(temp, 512, NULL, TRUE, crtproc_stmt, 512, NULL);
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, crtproc_stmt, WStrLen(crtproc_stmt, 512));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);	
+
+	/* Insert data */
+	WStringToString(temp, 512, NULL, TRUE, insert_stmt, 512, NULL);
+	SPRINTF(buffer,"Insert Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, insert_stmt, WStrLen(insert_stmt, 512));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);	
+
+	/* Getting names of tables */
+	StringToWString(unitemp, 256, NULL, TRUE, TABS_PATTERN, 256, NULL);
+	rc = SQLTablesW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS, NULL, 0);
+	SPRINTF(buffer," SQLTablesW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 3, SQL_C_WCHAR, var_table1, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 3, SQL_C_WCHAR, var_table2, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_TABLE1, 256, NULL);
+	if (WStrCmp(var_table1, unitemp) != 0)
+		okflag = FALSE;
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_TABLE2, 256, NULL);
+	if (WStrCmp(var_table2, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("      NAMES OF TABLES\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_table1, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_table2, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+	
+	/* Getting names of columns in table1 */
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_TABLE1, 256, NULL);
+	rc = SQLColumnsW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS, NULL, 0);
+	SPRINTF(buffer," SQLColumnsW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 4, SQL_C_WCHAR, var_col1, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 4, SQL_C_WCHAR, var_col2, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_T1_COL1, 256, NULL);
+	if (WStrCmp(var_col1, unitemp) != 0)
+		okflag = FALSE;
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_T1_COL2, 256, NULL);
+	if (WStrCmp(var_col2, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAMES OF COLUMNS\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_col1, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_col2, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Getting names of cursor and columns in result set */
+	StringToWString(unitemp, 64, NULL, TRUE, NAME_CUR, 64, NULL);
+	rc = SQLSetCursorNameW(hstmt, unitemp, (SQLSMALLINT)WStrLen(unitemp, 64));
+	SPRINTF(buffer," SQLSetCursorNameW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	WStringToString(temp, 256, NULL, TRUE, sel_stmt, 256, NULL);
+	SPRINTF(buffer,"Select Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, sel_stmt, WStrLen(sel_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetCursorNameW(hstmt, unitemp, 64, (SQLSMALLINT *)&pcbValue);
+	SPRINTF(buffer," SQLGetCursorNameW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp2, 256, NULL, TRUE, NAME_CUR, 256, NULL);
+	if (WStrCmp(unitemp, unitemp2) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAMES OF CURSOR\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, unitemp, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	rc = SQLColAttributeW(hstmt, 1, SQL_DESC_LABEL, var_rs_col1, 64, (SQLSMALLINT *)&pcbValue, NULL);
+	SPRINTF(buffer," SQLColAttributeW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLColAttributeW(hstmt, 2, SQL_DESC_LABEL, var_rs_col2, 64, (SQLSMALLINT *)&pcbValue, NULL);
+	SPRINTF(buffer," SQLColAttributeW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_RS_COL1, 256, NULL);
+	if (WStrCmp(var_rs_col1, unitemp) != 0)
+		okflag = FALSE;
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_RS_COL2, 256, NULL);
+	if (WStrCmp(var_rs_col2, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------------------\n");
+	PRINTF("    NAMES OF COLUMNS IN RESULT SET\n");
+	PRINTF("--------------------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_rs_col1, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_rs_col2, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Check sequence work */
+	rc = SQLBindCol(hstmt, 1, SQL_C_ULONG, &sq_id, sizeof(sq_id), &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	if (sq_id != 1)
+		okflag = FALSE;
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Check trigger work */
+	WStringToString(temp, 256, NULL, TRUE, sel2_stmt, 256, NULL);
+	SPRINTF(buffer,"Select Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, sel2_stmt, WStrLen(sel2_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 1, SQL_C_ULONG, &sq_id, sizeof(sq_id), &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	if (sq_id != 1)
+		okflag = FALSE;
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Getting names of foreign key in the table1 */
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_TABLE1, 256, NULL);
+	StringToWString(unitemp2, 256, NULL, TRUE, NAME_TABLE2, 256, NULL);
+	rc = SQLForeignKeysW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS, NULL, 0, NULL, 0, unitemp2, SQL_NTS);
+	SPRINTF(buffer," SQLForeignKeysW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 12, SQL_C_WCHAR, var_fk, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 13, SQL_C_WCHAR, var_pk, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_FK, 256, NULL);
+	if (WStrCmp(var_fk, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAME OF FOREIGN KEY\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_fk, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Getting name of procedure */
+	StringToWString(unitemp, 256, NULL, TRUE, PROC_PATTERN, 256, NULL);
+	rc = SQLProceduresW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS);
+	SPRINTF(buffer," SQLProceduresW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 3, SQL_C_WCHAR, var_proc, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_DBPROC, 256, NULL);
+	if (WStrCmp(var_proc, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAME OF PROCEDURE\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_proc, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Getting name of procedure parameters*/
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_DBPROC, 256, NULL);
+	rc = SQLProcedureColumnsW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS, NULL, 0);
+	SPRINTF(buffer," SQLProcedureColumnsW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 4, SQL_C_WCHAR, var_par1, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 4, SQL_C_WCHAR, var_par2, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_PROC_PAR1, 256, NULL);
+	if (WStrCmp(var_par1, unitemp) != 0)
+		okflag = FALSE;
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_PROC_PAR2, 256, NULL);
+	if (WStrCmp(var_par2, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAME OF PARMETERS\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_par1, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_par2, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Getting name of index in table1 */
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_TABLE2, 256, NULL);
+	rc = SQLStatisticsW(hstmt, NULL, 0, NULL, 0, unitemp, SQL_NTS, SQL_INDEX_ALL, SQL_QUICK);
+	SPRINTF(buffer," SQLStatisticW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindCol(hstmt, 6, SQL_C_WCHAR, var_index, 64, &pcbValue);
+	SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLCloseCursor(hstmt);
+	SPRINTF(buffer," SQLCloseCursor retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, NAME_INDEX, 256, NULL);
+	if (WStrCmp(var_index, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAMES OF INDEX\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_index, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+	/* Test unicode function SQLGetInfoW (test user name) */
+	rc = SQLGetInfoW(hdbc, SQL_USER_NAME, var_user, 64, (SQLSMALLINT *)&pcbValue);
+	SPRINTF(buffer," SQLGetInfoW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	StringToWString(unitemp, 256, NULL, TRUE, "ODBC", 256, NULL);
+	if (WStrCmp(var_user, unitemp) != 0)
+		okflag = FALSE;
+	PRINTF("--------------------------\n");
+	PRINTF("    NAME OF USER\n");
+	PRINTF("--------------------------\n");
+	WStringToString(buffer, 256, NULL, TRUE, var_user, 64, NULL);
+	PRINTF(buffer);
+	PRINTF("\n\n");
+
+
+	/* Droping tables */
+	WStringToString(temp, 256, NULL, TRUE, dropproc_stmt, 256, NULL);
+	SPRINTF(buffer,"Drop Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, dropproc_stmt, WStrLen(dropproc_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	WStringToString(temp, 256, NULL, TRUE, droptab2_stmt, 256, NULL);
+	SPRINTF(buffer,"Drop Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, droptab2_stmt, WStrLen(droptab2_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	WStringToString(temp, 256, NULL, TRUE, droptab1_stmt, 256, NULL);
+	SPRINTF(buffer,"Drop Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, droptab1_stmt, WStrLen(droptab1_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	WStringToString(temp, 256, NULL, TRUE, dropsq_stmt, 256, NULL);
+	SPRINTF(buffer,"Drop Stmt = '%s'"CRLF, temp);
+	PRINTF(buffer);
+	rc = SQLExecDirectW(hstmt, dropsq_stmt, WStrLen(dropsq_stmt, 256));
+	SPRINTF(buffer," SQLExecDirectW retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);	
+
+	if (okflag == TRUE)
+		PRINTF("\nTest state: OK\n\n");
+	else
+		PRINTF("\nTest state: Failure\n\n");
+	FullDisconnect(phenv, phdbc);
+	return 0;
+}

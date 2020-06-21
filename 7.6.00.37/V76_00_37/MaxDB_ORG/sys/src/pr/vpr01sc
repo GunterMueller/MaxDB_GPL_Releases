@@ -1,0 +1,267 @@
+/* @lastChanged: "1998-05-05  11:39"
+ 
+ * @filename:   gsp00
+ * @purpose:    "Execute_at_fetch_optimierung"
+ * @release:    6.2.8
+ * @see:        "-.-"
+ *
+ * @copyright:  (c) 1998-2004 SAP AG"
+ */
+ 
+.tt 1 $SAP$SAPDB for R/3$VPR01SC$
+.tt 3 $BurkhardD$EXECUTE_AT_FETCH_OPTIMIERUNG$$2001-06-26$
+ 
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 1998-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+***********************************************************
+ 
+Module  : Execute_at_fetch_optimierung
+ 
+Define  :
+
+#include "gpr01s.h"
+
+.CM *-END-* define --------------------------------------
+ 
+Use     :
+ 
+.CM *-END-* use -----------------------------------------
+ 
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+ 
+Version : 1998-05-05
+ 
+Release :  7.3    Date : 2001-06-26
+ 
+***********************************************************
+ 
+Specification:
+ 
+.CM *-END-* specification -------------------------------
+ 
+***********************************************************
+ 
+Description:
+ 
+.CM *-END-* description ---------------------------------
+ 
+***********************************************************
+ 
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+ 
+**********************************************************
+ 
+.CM -lll-
+Code    :
+/*PRETTY*/
+tsp00_Int4 pr04GetLoopCnt(sqlcatype *sqlca, sqlxatype *sqlxa, struct tpr_sqlloop *lp);
+
+tsp00_Int2 pr01sIsArrayCommand(sqlxatype* sqlxap, sqlkaentry *ka)
+{
+  sqlparpointer   pa = sqlxap->sqlpap - ka->kapaindex - 1;
+  if (pa->lo.pakind == SQLPARLO)
+    return TRUE;
+  else
+    return FALSE;
+}
+ 
+void pr01sPrepareExecuteAtFetch(tpr01_SQLDesc *SQLDesc)
+{
+  tpr01_SQLContainer *SQL = SQLDesc->SQL;
+  sqlcatype *sqlca = SQL->GetSqlca(SQLDesc);
+  sqlxatype *sqlxa = SQL->GetSqlxa(SQLDesc);
+  sqlcuentry *cu = SQLDesc->cu;
+  sqlkaentry *ka = SQLDesc->ka;
+  pr04LongInitLD (sqlca, sqlxa);
+  cu->cusqlindap = sqlca->sqlcxap->xasqldap;
+  cu->culoopin = pr04GetLoopCnt(sqlca, sqlxa, NULL);
+  cu->cukaopenind = sqlxa->xakano;
+  ka->kastate = CPR_STATE_EXECUTE_AT_FETCH;
+  sqlxa->xacmdinit = cpr_is_false;
+
+}
+ 
+void pr01sCuNameSearch(sqlxatype* sqlxap, sqlkaentry *ka, tsp00_KnlIdentifier cuname)
+{
+  M90TRACE(M90_TR_ENTRY, "pr01sCuNameSearch", 0);
+  {
+    int i;
+    sqlcupointer cup = sqlxap->sqlcup;
+    sqlcupointer cue = sqlxap->sqlcue;
+    
+    int prkaindex=0;
+    
+    sqlprpointer prp = sqlxap->sqlprp;
+    sqlprpointer pre = sqlxap->sqlpre;
+    int cbMaxPr = pre-prp;
+    
+    for (i=0; i<cbMaxPr; i++) {
+      if (!strncmp((const char*)(prp+i)->prCursorName, (char*)cuname, sizeof(tsp00_KnlIdentifier)))
+	prkaindex=(prp+i)->prkaindex;
+    }
+    
+    if (prkaindex > 0) {
+      M90TRACE(M90_TR_WORD, "prkaindex", &prkaindex);    
+      ka = sqlxap->sqlkap+prkaindex-1;
+      if (ka->kastate == CPR_STATE_EXECUTE_AT_FETCH)
+	(sqlxap->sqlkap + sqlxap->xakano-1)->kaprindex=ka->kaprindex;
+      M90TRACE(M90_TR_WORD, "kaprindex", &ka->kaprindex);    
+    }  
+  }
+  M90TRACE(M90_TR_EXIT, "pr01sCuNameSearch", 0);
+}
+
+tsp00_Int2 pr01sFindKaOpenIndex(sqlxatype* sqlxap, tsp00_KnlIdentifier cuname)
+{
+  int i;
+  int prkaindex=0;
+  sqlprpointer prp = sqlxap->sqlprp;
+  sqlprpointer pre = sqlxap->sqlpre;
+
+  int cbMaxPr = pre-prp;
+
+  for (i=0; i < cbMaxPr; i++) {
+    if (!strncmp((const char*)(prp+i)->prCursorName, (char*)cuname, sizeof(tsp00_KnlIdentifier)))
+      prkaindex=(prp+i)->prkaindex;
+  }
+  return(prkaindex);
+}
+
+sqlkaentry *pr01sIsExecuteAtFetch(sqlxatype* sqlxa)
+{
+  if (sqlxa->xaSQLDesc->CursorDesc) {
+    sqlkaentry *OpenKa = sqlxa->xaSQLDesc->CursorDesc->OpenKa;
+    if (OpenKa) {
+      /* PTS 1109172 execute only if the cmd is prepared for it */
+      sqlkaentry *FetchKa = sqlxa->xaSQLDesc->CursorDesc->FetchKa;
+      if (FetchKa)
+        if (OpenKa->kastate == CPR_STATE_EXECUTE_AT_FETCH)
+          return(OpenKa);
+    }
+  }
+  return(NULL);
+}
+
+tsp00_Int2 pr01s_PatchLoopCnt(sqlxatype *sqlxa, sqlkaentry *ka, tsp00_Int4 lpcnt)
+{ 
+  sqlparpointer pa; 
+  if (ka->kapaindex == 0)
+    return 0;
+  pa = sqlxa->sqlpap - ka->kapaindex - 1;
+  pa->lo.pava1index = -pa->lo.pava1index;
+  pa->lo.paloopcnt = lpcnt;
+  return(-pa->lo.pava1index);
+}
+
+void pr01sExecuteAtFetch(tpr01_SQLDesc *SQLDesc)
+{
+  tpr01_CursorDesc *CursorDesc = SQLDesc->CursorDesc;
+  tpr01_SQLContainer *SQL = SQLDesc->SQL;
+  sqlcatype *sqlca = SQL->GetSqlca(SQLDesc);
+  sqlxatype *sqlxa = SQL->GetSqlxa(SQLDesc);
+  sqlkapointer ka = CursorDesc->OpenKa;
+  sqlcupointer cu = SQLDesc->cu;
+  cu->cusqloutdap = sqlca->sqlcxap->xasqldap;
+  cu->culoopout = pr04GetLoopCnt(sqlca, sqlxa, NULL);
+  sqlca->sqlcxap->xasqldap=cu->cusqlindap;
+  pr01s_PatchLoopCnt(sqlxa, ka, cu->culoopin);
+  {
+    sqlkaentry *ka = SQLDesc->ka;
+    sqlorentry *ore = SQLDesc->ore;
+    sqlratype *sqlra = sqlca->sqlrap;
+    tsp00_Int2 xacmdinit = sqlxa->xacmdinit;
+    tpr01_SQLDesc *SQLDesc = sqlxa->xaSQLDesc;
+    do {
+      SQLDesc->ka = CursorDesc->OpenKa;
+      SQLDesc->ComType = CursorDesc->OpenKa->katyp;
+      SQLDesc->ore = CursorDesc->StmtNameDesc->ore;
+      pr01cBeg(SQLDesc);
+      if (sqlra->raparse_again == TRUE) {
+	tpr01_StmtNameDesc *StmtNameDesc = SQLDesc->StmtNameDesc;
+	SQLDesc->StmtNameDesc = SQLDesc->CursorDesc->StmtNameDesc;
+	SQLDesc->ka = SQLDesc->StmtNameDesc->ka;
+	SQLDesc->ComType = SQLDesc->StmtNameDesc->ka->katyp;
+	sqlxa->xastopcnt++;
+	if (pr01cParsePrepare(SQLDesc)) {
+	  SQLDesc->StmtNameDesc->State |= Prepared_bpr01;
+	}
+	pr06ParseInfoCopy(&CursorDesc->OpenKa->kaParseInfo, &SQLDesc->StmtNameDesc->ka->kaParseInfo);
+	CursorDesc->OpenKa->kastate = CPR_STATE_EXECUTE_AT_FETCH;
+	SQLDesc->StmtNameDesc = StmtNameDesc;
+      }
+    } while (sqlra->raparse_again == TRUE 
+	     && sqlxa->xastopcnt < ErrorLoop_mxpr00);
+    sqlxa->xacmdinit = xacmdinit;
+    SQLDesc->ka = ka;
+    SQLDesc->ore = ore;
+    SQLDesc->ComType = CursorDesc->FetchKa->katyp;
+  }
+  if (ka->kastate == CPR_STATE_EXECUTE_AT_FETCH)
+    ka->kastate = CPR_STATE_EXECUTE;
+  pr01s_PatchLoopCnt(sqlxa, ka, 0);
+  sqlca->sqlcxap->xasqldap=cu->cusqloutdap;
+}
+
+tsp00_Int2 pr01sGetFunctionCode(sqlratype *sqlrap)
+{
+  tsp1_segment *seg = (tsp1_segment *) sqlrap->rasegptr;
+  return((seg) ? seg->sp1s_segm_header.sp1r_function_code : csp1_nil_fc);
+}
+
+tsp00_Bool pr01sExecuteAtFetchPossible(sqlxatype* sqlxa, sqlkaentry *ka)
+{
+  if (ka->kaParseInfo.sp1rFunctionCode == csp1_mselect_fc  /* select command */
+      && ka->kapacount == -1                        /* dynamic sql */
+      && ka->kastate != CPR_STATE_EXECUTE_AT_FETCH) /* do not call recursive */
+    return(TRUE);
+  else
+    return(FALSE);
+}
+
+void pr01sDisableExecuteAtFetch(sqlratype *sqlrap)
+{
+  tsp1_segment *seg = sqlrap->rasegptr;
+  seg->variant.C_1.sp1s_segm_header_F.variant.C_1.sp1c_command_options_F[0] |= 1 << sp1co_selfetch_off;
+  
+}
+
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :          0
+*-PRETTY-*  lines of code :       1692        PRETTYX 3.10 
+*-PRETTY-*  lines in file :       1830         1997-12-10 
+.PA 

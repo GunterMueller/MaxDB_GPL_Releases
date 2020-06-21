@@ -1,0 +1,292 @@
+#!/usr/bin/perl
+#
+# @(#)DBTools		1998-11-16
+#
+# G. Großmann, SAP AG
+#
+package DBTools;
+use Carp;
+use FileHandle;
+require "sutvars$ENV{TOOLEXT}";
+&if $OS in [ WIN32 ]
+use Win32::Registry;
+&endif
+@EXPORT_OK = qw(start_db stop_db GetParam PutParam);
+
+
+##################################################################
+# Funktion : start_db
+#
+# Argumente :
+#   1. Datenbankname
+#   in Release 6.1 gilt:
+#   2. der zu startende Kern
+#   in anderen Releases:
+#   2. Optionen für 'x_start' fast,quick,slow
+#   3. colduser,password
+#
+# Rückgabe : keine
+#
+sub start_db 
+{
+  my $db = shift;
+  if ($ENV{'RELVER'} eq "R61")
+  {
+&if $OS in [ WIN32 ]
+    my $kernel = shift;
+    my $RegADA;
+    # Specify the kernel version in the registry
+    $main::HKEY_LOCAL_MACHINE->Open("SYSTEM\\CurrentControlSet\\Services\\ADABAS-$db", $RegADA)
+	|| die "Cannot open registry key!\n";
+
+    $RegADA->SetValueEx('ImagePath', 0, REG_EXPAND_SZ, "$kernel") 
+	|| die "Cannot register kernel version $kernel in the registry!\n";
+
+    $RegADA->Close();
+
+    system("x_start $db > $NULL") == 0
+       or croak "Error while executing \"x_start $db > $NULL\"\n"."message: $!\n"; 
+&else
+    my $dbvers = shift;
+    system("x_start $dbvers $db > $NULL") == 0
+           or croak "Error while executing \"x_start $dbvers $db > $NULL\"\n"."message: $!\n"; 
+&endif
+  }
+  else 
+  {
+    my $dbvers = shift;
+    if ( $ENV{'RELVER'} ge "R72") 
+    {
+       my $user = shift;
+       $user = $StdColdUser if !defined($user);
+       system("$ENV{INSTROOT}/pgm/dbmcli -d $db -u $user start $dbvers > $NULL") == 0 
+	   or croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $db -u $user start $dbvers\"\n"."message: $!\n"; 
+    }
+    else 
+    {
+       system("x_start $dbvers $db > $NULL") == 0
+           or croak "Error while executing \"x_start $dbvers $db > $NULL\"\n"."message: $!\n"; 
+    }
+  }
+}
+
+##################################################################
+# Funktion : stop_db
+#
+# Argumente :
+#   1. Datenbankname
+#   2. colduser,password
+#
+# Rückgabe : keine
+#
+sub stop_db 
+{
+  my $db   = shift;
+  my $user = shift;
+  $user = $StdColdUser if !defined($user);
+  if ($ENV{'RELVER'} ge "R72"  )
+  {
+    system("$ENV{INSTROOT}/pgm/dbmcli -d $db -u $user stop >$NULL 2>&1");
+  } 
+  else 
+  {
+    system("x_stop $db >$NULL 2>&1");
+  }
+&if $OS in [ WIN32 ]
+  if ($ENV{'RELVER'} eq "R61")
+  {
+      my $RegADA;
+      $main::HKEY_LOCAL_MACHINE->Open("SYSTEM\\CurrentControlSet\\Services\\ADABAS-$db", $RegADA)
+	  || die "Cannot open registry key!\n";
+
+      $RegADA->SetValueEx('ImagePath', 0, REG_EXPAND_SZ, "$ENV{'DBROOT'}\\pgm\\kernel.exe")
+          || die "Cannot reset kernel version in the registry!\n";
+
+      $RegADA->Close();
+  }
+&endif
+
+}
+
+#################################################################
+# Funktion : PutParam
+#
+# Argumente :
+#   1. Datenbankname
+#   2. der zu setzende Parameter
+#   3. der wert des zu setzenden Parameters
+#   4. colduser,password
+#
+# Rückgabe : keine
+#
+sub PutParam
+{
+    my ($Database, $Variable, $Value, $user) = @_;
+    if ($ENV{RELVER} lt "R72" )
+    {
+        system("$ENV{INSTROOT}/pgm/putparam $Database $Variable $Value") == 0
+            or croak "Error while executing \"$ENV{INSTROOT}/pgm/putparam $Database $Variable $Value\"\n".
+            "message: $!\n"; 
+    }
+    else
+    {
+        $user = $StdColdUser if !defined($user);
+        open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_directput $Variable $Value |") ||
+            croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_directput $Variable $Value\"\n".
+            "message: $!\n";
+        chomp($Status = <PIPE_IN>);
+        chomp($Value = <PIPE_IN>) if $Status !~ /OK/;
+        close(PIPE_IN);
+        die "Can't put parameter $Variable!\n$Value\n" if $Status !~ /OK/;
+    }
+}
+
+
+#################################################################
+# Funktion : GetParam
+#
+# Argumente :
+#   1. Datenbankname
+#   2. der zu erfragende Parameter
+#   3. colduser,password
+#
+# Rückgabe : der Wert des Parameters
+#
+sub GetParam
+{
+    my ($Database, $Variable, $user) = @_;
+    local ($Value, $Status);
+    if ($ENV{RELVER} lt "R72" )
+    {
+        open(PIPE_IN, "$ENV{INSTROOT}/pgm/getparam $Database $Variable |") ||
+            croak "Error while executing \"$ENV{INSTROOT}/pgm/getparam $Database $Variable\"\n".
+            "message: $!\n";
+        chomp($Value = <PIPE_IN>);
+        close(PIPE_IN);
+    }
+    else
+    {
+        $user = $StdColdUser if !defined($user);
+        open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_directget $Variable |") ||
+            croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_directget $Variable\"\n".
+            "message: $!\n";
+        chomp($Status = <PIPE_IN>);
+        chomp($Value = <PIPE_IN>);
+        close(PIPE_IN);
+        die "Can't get parameter $Variable!\n$Value\n" if $Status !~ /OK/;
+        ($Value) = $Value =~ /.+\s+(.*)/;
+    }
+    return $Value;
+}
+
+
+#################################################################
+# Funktion : BCheck
+#
+# Argumente :
+#   1. Datenbankname
+#   2. colduser,password
+#
+# Rückgabe : keine                   
+#
+sub BCheck
+{
+    my ($Database, $user) = @_;
+
+    if ( $ENV{'RELVER'} ge "R72")
+    {
+	local $fh = new FileHandle;
+	if ( ! $fh->open("Check_Param.dat", "w") )
+	{
+	    die "Can't open Check_Param.dat (output) :$!\n";
+	}
+	else
+	{
+	    $fh->print("param_startsession\n");
+	    $fh->print("param_checkall\n");
+	    $fh->print("param_commitsession\n");
+	}
+	$fh->close;
+	open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user -i Check_Param.dat |") ||
+	    croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user -i Check_Param.dat\"\n".
+		"message: $!\n";
+	while(<PIPE_IN>)
+	{
+	    do { die "dbmcli error at BCHECK\n"; last; } if /^ERR/;
+	}
+        unlink ("Check_Param.dat");
+    } else {
+	system("x_param -u $user -d $Database BCHECK"); 
+    }
+}
+
+#################################################################
+# Funktion : BInit
+#
+# Argumente :
+#   1. Datenbankname
+#   2. colduser,password
+#
+# Rückgabe : keine                   
+#
+sub BInit
+{
+    my ($Database, $user) = @_;
+
+    if ( $ENV{'RELVER'} ge "R72")
+    {
+	local $fh = new FileHandle;
+
+        # delete old PARAM file
+	open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_rmfile |") ||
+	    croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user param_rmfile\"\n".
+		"message: $!\n";
+	while(<PIPE_IN>)
+	{
+	    do { die "dbmcli error at BINIT (rmfile)\n"; last; } if /^ERR/;
+	}
+
+        # drop db
+	open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user db_drop $Database |") ||
+	    croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user db_drop $Database \"\n".
+		"message: $!\n";
+	while(<PIPE_IN>)
+	{
+	    do { die "dbmcli error at BINIT (db_drop)\n"; last; } if /^ERR/;
+	}
+
+        # create db
+	open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -R $INSTROOT  db_create $Database $user |") ||
+	    croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -R $INSTROOT  db_create $Database $user\"\n".
+		"message: $!\n";
+	while(<PIPE_IN>)
+	{
+	    do { die "dbmcli error at BINIT (db_create)\n"; last; } if /^ERR/;
+	}
+
+        # create new PARAM file        
+	if ( ! $fh->open("Init_Param.dat", "w") )
+	{
+	    die "Can't open Init_Param.dat (output) :$!\n";
+	}
+	else
+	{
+	    $fh->print("param_startsession\n");
+	    $fh->print("param_init\n");
+	    $fh->print("param_checkall\n");
+	    $fh->print("param_commitsession\n");
+	}
+	$fh->close;
+	open(PIPE_IN, "$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user -i Init_Param.dat |") ||
+	    croak "Error while executing \"$ENV{INSTROOT}/pgm/dbmcli -d $Database -u $user -i Init_Param.dat\"\n".
+		"message: $!\n";
+	while(<PIPE_IN>)
+	{
+	    do { die "dbmcli error at BINIT\n"; last; } if /^ERR/;
+	}
+        unlink ("Init_Param.dat");
+
+    } else {
+	system("x_param -u $user -d $Database BINIT"); 
+    }
+}

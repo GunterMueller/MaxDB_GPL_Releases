@@ -1,0 +1,1254 @@
+//
+// different types, maximum size, some constraints
+//
+CREATE TABLE TAB1(
+COL1 VARCHAR(250) NOT NULL,
+COL2 CHAR NOT NULL,
+COL3 CHAR(2000) DEFAULT 'sdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwecnifuoerkncoeirpoceifuporufciurnhfocnuaelioinrcnojdfdcidsfnlisduridosdifnocisusosdsiufiosdfiuosdsfdioosdfioeisufcilseurfocaoesucnoeisufnoxesldiuoodnoiufioosdrioeirduoicouifghnchglsjfoxmilsjmnlidfkkkawuezewnducwieruewifcoiewrzue8wfuw8eruwuuruwe9ruciueczreurivtzreuzurtcznenzcuiericxuriweruxfuhrehxomumxisreuzcluzrmcxierzuerzucnzerznccurieztcrezncruienmcurioeumncrienciruiczutirezgrbvruzieuncoerueiurinureiucnuiwxmuiweurxiwrumcireztxucnmeirumxeuiruccnriemcieuxmriwuerinmiruiusdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwecnifuoerkncoeirpoceifuporufciurnhfocnuaelioinrcnojdfdcidsfnlisduridosdifnocisusosdsiufiosdfiuosdsfdioosdfioeisufcilseurfocaoesucnoeisufnoxesldiuoodnoiufioosdrioeirduoicouifghnchglsjfoxmilsjmnlidfkkkawuezewnducwieruewifcoiewrzue8wfuw8eruwuuruwe9ruciueczreurivtzreuzurtcznenzcuiericxuriweruxfuhrehxomumxisreuzcluzrmcxierzuerzucnzerznccurieztcrezncruienmcurioeumncrienciruiczutirezgrbvruzieuncoerueiurinureiucnuiwxmuiweurxiwrumcireztxucnmeirumxeuiruccnriemcieuxmriwuerinmiruiusdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwxx',
+COL4 INTEGER,
+COL5 SMALLINT,
+COL6 FIXED(38) NOT NULL,
+COL7 FIXED(38,38) CHECK (COL7 > 0.01),
+COL8 FIXED(20,10),
+COL9 VARCHAR(2000),
+COL10 DATE,
+COL11 TIME,
+COL12 TIMESTAMP,
+COL13 FLOAT,
+COL14 BOOLEAN,
+COL15 BOOLEAN,
+CONSTRAINT CONSTR1 PRIMARY KEY (COL4, COL5),
+CONSTRAINT CONSTR2 UNIQUE (COL7, COL8),
+CONSTRAINT CONSTR3 UNIQUE (COL13))
+//
+// maximum row length
+//
+CREATE TABLE TAB2(
+COL1 CHAR(8000),
+COL2 CHAR(84),
+CONSTRAINT CONSTR1 PRIMARY KEY (COL2))
+//
+// 100 numeric columns
+//
+CREATE TABLE TAB3(
+COL1 INT,
+COL2 INT,
+COL3 INT,
+COL4 INT,
+COL5 INT,
+COL6 INT,
+COL7 INT,
+COL8 INT,
+COL9 INT,
+COL10 INT,
+COL11 INT,
+COL12 INT,
+COL13 INT,
+COL14 INT,
+COL15 INT,
+COL16 INT,
+COL17 INT,
+COL18 INT,
+COL19 INT,
+COL20 INT,
+COL21 FIXED(38,10),
+COL22 FIXED(38,10),
+COL23 FIXED(38,10),
+COL24 FIXED(38,10),
+COL25 FIXED(38,10),
+COL26 FIXED(38,10),
+COL27 FIXED(38,10),
+COL28 FIXED(38,10),
+COL29 FIXED(38,10),
+COL30 FIXED(38,10),
+COL31 FIXED(38,10),
+COL32 FIXED(38,10),
+COL33 FIXED(38,10),
+COL34 FIXED(38,10),
+COL35 FIXED(38,10),
+COL36 FIXED(38,10),
+COL37 FIXED(38,10),
+COL38 FIXED(38,10),
+COL39 FIXED(38,10),
+COL40 FIXED(38,10),
+COL41 FLOAT,
+COL42 FLOAT,
+COL43 FLOAT,
+COL44 FLOAT,
+COL45 FLOAT,
+COL46 FLOAT,
+COL47 FLOAT,
+COL48 FLOAT,
+COL49 FLOAT,
+COL50 FLOAT,
+COL51 FLOAT,
+COL52 FLOAT,
+COL53 FLOAT,
+COL54 FLOAT,
+COL55 FLOAT,
+COL56 FLOAT,
+COL57 FLOAT,
+COL58 FLOAT,
+COL59 FLOAT,
+COL60 FLOAT,
+COL61 FIXED(38,2),
+COL62 FIXED(38,2),
+COL63 FIXED(38,2),
+COL64 FIXED(38,2),
+COL65 FIXED(38,2),
+COL66 FIXED(38,2),
+COL67 FIXED(38,2),
+COL68 FIXED(38,2),
+COL69 FIXED(38,2),
+COL70 FIXED(38,2),
+COL71 FIXED(38,2),
+COL72 FIXED(38,2),
+COL73 FIXED(38,2),
+COL74 FIXED(38,2),
+COL75 FIXED(38,2),
+COL76 FIXED(38,2),
+COL77 FIXED(38,2),
+COL78 FIXED(38,2),
+COL79 FIXED(38,2),
+COL80 FIXED(38,2),
+COL81 SMALLINT,
+COL82 SMALLINT,
+COL83 SMALLINT,
+COL84 SMALLINT,
+COL85 SMALLINT,
+COL86 SMALLINT,
+COL87 SMALLINT,
+COL88 SMALLINT,
+COL89 SMALLINT,
+COL90 SMALLINT,
+COL91 SMALLINT,
+COL92 SMALLINT,
+COL93 SMALLINT,
+COL94 SMALLINT,
+COL95 SMALLINT,
+COL96 SMALLINT,
+COL97 SMALLINT,
+COL98 SMALLINT,
+COL99 SMALLINT,
+COL100 SMALLINT,
+CONSTRAINT CONSTR1 PRIMARY KEY (COL2, COL22, COL42, COL62, COL82),
+CONSTRAINT CONSTR3  UNIQUE (COL4, COL5, COL33, COL57, COL99, COL100))
+//
+//
+// 196 chracter columns, almost maximum row length, long column names
+//
+CREATE TABLE TAB4(
+MIGRATIONTESTMIGRATIONTEST1 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST2 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST3 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST4 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST5 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST6 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST7 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST8 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST9 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST10 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST11 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST12 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST13 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST14 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST15 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST16 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST17 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST18 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST19 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST20 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST21 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST22 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST23 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST24 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST25 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST26 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST27 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST28 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST29 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST30 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST31 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST32 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST33 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST34 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST35 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST36 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST37 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST38 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST39 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST40 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST41 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST42 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST43 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST44 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST45 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST46 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST47 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST48 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST49 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST50 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST51 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST52 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST53 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST54 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST55 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST56 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST57 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST58 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST59 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST60 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST61 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST62 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST63 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST64 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST65 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST66 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST67 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST68 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST69 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST70 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST71 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST72 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST73 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST74 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST75 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST76 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST77 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST78 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST79 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST80 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST81 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST82 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST83 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST84 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST85 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST86 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST87 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST88 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST89 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST90 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST91 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST92 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST93 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST94 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST95 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST96 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST97 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST98 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST99 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST100 CHAR(80),
+MIGRATIONTESTMIGRATIONTEST101 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST102 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST103 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST104 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST105 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST106 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST107 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST108 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST109 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST110 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST111 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST112 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST113 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST114 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST115 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST116 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST117 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST118 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST119 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST120 CHAR(20),
+MIGRATIONTESTMIGRATIONTEST121 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST122 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST123 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST124 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST125 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST126 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST127 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST128 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST129 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST130 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST131 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST132 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST133 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST134 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST135 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST136 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST137 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST138 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST139 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST140 VARCHAR(20),
+MIGRATIONTESTMIGRATIONTEST141 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST142 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST143 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST144 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST145 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST146 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST147 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST148 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST149 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST150 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST151 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST152 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST153 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST154 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST155 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST156 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST157 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST158 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST159 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST160 CHAR(40),
+MIGRATIONTESTMIGRATIONTEST161 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST162 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST163 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST164 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST165 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST166 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST167 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST168 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST169 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST170 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST171 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST172 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST173 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST174 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST175 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST176 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST177 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST178 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST179 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST180 VARCHAR(40),
+MIGRATIONTESTMIGRATIONTEST181 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST182 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST183 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST184 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST185 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST186 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST187 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST188 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST189 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST190 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST191 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST192 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST193 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST194 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST195 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST196 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST197 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST198 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST199 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST200 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST201 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST202 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST203 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST204 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST205 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST206 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST207 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST208 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST209 CHAR(42),
+MIGRATIONTESTMIGRATIONTEST210 CHAR(42),
+CONSTRAINT CONSTR1 PRIMARY KEY (MIGRATIONTESTMIGRATIONTEST1, MIGRATIONTESTMIGRATIONTEST2, MIGRATIONTESTMIGRATIONTEST3, MIGRATIONTESTMIGRATIONTEST4, MIGRATIONTESTMIGRATIONTEST5))
+//
+// default values, will get more than 3000 rows
+//
+CREATE TABLE TAB5(
+COL1 VARCHAR(250) DEFAULT 'wurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejine',
+COL2 CHAR DEFAULT '' NOT NULL,
+COL3 CHAR(2000) DEFAULT 'sdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwecnifuoerkncoeirpoceifuporufciurnhfocnuaelioinrcnojdfdcidsfnlisduridosdifnocisusosdsiufiosdfiuosdsfdioosdfioeisufcilseurfocaoesucnoeisufnoxesldiuoodnoiufioosdrioeirduoicouifghnchglsjfoxmilsjmnlidfkkkawuezewnducwieruewifcoiewrzue8wfuw8eruwuuruwe9ruciueczreurivtzreuzurtcznenzcuiericxuriweruxfuhrehxomumxisreuzcluzrmcxierzuerzucnzerznccurieztcrezncruienmcurioeumncrienciruiczutirezgrbvruzieuncoerueiurinureiucnuiwxmuiweurxiwrumcireztxucnmeirumxeuiruccnriemcieuxmriwuerinmiruiusdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwecnifuoerkncoeirpoceifuporufciurnhfocnuaelioinrcnojdfdcidsfnlisduridosdifnocisusosdsiufiosdfiuosdsfdioosdfioeisufcilseurfocaoesucnoeisufnoxesldiuoodnoiufioosdrioeirduoicouifghnchglsjfoxmilsjmnlidfkkkawuezewnducwieruewifcoiewrzue8wfuw8eruwuuruwe9ruciueczreurivtzreuzurtcznenzcuiericxuriweruxfuhrehxomumxisreuzcluzrmcxierzuerzucnzerznccurieztcrezncruienmcurioeumncrienciruiczutirezgrbvruzieuncoerueiurinureiucnuiwxmuiweurxiwrumcireztxucnmeirumxeuiruccnriemcieuxmriwuerinmiruiusdhfksufhishisfhishfidshfoisdufoiuooueiucruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuzruwezreuiowxirezioxwumiewurixwezruzwierziewrzxwxumoefiueufiruiuriwriuxeiueiuixnhjeriwurxeuriweurxiewurezruecbuerzwrcieurixwureiuciezrccuewzxoiehioohfreifchblksjfhbeoifujcawoefnjooeifuooinrufoifooaxeunxejinesjufnuserodinwoeidooeiooxuroinxeiouoieunoeurnwxuwxx',
+COL4 INTEGER DEFAULT 1234567890,
+COL5 SMALLINT DEFAULT 12345,
+COL6 FIXED(38) DEFAULT 12345678901234567890123456789012345678,
+COL7 FIXED(38,38) DEFAULT .12345678901234567890123456789012345678 CHECK (COL6 > 0.1),
+COL8 FIXED(20,10) DEFAULT 123456789.01234567891,
+COL9 DATE DEFAULT '1992-06-07',
+COL10 TIME DEFAULT '12:10:37',
+COL11 TIMESTAMP DEFAULT '1992-06-07 12:10:37',
+COL12 FLOAT DEFAULT '+9.9999999999999999999999999999999999999E+61',
+COL13 BOOLEAN DEFAULT TRUE,
+COL14 BOOLEAN DEFAULT FALSE)
+//
+// foreign key
+//
+CREATE TABLE TAB6(
+COL1 CHAR(20),
+COL2 CHAR(10),
+COL3 FIXED(10,2),
+COL4 CHAR(1000),
+CONSTRAINT CONSTR1 PRIMARY KEY (COL1, COL2))
+//
+CREATE TABLE TAB7(
+COL1 INT,
+COL2 CHAR(20),
+COL3 CHAR(10),
+COL4 CHAR(100),
+CONSTRAINT CONSTR1 FOREIGN KEY (COL2, COL3) REFERENCES TAB6 (COL1, COL2))
+//
+CREATE TABLE TAB8(
+COL1 CHAR(10),
+COL2 FIXED(10,2),
+COL3 BOOLEAN,
+COL4 CHAR(1000))
+//
+CREATE TABLE TAB9(
+COL1 INT,
+COL2 BOOLEAN,
+COL3 CHAR(20),
+COL4 CHAR(10),
+COL5 FIXED(10,2))
+//
+// alter tables
+//
+ALTER TABLE TAB9 ADD(
+COL6 CHAR(5000) DEFAULT 'jsoijfosifuisfuosdifosdifsodpfiosodpfosdfksoifjdsioofjsoifujdsiofhsdhsdfkljskdlf',
+COL7 FIXED(38,2))
+//
+ALTER TABLE TAB4 COLUMN MIGRATIONTESTMIGRATIONTEST190 NOT NULL
+//
+ALTER TABLE TAB4 COLUMN MIGRATIONTESTMIGRATIONTEST190 ADD DEFAULT 'Hello this is a default.'
+//
+ALTER TABLE TAB4 COLUMN MIGRATIONTESTMIGRATIONTEST190 ALTER DEFAULT 'Hello this is another default.'
+//
+// rename tables and columns
+//
+RENAME COLUMN TAB9.COL1 TO COL1A
+//
+RENAME COLUMN TAB9.COL2 TO COL2A
+//
+RENAME TABLE TAB9 TO TAB9A
+//
+RENAME TABLE TAB8 TO TAB8A
+//
+// create sequences
+//
+CREATE SEQUENCE SEQ1 INCREMENT BY 2 START WITH 2 NOMAXVALUE MINVALUE 2 NOCYCLE NOCACHE
+//
+CREATE SEQUENCE SEQ2 INCREMENT BY -10 START WITH 100 MAXVALUE 100 MINVALUE 0 CYCLE NOCACHE
+//
+// insert into tables
+//
+CREATE DBPROC DO_INSERTS_1
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB1 VALUES (
+				RFILL('tab1:', 'xyz', 250),
+				'Q',
+				'ruieruixoewurxureiwourtguirguhxihihfxhahxhafzxufiauxuz',
+				:I,
+				:I + 1,
+				:I * 1000000,
+				:I / 20 - 0.01,
+				:I * 100 + 0.1,
+				RFILL('tab1:', 'abcdefghijklmnopqrstuvwxyz', 2000),
+				'1992-07-07',
+				'17:10:46',
+				'1992-07-07 17:10:46',
+				:I * 1.23456789,
+				FALSE,
+				TRUE);
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_2
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB2 VALUES (
+				RFILL(ASCII(''), '1234567890', 8000),
+				CHR(:I));
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_3
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB3 VALUES (
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+// long DB procedure
+//
+CREATE DBPROC DO_INSERTS_4_0
+	AS VAR I INTEGER;
+		SET I = 1;
+		INSERT INTO MIGRTST.TAB4 VALUES (
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+		IF $RC <> 0 THEN
+                	STOP ($RC, $ERRMSG);
+		SET I = 2;
+		INSERT INTO MIGRTST.TAB4 VALUES (
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+		IF $RC <> 0 THEN
+                	STOP ($RC, $ERRMSG);
+		SET I = 3;
+		INSERT INTO MIGRTST.TAB4 VALUES (
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+		IF $RC <> 0 THEN
+                	STOP ($RC, $ERRMSG);
+		SET I = 4;
+		INSERT INTO MIGRTST.TAB4 VALUES (
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+			:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+		IF $RC <> 0 THEN
+                	STOP ($RC, $ERRMSG);
+		DELETE FROM MIGRTST.TAB4;
+		IF $RC <> 0 THEN
+                	STOP ($RC, $ERRMSG);
+//
+// continue with more efficient procedures
+//
+CREATE DBPROC DO_INSERTS_4
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB4 VALUES (
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10,
+				:I, :I * 2, :I * 3, :I * 4, :I * 5, :I * 6, :I * 7, :I * 8, :I * 9,  :I * 10);
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_5
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_6
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB6 VALUES (
+				:I,
+				:I * 2,
+				:I + .01,
+				RFILL('', '1234567890', 1000));				
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_7
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB7 VALUES (
+				:I - 1,
+				:I,
+				:I * 2,
+				RFILL('', '1234567890', 100));				
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+CREATE DBPROC DO_INSERTS_8A9A
+	AS VAR I INTEGER;
+		SET I = 1;
+		WHILE I <= 20 DO BEGIN
+			INSERT INTO MIGRTST.TAB8A VALUES (
+				:I,
+				MIGRTST.SEQ1.NEXTVAL,
+				TRUE,
+				RFILL('', '1234567890', 1000));				
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			INSERT INTO MIGRTST.TAB9A VALUES (
+				:I,
+				TRUE,
+				'Hello World!',
+				'lalala',
+				MIGRTST.SEQ1.CURRVAL,
+				'ifsodpfiosodpfosdfksoifjdsioofjsoifujdsiofh',
+				MIGRTST.SEQ2.NEXTVAL);
+        		IF $RC <> 0 THEN
+                        	STOP ($RC, $ERRMSG);
+			SET I = I + 1;
+		END;
+//
+// trigger
+//
+CREATE TRIGGER INS_TAB6 FOR TAB6 AFTER INSERT EXECUTE (
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+	INSERT INTO MIGRTST.TAB5 SET COL14 = FALSE;
+	IF $RC <> 0 THEN
+        	STOP ($RC, $ERRMSG);
+)
+//
+// call procedures
+//
+CALL DO_INSERTS_1
+//
+CALL DO_INSERTS_2
+//
+CALL DO_INSERTS_3
+//
+CALL DO_INSERTS_4_0
+//
+CALL DO_INSERTS_4
+//
+CALL DO_INSERTS_5
+//
+CALL DO_INSERTS_5
+//
+CALL DO_INSERTS_6
+//
+CALL DO_INSERTS_7
+//
+CALL DO_INSERTS_8A9A
+//
+// create index
+//
+CREATE INDEX IND16 ON TAB1 (COL6 ASC)
+//
+CREATE UNIQUE INDEX IND178 ON TAB1 (COL7 ASC, COL8 DESC)
+//
+// create, rename private/public synonyms
+//
+CREATE SYNONYM SYN1 FOR TAB1
+//
+CREATE PUBLIC SYNONYM SYN2 FOR TAB2
+//
+RENAME SYNONYM SYN1 TO SYN1A
+//
+RENAME PUBLIC SYNONYM SYN2 TO SYN2A
+//
+// create views on 2 or 3 tables, also using data/time fields, functions
+//
+CREATE VIEW V1 AS SELECT DISTINCT SUBSTR(T1.COL1, 1, 50), T1.COL10, T1.COL11, T3.COL3 FROM TAB1 T1, TAB3 T3 WHERE T3.COL3 > (POWER(2,6)-14)
+//
+CREATE VIEW V2 AS SELECT DISTINCT T5.COL4, T5.COL5, T6.COL2, T6.COL3, T7.COL1 FROM TAB5 T5, TAB6 T6, TAB7 T7 WHERE T6.COL2 = '32' AND T7.COL1 < 5
+//

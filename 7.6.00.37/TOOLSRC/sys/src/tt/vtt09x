@@ -1,0 +1,244 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP AG$ADABAS FOR R/3$VTT09X$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+// ilock.h
+//
+
+#ifndef __ILOCK_H
+#define __ILOCK_H
+
+// Module interface definition
+//#include "iconstants.h"
+
+#define LOCKED					1
+#define UNLOCKED				0
+#define MLOCKED					2
+#define ILOCK_OK				1
+#define ILOCK_NOTOK				0
+#define ILOCK_ALREADY_LOCKED	999
+#define ILOCK_NOT_LOCKED		998
+#define ILOCK_MAX_USERS_REACHED 997
+
+// Datenstrukturen in C
+typedef struct tFileInfo 
+{
+	int	 Version;			// Version, for future use
+	DWORD OffsetStateData;	// Offset of StateDate (= sizeof TFileInfo)
+	DWORD OffsetStateIndex;	// Offset of StateIndex (= sizeof (TFileInfo + #TStateData))
+	DWORD NoOfDataElements;	// Anzahl der Datenelemente
+} TFileInfo, *PFileInfo;
+
+
+// Definition von TStateData
+typedef struct OldtStateData
+{
+	char Name[OLD_MAX_MODULENAME_LENGTH+1];	// Name des zu verwaltenden Elements (Modul)
+	byte State;							// Status (locked, unlocked)
+	char Node[MAX_NODENAME_LENGTH+1];	// If locked, von welchem Rechner?
+	char User[MAX_USERNAME_LENGTH+1];	// If locked, von welchem Benutzer?
+	SYSTEMTIME date;					// If locked, when?
+	UINT Version;						// aktuelle Versionsnummer (Pre-Incrementel)
+	UINT  CountMax;		// Maximale Anzahl von User-ID Eintraegen verfuegbar in diesem Block
+	UINT  CountUsed;	// Anzahl der aktuell belegten User-IDs in diesem Block 
+	char  UserList[(MAX_USERNAME_LENGTH+1)*INITIAL_VERSION_USER_REF_LIST_ENTRIES];
+						// Array mit CountMax User-ID Eintragen  
+} OldTStateData, *OldPStateData;
+
+
+// Definition von TStateData
+typedef struct tStateData
+{
+	char Name[MAX_MODULENAME_LENGTH+1];	// Name des zu verwaltenden Elements (Modul)
+	byte State;							// Status (locked, unlocked)
+	char Node[MAX_NODENAME_LENGTH+1];	// If locked, von welchem Rechner?
+	char User[MAX_USERNAME_LENGTH+1];	// If locked, von welchem Benutzer?
+	SYSTEMTIME date;					// If locked, when?
+	UINT Version;						// aktuelle Versionsnummer (Pre-Incrementel)
+	UINT  CountMax;		// Maximale Anzahl von User-ID Eintraegen verfuegbar in diesem Block
+	UINT  CountUsed;	// Anzahl der aktuell belegten User-IDs in diesem Block 
+	char  UserList[(MAX_USERNAME_LENGTH+1)*INITIAL_VERSION_USER_REF_LIST_ENTRIES];
+						// Array mit CountMax User-ID Eintragen  
+} TStateData, *PStateData;
+
+// Definition von TStateIndex
+typedef struct tStateIndex
+{
+	char Name[MAX_MODULENAME_LENGTH+1];	// Name des zu verwaltenden Elements (Sortierkrit.)
+	DWORD Pos;							// Position des zugehoerigen Datenblocks
+} TStateIndex, *PStateIndex;
+
+
+// Definition von TStateIndex
+typedef struct OldtStateIndex
+{
+	char Name[OLD_MAX_MODULENAME_LENGTH+1];	// Name des zu verwaltenden Elements (Sortierkrit.)
+	DWORD Pos;							// Position des zugehoerigen Datenblocks
+} OldTStateIndex, *OldPStateIndex;
+
+
+
+class TILock
+{
+public:
+    TILock( const char *);	    // Constructor
+    ~TILock();					// Destructor
+    TILock (const TILock&);	    // Copy constructor
+
+    int Lock( const char *, const char *, const char *, const int Mget = FALSE);
+    int Unlock( const char *, const char *, const char *, BOOL);
+	int LockExcl( const char *, const char *, const char *);
+	int GetLockStateData(const char *, TStateData *);
+
+private:
+    // interne Funktionsprototypen
+    BOOLEAN MyOpenStatfileExclusive();
+    BOOLEAN MyCloseFile(HANDLE);
+    int MyReadFileInfo (void);
+    int MyReadStateIndex (void);
+    BOOLEAN MySearchModuleInIndex (const char *);
+    BOOLEAN MyModuleNotLocked (const char *);
+	BOOLEAN MyModuleMLocked (const char * Module);
+    int MyLockModule (const char *, const char *, const char *, const int, const int CountUsed=0);
+    int MyUnlockModule (const char *, const char *, const char *, int *, int*, BOOL bDel=FALSE);
+    int MyWriteStateProtocol(const char *, BOOL bDEL=FALSE);
+    int MyWriteStateProtocol(const char *, const char *, const char *, const char *, BOOL bDEL=FALSE);
+    int MyFlushStateFile(void);
+    int MySetFilePointer (HANDLE ,DWORD);
+    int MyEnterNewModule (const char *, const char*, const char *);
+    int MyWriteFile(HANDLE, LPCVOID, DWORD);
+    int MyReadFile(HANDLE, LPVOID, DWORD);
+    int MyStateIndexInsertNewElement (TStateIndex *);
+	void ILockError (const char*, const char *, DWORD dwError=NO_ERROR);
+	int MyAddUserToVerRefList(const char *);
+	int MySearchUserInVerRefList(const char *);
+	int MyDelUserFromVerRefList(const char *);
+	int MyMLockModuleAnyway (const char *, const char *,const char *, const char *);
+
+
+
+    // Data
+    char		*Statfile;			// Status file with lock info (binary)
+	char		*StatProtfile;		// Protocol file about act. on Statfile (text)
+    TFileInfo	MyFileInfo;
+    TStateData	MyStateData;		// zu bearbeitender InfoBlock
+    TStateIndex *pMyStateIndex;
+    DWORD		IndexStateIndex;	// Array-Index des StateIndex
+    HANDLE		hStatfile;
+    BOOLEAN		ObjectReady;
+};
+
+
+
+// Do not add anything behind this point!
+#endif
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : Josef Hasenberger
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

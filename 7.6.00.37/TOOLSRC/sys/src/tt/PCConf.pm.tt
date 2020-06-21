@@ -1,0 +1,272 @@
+#!/usr/bin/perl
+# module:      PCConf.pm
+#
+# responsible: D025086
+#
+# special area: Interface Test Tool
+#
+# description: Reads database configuration files used by jtest.
+#
+# see:
+#
+# change history: 
+#        2002-01-09 D025086 Initial version 
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+######################################################################
+package PCConf;
+######################################################################
+use strict;
+
+require XML::DOM;
+
+BEGIN
+{
+
+    use vars qw( @ISA @EXPORT);
+
+    @ISA = qw( Exporter );
+    @EXPORT = qw(UNKNOWN_TYPE
+                 UNIQUE_TYPE );
+
+}
+
+# Constants
+sub UNKNOWN_TYPE () {-1;}
+sub UNIQUE_TYPE  () { 1;}
+
+
+sub getUNIQUEUID () {
+
+    use Socket;
+    my $Hostname = $ENV{COMPUTERNAME} || $ENV{HOSTNAME};
+    my $Username = getlogin || getpwuid($<) || $ENV{USERNAME};
+    my $RELVER   = $ENV{'RELVER'};
+    my $VersionLayer = "";
+    
+    # only for releases >= 72
+    my ($Release) = ($RELVER =~ /^R(\d\d)$/);
+    if (defined $Release && $Release >= 72) {
+        # for 72.04.xx or 72.05.xx
+        # the name of the directory is 7240 or 7250
+        my $Correction = $ENV{'CORRECTION_LEVEL'};
+        $Correction *= 10 if ($Release == 72);        
+        $VersionLayer = 100 * $Release + $Correction;
+    }
+    if (defined $Hostname && $Hostname =~ m/^[0-9].*/) {
+        $Hostname = "_$Hostname"
+    }
+    return uc "$Hostname\_$VersionLayer\_$Username"
+}
+
+######################################################################
+package PCConf::Configuration;
+######################################################################
+
+use vars qw( @ISA );
+use XML::DOM;
+use Cwd;
+@ISA = qw(PCConf::Database);
+
+sub new (){
+    my $class = shift;
+    my $self  = {};
+    $self->{filename} = shift;
+    my $parser = new XML::DOM::Parser;
+    my $filename = $self->{filename};
+    my ($cwd);
+    $filename =~ tr!\\!/!;        
+    my $parsefile = $parser->parsefile($filename);
+    if ($filename =~ m!(.*)/.*!) {
+        $cwd = getcwd;
+        chdir "$1";
+    }
+    $self->{database} = ();
+    foreach my $elem ($parsefile->getElementsByTagName('configuration')) {
+        foreach my $child ($elem->getChildNodes) {
+            if ($child->getNodeType == ELEMENT_NODE ) {
+                if (defined $child->getFirstChild()) {
+                    if ($child->getTagName eq 'include') {
+                        my $filename = $child->getFirstChild()->getData();
+                        my $config = new PCConf::Configuration $filename;
+                        my @database = $config->enumDB;
+                        push (@{$self->{database}}, @database);    
+                    }
+                    if ($child->getTagName eq 'database') {
+                        my @database = (new PCConf::Database $child);
+                        push (@{$self->{database}}, @database);    
+                    }
+                }
+            }
+        }
+    }
+    chdir $cwd if (defined $cwd);        
+    return bless($self,$class);
+}
+
+sub getDatabase {
+    $_[0]->{database}[0];
+}
+
+sub getItemDB {
+    $_[0]->{database}[$_[1]];
+}
+
+sub enumDB {
+    wantarray ? @{$_[0]->{database}} : $_[0]->{database}[0];
+}
+
+sub countDB {
+    int (@{$_[0]->{database}});
+}
+
+sub toString
+{
+    my $str .= "filename = '$_[0]->{filename}'\n";
+    for ($_[0]->enumDB) {
+        $str .= $_->toString;
+    }
+    return $str;
+}
+
+######################################################################
+package PCConf::Database;
+######################################################################
+
+use XML::DOM;
+
+use vars qw( @ISA );
+
+sub new {
+    my ($class) = shift;
+    my $self  = {};
+    my $node = shift;
+    $self->{userlist} = ();
+    foreach my $child ($node->getChildNodes) {
+        if ($child->getNodeType == ELEMENT_NODE ) {
+            if (defined $child->getFirstChild()) {
+                if ($child->getTagName eq 'user') {
+                    my @userlist = (new PCConf::User $child);
+                    push (@{$self->{userlist}}, @userlist);    
+                }
+                else {
+                    $self->{$child->getTagName} = $child->getFirstChild()->getData();
+                }
+            }
+        }
+    }
+    return bless($self,$class);
+}
+
+sub enumUser {
+    return @{$_[0]->{userlist}};
+}
+
+sub countUser {
+    int (@{$_[0]->{userlist}});
+}
+
+sub DBName {
+    $_[0]->{'db-name'};
+}
+
+sub DBHost {
+    (defined $_[0]->{'db-host'} ? $_[0]->{'db-host'} : "");
+}
+
+sub toString
+{
+    my $str = "db-name = '" . $_[0]->DBName ."'\n";
+    $str .= "db-host = '" . $_[0]->DBHost . "'\n";
+    for ($_[0]->enumUser) {
+        $str .= $_->toString;
+    }
+    return $str;
+}
+
+######################################################################
+package PCConf::User;
+######################################################################
+
+BEGIN
+{
+
+    use XML::DOM;
+    use PCConf;
+
+}
+
+sub new {
+    my ($class) = shift;
+    my $self  = {};
+    my $node = shift;
+    $self->{kind} = $node->getAttribute('kind');
+    $self->{type} = $node->getAttribute('type');
+    foreach my $child ($node->getChildNodes) {
+        if ($child->getNodeType == ELEMENT_NODE ) {
+            if (defined $child->getFirstChild()) {
+                $self->{$child->getTagName} = $child->getFirstChild()->getData();
+            }
+        }
+    }
+    return bless($self,$class);
+}
+
+sub Kind {
+    my $str = $_[0]->{kind};
+    (defined $_[0]->{kind} ? $_[0]->{kind} : "#unkown");
+    $str;
+}
+
+sub Type {
+    (defined $_[0]->{type} ? ($_[0]->{type} eq 'unique' ? UNIQUE_TYPE : UNKNOWN_TYPE) : UNKNOWN_TYPE);
+}
+
+sub UID {
+    if ($_[0]->Type == UNIQUE_TYPE && !defined $_[0]->{'user-name'}) {
+        return PCConf::getUNIQUEUID;
+    }
+    else {
+        $_[0]->{'user-name'};
+    }
+}
+
+sub PWD {
+    if ($_[0]->Type == UNIQUE_TYPE && !defined $_[0]->{'user-password'}) {
+        return PCConf::getUNIQUEUID;
+    }
+    else {
+        $_[0]->{'user-password'};
+    }
+}
+
+sub toString
+{
+    my $str = "kind = '" . $_[0]->Kind . "'\n";
+    $str .= "type = '" . $_[0]->Type . "'\n";
+    $str .= "user-name = '" . $_[0]->UID . "'\n";
+    $str .= "user-password = '" . $_[0]->PWD . "'\n";
+    return $str;
+}
+
+1;
+__END__
+

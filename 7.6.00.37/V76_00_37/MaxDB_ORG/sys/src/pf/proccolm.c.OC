@@ -1,0 +1,577 @@
+/*
+*****************************************************************************
+** SQL Datenbanksysteme GmbH
+**
+** Autor        : Harun Eren 
+**
+** Program      : proccolm.c.OC
+**
+** Usage        : --
+** Option       : --
+**
+** Purpose      : Test der Funktion SQLProcedureColumn
+**
+** Date         : 27.06.95
+** l.aenderung  : 13:27pm 03-14-1996 (Harun)
+****************************************************************************
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+*/
+#include "winhead.h"
+
+/* ---------------------------------------------------------------------- */
+#define PROGNAME "proccolm"
+#ifndef DEFAULTS
+#define USERNAME "SUPERDBA"
+#define PASSWORD "ADMIN"
+#define DBNODE   "sqlprec:D"
+
+#define ODBCUSER  "ODBC"
+#define ODBCPASSW "ODBC"
+#endif
+
+#define ODBCUSER1  "ODBC1"
+#define ODBCPASSW1 "ODBC1"
+#define ODBCTABLE  "ODBCTEST"
+#define ODBCSCRIPT "proc2inst"
+#define DBPROC1	   "INSERT_TEST"
+#define DBPROC2	   "SELECT_TEST"
+
+#define ERROR_CHECK(hstmtx)  \
+    if (rc != SQL_SUCCESS) {\
+	   SQLError(henv, hdbc, hstmtx, sqlstate, &esq_sql_code, error_txt,\
+		    len_error_txt, &used_error_txt);\
+	   SPRINTF(buffer," sqlstate: %s"CRLF, sqlstate);\
+           PRINTF(buffer);\
+	   SPRINTF(buffer," esq_sql_code: %ld"CRLF, esq_sql_code);\
+           PRINTF(buffer);\
+           switch (rc) {\
+		  case(100) :\ 
+			  break;\
+		  default   :\ 
+			  exit(16); \
+			  break; } \
+	}
+
+ UCHAR sqlstate  [ 10 ];
+ SDWORD esq_sql_code;
+ UCHAR error_txt  [ 101 ] ;
+ SWORD len_error_txt = 100;
+ SWORD used_error_txt;
+ UCHAR buffer[1024];
+ UCHAR szDBNODE[256];
+/* ---------------------------------------------------------------------- */
+
+#define TESTNAME "SQLPROCEDURECOLUMNS"
+
+#define TABLE "TABSQLPROCCOL"
+#define USER1 ODBCUSER1
+#define PROCN "SEL_TEST"
+
+#define MAX_NAME_LEN 		512
+#define MAX_COL_NAME_LEN 	18
+
+#define STR_LEN 128+1
+#define REM_LEN 254+1
+
+#define NULL_VALUE "<NULL>"
+
+#define SQL_PARAM_OUTPUT	4
+#define SQL_RETURN_VALUE	5
+
+/* ---------------------------------------------------------------------- */
+RETCODE lstProcedureColumnsInfo(HENV henv, HDBC hdbc, HSTMT hstmt);
+RETCODE lst_ColumnNames(HENV henv, HDBC hdbc, HSTMT hstmt, SWORD outcol);
+RETCODE init_dbprocs();
+
+/* 
+ ------------------------------------------------------------------------- 
+| DoSQLProcedureColumns:
+|             
+|
+| Returns:
+|     Number of Errors or TEST_ABORTED
+ ------------------------------------------------------------------------
+*/
+/* ---------------------------------------------------------------------- */
+MAIN()
+{
+	RETCODE                 rc;
+	SWORD                   sErr=0;
+/* ----------------------------------------------------------------------- */
+	HENV henv   = SQL_NULL_HENV;
+	HENV FAR * phenv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC FAR * phdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT FAR * phstmt;
+
+/* ----------------------------------------------------------------------- */
+	UCHAR                   tabname[MAX_NAME_LEN+1];
+	UCHAR                   colname[MAX_NAME_LEN+1];
+	UCHAR                   create[(MAX_NAME_LEN+1)*2];
+	UCHAR                   drop[MAX_NAME_LEN+1];
+
+	/* Declare storage locations for result set data */
+	UCHAR   szProcQualifier[STR_LEN], 
+		szProcOwner[STR_LEN], 
+	        szProcName[STR_LEN],
+		szProcColumn[STR_LEN];
+
+	/* Declare storage locations for bytes available to return */
+	SDWORD cbProcQualifier, cbProcOwner, cbProcName, cbColumnName;
+
+/* --------------------------------------------------------------------har- */
+ SPRINTF(buffer, " %s running.\n", PROGNAME);
+ PRINTF(buffer);
+
+ init_dbprocs();
+
+ phenv = (HENV FAR *) &henv;
+ phdbc = (HDBC FAR *) &hdbc;
+ phstmt = (HSTMT FAR *) &hstmt;
+
+ rc = SQLAllocEnv(phenv);
+ SPRINTF(buffer," SQLAllocEnv retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+	
+ rc = SQLAllocConnect(henv, phdbc);
+ SPRINTF(buffer," SQLAllocConnect retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+	
+ rc = SQLConnect(hdbc, DBNODE, SQL_NTS, ODBCUSER, SQL_NTS, 
+ 						ODBCPASSW, SQL_NTS );
+ SPRINTF(buffer," SQLConnect retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+
+ rc = SQLAllocStmt (hdbc, phstmt);
+ SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+/* ---------------------------------------------------------------------- */ 
+	/* ************************************************************** */
+	/* *** I. SQLProcedureColumns *********************************** */
+	/* ************************************************************** */
+	SPRINTF(buffer,"I.) SQLProcedureColumns -> "CRLF);
+	PRINTF(buffer);
+
+	/* Get all the procedures columns. */
+	rc = SQLProcedureColumns(hstmt, 
+			NULL, 0, 			/* Proc qualifier */
+			"%", SQL_NTS,			/* Proc owner     */
+			"%", SQL_NTS,			/* Proc name      */
+			"%", SQL_NTS);			/* Column name    */
+	SPRINTF(buffer," SQLProcedureColumns retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	if (rc == SQL_SUCCESS) 
+		lstProcedureColumnsInfo(henv, hdbc, hstmt);
+
+	rc = SQLFreeStmt(hstmt, SQL_CLOSE);
+	SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	/* *************************************************************** */
+	/* *** II. SQLProcedureColumns *********************************** */
+	/* *************************************************************** */
+	SPRINTF(buffer,"II.) SQLProcedureColumns -> \ 
+			for USER: "USER1" - PROCEDURE: "PROCN);
+	PRINTF(buffer);
+
+	/* Get all the procedure columns. */
+	rc = SQLProcedureColumns(hstmt, 
+			NULL, 0, 			/* Proc qualifier */
+			USER1, SQL_NTS,			/* Proc owner     */
+			PROCN, SQL_NTS,			/* Proc name      */
+			"%", SQL_NTS);			/* Columns name   */
+	SPRINTF(buffer," SQLProcedureColumns retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	if (rc == SQL_SUCCESS) 
+		lstProcedureColumnsInfo(henv, hdbc, hstmt);
+
+	rc = SQLFreeStmt(hstmt, SQL_CLOSE);
+	SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+/* -------------------------------------------------------------------har- */ 
+  rc = SQLFreeStmt(hstmt, SQL_DROP);
+  SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLFreeConnect(hdbc);
+  SPRINTF(buffer," SQLFreeConnect retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLFreeEnv(henv);
+  SPRINTF(buffer," SQLFreeEnv retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  SPRINTF(buffer,""CRLF);
+  PRINTF(buffer);
+  SPRINTF(buffer," %s ending"CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  return(0);
+
+}
+/* ------------------------------------------------------------------------ */
+RETCODE lstProcedureColumnsInfo(HENV henv, HDBC hdbc, HSTMT hstmt)
+{
+	RETCODE                 rc;
+	SWORD                   sErr=0;
+/* ------------------------------------------------------------------------- */
+	/* Declare storage locations for result set data */
+	UCHAR   szProcQualifier[STR_LEN], 
+		szProcOwner[STR_LEN], 
+	        szProcName[STR_LEN],
+		szColumnName[STR_LEN], 
+		szTypeName[STR_LEN], 
+		szRemarks[STR_LEN];
+	SWORD   ColumnType,
+		DataType,
+		Scale,
+		Radix,
+		Nullable;
+	SDWORD  Precision,
+		Length;
+
+	UCHAR   szColumnType[STR_LEN],
+		szDataType[STR_LEN],
+		szPrecision[STR_LEN],
+		szLength[STR_LEN],
+		szScale[STR_LEN],
+		szRadix[STR_LEN],
+		szNullable[STR_LEN];
+
+	/* Declare storage locations for bytes available to return */
+	SDWORD 	cbProcQualifier, cbProcOwner, cbProcName, cbColumnName, 
+		cbColumnType, cbDataType, cbTypeName, cbPrecision, 
+		cbLength, cbScale, cbRadix, cbNullable, cbRemarks;
+
+	SWORD  count=0;
+/* ---------------------------------------------------------------------har- */
+	/* Bind columns in result set to storage locations */
+	SQLBindCol(hstmt, 1, SQL_C_CHAR, szProcQualifier, 
+						STR_LEN,&cbProcQualifier);
+	SQLBindCol(hstmt, 2, SQL_C_CHAR, szProcOwner, STR_LEN, &cbProcOwner);
+	SQLBindCol(hstmt, 3, SQL_C_CHAR, szProcName, STR_LEN,&cbProcName);
+	SQLBindCol(hstmt, 4, SQL_C_CHAR, szColumnName, STR_LEN,&cbColumnName);
+	SQLBindCol(hstmt, 5, SQL_C_SHORT, &ColumnType, 0, &cbColumnType);
+	SQLBindCol(hstmt, 6, SQL_C_SHORT, &DataType, 0, &cbDataType);
+	SQLBindCol(hstmt, 7, SQL_C_CHAR, szTypeName, STR_LEN,&cbTypeName);
+	SQLBindCol(hstmt, 8, SQL_C_LONG, &Precision, 0, &cbPrecision);
+	SQLBindCol(hstmt, 9, SQL_C_LONG, &Length, 0, &cbLength);
+	SQLBindCol(hstmt,10, SQL_C_SHORT, &Scale, STR_LEN,&cbScale);
+	SQLBindCol(hstmt,11, SQL_C_SHORT, &Radix, STR_LEN,&cbRadix);
+	SQLBindCol(hstmt,12, SQL_C_SHORT, &Nullable, STR_LEN,&cbNullable);
+	SQLBindCol(hstmt,13, SQL_C_CHAR, szRemarks, STR_LEN,&cbRemarks);
+
+	rc = lst_ColumnNames(henv, hdbc, hstmt, 13);
+
+	while(TRUE) {
+		count++;
+
+		rc = SQLFetch(hstmt);
+		/* ERROR_CHECK(hstmt); */
+
+		if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO){
+			/* Process fetched data */
+			if (cbProcQualifier == SQL_NULL_DATA) 
+				STRCPY(szProcQualifier, NULL_VALUE);
+			if (cbProcOwner == SQL_NULL_DATA) 
+				STRCPY(szProcOwner, NULL_VALUE);
+			if (cbProcName == SQL_NULL_DATA) 
+				STRCPY(szProcName, NULL_VALUE);
+			if (cbColumnName == SQL_NULL_DATA) 
+				STRCPY(szColumnName, NULL_VALUE);
+			if (cbColumnType == SQL_NULL_DATA) ColumnType=NULL;
+			if (cbDataType == SQL_NULL_DATA) 
+				STRCPY(szDataType,NULL_VALUE); 
+			    else SPRINTF(szDataType,"%d",DataType);
+			if (cbTypeName == SQL_NULL_DATA) 
+				STRCPY(szTypeName,NULL_VALUE); 
+			if (cbPrecision == SQL_NULL_DATA) 
+				STRCPY(szPrecision,NULL_VALUE); 
+			    else SPRINTF(szPrecision,"%d",Precision);
+			if (cbLength == SQL_NULL_DATA) 
+				STRCPY(szLength,NULL_VALUE); 
+			    else SPRINTF(szLength,"%d",Length);
+			if (cbScale == SQL_NULL_DATA) 
+				STRCPY(szScale,NULL_VALUE); 
+			    else SPRINTF(szScale,"%d",Scale);
+			if (cbRadix == SQL_NULL_DATA) 
+				STRCPY(szRadix,NULL_VALUE); 
+			    else SPRINTF(szRadix,"%d",Radix);
+			if (cbNullable == SQL_NULL_DATA) Nullable=NULL;
+			if (cbRemarks == SQL_NULL_DATA) 
+				STRCPY(szRemarks, NULL_VALUE);
+
+			switch (ColumnType) {
+			 case SQL_PARAM_TYPE_UNKNOWN	: 
+			 	STRCPY(szColumnType,"SQL_PARAM_TYPE_UNKONWN");
+				break;
+			 case SQL_PARAM_INPUT		: 
+			 	STRCPY(szColumnType,"SQL_PARAM_INPUT"); 
+				break;
+			 case SQL_PARAM_INPUT_OUTPUT	: 
+			 	STRCPY(szColumnType,"SQL_PARAN_INPUT_OUTPUT");
+				break;
+			 case SQL_PARAM_OUTPUT		: 
+			 	STRCPY(szColumnType,"SQL_PARAM_OUTPUT"); 
+				break;
+			 case SQL_RETURN_VALUE		: 
+			 	STRCPY(szColumnType,"SQL_RETURN_VALUE"); 
+				break;
+			 case SQL_RESULT_COL		: 
+			 	STRCPY(szColumnType,"SQL_RESULT_COL"); break;
+			 default			: 
+			 	STRCPY(szColumnType,NULL_VALUE); break;
+			}
+			switch (Nullable) {
+			 case SQL_NO_NULLS		: 
+			 	STRCPY(szNullable,"SQL_NO_NULLS"); break;
+		 	case SQL_NULLABLE		: 
+				STRCPY(szNullable,"SQL_NULLABLE"); break;
+			 case SQL_NULLABLE_UNKNOWN	: 
+				STRCPY(szNullable,"SQL_NULLABLE_UNKNOWN"); 
+				break;
+			 default			: 
+			 	STRCPY(szNullable,NULL_VALUE); break;
+			}
+			SPRINTF(buffer, "Procedure %d : \ 
+			 '%s','%s','%s','%s','%s','%s','%s','%s','%s',\
+			 '%s','%s','%s','%s'\r\n", \
+			 count, szProcQualifier, szProcOwner, szProcName,\
+			 szColumnName, szColumnType, szDataType, szTypeName,\
+			 szPrecision, szLength, szScale, szRadix, szNullable,\
+			 szRemarks);
+			PRINTF(buffer);
+		} else { 
+			/* ERROR_CHECK(hstmt); */
+			break; 
+		}
+	    }
+	return TRUE;
+}
+/* ----------------------------------------------------------------------- */
+RETCODE lst_ColumnNames(HENV henv, HDBC hdbc, HSTMT hstmt, SWORD outcol)
+{
+	RETCODE                 rc;
+	SWORD                   sErr=0;
+/* ----------------------------------------------------------------------- */
+	UWORD			icol;
+	UCHAR                   szColName[MAX_NAME_LEN];
+	SWORD                   cbColNameMax;
+	SWORD                   pcbColName;
+	SWORD			pfSqlType;
+	SQLULEN			pcbColDef;
+	SWORD			pibScale;
+	SWORD			pfNullable;
+/* ----------------------------------------------------------------------- */
+	STRCPY(buffer,"Columns->|");
+
+	icol = 1; cbColNameMax = MAX_COL_NAME_LEN;
+	while (icol <= outcol) {
+		rc = SQLDescribeCol(hstmt, icol, szColName, cbColNameMax, 
+					&pcbColName, &pfSqlType, &pcbColDef, 
+					&pibScale, &pfNullable);
+		STRCAT(buffer, szColName); STRCAT(buffer,"|");
+		icol++;
+	}
+	STRCAT(buffer, CRLF);
+	PRINTF(buffer);
+
+return(rc);
+}
+/* ----------------------------------------------------------------------- */
+RETCODE init_dbprocs()
+{
+	RETCODE rc;
+/* ----------------------------------------------------------------------- */
+	HENV henv   = SQL_NULL_HENV;
+	HENV FAR * phenv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC FAR * phdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT FAR * phstmt;
+
+	UCHAR stmt[MAX_NAME_LEN*2];
+/* ----------------------------------------------------------------------- */
+
+  phenv = (HENV FAR *) &henv;
+  phdbc = (HDBC FAR *) &hdbc;
+  phstmt = (HSTMT FAR *) &hstmt;
+  
+  rc = SQLAllocEnv(phenv);
+  SPRINTF(buffer, " SQLAllocEnv retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLAllocConnect(henv, phdbc);
+  SPRINTF(buffer," SQLAllocConnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLConnect(hdbc,
+		       DBNODE,
+		       (SWORD) SQL_NTS,
+		       USERNAME,
+		       (SWORD) SQL_NTS,
+		       PASSWORD,
+		       (SWORD) SQL_NTS );
+  SPRINTF(buffer," SQLConnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLAllocStmt (hdbc, phstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* Drop User ODBC1 */
+  STRCPY(stmt, "DROP USER "ODBCUSER1);
+  PRINTF(stmt);
+
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+
+  /* ***** Create User ODBC1*/
+  STRCPY(stmt, "CREATE USER "ODBCUSER1);
+  STRCAT(stmt, " PASSWORD "ODBCPASSW1);
+  STRCAT(stmt, " DBA NOT EXCLUSIVE ");
+  PRINTF(stmt);
+  
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+  
+  rc = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLConnect(hdbc,
+		       DBNODE,
+		       (SWORD) SQL_NTS,
+		       ODBCUSER1,
+		       (SWORD) SQL_NTS,
+		       ODBCPASSW1,
+		       (SWORD) SQL_NTS );
+  SPRINTF(buffer," SQLConnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLAllocStmt (hdbc, phstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* ***** Create Table ODBCTEST */
+  STRCPY(stmt, "CREATE TABLE "ODBCTABLE);
+  STRCAT(stmt, " ( CH CHAR  (10) KEY, FI FIXED (5), FL FLOAT (5), ");
+  STRCAT(stmt, " DA DATE DEFAULT DATE, TI TIME DEFAULT TIME ) ");
+  PRINTF(stmt);
+
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* ***** Grante Table to PUBLIC */
+  STRCPY(stmt, "GRANT ALL ON "ODBCTABLE" TO PUBLIC ");
+  PRINTF(stmt);
+
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* Call Script : dbproc2 */
+  rc = SQLGetInfo(hdbc, SQL_SERVER_NAME, szDBNODE, sizeof(szDBNODE), NULL);
+  STRCAT(szDBNODE, ":");
+  rc = SQLGetInfo(hdbc, SQL_DATABASE_NAME, szDBNODE+STRLEN(szDBNODE), sizeof(szDBNODE)-STRLEN(szDBNODE), NULL);
+
+  STRCPY(stmt, ODBCSCRIPT" "ODBCUSER1" "ODBCPASSW1" ");
+  STRCAT(stmt, szDBNODE);
+
+  system(stmt);
+  PRINTF(CRLF);
+
+  /* Grant DBProc INSERT_TEST to public */
+  STRCPY(stmt, "GRANT EXECUTE ON "ODBCUSER1"."ODBCTABLE"."DBPROC1);
+  STRCAT(stmt, " TO PUBLIC");
+  PRINTF(stmt);
+
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* Grant DBProc SELECT_TEST to public */
+  STRCPY(stmt, "GRANT EXECUTE ON "ODBCUSER1"."ODBCTABLE"."DBPROC2);
+  STRCAT(stmt, " TO PUBLIC");
+  PRINTF(stmt);
+
+  rc = SQLExecDirect (hstmt, stmt, SQL_NTS);
+  SPRINTF(buffer,CRLF" SQLExecDirect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  rc = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLFreeConnect(hdbc);
+  SPRINTF(buffer," SQLFreeConnect retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  rc = SQLFreeEnv(henv);
+  SPRINTF(buffer," SQLFreeEnv retcode: %d\n", rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  return(0);
+}
+/* ----------------------------------------------------------------------- */

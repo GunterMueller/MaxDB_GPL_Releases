@@ -1,0 +1,209 @@
+#
+#       @(#)differ     Version:6.2.8           1998-05-20
+#		AdminTool!		
+#
+#       Gert Großmann, Axel Mosle SAP AG
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+
+die "use this script in the development environment\n" if ! $OWN;
+$DevelopDir = shift;
+
+$Root = $OWN;
+$Root =~ s/\\develop//;
+
+$DevelopDir = "$Root\\develop" unless defined($DevelopDir);
+$DevelopSrc = "$DevelopDir\\sys\\src";
+$DevelopDesc = "$DevelopDir\\sys\\desc";
+$BasisDir  = "$Root\\basis";
+$BasisSrc  = "$Root\\basis\\sys\\src";
+$BasisDesc  = "$Root\\basis\\sys\\desc";
+$C_allDir  = "$Root\\c_all";
+$C_allSrc  = "$Root\\c_all\\sys\\src";
+$C_allDesc  = "$Root\\c_all\\sys\\desc";
+
+unlink "$OWN/differ_total.prot";
+unlink "$OWN/differ.prot";
+open(TOTAL, ">$OWN/differ_total.prot") || die "Can't open $OWN/differ_total.prot (output): $!\n";
+open(DIFFER, ">$OWN/differ.prot") || die "Can't open $OWN/differ.prot (output): $!\n";
+
+print STDOUT "===> DIFFERENZEN:\n\n";
+
+opendir(DIR_IN, $DevelopSrc);
+@src_layer = grep(-d "$DevelopSrc\\$_" && !/^\.$|^\.\.$/, readdir(DIR_IN));
+closedir(DIR_IN);
+foreach $layer ( @src_layer )
+{
+	opendir(DIR_IN, "$DevelopSrc\\$layer");
+	local @files = grep(-f "$DevelopSrc\\$layer\\$_" && !/^\.|\.\d{4}$/ , readdir(DIR_IN));
+	closedir(DIR_IN);
+	foreach $file ( @files )
+	{
+		$source = $file;
+		src_file_lookup($file);
+	}
+}
+
+
+opendir(DIR_IN, $DevelopDesc);
+@version = grep(-d "$DevelopDesc\\$_" && !/^\.$|^\.\.$/, readdir(DIR_IN));
+closedir(DIR_IN);
+foreach $version ( @version )
+{
+	opendir(DIR_IN, "$DevelopDesc\\$version");
+	local @desc = grep(-f "$DevelopDesc\\$version\\$_" && !/^\.|\.\d{4}$/ , readdir(DIR_IN));
+	closedir(DIR_IN);
+	foreach $file ( @desc )
+	{
+		$source = $file;
+		desc_file_lookup($file);
+	}
+}
+
+close(TOTAL); close(DIFFER);
+
+open (IN,"<$OWN/differ.prot");
+open (OUT,">$OWN/abc.bat");
+@lines=<IN>;
+chop (@lines);
+foreach $line (@lines)
+{
+   $linex=$line;
+   $linex=~ s/develop/upd/;
+   print OUT "copy $line $linex \n";
+}
+close IN;
+close OUT;
+
+#----------------------------------------------------------
+sub src_file_lookup
+{
+	$source = shift;
+	local $diff = 0;
+	
+	if ( -f "$C_allSrc\\$layer\\$source" )
+	{
+		if ( system("$TOOL/Posix/diff", "-B", "$DevelopSrc\\$layer\\$source $C_allSrc\\$layer\\$source", ">nul") )
+		{
+			# develop != c_all
+			print TOTAL "$DevelopSrc\\$layer\\$source: ";
+			print TOTAL "DIFF. zu c_all, pruefe basis ...";
+            $diff = 1;
+			if ( system("$TOOL/Posix/diff", "-B", "$DevelopSrc\\$layer\\$source $BasisSrc\\$layer\\$source", ">nul") )
+			{
+				# develop != c_all != basis -> Protokollieren
+				print TOTAL "DIFF. zu basis!\n";
+			}
+			else
+			{
+				print TOTAL "OK\n";
+			}
+		}
+	}
+	elsif ( -f "$BasisSrc\\$layer\\$source" )
+	{
+		# $file nicht auf c_all aber auf basis
+		if ( system("$TOOL/Posix/diff", "-B", "$DevelopSrc\\$layer\\$source $BasisSrc\\$layer\\$source", ">nul") )
+		{
+			# develop != basis -> Protokollieren
+			print TOTAL "$DevelopSrc\\$layer\\$source "; 
+			print TOTAL "DIFF. zu basis!\n";
+			$diff = 1;
+		}
+	}
+	else
+	{
+		# $file nicht auf c_all und nicht auf basisb -> Protokollieren
+		print TOTAL "$DevelopSrc\\$layer\\$source ";
+		print TOTAL "nicht existent auf c_all und basis!\n";
+		$diff = 1;
+	}
+	
+	if ( $diff )
+	{
+		print STDOUT "$DevelopSrc\\$layer\\$source\n";
+		print DIFFER "$DevelopSrc\\$layer\\$source\n";
+	}
+	else
+	{
+	    print TOTAL  "G L E I C H : $DevelopSrc\\$layer\\$source\n";
+	}
+}
+
+
+sub desc_file_lookup
+{
+	$source = shift;
+	local $diff = 0;
+
+	if ( -f "$C_allDesc\\$version\\$source" )
+	{
+		if ( system("$TOOL/Posix/diff", "-B", "$DevelopDesc\\$version\\$source $C_allDesc\\$version\\$source", ">nul") )
+		{
+			# develop != c_all
+			print TOTAL "$DevelopDesc\\$version\\$source: ";
+			print TOTAL "DIFF. zu c_all, pruefe basis ...";
+            $diff = 1;
+			if ( system("$TOOL/Posix/diff", "-B", "$DevelopDesc\\$version\\$source $BasisDesc\\$version\\$source", ">nul") )
+			{
+				# develop != c_all != basis -> Protokollieren
+				print TOTAL "DIFF. zu basis!\n";
+			}
+			else
+			{
+				print TOTAL "OK\n";
+			}
+		}
+	}
+	elsif ( -f "$BasisDesc\\$version\\$source" )
+	{
+		# $file nicht auf c_all aber auf basis
+		if ( system("$TOOL/Posix/diff", "-B", "$DevelopDesc\\$version\\$source $BasisDesc\\$version\\$source", ">nul") )
+		{
+			# develop != basis -> Protokollieren
+			print TOTAL "$DevelopDesc\\$version\\$source "; 
+			print TOTAL "DIFF. zu basis!\n";
+			$diff = 1;
+		}
+	}
+	else
+	{
+		# $file nicht auf c_all und nicht auf basisb -> Protokollieren
+		print TOTAL "$DevelopDesc\\$version\\$source ";
+		print TOTAL "nicht existent auf c_all und basis!\n";
+		$diff = 1;
+	}
+
+	if ( $diff )
+	{
+		print STDOUT "$DevelopDesc\\$version\\$source\n";
+		print DIFFER "$DevelopDesc\\$version\\$source\n";
+	}
+	else
+	{
+	    print TOTAL "G L E I C H : $DevelopDesc\\$version\\$source\n";
+	}
+}
+
+__END__
+

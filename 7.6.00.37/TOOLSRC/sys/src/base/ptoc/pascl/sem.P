@@ -1,0 +1,4471 @@
+(* sem.p 
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+*)
+
+(* defines *)
+
+#include "../common/csg.def"
+#include "../common/hdg.def"
+#include "../pascl/sflags.def"
+
+
+(* imports *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/opcode.i"
+#include "../common/_shifts.h"
+#include "../common/stab.h"
+#include "../common/csg.h"
+#include "../common/fold.h"
+#include "../common/utilities.h"
+#include "../pascl/globals1.i"
+#include "../pascl/pascal_opc.i"
+#include "../pascl/symtab.h"
+#include "../pascl/sysprocs.h"
+#include "../pascl/decls.h"
+#include "../pascl/semutil.h"
+#include "../pascl/init.h"
+#include "../pascl/pascalalloc.h"
+#include "../pascl/p1m2.h"
+
+#ifdef RASX /*RAS05 stuff used */
+
+procedure setbit(var v:integer; f:integer); external;
+procedure clearbit(var v:integer; f:integer); external;
+function testbit(v:integer; f:integer): boolean; external;
+
+const 
+    WithTmpVar = 16;
+    WithAktiv = 32;
+    MaxLoops = 10;
+
+var 
+    LoopIx: integer;
+    LoopScopes: array [0..MaxLoops] of integer;
+
+procedure InitLoopScopes;
+begin
+    LoopIx := 0;
+    LoopScopes [ LoopIx ] := -4711;
+end;
+
+procedure EndCheckLoopScopes;
+begin
+    if ( LoopIx > 0 ) then FatalErrorMsg ( 119, 0 );
+end;
+
+procedure PushLoopScope;
+begin
+    LoopIx := LoopIx + 1;
+    if ( LoopIx > MaxLoops ) then FatalErrorMsg ( 119, 0 );
+    LoopScopes [ LoopIx ] := LevelNo;
+end;
+
+procedure PopLoopScope;
+begin
+    if ( LoopIx = 0 ) then FatalErrorMsg ( 119, 0 );
+    LoopIx := LoopIx - 1;
+end;
+
+function LoopingInsideWith ( WithLevel: integer ): boolean;
+begin
+    LoopingInsideWith := WithLevel <= LoopScopes [ LoopIx ];
+end;
+
+#endif
+
+(* exports *)
+
+#include "../pascl/sem.h"
+
+function IsConstantExpr(n:HdgRange):boolean;
+external;
+
+procedure CsgPrint (n:HdgRange);
+external;
+
+function NoSideEffects(Node:integer):boolean;
+external;
+
+(* privates *)
+
+const
+   BitwiseType = BlockType;
+
+#ifdef PYRAMID_DOUBTFUL
+#else
+var
+   FreeSetTempFlag: boolean;
+   SetTempCount: integer;
+   SetTempStack: array [0..100] of integer;
+   FreeStringTempFlag: boolean;
+   StringTempCount: integer;
+   StringTempStack: array [0..100] of integer;
+
+#define PushSetTemporary(x) begin \
+	       		    SetTempCount := SetTempCount + 1; \
+	       		    SetTempStack [SetTempCount] := x; \
+			    end;
+#define PopSetTemporary     while SetTempCount >= 0 do begin \
+	       		       FreeTemporary (SetTempStack [SetTempCount]); \
+	       		       SetTempCount := SetTempCount - 1; \
+	    		    end;
+#define PushStringTemporary(x) begin \
+	       		    StringTempCount := StringTempCount + 1; \
+	       		    StringTempStack [StringTempCount] := x; \
+			    end;
+#define PopStringTemporary     while StringTempCount >= 0 do begin \
+	       		       FreeTemporary (StringTempStack [StringTempCount]); \
+	       		       StringTempCount := StringTempCount - 1; \
+	    		    end;
+#endif /* PYRAMID_DOUBTFUL */
+
+
+(* routines *)
+
+procedure process_initializer (
+   symbol: SymbolTableRange; 
+   NodeIndex: HdgRange; 
+   lineno: integer);
+external;
+
+function GenConDclName(t1: integer) : integer; external;
+
+function GenConstName(i: integer) : integer; external;
+
+#ifdef PYRAMID_DOUBTFUL
+#else
+procedure InitSemantics;
+begin
+				(* Only for TARGON /31, /32 *)
+   FreeSetTempFlag := true;	(* Free temporaries in set expressions *)
+   SetTempCount    := -1;
+   FreeStringTempFlag := true;	(* Free temporaries in string expressions *)
+   StringTempCount    := -1;
+#ifdef RASX /*RAS05 init. loop cnt*/
+   InitLoopScopes;
+#endif
+end;
+#endif /* PYRAMID_DOUBTFUL */
+
+procedure ClearLabel;
+
+var
+    i: integer;
+
+begin
+    i := LabelScopePtr + 1;
+    while i <= LabelPtr do begin
+	with LabelStack [i] do begin
+	    if DefLevel = ForWithLevel then
+	        DefLevel := 0;
+	    if RefLevel = ForWithLevel then
+		RefLevel := RefLevel - 1;
+	    end;
+	i := i + 1;
+	end;
+    ForWithLevel := ForWithLevel - 1;
+end;	(* ClearLabel *)
+
+
+
+function SetResultType
+   (typ1,
+    typ2: SymbolTableRange)
+   : SymbolTableRange;
+
+var
+   typ,
+   btyp1,
+   btyp2,
+   ptyp1,
+   ptyp2: SymbolTableRange;
+   low,
+   high,
+   lowlow,
+   highhigh: integer;
+
+begin
+   if typ1 = typ2 then begin
+      SetResultType := typ1;
+   end
+   else if typ1 = AnySetPtr then begin
+      SetResultType := typ2;
+   end
+   else if typ2 = AnySetPtr then begin
+      SetResultType := typ1;
+   end
+   else if typ1 = FindIntset then begin
+      SetResultType := typ2;
+   end
+   else if typ2 = FindIntset then begin
+      SetResultType := typ1;
+   end
+   else begin
+      btyp1 := STab [typ1].SBase;
+      btyp2 := STab [typ2].SBase;
+      ptyp1 := PrimType (btyp1);
+      ptyp2 := PrimType (btyp2);
+      if CompatibleTypes (ptyp1, ptyp2) then begin
+         if STab [btyp1].SLowRange < STab [btyp2].SLowRange then begin
+            lowlow := STab [btyp1].SLowRange;
+            low := 1;
+         end
+         else begin
+            lowlow := STab [btyp2].SLowRange;
+            low := 2;
+         end;
+         if STab [btyp1].SHighRange > STab [btyp2].SHighRange then begin
+            highhigh := STab [btyp1].SHighRange;
+            high := 1;
+         end
+         else begin
+            highhigh := STab [btyp2].SHighRange;
+            high := 2;
+         end;
+         case 2 * low + high of
+            3: begin  (* 1, 1 *)
+               SetResultType := typ1;
+            end;
+            6: begin (* 2, 2 *)
+               SetResultType := typ2;
+            end;
+            4,        (* 1, 2 *)
+            5: begin  (* 2, 1 *)
+               if ptyp1 = ptyp2 then begin
+                  NewSymbol (0, ptyp1, TypeDcl, LevelNo, -1);
+               end
+               else begin
+                  NewSymbol (0, IntegerPtr, TypeDcl, LevelNo, -1);
+               end;
+               typ := SymPtr;
+               STab [typ].SLowRange := lowlow;
+               STab [typ].SHighRange := highhigh;
+               TypeSize (typ);
+               NewSymbol (0, SetType, TypeDcl, LevelNo, -1);
+               STab [SymPtr].SBase := typ;
+               TypeSize (SymPtr);
+               SetResultType := SymPtr;
+            end;
+         end;
+      end
+      else begin
+         SetResultType := VoidType;
+      end;
+   end;
+end  (* SetResultType *);
+
+
+function ResultType
+   (exp1,
+    exp2: HdgRange;
+    col1,
+    col2: integer)
+   : SymbolTableRange;
+
+var
+   typ1,
+   typ2: SymbolTableRange;
+   t1,
+   t2: PRIMTYPE;
+   typ: SymbolTableRange;
+
+begin
+   if (exp1 <> -1) and (exp2 <> -1) then begin
+      typ1 := TypeFieldOf (exp1);
+      typ2 := TypeFieldOf (exp2);
+      t1 := STab [typ1].SType;
+      t2 := STab [typ2].SType;
+
+      case t1 of
+         CharType,
+	 UcharType,
+         ShortType,
+	 UshortType,
+         IntegerType: begin
+            case t2 of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+               IntegerType: begin
+                  ResultType := IntegerPtr;
+               end;
+	       UlongType,
+               LongType: begin
+                  ResultType := LongPtr;
+               end;
+               FloatType: begin
+                  ResultType := FloatPtr;
+               end;
+               DoubleType: begin
+                  if MinorOperatorOf (exp2) = LitOp then begin
+                     ResultType := FloatPtr;
+                  end
+                  else begin
+                     ResultType := DoublePtr;
+                  end;
+               end;
+               otherwise begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end  (* case *);
+         end;
+         FloatType: begin
+            case t2 of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+               IntegerType,
+               UlongType,
+               LongType,
+               FloatType: begin
+                  ResultType := FloatPtr;
+               end;
+               DoubleType: begin
+                  if MinorOperatorOf (exp2) = LitOp then begin
+                     ResultType := FloatPtr;
+                  end
+                  else begin
+                     ResultType := DoublePtr;
+                  end;
+               end;
+               otherwise begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end  (* case *);
+         end;
+         UlongType,
+         LongType: begin
+            case t2 of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+               IntegerType,
+               UlongType,
+               LongType,
+               FloatType: begin
+                  ResultType := LongPtr;
+               end;
+               DoubleType: begin
+                  if MinorOperatorOf (exp2) = LitOp then begin
+                     ResultType := LongPtr;
+                  end
+                  else begin
+                     ResultType := DoublePtr;
+                  end;
+               end;
+               otherwise begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end  (* case *);
+         end;
+         DoubleType: begin
+            case t2 of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+               IntegerType,
+               UlongType,
+               LongType,
+               FloatType: begin
+                  if MinorOperatorOf (exp1) = LitOp then begin
+                     ResultType := FloatPtr;
+                  end
+                  else begin
+                     ResultType := DoublePtr;
+                  end;
+               end;
+               DoubleType: begin
+                  ResultType := DoublePtr;
+               end;
+               otherwise begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end  (* case *);
+         end;
+         BooleanType,
+         CharacterType,
+         EnumerativeType: begin
+            if typ1 = typ2 then begin
+               ResultType := typ1;
+            end
+            else begin
+               ErrorMsg (0, col1);
+               ErrorMsg (0, col2);
+               ResultType := VoidType;
+            end;
+         end;
+         ArrayType,
+         StringType: begin
+            if typ2 = typ1 then begin
+               ResultType := typ1;
+            end
+            else if IsCharArray (typ1) and IsCharArray (typ2) then begin
+               if typ1 = PacPtr then begin
+                  ResultType := typ2;
+               end
+               else if typ2 = PacPtr then begin
+                  ResultType := typ1;
+               end
+               else if LengthOfCharArray (typ1) = LengthOfCharArray (typ2) then begin
+                  ResultType := typ1;
+               end
+               else begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end
+            else if IsString (typ1) then begin
+               if (typ2 = PacPtr) or IsString (typ2) then begin
+                  ResultType := typ1;
+               end
+               else begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end
+            else if IsString (typ2) then begin
+               if (typ1 = PacPtr) or IsString (typ1) then begin
+                  ResultType := typ2;
+               end
+               else begin
+                  ErrorMsg (0, col1);
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end
+            else begin
+               ErrorMsg (1, col2);
+               ResultType := VoidType;
+            end;
+         end;
+         RecordType: begin
+            if typ2 = typ1 then begin
+               ResultType := typ1;
+            end
+            else begin
+               ErrorMsg (1, col2);
+               ResultType := VoidType;
+            end;
+         end;
+         SetType: begin
+            if t2 = SetType then begin
+               typ := SetResultType (typ1, typ2);
+               if typ <> VoidType then begin
+                  ResultType := typ;
+               end
+               else begin
+                  ErrorMsg (0, col2);
+                  ResultType := VoidType;
+               end;
+            end
+            else begin
+               ErrorMsg (0, col2);
+               ResultType := VoidType;
+            end;
+         end;
+         PointerType: begin
+            if typ1 = typ2 then begin
+               ResultType := typ1;
+            end
+            else if typ1 = AnyPtrPtr then begin
+               ResultType := typ2;
+            end
+            else if typ2 = AnyPtrPtr then begin
+               ResultType := typ1;
+            end
+            else begin
+               ErrorMsg (0, col2);
+               ResultType := VoidType;
+            end;
+         end;
+         otherwise begin
+            ErrorMsg (1, col1);
+            ResultType := VoidType;
+         end;
+      end  (* case *);
+   end
+   else begin
+      ResultType := VoidType;
+   end;
+end  (* ResultType *);
+
+
+function ChkOpType
+   (op: integer;
+    typ: SymbolTableRange;
+    p: ParseStackRange)
+   : PRIMTYPE;
+
+var
+   t: PRIMTYPE;
+
+begin
+   t := STab [typ].SType;
+
+   case op of
+
+      AddOp,
+      SubtOp,
+      MultOp: begin
+         case t of
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType,
+            SetType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      UminusOp: begin
+         case t of
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      DivOp,
+      ModuloOp: begin
+         case t of
+	    UlongType,
+            LongType,
+            IntegerType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      EqOp,
+      NeOp: begin
+         case t of
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType,
+            BooleanType,
+            CharacterType,
+            EnumerativeType,
+            ArrayType,
+            RecordType,
+            SetType,
+            PointerType,
+            StringType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      LtOp,
+      GtOp,
+      LeOp,
+      GeOp: begin
+         case t of
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType,
+            BooleanType,
+            CharacterType,
+            EnumerativeType,
+            ArrayType,
+            SetType,
+(*              PointerType,  *)
+            StringType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      AndOp,
+      OrOp,
+      NotOp: begin
+         case t of
+            BooleanType: begin
+               ChkOpType := t;
+            end;
+	    UlongType,
+            LongType,
+            IntegerType: begin
+               ChkOpType := BitwiseType;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      ConcatOp,
+      SubStrOp: begin
+         case t of
+            StringType: begin
+               ChkOpType := t;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p]);
+               ChkOpType := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      otherwise begin
+         ErrorMsg (27, -1);
+         ChkOpType := VoidType;
+      end;
+
+   end  (* case *);
+
+end  (* ChkOpType *);
+
+
+function AssgnmntCompatible
+   (typ1,
+    exp2: SymbolTableRange)
+   : boolean;
+
+var
+   t1,
+   t2: PRIMTYPE;
+   typ2,
+   base1,
+   base2: SymbolTableRange;
+
+begin
+   if (typ1 = VoidType) or (exp2 = -1)  then begin
+      AssgnmntCompatible := false;
+   end
+   else begin
+      typ2 := TypeFieldOf (exp2);
+      if typ1 = typ2 then begin
+         AssgnmntCompatible := true;
+      end
+      else begin
+         t1 := STab [typ1].SType;
+         t2 := STab [typ2].SType;
+         case t1 of
+            CharType,
+	    UcharType,
+            ShortType,
+	    UshortType,
+            IntegerType: begin
+               case t2 of
+                  CharType,
+		  UcharType,
+                  ShortType,
+		  UshortType,
+		  UlongType,
+		  LongType,
+                  IntegerType: begin
+                     AssgnmntCompatible := true;
+                  end;
+                  otherwise begin
+                     AssgnmntCompatible := false;
+                  end;
+               end;
+            end;
+            FloatType,
+	    UlongType,
+	    LongType,
+            DoubleType: begin
+               case t2 of
+                  CharType,
+		  UcharType,
+                  ShortType,
+		  UshortType,
+                  IntegerType,
+                  UlongType,
+                  LongType,
+                  FloatType,
+                  DoubleType: begin
+                     AssgnmntCompatible := true;
+                  end;
+                  otherwise begin
+                     AssgnmntCompatible := false;
+                  end;
+               end;
+            end;
+            ArrayType: begin
+		  if IsPac (typ1) then
+                     AssgnmntCompatible := 
+			(IsPac (typ2) and (LengthOfCharArray (typ1) = LengthOfCharArray (typ2)))
+		      or
+			(IsIntegral (PrimType(STab [typ1].SIndex)) and (typ2 = PacPtr) and
+			 (MinorOperatorOf (exp2) = LitOp) and 
+			 (control['y'] or (LengthOfCharArray (typ1) = GetStringLength (Node1parameterOf (exp2)))))
+		      or
+			(IsIntegral (PrimType(STab [typ1].SIndex)) and (typ2 = CharPtr) and 
+			 (IsConstantExpr(exp2)) and 
+			 (control['y'] or (LengthOfCharArray (typ1) = 1)))
+		  else 
+		     AssgnmntCompatible := 
+			IsCharArray (typ1) 
+		   and (
+			((typ2 = PacPtr) and (MinorOperatorOf (exp2) = LitOp) and 
+			 (LengthOfCharArray (typ1) = GetStringLength (Node1parameterOf (exp2))))
+		      or
+			((typ2 = CharPtr) and (IsConstantExpr(exp2)) and (LengthOfCharArray (typ1) = 1))
+		      or 
+			(IsCharArray (typ2) and (LengthOfCharArray (typ1) = LengthOfCharArray (typ2))));
+            end;
+            StringType: begin
+               AssgnmntCompatible :=
+                  (t2 = StringType) or
+                  (typ2 = PacPtr) or
+                  ((typ2 = CharPtr) and (IsConstantExpr(exp2)));
+            end;
+            SetType: begin
+               AssgnmntCompatible :=
+                  (typ2 = AnySetPtr) or
+                  ((t2 = SetType) and
+                   CompatibleTypes (
+                      PrimType (STab [typ1].SBase),
+                      PrimType (STab [typ2].SBase)));
+            end;
+            PointerType: begin
+               AssgnmntCompatible := typ2 = AnyPtrPtr;
+            end;
+            otherwise begin
+               AssgnmntCompatible := false;
+            end;
+         end  (* case *);
+      end;
+   end;
+end  (* AssgnmntCompatible *);
+
+function ChkPtrOpType
+   (op: integer;
+    exp1,
+    exp2: HdgRange)
+   : SymbolTableRange;
+
+var
+   typ1,
+   typ2: SymbolTableRange;
+
+begin
+   if (exp1 <> -1) and (exp2 <> -1) then begin
+      typ1 := TypeFieldOf (exp1);
+      typ2 := TypeFieldOf (exp2);
+
+      case op of
+
+	 SubtOp: begin
+	    if IsPointer(typ1) and (typ1 = typ2) and
+	       (typ1 <> AnyPtrPtr) then begin
+	       ChkPtrOpType := IntegerPtr;
+	    end
+	    else if IsPointer(typ1) and IsIntegral(typ2) and
+	       (typ1  <> AnyPtrPtr) then begin
+	       ChkPtrOpType := typ1;
+	    end
+	    else begin
+	       ChkPtrOpType := VoidType;
+	    end;
+	 end;
+	       
+	 AddOp: begin
+	    if IsPointer(typ1) and IsIntegral(typ2) and
+	       (typ1  <> AnyPtrPtr) then begin
+	       ChkPtrOpType := typ1;
+	    end
+	    else if IsPointer(typ2) and IsIntegral(typ1) and
+	       (typ2  <> AnyPtrPtr) then begin
+	       ChkPtrOpType := typ2;
+	    end
+	    else begin
+	       ChkPtrOpType := VoidType;
+	    end;
+	 end;
+
+	 otherwise: begin
+	    ChkPtrOpType := VoidType;
+	 end;
+
+      end  (* case *);
+   end
+   else begin
+      ChkPtrOpType := VoidType;
+   end;
+end  (* ChkPtrOpType *);
+
+procedure EvalBinary
+   (p1,
+    p2: ParseStackRange;
+    op: integer);
+
+var
+   ResTyp: SymbolTableRange;
+   typ: PRIMTYPE;
+
+begin
+   ResTyp := ChkPtrOpType(op, g1 [p1], g1 [p2]);
+   if control ['p'] and (ResTyp <> VoidType) then begin
+      g1 [p1] := FoldBinary (op, ResTyp, g1[p1], g1[p2]);
+   end
+   else begin
+      ResTyp := ResultType (g1 [p1], g1 [p2], ColNo [p1], ColNo [p2]);
+      if ResTyp <> VoidType then begin
+	 typ := ChkOpType (op, ResTyp, p2);
+	 case typ of
+	    IntegerType,
+	    UlongType,
+	    LongType,
+	    FloatType,
+	    DoubleType,
+	    BooleanType: begin
+	       g1 [p1] := FoldBinary (
+		  op,
+		  ResTyp,
+		  EvalConvert (ResTyp, g1 [p1]),
+		  EvalConvert (ResTyp, g1 [p2]));
+	       TypeType [p1] := ResTyp;
+	       SubType [p1] := ResTyp;
+	    end;
+	    BitwiseType: begin
+	       case op of
+		  AndOp: op := BAndOp;
+		  OrOp:  op := BOrOp;
+	       end;
+	       g1 [p1] := FoldBinary (
+		  op,
+		  ResTyp,
+		  EvalConvert (ResTyp, g1 [p1]),
+		  EvalConvert (ResTyp, g1 [p2]));
+	       TypeType [p1] := ResTyp;
+	       SubType [p1] := ResTyp;
+	    end;
+	    SetType: begin
+	       if TypeFieldOf (g1 [p1]) = FindIntset then begin
+		  TypeFieldOf (g1 [p1]) := ResTyp;
+	       end
+	       else if TypeFieldOf (g1 [p2]) = FindIntset then begin
+		  TypeFieldOf (g1 [p2]) := ResTyp;
+	       end;
+	       g1 [p1] := BinaryExpression (
+		  op,
+		  ResTyp,
+		  g1 [p1],
+		  g1 [p2]);
+	       TypeType [p1] := ResTyp;
+	       SubType [p1] := ResTyp;
+	    end;
+	    VoidType: begin
+	       g1 [p1] := -1;
+	       TypeType [p1] := VoidType;
+	       SubType [p1] := VoidType;
+	    end;
+	    otherwise begin
+	       ErrorMsg (27, -1);
+	       g1 [p1] := -1;
+	       TypeType [p1] := VoidType;
+	       SubType [p1] := VoidType;
+	    end;
+	 end  (* case *);
+      end
+      else begin
+	 g1 [p1] := -1;
+	 TypeType [p1] := VoidType;
+	 SubType [p1] := VoidType;
+      end  (* if *);
+   end (* else *)
+end  (* EvalBinary *);
+
+
+procedure EvalDivide
+   (p1,
+    p2: ParseStackRange);
+
+var
+   ResTyp: SymbolTableRange;
+   typ: PRIMTYPE;
+
+begin
+   ResTyp := ResultType (g1 [p1], g1 [p2], ColNo [p1], ColNo [p2]);
+   if ResTyp <> VoidType then begin
+      typ := ChkOpType (MultOp, ResTyp, p2);
+      if ResTyp = IntegerPtr then begin
+         ResTyp := FloatPtr;
+      end;
+      case typ of
+         IntegerType,
+	 UlongType,
+	 LongType,
+         FloatType,
+         DoubleType: begin
+	    g1 [p1] := FoldBinary (
+               DivOp,
+               ResTyp,
+	       EvalConvert (ResTyp, g1 [p1]),
+	       EvalConvert (ResTyp, g1 [p2]));
+	    TypeType [p1] := ResTyp;
+            SubType [p1] := ResTyp;
+         end;
+         VoidType: begin
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+         otherwise begin
+            ErrorMsg (27, -1);
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+      end  (* case *);
+   end
+   else begin
+      g1 [p1] := -1;
+      TypeType [p1] := VoidType;
+      SubType [p1] := VoidType;
+   end  (* if *);
+end  (* EvalDivide *);
+
+function TransformModulo
+   (ResTyp: SymbolTableRange;
+    p1,
+    p2: ParseStackRange): HdgRange;
+
+var
+   tmp1, tmp2, tmp3: HdgRange;
+   op1, op2: HdgRange;
+   Temp1, Temp2: SymbolTableRange;
+
+begin
+   (* This function transforms the PASCAL modulo operator into an	*)
+   (* expression using the C modulo operator. In Pascal "i mod j" has	*)
+   (* the result "i - (K * j)" for all K such that "0 <= (i mod j) < j"	*)
+   (* while in C "i % j" has the result "i - (i / j) * j"; the result	*)
+   (* is the same if "i >= 0" or "(i mod j) = 0" and different 		*)
+   (* otherwise. The expression generated in C for "i mod j" is the	*)
+   (* following :							*)
+   (* "(tmp = i % j) >= 0 ? tmp : tmp + (j >= 0 ? j : -j)"		*)
+   (* Note that in HDG notation the PASCAL modulo operator is ModuloOp	*)
+   (* while the C modulo operator is ModOp.				*)
+
+   Temp2 := 0;
+
+   if NoSideEffects(g1 [p2]) then begin
+      op2 := EvalConvert (ResTyp, g1 [p2]);
+      tmp2 := CopyTree(op2);
+   end else begin
+      Temp2 := GetTemporary (ProcIndex, ResTyp, false);
+      tmp2 := LongStatement (StoreOp, ResTyp,
+	       node3(IdOp, ResTyp, Temp2, 0),
+	       EvalConvert (ResTyp, g1 [p2]), 0, 0, 0);
+      op2 := FoldUnary (LoadOp, ResTyp, node3(IdOp, ResTyp, Temp2, 0));
+   end;
+
+   op1 := EvalConvert (ResTyp, g1 [p1]);
+
+   Temp1 := GetTemporary (ProcIndex, ResTyp, false);
+   tmp2 := FoldBinary ( ModOp, ResTyp, op1, tmp2);
+   tmp2 := LongStatement (StoreOp, ResTyp,
+	 node3(IdOp, ResTyp, Temp1, 0),
+	 tmp2, 0, 0, 0);
+
+   op1 := FoldUnary (LoadOp, ResTyp, node3(IdOp, ResTyp, Temp1, 0));
+
+   tmp1 := FoldBinary ( GeOp, BooleanPtr, CopyTree (op2),
+      node3 (LitOp, IntegerPtr, 0, 0));
+
+   tmp3 := FoldUnary ( UminusOp, ResTyp, CopyTree (op2));
+
+   tmp1 := ComplexStmnt ( ifthenelse, ResTyp, tmp1, op2, tmp3, CardCount);
+
+   tmp3 := FoldBinary ( AddOp, ResTyp, CopyTree (op1), CopyTree (tmp1));
+
+   tmp1 := FoldBinary ( GeOp, BooleanPtr, CopyTree (tmp2),
+      node3 (LitOp, IntegerPtr, 0, 0));
+
+   tmp1 := ComplexStmnt ( ifthenelse, ResTyp, tmp1, op1, tmp3, CardCount);
+
+   TransformModulo := FoldTree(tmp1);
+
+   if Temp1 <> 0 then FreeTemporary(Temp1);
+   if Temp2 <> 0 then FreeTemporary(Temp2);
+end   (* TransformModulo *);
+
+procedure EvalModDiv
+   (p1,
+    p2: ParseStackRange;
+    op: integer);
+
+var
+   ResTyp: SymbolTableRange;
+   typ: PRIMTYPE;
+
+begin
+   ResTyp := ResultType (g1 [p1], g1 [p2], ColNo [p1], ColNo [p2]);
+   if ResTyp <> VoidType then begin
+      typ := ChkOpType (op, ResTyp, p2);
+      case typ of
+         UlongType,
+         LongType,
+         IntegerType: begin
+	    if (op = ModuloOp) then
+	       g1 [p1] := TransformModulo (ResTyp, p1, p2)
+	    else
+	       g1 [p1] := FoldBinary (
+		  op,
+		  ResTyp,
+		  EvalConvert (ResTyp, g1 [p1]),
+		  EvalConvert (ResTyp, g1 [p2]));
+	    TypeType [p1] := ResTyp;
+            SubType [p1] := ResTyp;
+         end;
+         FloatType,
+         DoubleType,
+         VoidType: begin
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+         otherwise begin
+            ErrorMsg (27, -1);
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+      end  (* case *);
+   end
+   else begin
+      g1 [p1] := -1;
+      TypeType [p1] := VoidType;
+      SubType [p1] := VoidType;
+   end  (* if *);
+end  (* EvalModDiv *);
+
+
+procedure EvalUnary
+   (p1: ParseStackRange;
+    op: integer);
+
+var
+   ResTyp: SymbolTableRange;
+   typ: PRIMTYPE;
+
+begin
+   ResTyp := ResultType (g1 [p1], g1 [p1], ColNo [p1], ColNo [p1]);
+   if ResTyp <> VoidType then begin
+      typ := ChkOpType (op, ResTyp, p1);
+      if op = NotOp then begin
+         if typ = BooleanType then begin
+	    g1 [p1] := demorgan (EvalConvert (ResTyp, g1 [p1]));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end
+         else if typ = BitwiseType then begin
+	    g1 [p1] := FoldUnary (BNotOp, ResTyp, EvalConvert (ResTyp, g1 [p1]));
+	    if IsConstant(g1 [p1]) then
+	       NameofConst [p1] := GenConstName(Node1parameterOf(g1 [p1]));
+         end
+         else begin
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+      end
+      else begin
+         case typ of
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType: begin
+	       g1 [p1] := FoldUnary (op, ResTyp, EvalConvert (ResTyp, g1 [p1]));
+	       if IsConstant(g1 [p1]) and (op = UminusOp) then
+		  NameofConst [p1] := GenConstName(Node1parameterOf(g1 [p1]));
+            end;
+            VoidType: begin
+	       g1 [p1] := -1;
+	       TypeType [p1] := VoidType;
+               SubType [p1] := VoidType;
+            end;
+            otherwise begin
+               ErrorMsg (27, -1);
+	       g1 [p1] := -1;
+	       TypeType [p1] := VoidType;
+               SubType [p1] := VoidType;
+            end;
+         end  (* case *);
+      end  (* if *);
+   end  (* if *);
+end (*EvalUnary *);
+
+function OptimSetExp(Node:HdgRange; var Result:HdgRange):boolean;
+var n1,n2:HdgRange;
+    id1,id2:SymbolTableRange;
+begin
+   n1 := -1; n2 := -1;
+   id1:=0;   id2:=0;
+   OptimSetExp := false;
+
+   if MajorOperatorOf(Node) = ExpList then
+   begin
+	n1 := ListHeadFieldOf(Node);
+	if (n1 <> -1) then 
+        begin
+           n2 := NextLinkOf(n1);
+	   if (n2 <> -1) then 
+	       if NextLinkOf(n2) <> -1 then n1 := -1;
+	end
+   end;
+
+   if (n1 <> -1) and (n2 <> -1) then
+   begin
+       if (MinorOperatorOf(n2) = LoadadrOp) then
+	 if (MinorOperatorOf(Unary1operandOf(n2)) = IdOp) then
+ 	   id2 := Node1parameterOf(Unary1operandOf(n2));
+
+       if (MinorOperatorOf(n1) = StoreOp) then
+	 if (MinorOperatorOf(Ls1operandOf(n1)) = IdOp) and IsLval(Ls2operandOf(n1)) then
+ 	   id1 := Node1parameterOf(Ls1operandOf(n1));
+
+       if (id1 <> 0) and (id2 <> 0) and (id1 = id2) then
+       begin
+          OptimSetExp := true;
+          Result := Ls2operandOf(n1);
+       end;
+   end;
+end;
+
+function EvalSetExp
+   (ResultIndex,
+    ExprIndex: HdgRange)
+   : HdgRange;
+
+var
+   ResultType,
+   ExprType,
+   TempTemp,
+   LeftTemp,
+   RightTemp: SymbolTableRange;
+   HIndex,
+   TempIndex,
+   LeftIndex,
+   RightIndex: HdgRange;
+#ifndef PYRAMID_DOUBTFUL
+   SaveFreeSet : boolean; 	(* 18.08.88 -- RK *)
+#endif
+
+begin
+
+   ResultType := TypeFieldOf (ResultIndex);
+   ExprType := TypeFieldOf (ExprIndex);
+
+   case MajorOperatorOf (ExprIndex) of
+
+      LongStmnt: begin
+         if MinorOperatorOf (ExprIndex) = CallOp then begin
+            TypeFieldOf (ExprIndex) := AnyPtrPtr;
+            EvalSetExp := CallConvertt (
+               ResultIndex,
+               UnaryExpression (
+                  LoadOp,
+                  ExprType,
+                  UnaryExpression (DerefOp, ExprType, ExprIndex, 0, 0),
+                  0, 0));
+         end
+         else begin
+            ErrorMsg (27, -1);
+            EvalSetExp := -1;
+         end;
+      end;
+
+      UnaryExp: begin
+         if MinorOperatorOf (ExprIndex) = LoadOp then begin
+            EvalSetExp := CallConvertt (ResultIndex, ExprIndex);
+         end
+         else begin
+            ErrorMsg (27, -1);
+            EvalSetExp := -1;
+         end;
+      end;
+
+      BinaryExp: begin
+#ifndef PYRAMID_DOUBTFUL
+         SaveFreeSet := FreeSetTempFlag ;  (* 18.08.88 -- RK *)
+         FreeSetTempFlag := false;  	   (* 18.08.88 -- RK *)
+#endif
+         if ResultType = ExprType then begin
+            TempTemp := 0;
+            TempIndex := ResultIndex;
+         end
+	 else if (STab [STab [ResultType].SBase].SLowRange < 
+	 STab [STab [ExprType].SBase].SLowRange) or
+	 (STab [STab [ResultType].SBase].SHighRange > 
+	 STab [STab [ExprType].SBase].SHighRange) then begin
+            TempTemp := 0;
+            TempIndex := ResultIndex;
+            LeftTemp := GetTemporary (ProcIndex, ResultType, false);
+            LeftIndex := UnaryExpression (
+               LoadOp,
+               ResultType,
+               UnaryExpression (
+                  DerefOp,
+                  ResultType,
+                  EvalSetExp (
+                     node3 (IdOp, ResultType, LeftTemp, 0),
+                     Bin1operandOf (ExprIndex)),
+                  0,
+                  0),
+               0,
+               0);
+            RightTemp := GetTemporary (ProcIndex, ResultType, false);
+            RightIndex := UnaryExpression (
+               LoadOp,
+               ResultType,
+               UnaryExpression (
+                  DerefOp,
+                  ResultType,
+                  EvalSetExp (
+                     node3 (IdOp, ResultType, RightTemp, 0),
+                     Bin2operandOf (ExprIndex)),
+                  0,
+                  0),
+               0,
+               0);
+            TempIndex := CallSetOp (
+               MinorOperatorOf (ExprIndex),
+               ResultType,
+               TempIndex,
+               LeftIndex,
+               RightIndex);
+	 end 
+         else begin
+            TempTemp := GetTemporary (ProcIndex, ExprType, false);
+            TempIndex := node3 (IdOp, ExprType, TempTemp, 0);
+         end;
+	 if (STab [STab [ResultType].SBase].SLowRange >=
+	 STab [STab [ExprType].SBase].SLowRange) and
+	 (STab [STab [ResultType].SBase].SHighRange <=
+	 STab [STab [ExprType].SBase].SHighRange) then begin
+            if (ExprType = TypeFieldOf (Bin1operandOf (ExprIndex))) and 
+		IsLval (Bin1operandOf (ExprIndex))
+            then begin
+               LeftTemp := 0;
+               LeftIndex := Bin1operandOf (ExprIndex);
+            end
+            else begin
+               LeftTemp := GetTemporary (ProcIndex, ExprType, false);
+	       LeftIndex := EvalSetExp(node3 (IdOp, ExprType, LeftTemp, 0), Bin1operandOf (ExprIndex));
+	       if  OptimSetExp(LeftIndex,HIndex)
+	       then LeftIndex := HIndex
+	       else
+		 LeftIndex := UnaryExpression (
+		    LoadOp,
+		    ExprType,
+#ifdef RAST2 /* RAS02 avoid deref on set-expr. */
+                    LeftIndex,
+#else
+		    UnaryExpression (
+		       DerefOp,
+		       ExprType,
+		       LeftIndex,
+		       0,
+		       0),
+#endif
+		    0,
+		    0);
+            end;
+            if (ExprType = TypeFieldOf (Bin2operandOf (ExprIndex))) and
+               IsLval (Bin2operandOf (ExprIndex))
+            then begin
+               RightTemp := 0;
+               RightIndex := Bin2operandOf (ExprIndex);
+            end
+            else begin
+               RightTemp := GetTemporary (ProcIndex, ExprType, false);
+
+               RightIndex := EvalSetExp(node3 (IdOp, ExprType, RightTemp, 0),Bin2operandOf (ExprIndex));
+	       if OptimSetExp(RightIndex,HIndex)
+	       then RightIndex := HIndex
+	       else
+		 RightIndex := UnaryExpression (
+		    LoadOp,
+		    ExprType,
+#ifdef RAST2 /* RAS02 avoid deref on set-expr. */
+                    RightIndex,
+#else
+		    UnaryExpression (
+		       DerefOp,
+		       ExprType,
+		       RightIndex,
+		       0,
+		       0),
+#endif
+		    0,
+		    0);
+            end;
+            TempIndex := CallSetOp (
+               MinorOperatorOf (ExprIndex),
+               ExprType,
+               TempIndex,
+               LeftIndex,
+               RightIndex);
+	 end;
+#ifndef PYRAMID_DOUBTFUL
+         FreeSetTempFlag := SaveFreeSet;   (* 18.08.88 -- RK *)
+	 if FreeSetTempFlag then begin
+	       PopSetTemporary;
+	 end;
+#endif
+         if TempTemp <> 0 then begin
+            TempIndex := CallConvertt (
+               ResultIndex,
+               UnaryExpression (
+                  LoadOp,
+                  ExprType,
+                  UnaryExpression (DerefOp, ExprType, TempIndex, 0, 0),
+                  0, 0));
+	
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (TempTemp);
+#else
+	    if FreeSetTempFlag then begin
+	       FreeTemporary (TempTemp);
+	    end
+	    else begin	(* We are evaluating a relational set expression *)
+			(* So push temporary on Stack *)
+	       PushSetTemporary(TempTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+
+         if LeftTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (LeftTemp);
+#else
+	    if FreeSetTempFlag then begin
+	       FreeTemporary (LeftTemp);
+	    end
+	    else begin	(* We are evaluating a relational set expression *)
+			(* So push temporary on Stack *)
+	       PushSetTemporary(LeftTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+         if RightTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (RightTemp);
+#else
+	    if FreeSetTempFlag then begin
+	       FreeTemporary (RightTemp);
+	    end
+	    else begin	(* We are evaluating a relational set expression *)
+			(* So push temporary on Stack *)
+	       PushSetTemporary(RightTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+         EvalSetExp := TempIndex;
+      end;
+
+      ExpList: begin
+         if MinorOperatorOf (ExprIndex) = VarCtOp then begin
+            EvalSetExp := CallCttot (ResultType, ResultIndex, ExprIndex);
+         end
+         else begin
+            LeftTemp := GetTemporary (ProcIndex, 0, false);
+            STab[SymPtr].SType := ResultType;
+            STab [SymPtr].SClass := LOCALSTATIC;
+            STab [SymPtr].SSubClass := InitializedVar;
+            process_initializer (LeftTemp, ExprIndex, CardCount);
+            ExprIndex := FoldUnary (LoadOp, ResultType,
+               node3 (IdOp, ResultType, LeftTemp, 0));
+            EvalSetExp := CallConvertt (ResultIndex, ExprIndex);
+         end;
+      end;
+
+      otherwise begin
+         ErrorMsg (27, -1);
+         EvalSetExp := -1;
+      end;
+   end;
+
+end;
+
+
+procedure EvalSetConstructor
+   (p1,
+    p2: integer);
+
+var
+   pairList,
+   singList,
+   mainList,
+   index,
+   temp: HdgRange;
+   PairCnt,
+   SingCnt: integer;
+   SetPtr: SymbolTableRange;
+   NodeIndex: HdgRange;
+   low,
+   lowlow,
+   high,
+   highhigh: integer;
+   x:integer;
+begin
+   
+   mainList  := g1 [p2];              (* the list of hdg nodes *)
+
+   if ListHeadFieldOf (mainList) = -1 then begin
+      SetPtr := AnySetPtr;
+   end
+   else if IsIntegral (TypeFieldOf (mainList)) then begin
+			(* EGST 01-08-88  WB; Fehler,wenn Highrange > 127 *)
+      SetPtr := FindIntset;
+      if (MinorOperatorOf (mainList) <> VarCtOp ) then begin
+         NodeIndex := ListHeadFieldOf (mainList);
+         lowlow := maxint;
+         highhigh := - maxint;
+         while (NodeIndex <> -1) do begin
+	    if MajorOperator = ExpList then begin
+	       index := ListHeadField;
+	       low := ConstExp(index);
+	       index := NextLinkOf (index);
+
+	       high := ConstExp(index);
+	       if low <= high then begin
+	          if low < lowlow then
+		     lowlow := low;
+	          if high > highhigh then
+		     highhigh := high;
+	       end;
+	    end
+	    else begin
+	       x := ConstExp(NodeIndex);
+               if (x > highhigh) then
+		  highhigh := x;
+	       if (x < lowlow) then
+	          lowlow := x;
+	    end;
+	    NodeIndex := NextLink;
+         end;
+         if (lowlow < STab [SetPtr].SLowRange) or
+	    (highhigh > STab [SetPtr].SHighRange)
+         then begin
+            NewSymbol (0, TypeFieldOf (mainList), TypeDcl, LevelNo, -1);
+	    SetPtr := SymPtr;
+            STab [SetPtr].SLowRange := lowlow;
+            STab [SetPtr].SHighRange := highhigh;
+            TypeSize (SetPtr);
+            NewSymbol (0, SetType, TypeDcl, LevelNo, -1);
+            STab [SymPtr].SBase := SetPtr;
+	    SetFlag (SymPtr, SetConstFlag);
+            TypeSize (SymPtr);
+            SetPtr := SymPtr;
+         end;
+      end;
+   end
+   else begin
+      NewSymbol (0, SetType, TypeDcl, LevelNo, -1);
+      STab [SymPtr].SBase := TypeFieldOf (mainList);
+      TypeSize (SymPtr);
+      SetPtr := SymPtr;
+   end;
+
+   if (MinorOperatorOf (mainList) = VarCtOp ) then begin
+
+        pairList := MakeList (ExpList, 0, -1, -1, -1); 
+        singList := MakeList (ExpList, 0, -1, -1, -1); 
+        PairCnt := 0;
+        SingCnt := 0;
+
+	(* extract the dotdot pairs. keep the others *)
+	index := ExtractList (mainList);
+        while (index <> -1 ) do begin
+             if (MajorOperatorOf (index) = ExpList) and 
+	        (MinorOperatorOf (index) <> CommaOp) then begin
+
+                 PairCnt := PairCnt + 1;
+
+		 (* a dotdot  *)
+		 temp := ExtractList (index);
+		 AppendList (
+                    ExpList, 0, pairList,
+                    FoldUnary (
+                       StorepOp, TypeFieldOf (index), ExtractList (index)));
+		 AppendList (
+                    ExpList, 0, pairList,
+                    FoldUnary (
+                       StorepOp, TypeFieldOf (temp), temp));
+
+	     end   (* a dotdot *)
+	     else begin
+		 (* single expr *)
+                 SingCnt := SingCnt + 1;
+		 AppendList (ExpList ,0, singList, index);
+	     end;
+	     
+	    (* bump the index *)
+     
+	     index := ExtractList (mainList);
+       end;  (* while *)
+
+       LinkLists (pairList, singList);
+
+       InsertList (ListOp, 0,
+          pairList,
+          FoldUnary (StorepOp, IntegerPtr,
+             node3 (LitOp, IntegerPtr, SingCnt, 0)));
+
+       InsertList (ListOp, 0,
+          pairList,
+          FoldUnary (StorepOp, IntegerPtr,
+             node3 (LitOp, IntegerPtr, PairCnt, 0)));
+
+       (* pairList now has all the nodes  *)
+
+       SetMinor ( pairList, VarCtOp);      (* set constructor var type. *)
+       TypeFieldOf ( pairList ) := SetPtr;
+
+       g1 [p1] := pairList;
+       TypeType [p1] := SetPtr;
+       SubType [p1] := SetPtr;
+
+    end   (* if MinorOperator = VarCtOp *)
+
+    else begin                   
+
+          TypeFieldOf (mainList) := SetPtr;
+	  g1 [p1] := mainList;
+	  TypeType [p1] := SetPtr;
+          SubType [p1] := SetPtr;
+
+    end;  (* constant list. *)
+
+end  (* EvalSetConstructor *);
+
+
+function EvalStringExp
+   (ResultIndex,
+    ExprIndex: HdgRange)
+   : HdgRange;
+
+var
+   typ,
+   LeftTemp,
+   RightTemp: SymbolTableRange;
+   NodeIndex,
+   LeftIndex,
+   RightIndex: HdgRange;
+#ifndef PYRAMID_DOUBTFUL
+   SaveFreeString : boolean;
+#endif
+
+begin
+   NodeIndex := ExprIndex;
+   case MinorOperator of
+
+      LoadOp,
+      LitOp: begin
+         EvalStringExp := CallStringCopy (
+            ResultIndex,
+            ExprIndex,
+            node3 (LitOp, IntegerPtr, 1, 0),
+            node3 (LitOp, IntegerPtr, 255, 0));
+      end;
+
+      CallOp: begin
+         typ := TypeField;
+         TypeField := AnyPtrPtr;
+         EvalStringExp := CallStringCopy (
+            ResultIndex,
+            UnaryExpression (
+               LoadOp,
+               typ,
+               UnaryExpression (DerefOp, typ, NodeIndex, 0, 0),
+               0,
+               0),
+            node3 (LitOp, IntegerPtr, 1, 0),
+            node3 (LitOp, IntegerPtr, 255, 0));
+      end;
+
+      ConcatOp: begin
+#ifndef PYRAMID_DOUBTFUL
+         SaveFreeString := FreeStringTempFlag ;
+         FreeStringTempFlag := false;
+#endif
+         if IsConstant (Bin1operand) then begin
+            LeftTemp := 0;
+            LeftIndex := EvalConvert (StringPtr, Bin1operand);
+         end
+         else if IsLval (Bin1operand) then begin
+            LeftTemp := 0;
+            LeftIndex := Bin1operand;
+         end
+         else begin
+            LeftTemp := GetTemporary (ProcIndex, TypeField, false);
+            LeftIndex := UnaryExpression (
+               LoadOp,
+               TypeField,
+               UnaryExpression (
+                  DerefOp,
+                  TypeField,
+                  EvalStringExp (
+                     node3 (IdOp, TypeField, LeftTemp, 0),
+                     Bin1operand),
+                  0,
+                  0),
+               0,
+               0);
+         end;
+         if IsConstant (Bin2operand) then begin
+            RightTemp := 0;
+            RightIndex := EvalConvert (StringPtr, Bin2operand);
+         end
+         else if IsLval (Bin2operand) then begin
+            RightTemp := 0;
+            RightIndex := Bin2operand;
+         end
+         else begin
+            RightTemp := GetTemporary (ProcIndex, TypeField, false);
+            RightIndex := UnaryExpression (
+               LoadOp,
+               TypeField,
+               UnaryExpression (
+                  DerefOp,
+                  TypeField,
+                  EvalStringExp (
+                     node3 (IdOp, TypeField, RightTemp, 0),
+                     Bin2operand),
+                  0,
+                  0),
+               0,
+               0);
+         end;
+         EvalStringExp := CallStringConcat (
+            ResultIndex,
+            LeftIndex,
+            RightIndex);
+#ifndef PYRAMID_DOUBTFUL
+         FreeStringTempFlag := SaveFreeString;
+	 if FreeStringTempFlag then begin
+	    PopStringTemporary;
+	 end;
+#endif
+
+         if LeftTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (LeftTemp);
+#else
+	    if FreeStringTempFlag then begin
+	       FreeTemporary (LeftTemp);
+	    end
+	    else begin    (* We are evaluating a relational string expression *)
+			  (* So push temporary on Stack *)
+	       PushStringTemporary(LeftTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+         if RightTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (RightTemp);
+#else
+	    if FreeStringTempFlag then begin
+	       FreeTemporary (RightTemp);
+	    end
+	    else begin    (* We are evaluating a relational string expression *)
+			  (* So push temporary on Stack *)
+	       PushStringTemporary(RightTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+      end;
+
+      SubStrOp: begin
+#ifndef PYRAMID_DOUBTFUL
+         SaveFreeString := FreeStringTempFlag ;
+         FreeStringTempFlag := false;
+#endif
+         if IsConstant (Unary1operand) then begin
+            LeftTemp := 0;
+            LeftIndex := EvalConvert (StringPtr, Unary1operand);
+         end
+         else if IsLval (Unary1operand) then begin
+            LeftTemp := 0;
+            LeftIndex := Unary1operand;
+         end
+         else begin
+            LeftTemp := GetTemporary (ProcIndex, StringPtr, false);
+            LeftIndex := UnaryExpression (
+               LoadOp,
+               StringPtr,
+               UnaryExpression (
+                  DerefOp,
+                  StringPtr,
+                  EvalStringExp (
+                     node3 (IdOp, TypeField, LeftTemp, 0),
+                     Unary1operand),
+                  0,
+                  0),
+               0,
+               0);
+         end;
+         EvalStringExp := CallStringCopy (
+            ResultIndex,
+            LeftIndex,
+            Unary1parameter,
+            Unary2parameter);
+#ifndef PYRAMID_DOUBTFUL
+         FreeStringTempFlag := SaveFreeString;
+	 if FreeStringTempFlag then begin
+	    PopStringTemporary;
+	 end;
+#endif
+         if LeftTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+            FreeTemporary (LeftTemp);
+#else
+	    if FreeStringTempFlag then begin
+	       FreeTemporary (LeftTemp);
+	    end
+	    else begin    (* We are evaluating a relational string expression *)
+			  (* So push temporary on Stack *)
+	       PushStringTemporary(LeftTemp);
+	    end;
+#endif /* PYRAMID_DOUBTFUL */
+         end;
+      end;
+
+      otherwise begin
+         ErrorMsg (27, -1);
+         EvalStringExp := -1;
+      end;
+
+   end;
+end  (* EvalStringExp *);
+
+
+procedure EvalRelational
+   (p1,
+    p2: ParseStackRange;
+    op: integer);
+
+var
+   ResTyp,
+   LeftTemp,
+   RightTemp,
+   IndexTemp: SymbolTableRange;
+   typ: PRIMTYPE;
+   NodeIndex: HdgRange;
+   leftlen,
+   rightlen: integer;
+#ifndef PYRAMID_DOUBTFUL
+   SaveFreeSet : boolean;
+   SaveFreeString : boolean;
+#endif 
+
+  HIndex, RightIndex, LeftIndex: HdgRange;  
+
+begin
+   ResTyp := ResultType (g1 [p1], g1 [p2], ColNo [p1], ColNo [p2]);
+   if ResTyp <> VoidType then begin
+      typ := ChkOpType (op, ResTyp, p2);
+      case typ of
+
+         IntegerType,
+         UlongType,
+         LongType,
+         FloatType,
+         DoubleType,
+         PointerType: begin
+	    g1 [p1] := FoldBinary (
+               op,
+               BooleanPtr,
+	       EvalConvert (ResTyp, g1 [p1]),
+	       EvalConvert (ResTyp, g1 [p2]));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end;
+
+         EnumerativeType,
+         BooleanType: begin
+	    if (control['q']) then 
+		g1 [p1] := FoldBinary (
+                   op,
+                   BooleanPtr,
+		   EvalConvert (IntegerPtr, g1 [p1]),
+		   EvalConvert (IntegerPtr, g1 [p2]))
+	    else 
+		g1 [p1] := FoldBinary (
+                   op,
+                   BooleanPtr,
+		   EvalConvert (ResTyp, g1 [p1]),
+		   EvalConvert (ResTyp, g1 [p2]));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end;
+
+         CharacterType: begin
+	    g1 [p1] := FoldBinary (
+               op,
+               BooleanPtr,
+	       EvalConvert (IntegerPtr, g1 [p1]),
+	       EvalConvert (IntegerPtr, g1 [p2]));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end;
+
+         ArrayType: begin
+	    if TypeType [p1] = PacPtr then begin
+	       if TypeType [p2] = PacPtr then begin
+		  NodeIndex := g1 [p1];
+                  leftlen := Node2parameter;
+		  NodeIndex := g1 [p2];
+                  rightlen := Node2parameter;
+		  if leftlen <> rightlen then
+		     WarnStrCmp(CardNum [p1]);
+                  NewSymbol (0, IntegerPtr, TypeDcl, STab [ProcIndex].SLevel + 1, 0);
+                  STab [SymPtr].SLowRange := 1;
+                  if leftlen > rightlen then begin
+                     STab [SymPtr].SHighRange := leftlen;
+                  end
+                  else begin
+                     STab [SymPtr].SHighRange := rightlen;
+                  end;
+                  TypeSize (SymPtr);
+                  NewSymbol (0, ArrayType, TypeDcl, STab [ProcIndex].SLevel + 1, 0);
+                  STab [SymPtr].SIndex := SymPtr - 1;
+                  STab [SymPtr].SElement := CharPtr;
+                  TypeSize (SymPtr);
+                  ResTyp := SymPtr;
+		  NodeIndex := g1 [p1];
+                  TypeField := ResTyp;
+		  NodeIndex := g1 [p2];
+                  TypeField := ResTyp;
+               end
+               else begin
+		  NodeIndex := g1 [p1];
+		  TypeField := TypeType [p2];
+                  leftlen := Node2parameter;
+		  rightlen := LengthOfCharArray(TypeFieldOf(g1 [p2]));
+		  if leftlen <> rightlen then
+		     WarnStrCmp(CardNum [p1]);
+               end;
+            end
+	    else if TypeType [p2] = PacPtr then begin
+	       NodeIndex := g1 [p2];
+	       TypeField := TypeType [p1];
+	       rightlen := Node2parameter;
+	       leftlen := LengthOfCharArray(TypeFieldOf(g1 [p1]));
+	       if leftlen <> rightlen then
+		  WarnStrCmp(CardNum [p1]);
+            end;
+	    leftlen := LengthOfCharArray(TypeFieldOf(g1 [p1]));
+	    rightlen := LengthOfCharArray(TypeFieldOf(g1 [p2]));
+	    if leftlen <> rightlen then
+	       WarnStrCmp(CardNum [p1]);
+	    g1 [p1] := BinaryExpression (
+               op,
+               BooleanPtr,
+	       EvalConvert (ResTyp, g1 [p1]),
+	       EvalConvert (ResTyp, g1 [p2]));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end;
+
+         RecordType: begin
+	    g1 [p1] := BinaryExpression (
+               op,
+               BooleanPtr,
+               CallCompare (p1, p2),
+               node3 (LitOp, IntegerPtr, 0, 0));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end;
+
+         SetType: begin
+#ifndef PYRAMID_DOUBTFUL
+            SaveFreeSet := FreeSetTempFlag;
+            FreeSetTempFlag := false;
+#endif 
+	    if ((ResTyp = TypeFieldOf (g1 [p1]))  or (STab[ResTyp].SBase = STab[TypeFieldOf(g1 [p1])].SBase)) and
+		IsLval (g1 [p1]) then begin
+               LeftTemp := 0;
+            end
+            else begin
+               LeftTemp := GetTemporary (ProcIndex, ResTyp, false);
+	       LeftIndex := EvalSetExp (node3 (IdOp, ResTyp, LeftTemp, 0), g1 [p1]);
+	       if OptimSetExp(LeftIndex,HIndex)
+	       then g1 [p1] := HIndex
+	       else
+		 g1 [p1] := UnaryExpression (
+		    LoadOp,
+		    ResTyp,
+#ifdef RAST2 /* RAS02 avoid deref on set-expr. */
+                    LeftIndex,
+#else
+		    UnaryExpression (
+		       DerefOp,
+		       ResTyp,
+		       LeftIndex,
+		       0,
+		       0),
+#endif
+		    0,
+		    0);
+            end;
+	    if ((ResTyp = TypeFieldOf (g1 [p2]))  or (STab[ResTyp].SBase = STab[TypeFieldOf(g1 [p2])].SBase)) and
+		IsLval (g1 [p2]) then begin
+               RightTemp := 0;
+            end
+            else begin
+               RightTemp := GetTemporary (ProcIndex, ResTyp, false);
+	       RightIndex := EvalSetExp (node3 (IdOp, ResTyp, RightTemp, 0), g1 [p2]);
+	       if OptimSetExp(RightIndex,HIndex)
+	       then g1 [p2] := HIndex
+	       else
+		 g1 [p2] := UnaryExpression (
+		    LoadOp,
+		    ResTyp,
+		    UnaryExpression (
+		       DerefOp,
+		       ResTyp,
+		       RightIndex,
+		       0,
+		       0),
+		    0,
+		    0);
+            end;
+	    g1 [p1] := CallSetRel (op, ResTyp, g1 [p1], g1 [p2]);
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+
+#ifndef PYRAMID_DOUBTFUL
+            FreeSetTempFlag := SaveFreeSet;   (* 18.08.88 -- RK *)
+	    if FreeSetTempFlag then begin
+		PopSetTemporary;
+	    end;
+#endif
+
+            if LeftTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+               FreeTemporary (LeftTemp);
+#else
+	       if FreeSetTempFlag then begin
+	          FreeTemporary (LeftTemp);
+	       end
+	       else begin    (* We are evaluating a relational set expression *)
+			     (* So push temporary on Stack *)
+	          PushSetTemporary(LeftTemp);
+	       end;
+#endif /* PYRAMID_DOUBTFUL */
+            end;
+
+            if RightTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+               FreeTemporary (RightTemp);
+#else
+	       if FreeSetTempFlag then begin
+	          FreeTemporary (RightTemp);
+	       end
+	       else begin    (* We are evaluating a relational set expression *)
+			     (* So push temporary on Stack *)
+	          PushSetTemporary(RightTemp);
+	       end;
+#endif /* PYRAMID_DOUBTFUL */
+            end;
+         end;
+
+         StringType: begin
+#ifndef PYRAMID_DOUBTFUL
+            SaveFreeString := FreeStringTempFlag ;
+            FreeStringTempFlag := false;
+#endif 
+	    if IsConstant (g1 [p1]) then begin
+               LeftTemp := 0;
+	       g1 [p1] := EvalConvert (StringPtr, g1 [p1]);
+            end
+	    else if IsLval (g1 [p1]) then begin
+               LeftTemp := 0;
+            end
+            else begin
+               LeftTemp := GetTemporary (ProcIndex, ResTyp, false);
+	       g1 [p1] := UnaryExpression (
+                  LoadOp,
+                  ResTyp,
+                  UnaryExpression (
+                     DerefOp,
+                     ResTyp,
+		     EvalStringExp (node3 (IdOp, ResTyp, LeftTemp, 0), g1 [p1]),
+                     0,
+                     0),
+                  0,
+                  0);
+            end;
+	    if IsConstant (g1 [p2]) then begin
+               RightTemp := 0;
+	       g1 [p2] := EvalConvert (StringPtr, g1 [p2]);
+            end
+	    else if IsLval (g1 [p2]) then begin
+               RightTemp := 0;
+            end
+            else begin
+               RightTemp := GetTemporary (ProcIndex, ResTyp, false);
+	       g1 [p2] := UnaryExpression (
+                  LoadOp,
+                  ResTyp,
+                  UnaryExpression (
+                     DerefOp,
+                     ResTyp,
+		     EvalStringExp (node3 (IdOp, ResTyp, RightTemp, 0), g1 [p2]),
+                     0,
+                     0),
+                  0,
+                  0);
+            end;
+	    g1 [p1] := BinaryExpression (
+               op,
+               BooleanPtr,
+	       CallStringCompare (g1 [p1], g1 [p2]),
+               node3 (LitOp, IntegerPtr, 0, 0));
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+#ifndef PYRAMID_DOUBTFUL
+            FreeStringTempFlag := SaveFreeString;
+	    if FreeStringTempFlag then begin
+		PopStringTemporary;
+	    end;
+#endif
+
+            if LeftTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+               FreeTemporary (LeftTemp);
+#else
+	       if FreeStringTempFlag then begin
+	          FreeTemporary (LeftTemp);
+	       end
+	       else begin    (* We are evaluating a relational string expression *)
+			     (* So push temporary on Stack *)
+	          PushStringTemporary(LeftTemp);
+	       end;
+#endif /* PYRAMID_DOUBTFUL */
+            end;
+            if RightTemp <> 0 then begin
+#ifdef PYRAMID_DOUBTFUL
+               FreeTemporary (RightTemp);
+#else
+	       if FreeStringTempFlag then begin
+	          FreeTemporary (RightTemp);
+	       end
+	       else begin    (* We are evaluating a relational string expression *)
+			     (* So push temporary on Stack *)
+	          PushStringTemporary(RightTemp);
+	       end;
+#endif /* PYRAMID_DOUBTFUL */
+            end;
+         end;
+
+         VoidType: begin
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+
+         otherwise begin
+            ErrorMsg (27, -1);
+	    g1 [p1] := -1;
+	    TypeType [p1] := VoidType;
+            SubType [p1] := VoidType;
+         end;
+
+      end  (* case *);
+   end
+   else begin
+      g1 [p1] := -1;
+      TypeType [p1] := VoidType;
+      SubType [p1] := VoidType;
+   end  (* if *);
+end  (* EvalRelational *);
+
+
+procedure EvalIn
+   (p1,
+    p2: ParseStackRange);
+
+var
+   ResTyp,
+   RightType,
+   RightTemp: SymbolTableRange;
+   element,
+   NodeIndex: HdgRange;
+
+begin
+   RightType := TypeType [p2];
+   if IsSet (RightType) then begin
+      if CompatibleTypes (TypeType [p1], PrimType (STab [RightType].SBase)) then begin
+	 element := EvalConvert (IntegerPtr, g1 [p1]);
+	 NodeIndex := g1 [p2];
+         if (MajorOperator = ExpList) and (MinorOperator = VarCtOp) then begin
+	    g1 [p1] := CallInct (element, NodeIndex);
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+         end
+	 else if (MajorOperator = ExpList) and (MinorOperator = ListOp) and
+		  (ListSizeField <= 32) then begin
+	    g1 [p1] := CallIntor (element, NodeIndex);
+	    TypeType [p1] := BooleanPtr;
+	    SubType [p1] := BooleanPtr;
+	 end
+         else begin
+            if IsLval (NodeIndex) then begin
+               RightTemp := 0;
+            end
+            else if
+               (MajorOperator = ExpList) and
+               (MinorOperator = ListOp)
+            then begin
+               RightTemp := GetTemporary (ProcIndex, 0, false);
+               STab[SymPtr].SType := RightType;
+               STab [SymPtr].SClass := LOCALSTATIC;
+               STab [SymPtr].SSubClass := InitializedVar;
+               process_initializer (RightTemp, NodeIndex, CardCount);
+               NodeIndex := FoldUnary (LoadOp, RightType,
+                  node3 (IdOp, RightType, RightTemp, 0));
+               RightTemp := 0;
+            end
+            else begin
+               RightTemp := GetTemporary (ProcIndex, RightType, false);
+#ifdef RAST2 /* RAS02 avoid deref on set-expr. */
+               NodeIndex := UnaryExpression (
+                  LoadOp,
+                  RightType,
+                  EvalSetExp (
+                    node3 (IdOp, RightType, RightTemp, 0),
+                    NodeIndex),
+                  0,
+                  0);
+#else
+               NodeIndex := UnaryExpression (
+                  LoadOp,
+                  RightType,
+                  UnaryExpression (
+                     DerefOp,
+                     RightType,
+                     EvalSetExp (
+                        node3 (IdOp, RightType, RightTemp, 0),
+                        NodeIndex),
+                     0,
+                     0),
+                  0,
+                  0);
+#endif
+            end;
+	    g1 [p1] := CallInt (element, RightType, NodeIndex);
+	    TypeType [p1] := BooleanPtr;
+            SubType [p1] := BooleanPtr;
+            if RightTemp <> 0 then begin
+               FreeTemporary (RightTemp);
+            end;
+         end;
+      end
+      else begin
+         ErrorMsg (0, ColNo [p2]);
+	 g1 [p1] := -1;
+	 TypeType [p1] := VoidType;
+         SubType [p1] := VoidType;
+      end  (* if *);
+   end
+   else begin
+      ErrorMsg (1, ColNo [p2]);
+      g1 [p1] := -1;
+      TypeType [p1] := VoidType;
+      SubType [p1] := VoidType;
+   end  (* if *);
+end  (* EvalIn *);
+
+
+function RangeCheck
+   (typ: SymbolTableRange;
+    NodeIndex: HdgRange)
+   : HdgRange;
+
+var
+    exp_val ,
+    low_lim ,
+    high_lim : integer ;
+
+begin
+   if (typ <> IntegerPtr) and IsOrdinal (PrimType (typ)) then begin
+      if ( not IsConstantExpr ( NodeIndex) ) then begin
+	 (* it is an ordinal expression whose value is not yet obvious *)
+	 if IsCallRange (NodeIndex) then
+	    RangeCheck := NodeIndex
+	 else
+	    RangeCheck := EvalConvert (
+	       TypeField,
+	       CallRange ( NodeIndex,
+		  STab [typ].SLowRange, STab [typ].SHighRange));
+      end
+      else begin (* constant value: check can be performed at compile time *)
+           low_lim  := STab [typ].SLowRange ;
+	   high_lim := STab [typ].SHighRange ;
+	   exp_val  := ConstExp ( NodeIndex );
+(*         CsgPrint ( NodeIndex );      *)
+	   if (exp_val < low_lim) or (exp_val > high_lim) then begin
+		(* the value is out of bounds *)
+	(*	ErrorMsg (146, ColNo [ NodeIndex ]);  problem on AIX *)
+		ErrorMsg (146, -1 );
+		RangeCheck := -1 ;
+(*              writeln ( 'low limit: ' , low_lim , ' high_limit: ' , high_lim ,
+ *                        ' value: ' , exp_val );       *)
+	   end
+	   else begin (* constant value, check is o.k. *)
+		RangeCheck := EvalConvert ( TypeField , NodeIndex );
+(*              writeln ( 'low limit: ' , low_lim , ' high_limit: ' , high_lim ,
+ *                        ' value: ' , exp_val );       *)
+	   end
+      end
+   end
+   else begin (* check is not done at all on 'integer' or non-ordinal types *)
+      RangeCheck := NodeIndex;
+   end;
+end  (* RangeCheck *);
+
+
+function GenStore
+   (lhs: HdgRange;
+    ltype,
+    lstype: SymbolTableRange;
+    lcol: integer;
+    rhs: HdgRange;
+    rtype,
+    rstype: SymbolTableRange;
+    rcol: integer;
+    card: integer)
+   : HdgRange;
+
+var
+    NodeIndex : HdgRange;
+
+begin
+   if AssgnmntCompatible (ltype, rhs) then begin
+      if IsString (ltype) then begin
+         rhs := EvalConvert (ltype, rhs);
+         GenStore := EvalStringExp (lhs, rhs);
+      end
+      else if
+         IsSet (ltype) and
+         not (IsLval (rhs) and (ltype = rtype))
+      then begin
+         GenStore := EvalSetExp (lhs, rhs);
+      end
+      else if
+         IsFile (ltype) and IsFile (rtype)
+      then begin
+      	 ErrorMsg (39, rcol);  (* type conflict *)
+      	 GenStore := -1;
+      end
+      else begin
+         if FileInRec (ltype) then
+	     ErrorMsg (136, rcol)
+         else if IsCharArray (ltype) then begin
+	    NodeIndex := rhs;
+	    if (MinorOperator = LitOp) and
+	       (Node2parameter > LengthOfCharArray (ltype)) then
+	       ErrorMsg (38, rcol);
+	    end;
+         rhs := EvalConvert (ltype, rhs);
+         if control ['r'] then begin
+            rhs := RangeCheck (lstype, rhs);
+         end;
+	 NodeIndex := lhs;
+	 if (MinorOperator = IdOp) and
+	    (GetFlag (Node1parameter, ControlVarFlag)) then begin
+	    ErrorMsg (142, lcol);
+	    GenStore := -1
+	 end else
+            GenStore := LongStatement (StoreOp, ltype, lhs, rhs, 0, 0, card);
+      end;
+   end
+   else begin
+      ErrorMsg (0, rcol);  (* type conflict *)
+      GenStore := -1;
+   end;
+end  (* GenStore *);
+
+
+function RefParm
+   (ParmInx: SymbolTableRange;
+    actual: ExpListRange;
+    actual_list: HdgRange)
+   : SymbolTableRange;
+
+var
+   NodeIndex: HdgRange;
+   atyp,
+   astyp,
+   fstyp: SymbolTableRange;
+   len: integer;
+
+begin
+   atyp := ExpType [actual];
+   astyp := ExpStype [actual];
+   fstyp := STab [ParmInx].SType;
+   NodeIndex := ExpVal [actual];
+   if (MajorOperator = UnaryExp) and (MinorOperator = LoadOp) then begin
+      NodeIndex := Unary1operand;
+   end;
+   if (* control ['s'] and *)
+      (MajorOperator = node) and (MinorOperator = IdOp) and
+      (GetFlag (Node1parameter, ControlVarFlag))
+   then begin
+      ErrorMsg (145, ExpColNo [actual]); (* for variable threatened *)
+   end;
+   if (fstyp = astyp) or ((fstyp = AnyFilePtr) and (IsFile (atyp))) then begin
+      NodeIndex := ExpVal [actual];
+      if MinorOperator = LoadOp then begin
+         SetMinor (NodeIndex, StorepadrOp);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+         AppendList (ExpList, IntegerPtr, actual_list, NodeIndex);
+         RefParm := 0;
+      end
+      else if IsCallRange(NodeIndex) then begin
+	 NodeIndex := SkipCallRange(NodeIndex);
+         SetMinor (NodeIndex, StorepadrOp);
+         AppendList (ExpList, IntegerPtr, actual_list, NodeIndex);
+         RefParm := 0;
+      end
+      else begin
+         ErrorMsg (9, ExpColNo [actual]); (* invalid actual parameter *)
+         RefParm := 0;
+      end  (* if *);
+   end
+   else if
+      ((fstyp = AnyPacPtr) or (fstyp = AnyPacLenPtr)) and
+      ((atyp = CharPtr) or IsCharArray (atyp))
+   then begin
+      NodeIndex := ExpVal [actual];
+      if MinorOperator = LoadOp then begin
+         if atyp = CharPtr then begin
+            len := 1;
+         end
+         else begin
+            len := LengthOfCharArray (atyp);
+         end;
+         SetMinor (NodeIndex, StorepadrOp);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+         AppendList (ExpList, IntegerPtr, actual_list, NodeIndex);
+         if fstyp = AnyPacLenPtr then begin
+            AppendList (
+               ExpList,
+               IntegerPtr,
+               actual_list,
+               node3 (LitOp, IntegerPtr, len, 0));
+         end;
+         RefParm := 0;
+      end
+      else if MinorOperator = LitOp then begin
+         if atyp = CharPtr then begin
+            CharToPac (NodeIndex);
+            len := 1;
+         end
+         else begin
+            len := Node2parameter;
+         end;
+         SetMinor (NodeIndex, LoadstrOp);
+         TypeField := PtrToCharPtr;
+         AppendList (ExpList, IntegerPtr, actual_list, NodeIndex);
+         if fstyp = AnyPacLenPtr then begin
+            AppendList (
+               ExpList,
+               IntegerPtr,
+               actual_list,
+               node3 (LitOp, IntegerPtr, len, 0));
+         end;
+         RefParm := 0;
+      end
+      else begin
+         ErrorMsg (9, ExpColNo [actual]); (* invalid actual parameter *)
+         RefParm := 0;
+      end  (* if *);
+   end
+   else begin
+      ErrorMsg (9, ExpColNo [actual]);
+      RefParm := 0;
+   end  (* if *);
+end  (* RefParm *);
+
+
+function ValueParm
+   (ParmInx: SymbolTableRange;
+    actual: ExpListRange;
+    actual_list: HdgRange)
+   : SymbolTableRange;
+
+var
+   FormalType,
+   ActualType,
+   temp: SymbolTableRange;
+   NodeIndex,
+   ActualExp: HdgRange;
+
+begin
+   FormalType := PrimType (STab [ParmInx].SType);
+   ActualType := ExpType [actual];
+   ActualExp := ExpVal [actual];
+   check_call (ActualExp, ExpColNo [actual]);
+   if AssgnmntCompatible (FormalType, ActualExp) then begin
+      if IsString (ActualType) then begin
+         temp := GetTemporary (ProcIndex, FormalType, false);
+         NodeIndex := UnaryExpression (
+            DerefOp,
+            FormalType,
+            EvalStringExp (
+               node3 (IdOp, FormalType, temp, 0),
+               EvalConvert (FormalType, ActualExp)),
+            0,
+            0);
+         NodeIndex := UnaryExpression (
+            StorepOp,
+            FormalType,
+            NodeIndex,
+            0,
+            0);
+      end
+      else if
+         IsSet (ActualType) and
+         not (IsLval (ActualExp) and (ActualType = FormalType))
+      then begin
+         temp := GetTemporary (ProcIndex, FormalType, false);
+#ifdef RAST2 /* RAS02 avoid deref on set-expr. */
+         NodeIndex :=  EvalSetExp (
+               node3 (IdOp, FormalType, temp, 0),
+               ActualExp);
+#else
+         NodeIndex := UnaryExpression (
+            DerefOp,
+            FormalType,
+            EvalSetExp (
+               node3 (IdOp, FormalType, temp, 0),
+               ActualExp),
+            0,
+            0);
+#endif
+         NodeIndex := UnaryExpression (
+            StorepOp,
+            FormalType,
+            NodeIndex,
+            0,
+            0);
+      end
+      else begin
+         temp := 0;
+	 NodeIndex := EvalConvert (FormalType, ActualExp);
+	 if control ['r'] then
+	     NodeIndex := RangeCheck (STab [ParmInx].SType, NodeIndex);
+         NodeIndex := UnaryExpression (
+            StorepOp,
+            FormalType,
+            NodeIndex,
+            0,
+            0);
+      end;
+      AppendList (ExpList, IntegerPtr, actual_list, NodeIndex);
+      ValueParm := temp;
+   end
+   else begin
+      ErrorMsg (9, ExpColNo [actual]);
+      ValueParm := 0;
+   end  (* if *);
+end  (* ValueParm *);
+
+
+procedure ProcParm
+   (ParmInx: SymbolTableRange;
+    actual,
+    actual_list: HdgRange);
+
+var
+   formal_type: SymbolTableRange;
+   proc_address,
+   static_link,
+   NodeIndex: HdgRange;
+
+begin
+   formal_type := PrimType (STab [ParmInx].SType);
+   NodeIndex := actual;
+   if (MinorOperator = CallOp) and (Ls2operand = -1 ) then begin
+      NodeIndex := Ls1operand;
+      if MinorOperator = IdOp then begin
+         proc_address := UnaryExpression (
+            LoadadrOp,
+            formal_type,
+            NodeIndex,
+            0,
+            0);
+         static_link := node3 (StaticLinkOp, AnyPtrPtr, Node1parameter, 0);
+      end
+      else begin
+         (* passing a formal *)
+         NodeIndex := Unary1operand;  (* skip DerefOp *)
+         NodeIndex := Unary1operand;  (* skip LoadOp *)
+         proc_address := UnaryExpression (
+            LoadOp,
+            formal_type,
+            NodeIndex,
+            0,
+            0);
+         (* the static link is the next formal *)
+         static_link :=UnaryExpression (
+            LoadOp,
+            IntegerPtr,
+            node3 (IdOp, IntegerPtr, Node1parameter + 1, 0),
+            0,
+            0);
+	if STab[Node1parameter].SLevel <= STab[ProcIndex].SLevel
+	then
+	   begin
+	   STab[Node1parameter].SFeld4 := 1;		
+	   STab[Node1parameter+1].SFeld4 := 1;		
+	   end;
+      end;
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         actual_list,
+         UnaryExpression (
+            StorepOp,
+            formal_type,
+            proc_address,
+            0,
+            0));
+      if control ['x'] then
+	 AppendList (
+	    ExpList,
+	    IntegerPtr,
+	    actual_list,
+	    UnaryExpression (
+	       StorepOp,
+	       IntegerPtr,
+	       static_link,
+	       0,
+	       0));
+   end
+   else begin
+      ErrorMsg (9, -1);
+   end  (* if *);
+end  (* ProcParm *);
+
+
+function FetchParm
+   (ParmInx: SymbolTableRange;
+    actual: ExpListRange;
+    actual_list: HdgRange)
+   : SymbolTableRange;
+
+begin
+   if STab [ParmInx].SSubClass = ByValueParm then begin
+      FetchParm := ValueParm (ParmInx, actual, actual_list);
+   end
+   else begin
+      FetchParm := RefParm (ParmInx, actual, actual_list);
+   end  (* if *);
+end  (* FetchParm *);
+
+
+function congruent
+	(actual, formali: SymbolTableRange)
+	: boolean;
+
+(* Check if procedural/functional parameters are congruent *)
+
+var
+    act, frm: SymbolTableRange;
+
+begin
+    if (STab [actual].SKind = ProcParmDcl) or
+       (STab [actual].SKind = FuncParmDcl) then begin
+	act := STab [actual].SType;
+	frm := STab [formali].SType;
+	if STab [act].SType = STab [frm].SType then begin
+	    act := STab [act].SDomain;
+	    frm := STab [frm].SDomain;
+	    congruent := (STab [act].SType = STab [frm].SType) and
+		  (STab [act].SResult = STab [frm].SResult);
+	end else
+	    congruent := false;
+    end else
+	congruent := (STab [actual].SSubClass =
+		           STab [formali].SSubClass) and
+		     (STab [actual].SType = STab [formali].SType);
+end;	(* congruent *)
+
+
+
+procedure GenParameters
+   (symp: SymbolTableRange;
+    p: ParseStackRange;
+    var return_cnt: integer;
+    var actual_list: HdgRange);
+
+   (* StartCnt[p] points to first element of list *)
+   (* cnt[p] specifies no. of expressions in list  *)
+
+var
+   i,
+   formal_cnt,
+   actual_cnt,
+   first,
+   last: integer;
+   k: SymbolTableRange;
+   head,
+   NodeIndex: HdgRange;
+   j: integer;				(* EF4: 01-11-86 WB *)
+   act_type,
+   procparm_type: SymbolTableRange;
+   ok: boolean;
+   actprocparcnt: integer;
+
+begin
+   if p = -1 then begin
+      actual_cnt := 0;
+   end
+   else begin
+      actual_cnt := cnt [p];
+   end;
+   formal_cnt := STab [symp].SParmCnt;
+   return_cnt := formal_cnt;
+   if actual_cnt <= formal_cnt then begin
+      if actual_cnt = 0 then begin
+         actual_list := -1;
+      end
+      else begin
+         first := StartCnt [p];
+         last := first + actual_cnt - 1;
+         head := MakeList (ExpList, 0, -1, -1, -1);
+         i := first;
+         k := STab [symp].SNext;
+         while (i <= last) and (formal_cnt > 0) do begin
+            if STab[k].SKind = ParmDcl then begin
+               ExpType [i] := FetchParm (k, i, head);
+               i := i + 1;
+               if STab [k].SType = AnyPacLenPtr then begin
+                  k := STab [k].SNext;
+                  k := STab [k].SNext;
+                  formal_cnt := formal_cnt - 2;
+               end
+               else begin
+                  k := STab [k].SNext;
+                  formal_cnt := formal_cnt - 1;
+               end;
+            end
+            else begin
+						(* EF4: 01-11-86 WB *)
+	       procparm_type := STab [STab [k].SType].SDomain;
+	       NodeIndex := ExpVal [i];
+	       NodeIndex := Ls1operand;
+	       if NodeIndex <> -1 then begin
+	           act_type := TypeField;
+	           if STab [act_type].SType <> STab [procparm_type].SType then
+		       if STab [procparm_type].SType = ProcedureType then
+		           ErrorMsg (26, ExpColNo [i])
+		       else
+		           ErrorMsg (34, ExpColNo [i]);
+	           actprocparcnt := STab [act_type].SParmCnt;
+	           if actprocparcnt <> STab [procparm_type].SParmCnt then
+		       ErrorMsg (8, ExpColNo [i]);
+	           if STab [act_type].SResult <> STab [procparm_type].SResult
+		   then
+		       ErrorMsg (9, ExpColNo [i]);
+	           ok := true; j := 0;
+	           while ok and (j < actprocparcnt) do begin
+		       act_type := STab [act_type].SNext;
+		       procparm_type := STab [procparm_type].SNext;
+		       j := j + 1;
+		       ok := congruent (act_type, procparm_type);
+		       end;
+	           if (not ok) then
+		       ErrorMsg (9, ExpColNo [i]);
+                   ProcParm (k, ExpVal [i], head);
+                   ExpType [i] := 0;
+                   i := i + 1;
+                   k := STab [k].SNext;
+		   if control ['x'] then
+		   begin
+		      k := STab [k].SNext;
+		      formal_cnt := formal_cnt - 2
+		   end
+		   else
+		      formal_cnt := formal_cnt - 1;
+		end else begin
+                   ExpType [i] := 0;
+                   i := i + 1;
+                   k := STab [k].SNext;
+		   if control ['x'] then
+		   begin
+		      k := STab [k].SNext;
+		      formal_cnt := formal_cnt - 2
+		   end
+		   else
+		      formal_cnt := formal_cnt - 1;
+		   end;
+            end  (* if *);
+         end  (* while *);
+         if (i = last + 1) and (formal_cnt = 0) then begin
+            for i := first to last do begin
+               if ExpType [i] <> 0 then begin
+                  FreeTemporary (ExpType [i]);
+               end;
+            end;
+            actual_list := head;
+         end
+         else begin
+            ErrorMsg (8, ColNo [mp]);
+            return_cnt := 0;
+            actual_list := -1;
+         end;
+      end;
+   end
+   else begin
+      ErrorMsg (8, ColNo [mp]);
+      return_cnt := 0;
+      actual_list := -1;
+   end;
+end  (* GenParameters *);
+
+
+procedure GenCall
+   (symp: SymbolTableRange;
+    p1,
+    p2: ParseStackRange);
+
+var
+   t,
+   t1: SymbolTableRange;
+   actual_list: HdgRange;
+   actual_count: integer;
+
+begin
+   case STab [symp].SKind of
+
+      ProcDcl, ForwardProcDcl: begin
+         t1 := STab [symp].SType;
+         GenParameters (t1, p2, actual_count, actual_list);
+	 g1 [p1] := LongStatement (
+            CallOp,
+            IntegerPtr,
+            node3 (IdOp, t1, symp, 0),
+            actual_list,
+            node3 (StaticLinkOp, AnyPtrPtr, symp, 0),
+            actual_count,
+            CardNum [p1]);
+      end;
+
+      FuncDcl, ForwardFuncDcl: begin
+         t1 := STab [symp].SType;
+         GenParameters (t1, p2, actual_count, actual_list);
+	 g1 [p1] := LongStatement (
+            CallOp,
+	    TypeType [p1],
+            node3 (IdOp, t1, symp, 0),
+            actual_list,
+            node3 (StaticLinkOp, AnyPtrPtr, symp, 0),
+            actual_count,
+            CardNum [p1]);
+      end;
+
+      ProcParmDcl: begin
+         t := PrimType (STab [symp].SType);
+         t1 := PrimType (STab [t].SDomain);
+         GenParameters (t1, p2, actual_count, actual_list);
+	 g1 [p1] := LongStatement (
+            CallOp,
+            IntegerPtr,
+            UnaryExpression (
+               DerefOp,
+               t1,
+               UnaryExpression (
+                  LoadOp,
+                  t,
+                  node3 (IdOp, t, symp, 0),
+                  0,
+                  0),
+               0,
+               0),
+            actual_list,
+            UnaryExpression (
+               LoadOp,
+               AnyPtrPtr,
+               node3 (IdOp, AnyPtrPtr, symp + 1, 0),
+               0,
+               0),
+            actual_count,
+            CardNum [p1]);
+	 if STab[symp].SLevel <= STab[ProcIndex].SLevel
+	 then 
+	    begin
+	    STab[symp].SFeld4 := 1;		(* Mark procedure and static link as accessed from lower level *)
+	    STab[symp+1].SFeld4 := 1;
+	    end
+      end;
+
+      FuncParmDcl: begin
+         t := PrimType (STab [symp].SType);
+         t1 := PrimType (STab [t].SDomain);
+         GenParameters (t1, p2, actual_count, actual_list);
+	 g1 [p1] := LongStatement (
+            CallOp,
+	    TypeType [p1],
+            UnaryExpression (
+               DerefOp,
+               t1,
+               UnaryExpression (
+                  LoadOp,
+                  t,
+                  node3 (IdOp, t, symp, 0),
+                  0,
+                  0),
+               0,
+               0),
+            actual_list,
+            UnaryExpression (
+               LoadOp,
+               AnyPtrPtr,
+               node3 (IdOp, AnyPtrPtr, symp + 1, 0),
+               0,
+               0),
+            actual_count,
+            CardNum [p1]);
+	 if STab[symp].SLevel <= STab[ProcIndex].SLevel
+	 then 
+	    begin
+	    STab[symp].SFeld4 := 1;		(* Mark procedure and static link as accessed from lower level *)
+	    STab[symp+1].SFeld4 := 1;
+	    end
+      end;
+
+   end  (* case *);
+
+end  (* GenCall *);
+
+
+procedure GenAddress
+   (p1,
+    p2: ParseStackRange);
+
+var
+   NodeIndex: HdgRange;
+   typ: SymbolTableRange;
+
+begin
+   NodeIndex := g1 [p2];
+   if NodeIndex <> -1 then begin
+      case MinorOperator of
+         LoadOp: begin
+	    if ((MajorOperatorOf (Unary1operandOf (NodeIndex)) = node) and 
+	    (MinorOperatorOf (Unary1operandOf (NodeIndex)) = IdOp)) and
+	    (STab [Node1parameterOf (Unary1operandOf (NodeIndex))].SKind = 
+	    TypeNameDcl) then begin
+	       ErrorMsg (1, ColNo [p2]);
+	    end else begin
+               typ := AnyPtrPtr;
+               SetMinor (NodeIndex, LoadadrOp);
+               TypeField := typ;
+#ifdef PYRAMID_DOUBTFUL
+#else
+	       SaveIndex := NodeIndex;
+	       NodeIndex := Unary1operand;
+	       if (MinorOperator = IdOp) then begin
+		    with STab [Node1parameter] do begin
+		        if (SClass = AUTO) or (SClass = REGISTER) then
+			    SClass := AUTONR;
+		    end;
+	       end;
+	       NodeIndex := SaveIndex;
+#endif
+	    end;
+         end;
+	 ConvertOp,
+         Sys0Op: begin
+	    if IsCallRange(NodeIndex) then begin
+	       NodeIndex := SkipCallRange(NodeIndex);
+               SetMinor (NodeIndex, LoadadrOp);
+               typ := AnyPtrPtr;
+               TypeField := typ;
+            end
+            else begin
+               ErrorMsg (28, ColNo [p2]);
+               typ := VoidType;
+               NodeIndex := -1;
+            end;
+         end;
+         CallOp: begin
+            NodeIndex := Ls1operand;  (* skip CallOp *)
+            NodeIndex := UnaryExpression (
+               LoadadrOp, AnyPtrPtr, NodeIndex, 0, 0);
+            typ := AnyPtrPtr;
+         end;
+         LitOp: begin
+	    typ := TypeType [p2];
+            if typ = CharPtr then begin
+               CharToPac (NodeIndex);
+               typ := PacPtr;
+            end;
+            if IsCharArray (typ) then begin
+               typ := AnyPtrPtr;
+               SetMinor (NodeIndex, LoadstrOp);
+               TypeField := typ;
+            end
+            else begin
+               ErrorMsg (28, ColNo [p2]);
+               typ := VoidType;
+               NodeIndex := -1;
+            end;
+         end;
+         otherwise: begin
+            ErrorMsg (28, ColNo [p2]);
+            typ := VoidType;
+            NodeIndex := -1;
+         end;
+      end;
+      g1 [p1] := NodeIndex;
+      TypeType [p1] := typ;
+      SubType [p1] := typ;
+   end
+   else begin
+      g1 [p1] := -1;
+      TypeType [p1] := VoidType;
+      SubType [p1] := VoidType;
+   end;
+end  (* GenAddress *);
+
+
+function UseSymbolicConst : boolean; external;
+
+procedure AccessVariable
+   (symp: SymbolTableRange;
+    p1,
+    p2: ParseStackRange);
+
+(* an identifier can be one of: a scalar variable var ,   *)
+(* an array variable var or a function var *)
+
+#ifdef RASX /*RAS05 loc.var*/
+var   NodeIndex: HdgRange;
+#endif
+
+begin
+   if (symp = -1) then begin
+      g1 [p1] := -1;
+      TypeType[p1] := IntegerPtr;
+      SubType[p1] := IntegerPtr;
+   end
+   else begin
+      case STab[symp].SKind of
+
+         ConDcl: begin
+#ifndef RAS /*RASE err.17: fix for -Xc (da ist was oberfaul!) */
+(*JH*)      if UseSymbolicConst and IsOrdinal(PrimType(STab[symp].SType))
+ 	    then
+	      g1 [p1] := node3(IdOp, TypeType[p1], symp, 0)
+	    else
+#endif
+	      g1 [p1] := node3(LitOp, TypeType[p1], STab [symp].SCon1val, STab [symp].SCon2val);
+	    NameofConst [p1] := GenConDclName(symp);
+         end;
+
+         VarDcl, ParmDcl, TypeNameDcl: begin
+
+#ifdef PYRAMID_DOUBTFUL
+#else
+	    with STab [symp] do begin
+          	if (SLevel <= STab [ProcIndex].SLevel) and
+	           ((SClass = AUTO) or (SClass = REGISTER)) then
+		    SClass := AUTONR;
+	    end;
+#endif
+	    with STab [symp] do begin
+          	if (SLevel <= STab [ProcIndex].SLevel) and
+	           ((SClass = AUTO) or (SClass = AUTONR) or (SClass = REGISTER) or (SClass = PARAM)) then
+		    SFeld4 := 1;
+	    end;
+	    g1 [p1] := node3 (IdOp, TypeType [p1], symp, 0);
+         end;
+
+         RecordElementDcl: begin
+#ifdef RASX /*RAS05 use orig. WITH expr. if not in FOR etc. */
+            NodeIndex := WithRecs [STab [symp].SLevel];  (* DerefOp *)
+            NodeIndex := Unary1operand;       (* LoadOp  *)
+            NodeIndex := Unary1operand;       (* IdOp    *)
+            if not testbit ( STab[Node1parameter] .SFeld4, WithTmpVar ) then
+                FatalErrorMsg ( 119, 0 );
+            if RAS_control ['W']  or ( RAS_control ['w'] and 
+                    not LoopingInsideWith ( STab [symp].SLevel ) ) then begin
+                 g1 [p1] := BinaryExpression (
+                   ElementOp,
+	           TypeType [p1],
+                   CopyTree (STab[Node1parameter] .SFeld3), (* the orig. WITH expr. *)
+                   node3 (LitOffsetOp, IntegerPtr, symp, 0))
+            end else begin
+               setbit ( STab[Node1parameter] .SFeld4, WithAktiv );
+#endif
+	    g1 [p1] := BinaryExpression (
+               ElementOp,
+	       TypeType [p1],
+               CopyTree (WithRecs [STab [symp].SLevel]),
+               node3 (LitOffsetOp, IntegerPtr, symp, 0));
+#ifdef RASX /*RAS05*/
+         end;
+#endif
+         end;
+
+         otherwise begin
+            ErrorMsg (18, ColNo [p1]); (* not a variable *)
+         end;
+      end;
+   end;
+end  (*AccessVariable *);
+
+
+   procedure IndexedVar
+      (p1,
+       p2: integer);
+
+   label
+      100;
+
+   var
+      typ,
+      ityp,
+      etyp: SymbolTableRange;
+      upper,
+      lower : integer;
+      itree,
+      NodeIndex: HdgRange;
+      (* padding: boolean; 1.5.94 *)
+      kind: KINDTYPE;
+
+   begin
+      if val [p1] = -1 then begin
+	 ErrorMsg (21, ColNo [p1]);
+	 StackError (p1);
+	 goto 100;
+      end;
+      kind := STab [ val [p1] ].SKind;
+      if kind = ConDcl then begin
+	 ErrorMsg (100, ColNo [p1]);
+	 StackError (p1);
+	 goto 100;
+      end;
+      typ := TypeType [p1];
+      if STab [typ].SType = ArrayType then begin
+         ityp := STab [typ].SIndex;
+         upper := STab [ityp].SHighRange;
+         lower := STab [ityp].SLowRange;
+         ityp := PrimType (ityp);
+         etyp := STab [typ].SElement;
+      end
+      else if STab [typ].SType = StringType then begin
+         upper := STab [typ].SLength - 1;
+         lower := 0;
+         ityp := IntegerPtr;
+         etyp := CharPtr;
+      end
+      else begin
+         ErrorMsg (21, ColNo [p1]);
+         StackError (p1);
+         goto 100;
+      end;
+      if AssgnmntCompatible (ityp, g1 [p2]) then begin
+#ifdef RASN /*RASN1 avoid char->int convert*/
+       if ( not RAS_control ['c'] ) then 
+#endif
+	 itree := EvalConvert (IntegerPtr, g1 [p2]);
+      end
+      else begin
+         ErrorMsg (11, ColNo [p2]);
+         StackError (p1);
+         goto 100;
+      end  (* if *);
+#ifdef RASN /*RASN1 avoid range check on char*/
+      if ( not RAS_control ['c'] ) then 
+#endif
+      if control ['r'] then begin
+         itree := RangeCheck (STab [typ].SIndex, itree);
+      end;
+      SubType [p1] := etyp;
+      TypeType [p1] := PrimType (etyp);
+      (* if control ['n'] then begin
+       *    with STab [etyp].TypeInfo do begin
+       *       padding := (SSize mod SAlign) <> 0;
+       *    end;
+       * end
+       * else begin
+       *    padding := false;
+       * end;
+       * 1.5.94 *)
+      NodeIndex := g1 [p1];
+#ifdef RASN /*RASN1 avoid range check on char*/
+      if ( RAS_control ['c'] ) then 
+       NodeIndex := BinaryExpression (
+	 SubscriptOp,
+	 etyp,
+	 g1 [p1],
+	 g1 [p2] ) else
+#endif
+      NodeIndex := BinaryExpression (
+	 SubscriptOp,
+	 etyp,
+	 g1 [p1],
+	 itree);
+      Bin2parameter := -lower;
+#ifdef RASN /*RASN1 avoid FoldSubscript on char*/
+      if ( not RAS_control ['c'] ) then 
+#endif
+      FoldSubscript (NodeIndex);
+      g1 [p1] := NodeIndex;
+
+      100:  (* error exit *)
+   end  (* IndexedVar *);
+
+
+   procedure EvalWith
+      (p1,
+       p2: integer);
+
+   var
+      typ,
+      tmptyp,
+      tmp: SymbolTableRange;
+      NodeIndex: HdgRange;
+
+   begin
+      typ := TypeType [p2];
+      if STab [typ].SType <> RecordType then begin
+         ErrorMsg (19, ColNo [p2]);
+      end
+      else begin
+	 EntSymbol(0,PointerType,TypeDcl,-1);
+	 STab[SymPtr].SDomain := typ;
+         tmptyp := SymPtr;
+         tmp := GetTemporary (ProcIndex, tmptyp, false);
+#ifdef RASX /*RAS05 save WITH expr. in SFeld3 */
+	 STab[SymPtr].SFeld3 := g1 [p2];       
+	 setbit ( STab[SymPtr].SFeld4, WithTmpVar );       
+#endif
+         NodeIndex := LongStatement (
+            StoreOp,
+            IntegerPtr,
+            node3 (IdOp, tmptyp, tmp, 0),
+            UnaryExpression (
+               LoadadrOp,
+               tmptyp,          (* EG5: 24-Nov-87 WB; Fehlerbehebung fuer NME *)
+	       g1 [p2],
+               0,
+               0),
+            0,
+            0,
+            CardNum [p2]);
+         upscope (-1);
+         WithRecs [LevelNo] := UnaryExpression (
+            DerefOp,
+            typ,
+            UnaryExpression (
+               LoadOp,
+               tmptyp,
+               node3 (IdOp, tmptyp, tmp, 0),
+               0,
+               0),
+            0,
+            0);
+         val [p1] := val [p1] + 1;
+	 g1 [p1] := LinkChain (g1 [p1], NodeIndex);
+      end;
+   end  (* EvalWith *);
+
+
+   procedure EndWith
+      (p1: integer);
+
+   var
+      i,
+      count: integer;
+      NodeIndex: HdgRange;
+#ifdef RASX /*RAS05 loc.vars */
+      store: HdgRange;
+      j: integer;
+#endif
+   begin
+      count := val [p1];
+      for i := 1 to count do begin
+         NodeIndex := WithRecs [LevelNo];  (* DerefOp *)
+         NodeIndex := Unary1operand;       (* LoadOp  *)
+         NodeIndex := Unary1operand;       (* IdOp    *)
+         FreeTemporary (Node1parameter);
+#ifdef RASX /*RAS05 make unused temp.stores NopOp */
+         if not testbit ( STab[Node1parameter] .SFeld4, WithTmpVar ) then
+                FatalErrorMsg ( 119, 0 );
+         if RAS_control ['W'] or ( RAS_control ['w'] and 
+               ( not testbit ( STab[Node1parameter] .SFeld4, WithAktiv ) ) ) then begin 
+            NodeIndex := g1 [ p1 ];
+            for j := count downto i+1 do
+              NodeIndex := NextLink;
+            SetMinor ( NodeIndex, NopOp ); 
+         end else if  not testbit ( STab[Node1parameter] .SFeld4, WithAktiv ) then begin
+            writeln ( 'Line ', CardNum [p1] :1, ': unrefered WITH expression' );
+            if RAS_control ['u'] then FatalErrorMsg ( 119, 0 )
+            else setbit ( STab[Node1parameter] .SFeld4, WithAktiv );
+         end;
+#endif
+         PopScope (-1);
+      end;
+						(* EF4: 01-11-86 WB *)	
+      ClearLabel;
+   end  (* EndWith *);
+
+
+   procedure QualifiedVar;
+
+   var
+      i: integer;
+
+   begin
+      i := QidLookup (p1, p2);
+      if i <> -1 then begin
+	 g1 [p1] := BinaryExpression (
+             ElementOp,
+             SubType [p2],
+	     g1 [p1],
+             node3 (LitOffsetOp, IntegerPtr, i, 0));
+	 TypeType [p1] := TypeType [p2];
+         SubType [p1] := SubType [p2];
+      end;
+   end (*QualifiedVar*);
+
+
+   procedure RefVar;
+      (* *)
+	begin
+	ErrorMsg (27, -1);
+        end (*RefVar*);
+
+
+   procedure DerefVar;
+
+   var
+      t,
+      typ: SymbolTableRange;
+#ifdef PYRAMID_DOUBTFUL
+#else
+      NodeIndex: HdgRange;
+#endif
+
+   begin
+      typ := TypeType [p1];
+      if STab [typ].SType = PointerType then begin
+	 if control ['r'] then
+	    g1 [p1] := CallNilCheck(p1);
+         t := STab [STab [typ].SDomain].SType;
+	 g1 [p1] := UnaryExpression (
+            DerefOp,
+            t,
+	    g1 [p1],
+            0,
+            0);
+      end
+      else if STab [typ].SType = FileType then begin
+         t := STab [typ].SComponent;
+	 SetMinor (g1 [p1], StorepadrOp);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 NodeIndex := g1 [p1];
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+#endif
+	 g1 [p1] := CallFnil (g1 [p1], PrimType (t));
+      end
+      else begin
+         ErrorMsg (29, ColNo [p1]);
+         t := VoidType;
+	 g1 [p1] := -1;
+      end  (* if *);
+      SubType [p1] := t;
+      TypeType [p1] := PrimType (t);
+   end (*DerefVar*);
+
+
+   (*****************************)
+   (*      case checkers        *)
+   (*****************************)
+
+
+   procedure CheckScalar
+      (p1: integer);
+
+   begin
+      case STab [TypeType [p1]].SType of
+         UlongType, LongType,
+         BooleanType, IntegerType, CharacterType, EnumerativeType: begin
+         end;
+         otherwise begin
+            ErrorMsg (1, ColNo [p1]);
+         end;
+      end  (* case *);
+   end  (* CheckScalar *);
+
+
+   procedure BuildCaseConst;
+   begin
+      CheckScalar (p1);
+      if p2 <> p1 then begin
+         CheckScalar (p2);
+	 if val [p1] > val [p2] then begin
+            ErrorMsg (130, ColNo [p2]);
+	 end;
+         if SubType [p1] <> SubType [p2] then begin
+            ErrorMsg (1, ColNo [p2]);
+         end;
+      end;
+      g2 [p1] := g1 [p2];
+   end  (* BuildCaseConst *);
+
+
+   function BuildCase;
+      (* p1-expression list for select lablels *)
+      (* p2-statement list                     *)
+
+   var
+      i,
+      j,
+      t,
+      TempCase: integer;
+      flag: boolean;
+
+   procedure search (low, high: integer; var p: integer; var h: boolean);
+   var
+      p1, p2: integer;
+
+   begin
+      if p = -1 then
+      begin
+         p := t;
+         h := true;
+         CaseLowValOf(p) := low;
+         CaseHighValOf(p) := high;
+         CaseLeftLinkOf(p) := -1;
+         CaseRightLinkOf(p) := -1;
+         CaseBalanceOf(p) := 0;
+      end else
+      if (high < CaseLowValOf(p)) or 
+      ((high >= CaseLowValOf(p)) and (low < CaseLowValOf(p))) then
+      begin
+         if high >= CaseLowValOf(p) then ErrorMsg(131, ExpColNo[j + 1]);
+         search (low, high, CaseLeftLinkOf(p), h);
+         if h then
+         case CaseBalanceOf(p) of
+	    1:  begin
+	           CaseBalanceOf(p) := 0;
+	           h := false;
+	        end;
+            0:  CaseBalanceOf(p) := -1;
+	    -1: begin
+		   p1 := CaseLeftLinkOf(p);
+		   if CaseBalanceOf(p1) = -1 then
+		   begin
+		      CaseLeftLinkOf(p) := CaseRightLinkOf(p1);
+		      CaseRightLinkOf(p1) := p;
+		      CaseBalanceOf(p) := 0;
+		      p := p1;
+		   end else
+		   begin
+		      p2 := CaseRightLinkOf(p1);
+		      CaseRightLinkOf(p1) := CaseLeftLinkOf(p2);
+		      CaseLeftLinkOf(p2) := p1;
+		      CaseLeftLinkOf(p) := CaseRightLinkOf(p2);
+		      CaseRightLinkOf(p2) := p;
+		      if CaseBalanceOf(p2) = -1 then CaseBalanceOf(p) := 1
+		      else CaseBalanceOf(p) := 0;
+		      if CaseBalanceOf(p2) = 1 then CaseBalanceOf(p1) := -1
+		      else CaseBalanceOf(p1) := 0;
+		      p := p2
+		   end;
+		   CaseBalanceOf(p) := 0;
+		   h := false;
+	        end
+	    end
+         end else
+         if (low > CaseHighValOf(p)) or 
+         ((low <= CaseHighValOf(p)) and (high > CaseHighValOf(p))) then
+         begin
+	    if low <= CaseHighValOf(p) then ErrorMsg(131, ExpColNo [j + 1]);
+	    search (low, high, CaseRightLinkOf(p), h);
+	    if h then
+	    case CaseBalanceOf(p) of
+	       -1: begin
+		      CaseBalanceOf(p) := 0;
+		      h := false;
+		   end;
+               0:  CaseBalanceOf(p) := 1;
+	       1:  begin
+		      p1 := CaseRightLinkOf(p);
+		      if CaseBalanceOf(p1) = 1 then
+		      begin
+		         CaseRightLinkOf(p) := CaseLeftLinkOf(p1);
+		         CaseLeftLinkOf(p1) := p;
+		         CaseBalanceOf(p) := 0;
+		         p := p1;
+		      end else
+		      begin
+		         p2 := CaseLeftLinkOf(p1);
+		         CaseLeftLinkOf(p1) := CaseRightLinkOf(p2);
+		         CaseRightLinkOf(p2) := p1;
+		         CaseRightLinkOf(p) := CaseLeftLinkOf(p2);
+		         CaseLeftLinkOf(p2) := p;
+		         if CaseBalanceOf(p2) = 1 then CaseBalanceOf(p) := -1 
+		         else CaseBalanceOf(p) := 0;
+		         if CaseBalanceOf(p2) = -1 then CaseBalanceOf(p1) := 1 
+		         else CaseBalanceOf(p1) := 0;
+		         p := p2
+		      end;
+		      CaseBalanceOf(p) := 0;
+		      h := false;
+		   end
+	    end
+         end else
+         begin
+	    if (low < CaseLowValOf(p)) and (high > CaseHighValOf(p)) then
+	    begin
+	       p1 := p;
+	       p := t;
+	       CaseLowValOf(p) := low;
+	       CaseHighValOf(p) := high;
+	       CaseLeftLinkOf(p) := CaseLeftLinkOf(p1);
+	       CaseRightLinkOf(p) := CaseRightLinkOf(p1);
+	       CaseBalanceOf(p) := CaseBalanceOf(p1);
+	       ErrorMsg(131, ExpColNo [j + 1]);
+	    end;
+	    ErrorMsg(131, ExpColNo [j + 1]);
+	    h := false;
+         end
+   end;
+
+   begin
+      TempCase := -1;
+      j := StartCnt [p1];
+      for i := 1 to cnt [p1] do begin
+         t := CaseStmnt (
+            Case,
+            CaseOp,
+            IntegerPtr,
+            ConstExp (ExpVal [j]),
+            ConstExp (ExpVal [j + 1]),
+            CardNum [p1]);
+         flag := false;
+	 search(CaseLowValOf(t), CaseHighValOf(t), CaseRoot, flag);
+         TempCase := LinkChain (TempCase, t);
+         j := j + 2;
+      end  (* for *);
+      TempCase := LinkChain (TempCase, g1 [p2]);
+      t := special (BreakOp, 0, 0, CardNum [p1]);
+      TempCase := LinkChain (TempCase, t);
+      BuildCase:= TempCase;
+   end  (* BuildCase *);
+
+
+   function BuildDefault;
+
+   var
+      t,
+      TempCase: integer;
+
+   begin
+      TempCase := CaseStmnt (
+         Case,
+         DefaultOp,
+         IntegerPtr,
+         0,
+         0,
+         CardNum [p1]);
+      TempCase := LinkChain (TempCase, g1 [p2]);
+      t := special (BreakOp, 0, 0, CardNum [p1]);
+      TempCase := LinkChain (TempCase, t);
+      BuildDefault := TempCase;
+   end  (* BuildDefault *);
+
+   function LabDef;
+
+   var
+      lab,
+      len: integer;
+      s: STRING;
+      ptr: integer;
+
+   begin
+      lab := val [p1];
+      if (lab < 0) or (lab > 9999) then begin
+         ErrorMsg (28, ColNo [p1]);
+         LabDef := -1;
+      end
+      else begin
+         LabelName (lab, s, len);
+         lab := EnterString (s [0], len);
+         AllocNameSpace (lab);
+         lab := FindSymbol (lab);
+         if lab = -1 then begin
+            ErrorMsg (3, ColNo [p1]);
+            LabDef := -1;
+         end
+         else if lab < ProcMark then begin
+            ErrorMsg (6, ColNo [p1]);
+            LabDef := -1;
+         end
+	 else if (not GetFlag (lab, ForwardFlag)) then begin
+	    ErrorMsg (36, ColNo [p1]);
+	    LabDef := -1;
+	 end
+         else begin
+            ClearFlag (lab, ForwardFlag);
+            LabDef := special (LabelOp, 0, lab, CardNum [p1]);
+						(* EF4: 01-11-86 WB *)	
+	    ptr := STab [lab].SParent;
+	    with LabelStack [ptr] do begin
+		DefLevel := ForWithLevel;
+		if (RefLevel > 0) and (RefLevel <> DefLevel) then
+		    ErrorMsg (138, ColNo [p1]);
+		end;
+         end;
+      end;
+   end  (* LabDef *);
+
+
+   function LabRef;
+
+   label
+      100;
+
+   var
+      lab,
+      len: integer;
+      s: STRING;
+      ptr: integer;
+
+   begin
+      lab := val [p1];
+      if (lab < 0) or (lab > 9999) then begin
+         ErrorMsg (35, ColNo [p1]);
+         LabRef := -1;
+         goto 100;
+      end;
+      LabelName (lab, s, len);
+      lab := EnterString (s [0], len);
+      lab := FindSymbol (lab);
+      if lab = -1 then begin
+         ErrorMsg (3, ColNo [p1]);
+         LabRef := -1;
+         goto 100;
+      end;
+      if lab >= ProcMark then begin
+         LabRef := special (
+            GotoOp,
+            0,
+            lab,
+            CardNum [p1]);
+      end
+      else begin
+         LabRef := EvalGoto (lab);
+      end;
+
+						(* EF4: 01-11-86 WB *)	
+      ptr := STab [lab].SParent;
+      with LabelStack [ptr] do begin
+	  if (RefLevel > 0) then begin
+	     if (ForWithLevel < RefLevel) then
+		RefLevel := ForWithLevel
+	  end else
+	     RefLevel := ForWithLevel;
+	  if (not GetFlag (lab, ForwardFlag))
+		and (DefLevel = 0) then
+	     ErrorMsg (139, ColNo [p1]);
+	  end;
+      100:
+   end;
+
+
+procedure EvalTo
+   (f,
+    v,
+    e1,
+    e2: ParseStackRange);
+
+(*
+ *   for v := e1 to e2 do s generates
+ *
+ *   if control ['t'] then
+ *      t2 := e2;
+ *      v := e1;
+ *      while (v <= t2) do begin
+ *         s;
+ *         v := succ (v);
+ *      end;
+ *   end
+ *   else begin
+ *      t1 := e1;
+ *      t2 := e2;
+ *      if t1 <= t2 then begin
+ *         v := t1;
+ *         repeat
+ *            s;
+ *            if v = t2 then break;
+ *            v := succ (v);
+ *         until false;
+ *      end;
+ *   end;
+ *)
+
+var
+   i,
+   typ,
+   t1,
+   t2: SymbolTableRange;
+   tln1,
+   tln2,
+   temp,
+   ForStmnt: HdgRange;
+   
+begin
+#ifdef RASX /*RAS05 save loop's scope*/
+    PushLoopScope;
+#endif
+   i := IdLookup (v);
+   if i <> -1 then begin
+      typ := TypeType [v];
+      if GetFlag (i, ControlVarFlag) then begin
+	 ErrorMsg (142, ColNo [v]);
+      end;
+      if
+         (STab [i].SKind <> VarDcl) and
+         (STab [i].SKind <> ParmDcl)
+      then begin
+         ErrorMsg (18, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if
+(*           (control ['s']) and  *)
+         ((STab [i].SKind <> VarDcl) or
+          (STab [i].SLevel <= STab [ProcIndex].SLevel))
+      then begin
+         ErrorMsg (134, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if not IsOrdinal (typ) then begin
+         ErrorMsg (1, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if not AssgnmntCompatible (typ, g1 [e1]) then begin
+         ErrorMsg (0, ColNo [e1]);
+	 g1 [f] := -1;
+      end
+      else if not AssgnmntCompatible (typ, g1 [e2]) then begin
+         ErrorMsg (0, ColNo [e2]);
+	 g1 [f] := -1;
+
+      end
+      else if IsConstant (g1 [e2]) and IsConstant (g1 [e1]) and
+	      (Node1parameterOf (g1 [e1]) > Node1parameterOf (g1 [e2]))
+      then begin
+	 g1 [f] := -1;
+      end
+			(* EGST 02-08-88 WB; Nehme alte For-Schleife auch *)
+			(* bei -qn; da Probleme mit Enumerative Type      *)
+			(* -t Flag fuer Testzwecke			  *)
+      else if control ['t'] then begin
+	 if IsConstant (g1 [e1]) then begin
+            t1 := -1;
+	    tln1 := EvalConvert (typ, g1 [e1]);
+	 end
+	 else begin
+	    t1 := GetTemporary (ProcIndex, typ, false);
+            tln1 := UnaryExpression (
+			LoadOp,
+			typ,
+			node3 (IdOp, typ, t1, 0),
+	       		0, 0);
+	 end;
+	 if IsConstant (g1 [e2]) then begin
+            t2 := -1;
+	    tln2 := EvalConvert (typ, g1 [e2]);
+         end
+         else begin
+            t2 := GetTemporary (ProcIndex, typ, false);
+            tln2 := UnaryExpression (
+			LoadOp,
+			typ,
+			node3 (IdOp, typ, t2, 0),
+	       		0, 0);
+	 end;
+
+      (*  v := succ (v) *)
+         temp := LongStatement (
+            PrefixOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            node3 (LitOp, typ, 1, 0),
+            0,
+            AddOp,
+            CardNum [f]);
+
+      (*  v <= e2 *)
+         ForStmnt := FoldBinary (
+            LeOp,
+            BooleanPtr,
+	    UnaryExpression (
+		  LoadOp,
+		  typ,
+		  node3 (IdOp, typ, i, 0),
+	       	  0, 0),
+            tln2);
+
+      (* build while ... do ... *)
+	 ForStmnt := ComplexStmnt (loop, 0, ForStmnt, temp, -1, CardNum [f]);
+
+      (* remember location of repeat for linking in s later *)
+         g2 [f] := ForStmnt;
+
+      (* build  v := t1; t1 := e1; t2 := e2 *)
+         temp := LongStatement (
+            StoreOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            tln1,
+            0,
+            0,
+            CardNum [f]);
+	 ForStmnt := LinkChain (temp, ForStmnt);
+
+	 temp := -1;
+	 if t1 <> -1 then begin
+	    temp := LinkChain (
+		       temp, 
+		       LongStatement (
+		          StoreOp,
+		          typ,
+		          node3 (IdOp, typ, t1, 0),
+			  g1 [e1],
+		          0,
+		          0,
+		          CardNum [f]));
+	 end;
+	 if t2 <> -1 then begin
+	    temp := LinkChain (
+		       temp, 
+		       LongStatement (
+		          StoreOp,
+		          typ,
+		          node3 (IdOp, typ, t2, 0),
+			  g1 [e2],
+		          0,
+		          0,
+		          CardNum [f]));
+	 end;
+
+      (* link while *)
+         ForStmnt := LinkChain (temp, ForStmnt);
+	 g1 [f] := ForStmnt;
+	 TypeType [f] := t2;
+	 if t1 <> -1 then begin
+            FreeTemporary (t1);
+	 end;
+      end
+      else begin			(* old version of for-loop *)
+	 if IsConstant (g1 [e1]) then begin
+            t1 := -1;
+	    tln1 := EvalConvert (IntegerPtr, g1 [e1]);
+         end
+         else begin
+            t1 := GetTemporary (ProcIndex, IntegerPtr, false);
+            tln1 := UnaryExpression (
+			LoadOp,
+			IntegerPtr,
+			node3 (IdOp, IntegerPtr, t1, 0),
+			0,
+			0);
+         end;
+	 if IsConstant (g1 [e2]) then begin
+            t2 := -1;
+	    tln2 := EvalConvert (IntegerPtr, g1 [e2]);
+         end
+         else begin
+            t2 := GetTemporary (ProcIndex, IntegerPtr, false);
+            tln2 := UnaryExpression (
+			LoadOp,
+			IntegerPtr,
+			node3 (IdOp, IntegerPtr, t2, 0),
+	       		0,
+	       		0);
+         end;
+
+      (*  if v = t2 then break ; v := succ (v) *)
+
+         temp := FoldBinary (
+            EqOp,
+            BooleanPtr,
+            UnaryExpression (
+               LoadOp,
+               typ,
+               node3 (IdOp, typ, i, 0),
+               0,
+               0),
+            EvalConvert (typ, CopyTree (tln2)));
+         ForStmnt := ComplexStmnt (
+            ifthenelse,
+            0,
+            temp,
+            special (BreakOp, 0, 0, CardNum [f]),
+            -1,
+            CardNum [f]);
+         temp := LongStatement (
+            PrefixOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            node3 (LitOp, typ, 1, 0),
+            0,
+            AddOp,
+            CardNum [f]);
+
+	 if control ['r'] then			(* EF4: 01-11-86 WB *)
+	     temp := RangeCheck (SubType [v], temp);
+
+         ForStmnt := LinkChain (
+            ForStmnt,
+            temp);
+
+      (* build repeat ... until false *)
+
+         ForStmnt := ComplexStmnt (
+            RepeatUntil,
+            0,
+            node3 (LitOp, BooleanPtr, FalseValue, 0),
+            ForStmnt,
+            -1,
+            CardNum [f]);
+
+      (* remember location of repeat for linking in s later *)
+
+         g2 [f] := ForStmnt;
+
+      (* build v := t1 *)
+
+	 temp := EvalConvert (typ, CopyTree (tln1));	(* EF4: 01-11-86 WB *)
+	 if control ['r'] then
+	     temp := RangeCheck (SubType [v], temp);
+
+#ifdef RASX /*RAS0A*/
+         if IsConstantExpr (g1 [e2]) and IsConstantExpr (g1 [e1]) then
+         temp := LongStatement (
+            StoreOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            temp,
+            g1 [e1],
+            g1 [e2],
+            CardNum [f])
+         else
+#endif
+         temp := LongStatement (
+            StoreOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            temp,
+            0,
+            0,
+            CardNum [f]);
+
+      (* link repeat *)
+
+         ForStmnt := LinkChain (temp, ForStmnt);
+
+      (* if t1 <= t2 then ... *)
+
+         temp := FoldBinary (
+            LeOp,
+            BooleanPtr,
+            CopyTree (tln1),
+            CopyTree (tln2));
+         ForStmnt := ComplexStmnt (
+            ifthenelse,
+            0,
+            temp,
+            ForStmnt,
+            -1,
+            CardNum [f]);
+	 ForStmnt := FoldTree(ForStmnt);
+
+      (* t1 := e1 ; t2 := e2 ; if ... *)
+
+         temp := -1;
+         if t1 <> -1 then begin
+            temp := LinkChain (
+               temp,
+               LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, t1, 0),
+		  g1 [e1],
+                  0,
+                  0,
+                  CardNum [f]));
+         end;
+         if t2 <> -1 then begin
+            temp := LinkChain (
+               temp,
+               LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, t2, 0),
+		  g1 [e2],
+                  0,
+                  0,
+                  CardNum [f]));
+         end;
+         ForStmnt := LinkChain (temp, ForStmnt);
+	 g1 [f] := ForStmnt;
+	 TypeType [f] := t2;
+	 if t1 <> -1 then begin
+            FreeTemporary (t1);
+	 end;
+      end  (* if *);
+   end
+   else begin
+      g1 [f] := -1;
+   end  (* if *);
+
+   SubType[f] := i;
+   ForWithLevel := ForWithLevel + 1;
+   if g1 [f] <> -1 then
+      SetFlag (i, ControlVarFlag);
+end  (* EvalTo *);
+
+
+procedure EvalDownto
+   (f,
+    v,
+    e1,
+    e2: ParseStackRange);
+
+(*
+ *   for v := e1 downto e2 do s generates
+ *
+ *   if control ['t'] then begin
+ *      v := e1;
+ *      while (v >= e2) do begin
+ *         s;
+ *         v := pred (v);
+ *      end;
+ *   end
+ *   else begin
+ *      t1 := e1;
+ *      t2 := e2;
+ *      if t1 <= t2 then begin
+ *         v := t1;
+ *         repeat
+ *            s;
+ *            if v = t2 then break;
+ *            v := succ (v);
+ *         until false;
+ *      end;
+ *   end;
+ *)
+
+var
+   i,
+   typ,
+   t1,
+   t2: SymbolTableRange;
+   tln1,
+   tln2,
+   temp,
+   ForStmnt: HdgRange;
+   
+begin
+#ifdef RASX /*RAS05 save loop's scope*/
+    PushLoopScope;
+#endif
+   i := IdLookup (v);
+   if i <> -1 then begin
+      typ := TypeType [v];
+      if GetFlag (i, ControlVarFlag) then begin
+	 ErrorMsg (142, ColNo [v]);
+      end;
+      if
+         (STab [i].SKind <> VarDcl) and
+         (STab [i].SKind <> ParmDcl)
+      then begin
+         ErrorMsg (18, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if
+(*           (control ['s']) and  *)
+         ((STab [i].SKind <> VarDcl) or
+          (STab [i].SLevel <= STab [ProcIndex].SLevel))
+      then begin
+         ErrorMsg (134, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if not IsOrdinal (typ) then begin
+         ErrorMsg (1, ColNo [v]);
+	 g1 [f] := -1;
+      end
+      else if not AssgnmntCompatible (typ, g1 [e1]) then begin
+         ErrorMsg (0, ColNo [e1]);
+	 g1 [f] := -1;
+      end
+      else if not AssgnmntCompatible (typ, g1 [e2]) then begin
+         ErrorMsg (0, ColNo [e2]);
+	 g1 [f] := -1;
+      end
+      else if IsConstant (g1 [e2]) and IsConstant (g1 [e1]) and
+	      (Node1parameterOf (g1 [e1]) < Node1parameterOf (g1 [e2]))
+      then begin
+	 g1 [f] := -1;
+      end
+			(* EGST 02-08-88 WB; Nehme alte For-Schleife auch *)
+			(* bei -qn; da Probleme mit Enumerative Type      *)
+			(* -t Flag fuer Testzwecke			  *)
+      else if control ['t'] then begin
+	 if IsConstant (g1 [e1]) then begin
+            t1 := -1;
+	    tln1 := EvalConvert (typ,g1 [e1]);
+         end
+         else begin
+            t1 := GetTemporary (ProcIndex, typ, false);
+            tln1 := UnaryExpression (
+			LoadOp,
+			typ,
+			node3 (IdOp, typ, t1, 0),
+	       		0,
+	       		0);
+	 end;
+	 if IsConstant (g1 [e2]) then begin
+            t2 := -1;
+	    tln2 := EvalConvert (typ,g1 [e2]);
+         end
+         else begin
+            t2 := GetTemporary (ProcIndex, typ, false);
+            tln2 := UnaryExpression (
+			LoadOp,
+			typ,
+			node3 (IdOp, typ, t2, 0),
+	       		0,
+	       		0);
+	 end;
+
+      (*  v := pred (v) *)
+         temp := LongStatement (
+            PrefixOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            node3 (LitOp, typ, 1, 0),
+            0,
+            SubtOp,
+            CardNum [f]);
+
+      (*  v >= e2 *)
+         ForStmnt := FoldBinary (
+            GeOp,
+            BooleanPtr,
+	    UnaryExpression (
+                  LoadOp,
+                  typ,
+                  node3 (IdOp, typ, i, 0),
+                  0, 0),
+            tln2);
+
+      (* build while ... do ... *)
+	  ForStmnt := ComplexStmnt (loop, 0, ForStmnt, temp, -1, CardNum [f]);
+
+      (* remember location of repeat for linking in s later *)
+         g2 [f] := ForStmnt;
+
+      (* build  v := t1; t1 := e1; t2 := e2 *)
+         temp := LongStatement (
+            StoreOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            tln1,
+            0,
+            0,
+            CardNum [f]);
+	 ForStmnt := LinkChain (temp, ForStmnt);
+
+	 temp := -1;
+	 if t1 <> -1 then begin
+	    temp := LinkChain (
+		       temp, 
+		       LongStatement (
+		          StoreOp,
+		          typ,
+		          node3 (IdOp, typ, t1, 0),
+			  g1 [e1],
+		          0,
+		          0,
+		          CardNum [f]));
+	 end;
+	 if t2 <> -1 then begin
+	    temp := LinkChain (
+		       temp, 
+		       LongStatement (
+		          StoreOp,
+		          typ,
+		          node3 (IdOp, typ, t2, 0),
+			  g1 [e2],
+		          0,
+		          0,
+		          CardNum [f]));
+	 end;
+
+      (* link repeat *)
+         ForStmnt := LinkChain (temp, ForStmnt);
+	 g1 [f] := ForStmnt;
+	 TypeType [f] := t2;
+	 if t1 <> -1 then begin
+            FreeTemporary (t1);
+	 end;
+      end
+      else begin
+	 if IsConstant (g1 [e1]) then begin
+            t1 := -1;
+	    tln1 := EvalConvert (IntegerPtr, g1 [e1]);
+         end
+         else begin
+            t1 := GetTemporary (ProcIndex, IntegerPtr, false);
+            tln1 := UnaryExpression (
+			LoadOp,
+			IntegerPtr,
+			node3 (IdOp, IntegerPtr, t1, 0), 
+			0,
+			0);
+         end;
+	 if IsConstant (g1 [e2]) then begin
+            t2 := -1;
+	    tln2 := EvalConvert (IntegerPtr, g1 [e2]);
+         end
+         else begin
+            t2 := GetTemporary (ProcIndex, IntegerPtr, false);
+            tln2 := UnaryExpression (
+			LoadOp,
+			IntegerPtr,
+			node3 (IdOp, IntegerPtr, t2, 0),
+			0,
+			0);
+         end;
+
+      (*  if v = t2 then break ; v := succ (v) *)
+
+         temp := FoldBinary (
+            EqOp,
+            BooleanPtr,
+            UnaryExpression (
+               LoadOp,
+               typ,
+               node3 (IdOp, typ, i, 0),
+               0,
+               0),
+            EvalConvert (typ, CopyTree (tln2)));
+         ForStmnt := ComplexStmnt (
+            ifthenelse,
+            0,
+            temp,
+            special (BreakOp, 0, 0, CardNum [f]),
+            -1,
+            CardNum [f]);
+         temp := LongStatement (
+            PrefixOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            node3 (LitOp, typ, 1, 0),
+            0,
+            SubtOp,
+            CardNum [f]);
+
+	 if control ['r'] then			(* EF4: 01-11-86 WB *)
+	     temp := RangeCheck (SubType [v], temp);
+
+         ForStmnt := LinkChain (
+            ForStmnt,
+            temp);
+
+      (* build repeat ... until false *)
+
+         ForStmnt := ComplexStmnt (
+            RepeatUntil,
+            0,
+            node3 (LitOp, BooleanPtr, FalseValue, 0),
+            ForStmnt,
+            -1,
+            CardNum [f]);
+
+      (* remember location of repeat for linking in s later *)
+
+         g2 [f] := ForStmnt;
+
+      (* build v := t1 *)
+
+	 temp := EvalConvert (typ, CopyTree (tln1));	(* EF4: 01-11-86 WB *)
+	 if control ['r'] then
+	     temp := RangeCheck (SubType [v], temp);
+
+         temp := LongStatement (
+            StoreOp,
+            typ,
+            node3 (IdOp, typ, i, 0),
+            temp,
+            0,
+            0,
+            CardNum [f]);
+
+      (* link repeat *)
+
+         ForStmnt := LinkChain (temp, ForStmnt);
+
+      (* if t1 >= t2 then ... *)
+
+         temp := FoldBinary (
+            GeOp,
+            BooleanPtr,
+            CopyTree (tln1),
+            CopyTree (tln2));
+         ForStmnt := ComplexStmnt (
+            ifthenelse,
+            0,
+            temp,
+            ForStmnt,
+            -1,
+            CardNum [f]);
+	 ForStmnt := FoldTree(ForStmnt);
+
+      (* t1 := e1 ; t2 := e2 ; if ... *)
+
+         temp := -1;
+         if t1 <> -1 then begin
+            temp := LinkChain (
+               temp,
+               LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, t1, 0),
+		  g1 [e1],
+                  0,
+                  0,
+                  CardNum [f]));
+         end;
+         if t2 <> -1 then begin
+            temp := LinkChain (
+               temp,
+               LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, t2, 0),
+		  g1 [e2],
+                  0,
+                  0,
+                  CardNum [f]));
+         end;
+         ForStmnt := LinkChain (temp, ForStmnt);
+	 g1 [f] := ForStmnt;
+	 TypeType [f] := t2;
+	 if t1 <> -1 then begin
+            FreeTemporary (t1);
+	 end;
+      end  (* if *);
+   end
+   else begin
+      g1 [f] := -1;
+   end  (* if *);
+
+   SubType[f] := i;
+   ForWithLevel := ForWithLevel + 1;
+   if g1 [f] <> -1 then
+      SetFlag (i, ControlVarFlag);
+end  (* EvalDownto *);
+
+
+procedure EvalFor
+   (p1,
+    p2: HdgRange);
+
+var
+   NodeIndex: HdgRange;
+
+begin
+   if g1 [p1] <> -1 then begin
+      NodeIndex := g2 [p1];
+			(* EGST 02-08-88 WB; Nehme alte For-Schleife auch *)
+			(* bei -qn; da Probleme mit Enumerative Type      *)
+			(* -t Flag fuer Testzwecke			  *)
+      if control ['t'] then begin
+         NodeIndex := WhileTestField;
+         NodeIndex := Unary1operandOf (Bin1operand);
+         ClearFlag (Node1parameter, ControlVarFlag);
+         NodeIndex := g2 [p1];
+   
+	 WhileBodyField := LinkChain (g1 [p2], WhileBodyField);
+      end 
+      else begin
+	 NodeIndex := RepeatBody;
+	 NodeIndex := IfCondField;
+	 NodeIndex := Unary1operandOf (Bin1operand);
+	 ClearFlag (Node1parameter, ControlVarFlag);
+	 NodeIndex := g2 [p1];
+
+	 RepeatBody := LinkChain (g1 [p2], RepeatBody);
+      end;
+      if TypeType [p1] <> -1 then begin
+	 FreeTemporary (TypeType [p1]);
+      end;
+   end;
+
+   if control ['g'] and (SubType [p1] <> -1) then begin
+      NodeIndex := LongStatement (
+	 StoreOp,
+	 IntegerPtr,
+	 node3 (IdOp, IntegerPtr, SubType [p1], 0),
+	 node3 (LitOp, IntegerPtr, FillForVar, 0),
+	 0,
+	 0,
+	 CardNum [p1]);
+	 g1 [p1] := LinkChain (g1 [p1], NodeIndex);
+   end;
+
+   ClearLabel;
+#ifdef RASX /*RAS05 pop loop's scope*/
+    PopLoopScope;
+#endif
+end  (* EvalFor *);
+
+
+function EvalProgramParameters
+   (p1: ParseStackRange)
+   : HdgRange;
+
+var
+   i,
+   k: integer;
+   id: SymbolTableRange;
+   NodeIndex: HdgRange;
+
+begin
+   NodeIndex := -1;
+   k := 1;
+   while k <= cnt [p1] do begin
+      i := StartCnt [p1] + k;
+      id := FindSymbol (IdList [i]);
+      if id <> -1 then begin
+         if (id <> InputPtr) and (id <> OutputPtr) then begin
+            if IsFile (STab [id].SType) then begin
+               NodeIndex := LinkChain (NodeIndex, EvalDefname (id));
+            end
+            else begin
+               DclError (IdList [i], CardNum [p1], CurrentFile, 1);
+            end;
+         end;
+      end
+      else begin
+         DclError (IdList [i], CardNum [p1], CurrentFile, 3);
+      end;
+      k := k + 1;
+   end  (* while *);
+   IdPtr := StartCnt [p1]; (* restore pointer *)
+   EvalProgramParameters := NodeIndex;
+end  (* EvalProgramParameters *);
+
+
+function EvalAssert
+   (p1, p2: ParseStackRange)
+   : HdgRange;
+
+begin
+   EvalAssert := -1;
+end  (* Evalassert *);

@@ -1,0 +1,2640 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VAK661$
+.tt 2 $$$
+.TT 3 $ElkeZ$Subquery_handling$2000-04-04$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+MODULE  : Subquery_handling
+=========
+.sp
+Purpose : First part of processing mass selects
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              a661_corr_sub (
+                    VAR acv                     : tak_all_command_glob;
+                    VAR dmli                    : tak_dml_info;
+                    s_n                         : integer;
+                    filled_part2_bytes          : integer;
+                    VAR sr_rec                  : tak71_strat_rec;
+                    VAR pseudo_resultset_select : boolean;
+                    last_corr_query             : boolean;
+                    level                       : integer;
+                    no_in_level                 : integer);
+ 
+        PROCEDURE
+              a661_update_keys_of_parsrecords
+                    (VAR acv    : tak_all_command_glob;
+                    old_p_id    : tsp00_C1;
+                    VAR lowpars : tsp00_Uint1;
+                    old_lowpars : tsp00_Uint1);
+ 
+        PROCEDURE
+              a661_build_t_fromsel_tableid (
+                    VAR syskey_tableid  : tgg00_Surrogate;
+                    VAR fn_tableid      : tgg00_Surrogate;
+                    VAR curr_ex_parskey : tak_parskey;
+                    site                : tgg00_ServerdbNo;
+                    from_select_no      : tsp00_Int2);
+ 
+        FUNCTION
+              a661_fromsel_found (
+                    VAR acv : tak_all_command_glob;
+                    sub_n : integer) : boolean;
+ 
+        PROCEDURE
+              a661del_all_fromtabs (
+                    VAR acv : tak_all_command_glob;
+                    sub_n : integer);
+ 
+        PROCEDURE
+              a661_fdelete_fromtab_results (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a661a_subquery (
+                    VAR acv                     : tak_all_command_glob;
+                    VAR dmli                    : tak_dml_info;
+                    VAR sr_rec                  : tak71_strat_rec;
+                    curr_n                      : tsp00_Int2;
+                    VAR pseudo_resultset_select : boolean);
+ 
+        PROCEDURE
+              a661_get_from_select_table (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tableid : tgg00_Surrogate;
+                    VAR pbasep  : tak_sysbufferaddress;
+                    dstate      : tak_directory_state;
+                    all         : boolean;
+                    VAR f_ok    : boolean);
+ 
+        PROCEDURE
+              a661get_from_select_table (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    from_select_no : tsp00_Int2;
+                    all            : boolean);
+ 
+        PROCEDURE
+              a661_sub_build (
+                    VAR acv               : tak_all_command_glob;
+                    VAR dmli              : tak_dml_info;
+                    sub_n                 : integer;
+                    filled_part2_bytes    : integer;
+                    VAR sr_rec            : tak71_strat_rec);
+ 
+        FUNCTION
+              a661_is_fromsel_table (
+                    VAR acv     : tak_all_command_glob;
+                    VAR ftreeid : tgg00_FileId) : boolean;
+ 
+        PROCEDURE
+              a661exec_sub (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    curr_n                  : tsp00_Int2;
+                    VAR del_cnt             : integer;
+                    m_acv_info_output       : boolean;
+                    pseudo_resultset_select : boolean);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01sysnullkey        : tgg00_SysInfoKey;
+              a01_il_b_identifier   : tsp00_KnlIdentifier;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06reset_retpart (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a06finish_curr_retpart (
+                    VAR acv   : tak_all_command_glob;
+                    part_kind : tsp1_part_kind;
+                    arg_count : tsp00_Int2);
+ 
+        PROCEDURE
+              a06drop_fieldlist_references (VAR fieldlists : tgg00_FieldLists);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK071;
+ 
+        FUNCTION
+              a071_return_code (
+                    b_err   : tgg00_BasisError;
+                    sqlmode : tsp00_SqlMode) : tsp00_Int2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10del_sysinfo (
+                    VAR acv     : tak_all_command_glob;
+                    VAR syskey  : tgg00_SysInfoKey;
+                    VAR b_err   : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_rel_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_upd_key (
+                    VAR acv   : tak_all_command_glob;
+                    VAR p     : tak_parskey;
+                    diff      : integer;
+                    VAR b_err : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFiles(
+                    VAR trans      : tgg00_TransContext;
+                    fileType       : tgg00_TfnTemp(*ptocConst*);
+                    level          : tsp00_Int4(*ptocConst*);
+                    subLevel       : tsp00_Int2(*ptocConst*);
+                    VAR fileName   : tgg00_Filename);
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        PROCEDURE
+              a101_SetTempFileLevel(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId;
+                    level          : tsp00_Int2(*ptocConst*));
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_dispatcher : VAK501;
+ 
+        PROCEDURE
+              a501do_execute (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    output_during_execution : boolean);
+ 
+        PROCEDURE
+              a501exec_with_change_rec (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    VAR change_rec          : tak_changerecord;
+                    output_during_execution : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Long-Support-Getval: VAK508;
+ 
+        PROCEDURE
+              a508_lget_long_columns (
+                    VAR acv             : tak_all_command_glob;
+                    VAR change_rec      : tak_changerecord;
+                    VAR lcol_lock       : boolean;
+                    rec_cnt             : integer;
+                    rec_len             : integer;
+                    startpos            : integer);
+ 
+        FUNCTION
+              a508_lcol_found (
+                    VAR acv        : tak_all_command_glob;
+                    VAR change_rec : tak_changerecord) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK54;
+ 
+        PROCEDURE
+              a54_get_pparsp_pinfop (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr;
+                    mtype     : tgg00_MessType);
+ 
+        PROCEDURE
+              a54set_complex_entry (
+                    VAR acv     : tak_all_command_glob;
+                    call_reason : tak_complex_call_reason);
+ 
+        PROCEDURE
+              a54_loc_temp_locks (
+                    VAR acv   : tak_all_command_glob;
+                    globstate : tgg00_HandlingSet;
+                    VAR sparr : tak_syspointerarr);
+ 
+        PROCEDURE
+              a54_shortinfo_to_varpart (
+                    VAR acv   : tak_all_command_glob;
+                    store_cmd : boolean;
+                    VAR infop : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Syntax : VAK60;
+ 
+        PROCEDURE
+              a60_change_results (
+                    VAR acv        : tak_all_command_glob;
+                    VAR data       : tsp00_MoveObj;
+                    VAR change_rec : tak_changerecord;
+                    startpos       : integer;
+                    curr_resreclen : integer);
+ 
+        PROCEDURE
+              a60_put_result (
+                    VAR acv    : tak_all_command_glob;
+                    VAR mblock : tgg00_MessBlock;
+                    spos      : integer);
+ 
+        PROCEDURE
+              a60rescount (
+                    VAR acv  : tak_all_command_glob;
+                    rescount : tsp00_Int4);
+ 
+        PROCEDURE
+              a60_get_longinfobuffer (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr;
+                    col_cnt   : integer;
+                    resultno  : tsp00_Int4);
+ 
+        PROCEDURE
+              a60_columnnames_return (
+                    VAR acv   : tak_all_command_glob;
+                    pcolnamep : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a60_p_info_output (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Execute_Select_Expression : VAK660;
+ 
+        PROCEDURE
+              a660select (
+                    VAR acv                     : tak_all_command_glob;
+                    startnode                   : tsp00_Int2;
+                    VAR dmli                    : tak_dml_info;
+                    VAR pseudo_resultset_select : boolean);
+ 
+        PROCEDURE
+              a660_query_execute (
+                    VAR acv                     : tak_all_command_glob;
+                    VAR dmli                    : tak_dml_info;
+                    s_n                         : integer;
+                    new_parsinfo                : boolean;
+                    filled_part2_bytes          : integer;
+                    VAR sr_rec                  : tak71_strat_rec;
+                    VAR pseudo_resultset_select : boolean;
+                    level                       : integer;
+                    no_in_level                 : integer;
+                    from_sel_found              : boolean);
+ 
+        PROCEDURE
+              a660_new_pparsp (
+                    VAR acv        : tak_all_command_glob;
+                    VAR sparr      : tak_syspointerarr;
+                    needs_twuseold : boolean;
+                    complicate     : boolean);
+ 
+        PROCEDURE
+              a660_prefix_delete (
+                    VAR acv       : tak_all_command_glob;
+                    VAR parsk     : tak_parskey;
+                    VAR del_cnt   : integer;
+                    prefix_length : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Union_handling : VAK662;
+ 
+        PROCEDURE
+              a662_start_union_select (
+                    VAR acv                     : tak_all_command_glob;
+                    startnode                   : tsp00_Int2;
+                    VAR dmli                    : tak_dml_info;
+                    VAR pseudo_resultset_select : boolean;
+                    VAR parsk                   : tak_parskey);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Resultname_handling : VAK663;
+ 
+        PROCEDURE
+              a663_del_result (
+                    VAR acv          : tak_all_command_glob;
+                    VAR resname_rec  : tak_resname_record;
+                    do_cdel          : boolean;
+                    del_resname_rec  : boolean);
+ 
+        FUNCTION
+              a663parse_for_execute (VAR acv : tak_all_command_glob) : boolean;
+ 
+        PROCEDURE
+              a663_put_result_info (
+                    VAR acv          : tak_all_command_glob;
+                    VAR resname_addr : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Part2_Select_Expression : VAK67;
+ 
+        PROCEDURE
+              a67_info_store (VAR acv : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Resulttable : VAK73;
+ 
+        PROCEDURE
+              a73_ex_describe (
+                    VAR acv           : tak_all_command_glob;
+                    VAR dmli          : tak_dml_info;
+                    start_fieldno     : integer;
+                    count_in_var_part : boolean);
+ 
+        PROCEDURE
+              a73parsid_describe_semantic (VAR acv : tak_all_command_glob;
+                    inclusive_output : boolean;
+                    VAR infop        : tak_sysbufferaddress;
+                    VAR columnnamep  : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04build_temp_tree_id (
+                    VAR curr : tgg00_FileId;
+                    VAR t : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_cpp_auxiliary_functions : VGG06;
+ 
+        PROCEDURE
+              gg06SetNilSession (VAR SessionNo : tgg91_SessionNo);
+ 
+        FUNCTION
+              gg06IsNilSession (VAR SessionNo : tgg91_SessionNo): boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove  (
+                    size1    : tsp00_Int4;
+                    size2    : tsp00_Int4;
+                    val1     : tsp00_MoveObjPtr;
+                    p1       : tsp00_Int4;
+                    val2     : tsp00_MoveObjPtr;
+                    p2       : tsp00_Int4;
+                    cnt      : tsp00_Int4);
+&       IFDEF TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01execution_kind (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    ex_kind   : tak_execution_kind);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01command_kind (
+                    debug        : tgg00_Debug;
+                    nam          : tsp00_Sname;
+                    command_kind : tak_commandkind);
+ 
+        PROCEDURE
+              t01basis_error (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01buf  (
+                    level     : tgg00_Debug;
+                    VAR buf   : tak_systembuffer;
+                    pos_start : integer;
+                    pos_end   : integer);
+ 
+        PROCEDURE
+              t01surrogate (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname (*ptocSynonym const char**);
+                    VAR tabid : tgg00_Surrogate);
+&       ENDIF
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              t01buf;
+ 
+              tsp00_Buf tak_systembuffer
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : ElkeZ
+.sp
+.cp 3
+Created : 1985-07-05
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 2000-04-04
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+ 
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_output_during_execution= true (* a501do_execute *);
+      c_first_parsinfo   = true (* a660_new_pparsp *);
+      c_complicate       = true (* a660_new_pparsp *);
+      c_new_parsinfo     = true (* a660_query_execute *);
+      c_from_sel_found   = true (* a660_query_execute *);
+      (*                           ak661a_corr_subquery *)
+      c_last_corr_query  = true (* a661_corr_sub *);
+      c_do_cdel          = true (* a663_del_result *);
+      c_del_resname_rec  = true (* a663_del_result *);
+      c_subquery         = true (* a73_ex_describe *);
+      c_inclusive_output = true (* a73parsid_describe_semantic *);
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661_del_one_fromtab (
+            VAR acv   : tak_all_command_glob;
+            fromsel_n : integer);
+ 
+VAR
+      _b_err        : tgg00_BasisError;
+      _ke           : tgg00_SysInfoKey;
+      _hbuf         : tak_sysbufferaddress;
+      _aux_return   : tsp00_Int2;
+      _aux_errorpos : tsp00_Int4;
+      _fn_tableid   : tgg00_Surrogate;
+ 
+BEGIN
+_aux_return   := acv.a_returncode;
+_aux_errorpos := acv.a_errorpos;
+acv.a_returncode := 0;
+_ke          := a01sysnullkey;
+(* PTS 1111510 E.Z. *)
+a661_build_t_fromsel_tableid (_ke.stableid, _fn_tableid,
+      acv.a_curr_ex_parskey, cak_fromseltab_site,
+      acv.a_ap_tree^[ fromsel_n ].n_pos);
+_ke.sentrytyp := cak_eresult;
+_ke.slinkage  := cak_init_linkage;
+a10get_sysinfo (acv, _ke, d_release, _hbuf, _b_err);
+IF  (_b_err <> e_ok) AND
+    (_b_err <> e_sysinfo_not_found)
+THEN
+    a07_b_put_error (acv, _b_err, 1);
+(*ENDIF*) 
+a10del_sysinfo (acv, _ke, _b_err);
+acv.a_returncode := _aux_return;
+acv.a_errorpos   := _aux_errorpos;
+(* PTS 1118537 E.Z. *)
+(* in case it is a union, from-selects in that union *)
+(* will not be found by a661del_all_fromtabs, it has *)
+(* to be done somehow                                *)
+WITH acv.a_ap_tree^[acv.a_ap_tree^[fromsel_n].n_lo_level] DO
+    IF  (n_proc = a63) AND (n_subproc = cak_x_start_union)
+    THEN
+        ak661del_union_fromtab (acv, n_lo_level);
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661del_union_fromtab (
+            VAR acv : tak_all_command_glob;
+            union_n : integer);
+ 
+BEGIN
+IF  acv.a_ap_tree^[union_n].n_proc = a63query_spec
+THEN
+    a661del_all_fromtabs (acv, acv.a_ap_tree^[union_n].n_sa_level)
+ELSE
+    IF  acv.a_ap_tree^[union_n].n_proc = a63
+    THEN
+        BEGIN
+        ak661del_union_fromtab (acv, acv.a_ap_tree^[union_n].n_lo_level);
+        ak661del_union_fromtab (acv, acv.a_ap_tree^[union_n].n_sa_level);
+        END
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(* PTS END 1118537 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661_fromsub_build (
+            VAR acv                 : tak_all_command_glob;
+            VAR dmli                : tak_dml_info;
+            VAR parsk               : tak_parskey;
+            fs_n                    : integer;
+            pseudo_resultset_select : boolean;
+            VAR sr_rec              : tak71_strat_rec;
+            VAR new_complex_rec     : boolean);
+ 
+VAR
+      _m_fromsel_n   : tsp00_Int2;
+      _m_select_node : tsp00_Int2;
+      _next_n        : tsp00_Int2;
+      _m_d_corr      : tak_corr_type;
+      _messagetype   : tgg00_MessType;
+ 
+BEGIN
+WITH acv.a_ap_tree^[ acv.a_ap_tree^[ fs_n ].n_pos ] DO
+    BEGIN
+&   IFDEF TRACE
+    t01int4 (ak_sem, 'fs_n   start', fs_n);
+    t01int4 (ak_sem, 'a_select_nod', acv.a_select_node);
+&   ENDIF
+    acv.a_outer_join  := false;
+    _m_fromsel_n   := 0;
+    _m_select_node := 0;
+    _m_d_corr      := dmli.d_corr;
+    IF  (acv.a_returncode = 0)
+    THEN
+        BEGIN
+        _m_fromsel_n   := acv.a_fromsel_n;
+        acv.a_fromsel_n   := acv.a_ap_tree^[ fs_n ].n_pos;
+        _m_select_node := acv.a_select_node;
+        acv.a_select_node := fs_n;
+        _next_n        := acv.a_ap_tree^[ fs_n ].n_lo_level;
+        IF  (_next_n > 0)
+        THEN
+            IF  (acv.a_ap_tree^[ _next_n ].n_proc = a92fromsel)
+            THEN
+                BEGIN
+                ak661_fromsub_build (acv, dmli, parsk, _next_n,
+                      pseudo_resultset_select, sr_rec, new_complex_rec);
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        _next_n := acv.a_ap_tree^[ fs_n ].n_sa_level;
+        IF  (_next_n > 0)
+        THEN
+            IF  (acv.a_ap_tree^[ _next_n ].n_proc = a92fromsel)
+            THEN
+                BEGIN
+                ak661_fromsub_build (acv, dmli, parsk, _next_n,
+                      pseudo_resultset_select, sr_rec, new_complex_rec);
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  (acv.a_returncode = 0)
+        THEN
+            BEGIN
+            acv.a_from_select := true;
+            IF  (NOT dmli.d_only_sem_check)
+            THEN
+                IF  new_complex_rec
+                THEN
+                    BEGIN
+                    IF  acv.a_intern_explain
+                    THEN
+                        _messagetype := m_show
+                    ELSE
+                        _messagetype := m_select;
+                    (*ENDIF*) 
+                    a54_get_pparsp_pinfop (acv, dmli.d_sparr, _messagetype);
+                    new_complex_rec := false;
+                    END
+                ELSE
+                    a660_new_pparsp (acv, dmli.d_sparr,
+                          NOT c_first_parsinfo, c_complicate);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  (acv.a_returncode = 0)
+            THEN
+                BEGIN
+                IF  (acv.a_ap_tree^[ fs_n ].n_lo_level > 0)
+                THEN
+                    BEGIN
+                    ak661a_corr_subquery (acv, dmli, parsk, sr_rec,
+                          n_lo_level, pseudo_resultset_select,
+                          acv.a_ex_kind, acv.a_from_select);
+                    END
+                ELSE
+                    BEGIN
+                    acv.a_outer_join           := false;
+                    dmli.d_subquery             := false;
+                    dmli.d_corr                 := no_correlation;
+                    dmli.d_use_sub              := false;
+                    dmli.d_cntpar               := MAX_COL_PER_TAB_GG00;
+                    a660select (acv, acv.a_ap_tree^[ acv.a_fromsel_n ].n_lo_level,
+                          dmli, pseudo_resultset_select);
+                    acv.a_outer_join := false;
+                    a54set_complex_entry (acv, c_set_last_pars);
+                    END;
+                (*ENDIF*) 
+                IF  (_m_select_node > 0) AND
+                    (_m_fromsel_n   > 0)
+                THEN (* *** not first call *** *)
+                    IF  acv.a_ap_tree^[ _m_select_node ].n_lo_level = fs_n
+                    THEN
+                        acv.a_ap_tree^[ _m_select_node ].n_lo_level :=
+                              acv.a_ap_tree^[ fs_n ].n_sa_level;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            dmli.d_subquery := false;
+            _m_d_corr       := dmli.d_corr;
+            dmli.d_corr     := no_correlation;
+            dmli.d_use_sub  := false;
+            dmli.d_cntpar   := MAX_COL_PER_TAB_GG00;
+            END;
+        (*ENDIF*) 
+        dmli.d_corr        := _m_d_corr;
+        acv.a_fromsel_n   := _m_fromsel_n;
+        acv.a_select_node := _m_select_node;
+        END;
+    (*ENDIF*) 
+    acv.a_from_select := acv.a_fromsel_n > 0;
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661a_corr_subquery (
+            VAR acv                     : tak_all_command_glob;
+            VAR dmli                    : tak_dml_info;
+            VAR parsk                   : tak_parskey;
+            VAR sr_rec                  : tak71_strat_rec;
+            curr_n                      : integer;
+            VAR pseudo_resultset_select : boolean;
+            VAR m_ex_kind               : tak_execution_kind;
+            from_sel_found              : boolean);
+ 
+VAR
+      _munion_cnt             : integer;
+      _m_d_keylen             : integer;
+      _ke                     : tgg00_SysInfoKey;
+      _b_err                  : tgg00_BasisError;
+      _aux_return             : tsp00_Int2;
+      _aux_errorpos           : tsp00_Int4;
+      _m_d_distinct           : tgg04_Distinct;
+      _m_p_id                 : tsp00_C1;
+      _dummy_resultset_select : boolean;
+      _mdm_union              : boolean;
+      _m_date_time_used       : boolean;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+t01int4 (ak_sem, 'a_select_nod', acv.a_select_node);
+t01int4 (ak_sem, 'd_distinct  ', ord (dmli.d_distinct));
+&ENDIF
+dmli.d_corr       := first_correlation;
+dmli.d_use_sub    := false;
+acv.a_outer_join  := false;
+_m_d_distinct  := dmli.d_distinct;
+_mdm_union     := dmli.d_union;
+_munion_cnt    := acv.a_union_cnt;
+(* PTS 1117747 E.Z. *)
+acv.a_where_corr_info.uci_oldlowpars := 0;
+acv.a_where_corr_info.uci_lowpars    := 0;
+acv.a_where_corr_info.uci_pid[1]     := chr(0);
+IF  from_sel_found
+THEN
+    BEGIN
+    dmli.d_union       := false;
+    acv.a_union_cnt   := 0;
+    a660select (acv, curr_n, dmli, pseudo_resultset_select)
+    END
+ELSE
+    BEGIN
+    (* PTS 1000785 E.Z. *)
+    dmli.d_subquery_node := curr_n;
+    (* analyze top select *)
+    a660_query_execute (acv, dmli, curr_n, NOT c_new_parsinfo,
+          cgg_rec_key_offset, sr_rec, pseudo_resultset_select,
+          1, 1, from_sel_found);
+    dmli.d_union       := false;
+    acv.a_union_cnt   := 0;
+    END;
+(*ENDIF*) 
+acv.a_outer_join       := false;
+acv.a_from_select      := false;
+acv.a_fromsel_n        := 0;
+_m_d_keylen            := dmli.d_keylen;
+dmli.d_subquery        := true;
+_dummy_resultset_select := false;
+dmli.d_corr            := correlation;
+_m_p_id                := acv.a_pars_last_key.p_id;
+_m_date_time_used      := acv.a_date_time_used;
+&IFDEF TRACE
+t01int4 (ak_sem, 'acv_select_n', acv.a_select_node);
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+t01int4 (ak_sem, 'dm_act_node ', dmli.d_act_node);
+&ENDIF
+IF  from_sel_found AND
+    (acv.a_ap_tree^[ acv.a_select_node ].n_lo_level > 0)
+THEN
+    curr_n := acv.a_ap_tree^[ acv.a_select_node ].n_lo_level
+ELSE
+    IF  (acv.a_ap_tree^[ acv.a_select_node ].n_sa_level > 0)
+    THEN
+        curr_n := acv.a_ap_tree^[ acv.a_select_node ].n_sa_level
+    ELSE
+        IF  (acv.a_ap_tree^[ acv.a_select_node ].n_lo_level > 0)
+        THEN
+            curr_n := acv.a_ap_tree^[ acv.a_select_node ].n_lo_level;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+;
+&ifdef TRACE
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+t01bool (ak_sem, 'a_date_time_', acv.a_date_time_used);
+&ENDIF
+IF  (acv.a_returncode = 0)
+THEN
+    BEGIN
+    a661_corr_sub (acv, dmli, curr_n, dmli.d_filled_bytes,
+          sr_rec, _dummy_resultset_select, c_last_corr_query, 2, 1);
+    IF  dmli.d_view
+    THEN
+        BEGIN
+        WITH _ke DO
+            BEGIN
+            _ke           := a01sysnullkey;
+            sauthid[ 1 ] := cak_tempinfo_byte;
+            SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(sauthid),
+                  @acv.a_pars_last_key, 1, @sauthid, 2, mxak_parskey);
+            sauthid[ mxak_parskey + 1 ] := chr(0);
+            sentrytyp                   := cak_ecorrinfo;
+            END;
+        (*ENDWITH*) 
+        _aux_return   := acv.a_returncode;
+        _aux_errorpos := acv.a_errorpos;
+        acv.a_returncode := 0;
+        _b_err            := e_ok;
+        a10del_sysinfo (acv, _ke, _b_err);
+        IF  (_b_err <> e_ok)                AND
+            (_b_err <> e_sysinfo_not_found) AND
+            (_aux_return = 0)
+        THEN
+            a07_b_put_error (acv, _b_err, 1)
+        ELSE
+            BEGIN
+            acv.a_returncode := _aux_return;
+            acv.a_errorpos   := _aux_errorpos;
+            END;
+        (*ENDIF*) 
+&       IFDEF TRACE
+        t01basis_error  (ak_sem, 'b_err       ', _b_err);
+        t01int4  (ak_sem, 'returncode  ', acv.a_returncode);
+&       endif
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+t01bool (ak_sem, 'a_date_time_', acv.a_date_time_used);
+&endif
+IF  (acv.a_returncode = 0)       AND
+    (dmli.d_lowpars   < csp_maxint1) AND
+    (NOT dmli.d_only_sem_check)
+THEN
+    a661_update_keys_of_parsrecords (acv, _m_p_id,
+          dmli.d_lowpars, csp_maxint1);
+(*ENDIF*) 
+dmli.d_distinct    := _m_d_distinct;
+dmli.d_union       := _mdm_union;
+acv.a_union_cnt    := _munion_cnt;
+dmli.d_subcount    := 0;
+dmli.d_subquery    := false;
+acv.a_date_time_used := _m_date_time_used;
+IF  (acv.a_returncode  = 0)                 AND
+    (m_ex_kind         = only_parsing)      AND
+    (acv.a_max_intern_select = acv.a_intern_select_cnt) AND
+    (acv.a_union_cnt     = 0)                 AND
+    (NOT acv.a_insert_select)                 AND
+    (NOT from_sel_found)
+THEN
+    BEGIN
+    (* PTS 1122398 E.Z. *)
+    a54_shortinfo_to_varpart (acv, acv.a_initial_segment_header.sp1c_prepare OR
+          (acv.a_intern_explain AND a663parse_for_execute (acv)),
+          dmli.d_sparr.pinfop);
+    IF  (
+        (acv.a_comp_type = at_xci) OR
+        (acv.a_comp_type = at_db_manager) OR
+        (acv.a_comp_type = at_odbc)
+        )                          AND
+        (m_ex_kind = only_parsing) AND
+        (dmli.d_sparr.pcolnamep <> NIL)
+    THEN
+        a60_columnnames_return (acv, dmli.d_sparr.pcolnamep);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+parsk := acv.a_pars_last_key;
+acv.a_part_rollback := (acv.a_returncode <> 0) AND
+      (acv.a_returncode <> 100);
+dmli.d_keylen := _m_d_keylen;
+END;
+ 
+(* PTS 1116715 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661a_norm_sub (
+            VAR acv                     : tak_all_command_glob;
+            VAR dmli                    : tak_dml_info;
+            VAR parsk                   : tak_parskey;
+            VAR sr_rec                  : tak71_strat_rec;
+            curr_n                      : tsp00_Int2;
+            VAR pseudo_resultset_select : boolean;
+            VAR m_acv_info_output       : boolean);
+ 
+VAR
+      _mcommand         : tak_commandkind;
+      _md_union         : boolean;
+      _munion_cnt       : integer;
+      _m_distinct       : tgg04_Distinct;
+      _m_recurs_state   : tak_recursive_state;
+      _m_subcount       : tsp00_Int2;
+      _m_cntpar         : tsp00_Int2;
+      _m_act_node       : tsp00_Int2;
+      _m_subquery       : boolean;
+      _m_use_sub        : boolean;
+      _messagetype      : tgg00_MessType;
+      _m_d_group        : boolean;
+      _m_date_time_used : boolean;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'd_cor      1', ord(dmli.d_corr));
+t01bool (ak_sem, 'd_union     ', dmli.d_union);
+t01bool (ak_sem, 'd_group     ', dmli.d_group);
+t01command_kind (ak_sem, 'command_kind', acv.a_command_kind);
+t01bool (ak_sem, 'a_date_time_', acv.a_date_time_used);
+&ENDIF
+_m_use_sub            := dmli.d_use_sub;
+dmli.d_use_sub       := true;
+_m_subquery           := dmli.d_subquery;
+dmli.d_subquery      := true;
+dmli.d_sparr.pbasep  := NIL;
+_m_distinct      := dmli.d_distinct;
+_m_subcount      := dmli.d_subcount;
+_m_act_node      := dmli.d_act_node;
+_m_cntpar        := dmli.d_cntpar;
+_m_recurs_state  := acv.a_recursive_state;
+_m_date_time_used:= acv.a_date_time_used;
+acv.a_recursive_state := rs_no_recursive_select;
+_mcommand        := acv.a_command_kind;
+IF  _mcommand in [ complex_view_command, sub_in_complex_command ]
+THEN
+    acv.a_command_kind := sub_in_complex_command
+ELSE
+    IF  _mcommand = union_command
+    THEN
+        acv.a_command_kind := sub_in_union_command
+    ELSE
+        IF  _mcommand = sub_in_union_command
+        THEN
+            acv.a_command_kind := sub_in_union_command
+        ELSE
+            IF  dmli.d_union AND
+                (_mcommand = union_in_sub_command)
+            THEN
+                acv.a_command_kind := sub_in_union_command
+            ELSE
+                acv.a_command_kind := subquery_command;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  acv.a_intern_explain
+THEN
+    _messagetype := m_show
+ELSE
+    _messagetype := m_select;
+(*ENDIF*) 
+IF  NOT (dmli.d_only_sem_check)
+THEN
+    a54_get_pparsp_pinfop (acv, dmli.d_sparr, _messagetype);
+(*ENDIF*) 
+acv.a_mblock.mb_data_len         := cgg_rec_key_offset;
+acv.a_mblock.mb_data^.mbp_keylen := 0;
+acv.a_mblock.mb_data^.mbp_reclen := 0;
+_md_union                       := dmli.d_union;
+dmli.d_union                        := false;
+_munion_cnt                     := acv.a_union_cnt;
+acv.a_union_cnt                    := 0;
+a661_sub_build (acv, dmli, acv.a_ap_tree^[ curr_n ].n_sa_level,
+      cgg_rec_key_offset, sr_rec);
+(* could thrown error: e_corelated_subquery_not_alloed *)
+IF  (acv.a_returncode = 0) AND (acv.a_main_returncode <> 0)
+THEN
+    BEGIN
+    acv.a_returncode := acv.a_main_returncode;
+    acv.a_errorpos   := acv.a_main_errorpos;
+    END;
+(*ENDIF*) 
+dmli.d_subquery  := false;
+dmli.d_union     := _md_union;
+acv.a_union_cnt  := _munion_cnt;
+dmli.d_distinct  := _m_distinct;
+acv.a_date_time_used := _m_date_time_used;
+&ifdef trace
+t01bool (ak_sem, 'd_view      ', dmli.d_view);
+t01bool (ak_sem, 'd_only_sem_c', dmli.d_only_sem_check);
+t01bool (ak_sem, 'd_group     ', dmli.d_group);
+t01bool (ak_sem, 'a_date_time_', acv.a_date_time_used);
+&endif
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  NOT (dmli.d_view OR dmli.d_only_sem_check)
+    THEN
+        BEGIN
+        a660_new_pparsp (acv, dmli.d_sparr,
+              NOT c_first_parsinfo, c_complicate);
+        dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel := -1;
+        ak661_subquery_found (acv, acv.a_ap_tree^[ curr_n ].n_sa_level,
+              dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel);
+&       IFDEF TRACE
+        t01int4(ak_sem, 'new subcnt  ',
+              dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel );
+&       ENDIF
+        IF  (acv.a_max_intern_select = acv.a_intern_select_cnt) AND
+            (NOT acv.a_from_select) AND
+            (NOT acv.a_insert_select) AND
+            (_m_subcount = 0)
+        THEN
+            (* PTS 1114017 E.Z. *)
+            a54set_complex_entry (acv, c_set_last_pars);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    dmli.d_subcount := _m_subcount;
+    (*d_use_sub       := _m_use_sub;*)
+    dmli.d_subquery      := _m_subquery;
+    IF  _mcommand <> single_command
+    THEN
+        acv.a_command_kind  := _mcommand;
+    (*ENDIF*) 
+    dmli.d_cntpar := _m_cntpar;
+    (* restable is needed for longinfos in case of single select  *)
+    IF  _mcommand = union_in_sub_command
+    THEN
+        dmli.d_act_node := _m_act_node
+    ELSE
+        dmli.d_act_node := curr_n;
+    (*ENDIF*) 
+    acv.a_recursive_state:= _m_recurs_state;
+&   IFDEF trace
+    t01int4 (ak_sem, 'query_exec4 ', 6604);
+    t01command_kind (ak_sem, 'command_kind', acv.a_command_kind);
+&   ENDIF
+    acv.a_outer_join  := false;
+    (* PTS 1116716 E.Z. *)
+    IF  acv.a_init_ex_kind = only_parsing
+    THEN
+        BEGIN
+        acv.a_info_output := m_acv_info_output;
+        IF  dmli.d_sparr.pinfop <> NIL
+        THEN
+            dmli.d_sparr.pinfop^.sshortinfo.sicount := acv.a_count_variab;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    ;
+    (* analyse top select *)
+    a660_query_execute (acv, dmli, curr_n, NOT c_new_parsinfo,
+          cgg_rec_key_offset, sr_rec, pseudo_resultset_select, 1, 1,
+          NOT c_from_sel_found);
+&   IFDEF trace
+    t01int4 (ak_sem, 'query_exec4 ', 66049);
+&   ENDIF
+    (* PTS 1114017 E.Z. *)
+    END
+ELSE
+    acv.a_command_kind  := _mcommand;
+(*ENDIF*) 
+parsk           := acv.a_pars_last_key;
+parsk.p_id[ 1 ] := acv.a_first_parskey;
+parsk.p_kind    := m_complex;
+parsk.p_no      := 0;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661change_p_no_in_fetch (
+            VAR acv  : tak_all_command_glob;
+            hp_no    : tsp00_Uint1;
+            old_p_no : tsp00_Uint1);
+ 
+VAR
+      _b_err   : tgg00_BasisError;
+      _sysp    : tak_sysbufferaddress;
+      _sysk    : tgg00_SysInfoKey;
+ 
+BEGIN
+_sysk              := a01sysnullkey;
+_sysk.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(_sysk.sauthid),
+      @acv.a_pars_last_key, 1, @_sysk.sauthid, 2, mxak_parskey);
+_sysk.sauthid[ mxak_parskey + 1 ] := chr(hp_no);
+_sysk.sentrytyp                   := cak_eparsinfo;
+a10get_sysinfo (acv, _sysk, d_release, _sysp, _b_err);
+IF  _b_err = e_ok
+THEN
+    IF  _sysp^.sparsinfo.p_mtyp = m_fetch
+    THEN
+        BEGIN
+        (* PTS 1117747 E.Z. *)
+        WITH _sysp^.sparsinfo DO
+            BEGIN
+&           ifdef TRACE
+            t01int4 (ak_sem, 'hp_no       ', hp_no);
+            t01int4 (ak_sem, 'old_p_no    ', old_p_no);
+            t01int4 (ak_sem, 'p_p_no      ', p_p_no);
+&           endif
+            p_p_no := p_p_no + acv.a_pars_last_key.p_no - old_p_no;
+&           ifdef TRACE
+            t01int4 (ak_sem, 'p_p_no new  ', p_p_no);
+&           endif
+            END;
+        (*ENDWITH*) 
+        a10repl_sysinfo (acv, _sysp, _b_err);
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  _b_err <> e_ok
+THEN
+    a07_b_put_error (acv, _b_err, 2)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661exec_sub (
+            VAR acv                 : tak_all_command_glob;
+            VAR dmli                : tak_dml_info;
+            VAR parsk               : tak_parskey;
+            curr_n                  : tsp00_Int2;
+            VAR del_cnt             : integer;
+            m_acv_info_output       : boolean;
+            pseudo_resultset_select : boolean);
+ 
+VAR
+      _lcol_found   : boolean;
+      _lcol_lock    : boolean;
+      _aux_return   : tsp00_Int2;
+      _aux_errorpos : tsp00_Int4;
+      _munion_cnt   : integer;
+      _prefix_len   : integer;
+      _part_ptr     : tsp1_part_ptr;
+      _lastparsk    : tak_parskey;
+ 
+BEGIN
+(* PTS 1121945 E.Z. *)
+IF  (csa_subq_datatype_problem in acv.a_sql_cmd_state)
+THEN
+    acv.a_returncode := cak_e_subq_type_diff;
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  m_acv_info_output
+    THEN
+        BEGIN
+        _lastparsk := acv.a_pars_last_key;
+        acv.a_pars_last_key := parsk;
+        acv.a_count_variab  := 0;
+        acv.a_ex_kind       := pars_then_execute;
+        IF  pseudo_resultset_select
+        THEN
+            dmli.d_single := true;
+        (*ENDIF*) 
+        a73parsid_describe_semantic (acv, NOT c_inclusive_output,
+              dmli.d_sparr.pinfop, dmli.d_sparr.pcolnamep);
+        IF  (acv.a_returncode = 0)
+        THEN
+            a60_p_info_output (acv, dmli.d_sparr);
+        (*ENDIF*) 
+        acv.a_pars_last_key := _lastparsk;
+        END;
+    (*ENDIF*) 
+    acv.a_ex_kind   := only_executing;
+    _munion_cnt  := acv.a_union_cnt;
+    acv.a_union_cnt := 0;
+    acv.a_recursive_state := rs_no_recursive_select;
+&   ifdef TRACE
+    t01command_kind (ak_sem, 'command_kind', acv.a_command_kind);
+    WITH parsk DO
+        BEGIN
+        t01int4 (ak_sem, 'p_count[1]  ', ord(p_count[1]));
+        t01int4 (ak_sem, 'p_count[2]  ', ord(p_count[2]));
+        t01int4 (ak_sem, 'p_count[3]  ', ord(p_count[3]));
+        t01int4 (ak_sem, 'p_id        ', ord (p_id[ 1 ]));
+        t01int4 (ak_sem, 'p_kind      ', ord (p_kind));
+        t01int4 (ak_sem, 'p_no        ', p_no);
+        END;
+    (*ENDWITH*) 
+    WITH acv.a_pars_last_key DO
+        BEGIN
+        t01int4 (ak_sem, 'p_count[1]  ', ord(p_count[1]));
+        t01int4 (ak_sem, 'p_count[2]  ', ord(p_count[2]));
+        t01int4 (ak_sem, 'p_count[3]  ', ord(p_count[3]));
+        t01int4 (ak_sem, 'p_id        ', ord (p_id[ 1 ]));
+        t01int4 (ak_sem, 'p_kind      ', ord (p_kind));
+        t01int4 (ak_sem, 'p_no        ', p_no);
+        END;
+    (*ENDWITH*) 
+&   ENDIF
+    acv.a_input_data_pos := 1;
+    IF  acv.a_ap_tree^[ curr_n ].n_symb = s_sum
+    THEN
+        a501exec_with_change_rec (acv, dmli, parsk, dmli.d_change,
+              NOT c_output_during_execution)
+    ELSE
+        a501do_execute (acv, dmli, parsk, NOT c_output_during_execution);
+    (*ENDIF*) 
+    IF  m_acv_info_output AND
+        ((acv.a_returncode = 0) OR (acv.a_returncode = 100))
+    THEN
+        BEGIN
+        _aux_return   := acv.a_returncode;
+        _aux_errorpos := acv.a_errorpos;
+        acv.a_returncode := 0;
+        acv.a_ex_kind       := pars_then_execute;
+        a67_info_store (acv, dmli);
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            acv.a_returncode := _aux_return;
+            acv.a_errorpos   := _aux_errorpos;
+            END;
+        (*ENDIF*) 
+        acv.a_ex_kind   := only_executing;
+        IF  NOT pseudo_resultset_select
+        THEN
+            acv.a_resname_addr[ cak_extern_pos ]^.sresname.
+                  resinfobuf := 2;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    acv.a_union_cnt := _munion_cnt;
+    END;
+(*ENDIF*) 
+_aux_return   := acv.a_returncode;
+_aux_errorpos := acv.a_errorpos;
+&IFDEF TRACE
+t01bool (ak_sem, 'old m_info  ', m_acv_info_output);
+t01int4 (ak_sem, 'returncode  ', acv.a_returncode);
+&ENDIF
+IF  (acv.a_returncode = 0)   OR
+    (acv.a_returncode = 100)
+THEN
+    BEGIN
+    IF  (NOT pseudo_resultset_select) AND
+        (acv.a_intern_select_cnt = acv.a_max_intern_select)
+    THEN
+        BEGIN
+        WITH  acv.a_resname_addr[ cak_extern_pos ]^.sresname DO
+            BEGIN
+            acv.a_result_name := reskey_name;
+            acv.a_modul_name  := reskey_modul_name;
+            END;
+        (*ENDWITH*) 
+        IF  acv.a_resname_addr[ cak_extern_pos ]^.sresname.resselect_fetch = sft_select_all_results
+        THEN
+            BEGIN
+            _aux_return   := acv.a_returncode;
+            _aux_errorpos := acv.a_errorpos;
+            acv.a_returncode := 0;
+            (* normal_result: otherwise a663_del_result will not do *)
+            acv.a_resname_addr[ cak_extern_pos ]^.sresname.resselect_fetch := sft_normal_select;
+            a663_put_result_info (acv, acv.a_resname_addr[ cak_extern_pos ]);
+            a663_del_result (acv,
+                  acv.a_resname_addr[ cak_extern_pos ]^.sresname,
+                  c_do_cdel, c_del_resname_rec);
+            acv.a_resname_addr[ cak_extern_pos ] := NIL;
+            acv.a_intern_warnings :=
+                  acv.a_intern_warnings + [sp1iw_warn0_resultset_closed];
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                acv.a_returncode := _aux_return;
+                acv.a_errorpos   := _aux_errorpos;
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (pseudo_resultset_select AND (acv.a_returncode = 0))
+THEN
+    BEGIN
+    _lcol_found := false;
+    IF  dmli.d_change.cr_colcount > 0
+    THEN
+        _lcol_found := a508_lcol_found (acv, dmli.d_change);
+    (*ENDIF*) 
+    a60rescount (acv, 1);
+    a60_change_results (acv, acv.a_mblock.mb_data^.mbp_buf,
+          dmli.d_change, 0, acv.a_mblock.mb_data_len);
+    a60_put_result (acv, acv.a_mblock,
+          cgg_rec_key_offset + acv.a_mblock.mb_data^.mbp_keylen);
+    IF  _lcol_found AND (acv.a_returncode = 0)
+    THEN
+        BEGIN
+        _lcol_lock := true;
+        a508_lget_long_columns (acv, dmli.d_change,
+              _lcol_lock, 1, acv.a_mblock.mb_data^.mbp_reclen,
+              - (acv.a_mblock.mb_data^.mbp_keylen +
+              cgg_rec_key_offset))
+        END;
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        a06finish_curr_retpart (acv, sp1pk_data, 1)
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode <> 0) AND
+    ((_aux_return = 0  ) OR
+    ( _aux_return = 100)   )
+THEN
+    BEGIN
+    _aux_return   := acv.a_returncode;
+    _aux_errorpos := acv.a_errorpos;
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode      = cak_e_corelated_subquery_not_allowed) OR
+    (acv.a_main_returncode = cak_e_corelated_subquery_not_allowed)
+THEN
+    BEGIN
+&   IFDEF TRACE
+    t01int4 (ak_sem, '661exec_sub ', 661);
+    t01int4 (ak_sem, 'd_onlysemchk', ord (dmli.d_only_sem_check));
+    t01int4 (ak_sem, 'acv_unioncnt', acv.a_union_cnt);
+&   ENDIF
+    IF  (acv.a_ex_kind <> only_parsing) AND
+        ((NOT dmli.d_view) OR
+        (acv.a_union_cnt = 0))
+    THEN
+        a660_prefix_delete (acv, parsk, del_cnt, cak_intern_prefix);
+    (*ENDIF*) 
+    acv.a_ap_tree^[ acv.a_select_node ].n_symb := s_sum;
+    END
+ELSE
+    BEGIN
+    acv.a_returncode := 0;
+    IF  pseudo_resultset_select
+    THEN
+        IF  acv.a_resname_addr [ cak_intern_pos ] <> NIL
+        THEN
+            WITH acv.a_resname_addr [ cak_intern_pos ]^.sresname DO
+                BEGIN
+                IF  (resmaxlinkage > 0) AND
+                    (acv.a_union_cnt <= 1 )
+                THEN
+                    a663_del_result (acv,
+                          acv.a_resname_addr [ cak_intern_pos ]^.sresname,
+                          c_do_cdel, NOT c_del_resname_rec);
+                (*ENDIF*) 
+                resdecresdel := dr_sql_db
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  acv.a_qualified_jv_upd <> no_jv_upd
+    THEN
+        _prefix_len := cak_intern_prefix
+    ELSE
+        _prefix_len := cak_complete_prefix;
+    (*ENDIF*) 
+    IF  acv.a_max_intern_select = acv.a_intern_select_cnt
+    THEN
+        a660_prefix_delete (acv, parsk, del_cnt, _prefix_len);
+    (*ENDIF*) 
+    IF  (acv.a_returncode = 0) OR
+        ((_aux_return <> 0  ) AND
+        ( _aux_return <> 100)    )
+    THEN
+        BEGIN
+        acv.a_returncode := _aux_return;
+        acv.a_errorpos   := _aux_errorpos;
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661s_corr_start (
+            VAR acv                     : tak_all_command_glob;
+            VAR dmli                    : tak_dml_info;
+            VAR parsk                   : tak_parskey;
+            VAR sr_rec                  : tak71_strat_rec;
+            curr_n                      : tsp00_Int2;
+            VAR pseudo_resultset_select : boolean;
+            VAR m_ex_kind               : tak_execution_kind;
+            VAR m_acv_info_output       : boolean);
+ 
+VAR
+      _b_err           : tgg00_BasisError;
+      _fs_n            : integer;
+      _mcommand        : tak_commandkind;
+      _new_complex_rec : boolean;
+      _m_first_union   : boolean;
+      _m_union         : boolean;
+      _new_col_rec     : boolean;
+      _m_union_cnt     : integer;
+      _old_next_n      : integer;
+      _m_curr_n        : integer;
+      _messagetype     : tgg00_MessType;
+      _m_rowno         : tsp00_Int4;
+ 
+BEGIN
+_new_col_rec := false;
+_m_union_cnt := acv.a_union_cnt;
+_m_rowno := dmli.d_rowno;
+dmli.d_rowno := cgg04_no_rowno_predicate;
+IF  acv.a_ap_tree^[ curr_n ].n_sa_level > 0
+THEN
+    _fs_n := acv.a_ap_tree^[ curr_n ].n_sa_level
+ELSE
+    _fs_n := curr_n;
+(*ENDIF*) 
+(* PTS 1000785 E.Z. *)
+dmli.d_subquery_node := curr_n;
+_new_complex_rec := true;
+&IFDEF TRACE
+t01int4 (ak_sem, 'fs_n        ', _fs_n);
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+t01int4 (ak_sem, 'd_subcount  ', dmli.d_subcount);
+t01int4 (ak_sem, 'd_lowpars   ', dmli.d_lowpars);
+t01bool (ak_sem, 'm_acv_info_o', m_acv_info_output);
+t01bool (ak_sem, 'pseudo_rsets', pseudo_resultset_select);
+t01command_kind (ak_sem, 'command_kind', acv.a_command_kind);
+&ENDIF
+_mcommand := acv.a_command_kind;
+CASE _mcommand OF
+    union_command:
+        acv.a_command_kind := sub_in_union_command;
+    complex_view_command,
+    sub_in_complex_command,
+    union_in_sub_command,
+    sub_in_union_command:
+        BEGIN
+        END;
+    OTHERWISE
+        acv.a_command_kind := subquery_command;
+    END;
+(*ENDCASE*) 
+_old_next_n := 0;
+_m_curr_n   := curr_n;
+IF  (acv.a_ap_tree^[ _fs_n ].n_proc = a92fromsel)
+THEN
+    BEGIN
+    _m_first_union := dmli.d_first_union;
+    dmli.d_first_union := false;
+    _m_union       := dmli.d_union;
+    dmli.d_union       := false;
+    ak661_fromsub_build (acv, dmli, parsk, _fs_n,
+          pseudo_resultset_select, sr_rec,
+          _new_complex_rec);
+    dmli.d_first_union := _m_first_union;
+    dmli.d_union       := _m_union;
+    (* PTS 1117747 E.Z. *)
+    dmli.d_where_subquery       := false;
+    dmli.d_where_corr_subquery  := false;
+    dmli.d_having_subquery      := false;
+    dmli.d_having_corr_subquery := false;
+    _old_next_n    := acv.a_ap_tree^[ curr_n ].n_sa_level;
+    WHILE (_fs_n > 0) DO
+        IF  (acv.a_ap_tree^[ _fs_n ].n_proc = a92fromsel)
+        THEN
+            BEGIN
+            acv.a_ap_tree^[ curr_n ].n_sa_level :=
+                  acv.a_ap_tree^[ _fs_n ].n_sa_level;
+            _fs_n := acv.a_ap_tree^[ _fs_n ].n_sa_level;
+            END
+        ELSE
+            _fs_n := 0;
+        (*ENDIF*) 
+    (*ENDWHILE*) 
+    END
+ELSE
+    IF  _mcommand = union_command
+    THEN
+        acv.a_command_kind := _mcommand;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  (NOT dmli.d_only_sem_check)
+THEN
+    BEGIN
+    IF  _new_complex_rec
+    THEN
+        BEGIN
+        IF  acv.a_intern_explain
+        THEN
+            _messagetype := m_show
+        ELSE
+            _messagetype := m_select;
+        (*ENDIF*) 
+        a54_get_pparsp_pinfop (acv, dmli.d_sparr, _messagetype);
+        _new_complex_rec := false;
+        (* PTS 1122398 E.Z. *)
+        acv.a_info_output := m_acv_info_output;
+        IF  acv.a_info_output
+        THEN
+            BEGIN
+            _new_col_rec := true;
+            a60_get_longinfobuffer( acv, dmli.d_sparr, MAX_COL_PER_TAB_GG00,
+                  acv.a_curr_res_id );
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        a660_new_pparsp (acv, dmli.d_sparr,
+              NOT c_first_parsinfo, c_complicate);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode = 0)
+THEN
+    IF  (acv.a_ap_tree^[ curr_n ].n_sa_level > 0)
+    THEN (* *** process subquery on highest level *** *)
+        ak661a_corr_subquery (acv, dmli, parsk, sr_rec, curr_n,
+              pseudo_resultset_select, m_ex_kind,
+              NOT c_from_sel_found)
+    ELSE (* *** subqueries only in fromselect, now select it *** *)
+        BEGIN
+        acv.a_outer_join       := false;
+        dmli.d_subquery        := false;
+        dmli.d_corr            := no_correlation;
+        dmli.d_use_sub         := false;
+        dmli.d_cntpar          := MAX_COL_PER_TAB_GG00;
+        a660_query_execute (acv, dmli, curr_n, NOT c_new_parsinfo,
+              cgg_rec_key_offset, sr_rec, pseudo_resultset_select, 1, 1,
+              NOT c_from_sel_found);
+        acv.a_outer_join := false;
+        IF  (_mcommand  <> union_command)
+        THEN
+            a54set_complex_entry (acv, c_set_last_pars);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+acv.a_command_kind := _mcommand;
+acv.a_union_cnt    := _m_union_cnt;
+IF  _old_next_n <> 0
+THEN
+    acv.a_ap_tree^[ curr_n ].n_sa_level := _old_next_n;
+(*ENDIF*) 
+IF  _new_col_rec AND (dmli.d_sparr.pcolnamep <> NIL)
+THEN
+    a10del_sysinfo (acv, dmli.d_sparr.pcolnamep^.syskey, _b_err);
+(*ENDIF*) 
+dmli.d_rowno := _m_rowno;
+END;
+ 
+(* PTS 1111510 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_build_t_fromsel_tableid (
+            VAR syskey_tableid  : tgg00_Surrogate;
+            VAR fn_tableid      : tgg00_Surrogate;
+            VAR curr_ex_parskey : tak_parskey;
+            site                : tgg00_ServerdbNo;
+            from_select_no      : tsp00_Int2);
+ 
+VAR
+      _mt  : tak_fromsel_tabid;
+ 
+BEGIN
+_mt.tabid      := cgg_zero_id;
+(* PTS 1111510 E.Z. *)
+_mt.fromsiteno := site;
+_mt.ft         := ttfnFromSelect_egg00;
+(* filename-tabid with session *)
+gg06SetNilSession (_mt.session); (* shared SQL *)
+(* fs_no for fileId will be set via a101_SetTempFileLevel *)
+(*    _mt.fs_no    := 0; *)
+fn_tableid  := _mt.tabid;
+(* syskey_tabid with cmd_count *)
+_mt.fs_no        := from_select_no;
+_mt.fparschar[1] := cak_tempinfo_byte;
+_mt.fcmd_count   := curr_ex_parskey.p_count;
+_mt.ffill        := 0;
+syskey_tableid := _mt.tabid;
+&IFDEF TRACE
+t01int4   (ak_sem, 'ft          ', ord (_mt.ft));
+t01int4   (ak_sem, 'from_sel_no ', _mt.fs_no);
+&ENDIF
+END;
+ 
+(* PTS 1117747 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_corr_sub (
+            VAR acv                     : tak_all_command_glob;
+            VAR dmli                    : tak_dml_info;
+            s_n                         : integer;
+            filled_part2_bytes          : integer;
+            VAR sr_rec                  : tak71_strat_rec;
+            VAR pseudo_resultset_select : boolean;
+            last_corr_query             : boolean;
+            level                       : integer;
+            no_in_level                 : integer);
+ 
+VAR
+      _b_err           : tgg00_BasisError;
+      _hp_no           : tsp00_Uint1;
+      _fetch_inner_sel : tsp00_Uint1;
+      _old_d_lowpars   : tsp00_Uint1;
+      _old_p_no        : tsp00_Uint1;
+      _old_p_id        : tsp00_C1;
+      _ke              : tgg00_SysInfoKey;
+      _m_corr_info     : tak_used_corr_infos;
+ 
+BEGIN
+&ifdef TRACE
+t01int4 (ak_sem, 'filled_part2', filled_part2_bytes);
+&endif
+(* PTS 1000785 E.Z. *)
+dmli.d_subquery_node := s_n;
+(* ??? dem d_subcount-setzen traue ich im Zusammenhang mit
+      unions aber auch nicht ueber den Weg ???*)
+dmli.d_subcount := acv.a_ap_tree^[ acv.a_ap_tree^[ s_n ].n_pos ].n_length;
+_old_d_lowpars := dmli.d_lowpars;
+_m_corr_info := acv.a_where_corr_info;
+acv.a_where_corr_info.uci_oldlowpars := 0;
+acv.a_where_corr_info.uci_lowpars    := 0;
+acv.a_where_corr_info.uci_pid[1]     := chr(0);
+dmli.d_where_corr := false;
+&ifdef TRACE
+t01int4 (ak_sem, 'hci_oldlowpa', _m_corr_info.uci_oldlowpars);
+t01int4 (ak_sem, 'hci_lowpars ', _m_corr_info.uci_lowpars);
+t01int4 (ak_sem, 'hci_no      ', ord(_m_corr_info.uci_pid[1]));
+&endif
+_hp_no := acv.a_pars_last_key.p_no;
+(* pno of fetch *)
+_old_p_id := acv.a_pars_last_key.p_id;
+IF  NOT (dmli.d_only_sem_check)
+THEN
+    a660_new_pparsp (acv, dmli.d_sparr,
+          NOT c_first_parsinfo, NOT c_complicate);
+(*ENDIF*) 
+IF  no_in_level >= cak_maxsubcnt_per_level
+THEN
+    a07_b_put_error (acv, e_too_many_subqueries, 1);
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    (* .n_lo_level / n_sa_level = -1 ==> pos for next subquery *)
+    IF  acv.a_ap_tree^[ s_n ].n_lo_level <= 0
+    THEN
+        BEGIN
+        IF  (last_corr_query AND (acv.a_ap_tree^[ s_n ].n_sa_level <= 0))
+        THEN
+            BEGIN
+            WITH _ke DO
+                BEGIN
+                _ke := a01sysnullkey;
+                sauthid[ 1 ] := cak_tempinfo_byte;
+                SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(sauthid),
+                      @acv.a_pars_last_key, 1,
+                      @sauthid, 2, mxak_parskey);
+                sauthid[ mxak_parskey + 1 ] := chr(0);
+                sentrytyp                   := cak_ecorrinfo;
+                END;
+            (*ENDWITH*) 
+            (* *** union with corelation *** *)
+            IF  (acv.a_corr_key.p_no <> 0)
+            THEN
+                BEGIN
+                a10del_sysinfo (acv, _ke, _b_err);
+                IF  _b_err <> e_ok
+                THEN
+                    a07_b_put_error (acv, _b_err, 1)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        dmli.d_corr := lowest_of_correlation;
+        END;
+    (*ENDIF*) 
+    dmli.d_act_node := acv.a_ap_tree^[ s_n ].n_pos;
+    a660_query_execute (acv, dmli, dmli.d_act_node,
+          NOT c_new_parsinfo, filled_part2_bytes, sr_rec,
+          pseudo_resultset_select, level, no_in_level,
+          NOT c_from_sel_found);
+    acv.a_outer_join := false;
+    dmli.d_corr      := correlation;
+    (* _fetch_inner_sel = pno of fetch of inner select *)
+    _fetch_inner_sel  := acv.a_pars_last_key.p_no;
+    IF  dmli.d_only_sem_check
+    THEN
+        a06drop_fieldlist_references (acv.a_mblock.mb_fieldlists);
+    (*ENDIF*) 
+    END;
+(* PTS 1117747 E.Z. *)
+(*ENDIF*) 
+IF  ((acv.a_returncode = 0) AND
+    (acv.a_ap_tree^[ s_n ].n_lo_level > 0))
+THEN
+    BEGIN
+    a661_corr_sub (acv, dmli, acv.a_ap_tree^[ s_n ].n_lo_level,
+          dmli.d_filled_bytes, sr_rec, pseudo_resultset_select,
+          (last_corr_query AND (acv.a_ap_tree^[ s_n ].n_sa_level <= 0)),
+          level+1, 1);
+    dmli.d_level[ level + 1 ] := 0
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode = 0)             AND
+    (dmli.d_lowpars          < _old_d_lowpars) AND
+    (NOT dmli.d_only_sem_check)
+THEN
+    BEGIN
+    a661_update_keys_of_parsrecords (acv, _old_p_id,
+          dmli.d_lowpars, _old_d_lowpars);
+    dmli.d_lowpars := _old_d_lowpars;
+    END;
+(*ENDIF*) 
+IF  (acv.a_ap_tree^[ s_n ].n_sa_level > 0) AND
+    (* PTS 1123051 E.Z. *)
+    (acv.a_ap_tree^[ s_n ].n_symb in [ s_where, s_select ])
+THEN
+    IF  (acv.a_ap_tree^[ acv.a_ap_tree^
+        [ s_n ].n_sa_level ].n_symb = s_having) AND
+        (_m_corr_info.uci_lowpars <> _m_corr_info.uci_oldlowpars)
+    THEN
+        BEGIN
+        a661_update_keys_of_parsrecords (acv, _m_corr_info.uci_pid,
+              _m_corr_info.uci_lowpars, _m_corr_info.uci_oldlowpars);
+        dmli.d_lowpars                       := _m_corr_info.uci_oldlowpars;
+        acv.a_where_corr_info.uci_oldlowpars := 0;
+        acv.a_where_corr_info.uci_lowpars    := 0;
+        acv.a_where_corr_info.uci_pid[1]     := chr(0);
+        END
+    ELSE
+        acv.a_where_corr_info := _m_corr_info;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  (acv.a_returncode       = 0) AND
+    (acv.a_ap_tree^[ s_n ].n_sa_level > 0)
+THEN
+    BEGIN
+    _old_p_no := acv.a_pars_last_key.p_no;
+    a661_corr_sub (acv, dmli, acv.a_ap_tree^[ s_n ].n_sa_level,
+          filled_part2_bytes, sr_rec, pseudo_resultset_select,
+          last_corr_query, level, no_in_level+1);
+    IF  NOT (dmli.d_only_sem_check) AND NOT (acv.a_intern_explain)
+    THEN
+        (* PTS 1123051 E.Z. *)
+        IF  (acv.a_ap_tree^[ s_n ].n_symb in [ s_where, s_select ]) AND
+            (acv.a_ap_tree^[ acv.a_ap_tree^
+            [ s_n ].n_sa_level ].n_symb = s_having)
+        THEN
+            ak661change_p_no_in_fetch (acv, _hp_no, _old_p_no)
+        ELSE
+            ak661change_p_no_in_fetch (acv, _fetch_inner_sel, _old_p_no)
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_fdelete_fromtab_results (VAR acv : tak_all_command_glob);
+ 
+VAR
+      _del_cnt        : integer;
+      _i              : integer;
+      _fs_tree        : tgg00_FileId;
+      _pars_k         : tak_parskey;
+      _aux_return    : tsp00_Int2;
+      _aux_errorpos  : tsp00_Int4;
+      _syskey_tableid : tgg00_Surrogate;
+ 
+BEGIN
+g04build_temp_tree_id (_fs_tree, acv.a_transinf.tri_trans);
+(* PTS 1111510 E.Z. *)
+_fs_tree.fileTfnTemp_gg00 := ttfnFromSelect_egg00;
+a661_build_t_fromsel_tableid (_syskey_tableid,
+      _fs_tree.fileTabId_gg00,
+      acv.a_curr_ex_parskey, cak_fromseltab_site, 0);
+a101_SetTempFileLevel (acv, _fs_tree, 0);
+SAPDB_PascalForcedMove (sizeof(_syskey_tableid), sizeof(_pars_k),
+      @_syskey_tableid, 2, @_pars_k, 1, mxak_parskey);
+_del_cnt     := 0;
+_aux_return   := acv.a_returncode;
+_aux_errorpos := acv.a_errorpos;
+acv.a_returncode := 0;
+a660_prefix_delete (acv, _pars_k, _del_cnt, mxak_parskey);
+acv.a_returncode := 0;
+a101_DestroyGroupedTempFiles (acv.a_transinf.tri_trans,
+      ttfnFromSelect_egg00, -1, -1, _fs_tree.fileName_gg00);
+acv.a_returncode := _aux_return;
+acv.a_errorpos   := _aux_errorpos;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_get_from_select_table (
+            VAR acv     : tak_all_command_glob;
+            VAR tableid : tgg00_Surrogate;
+            VAR pbasep  : tak_sysbufferaddress;
+            dstate      : tak_directory_state;
+            all         : boolean;
+            VAR f_ok    : boolean);
+ 
+VAR
+      _site  : tgg00_ServerdbNo;
+      _b_err : tgg00_BasisError;
+      _sysk  : tgg00_SysInfoKey;
+      (* PTS 1111510 E.Z. *)
+      _mt    : tak_fromsel_tabid;
+ 
+BEGIN
+_mt.tabid        := tableid;
+(* PTS 1111510 E.Z. *)
+_mt.fparschar[1] := cak_tempinfo_byte;
+_mt.fcmd_count   := acv.a_curr_ex_parskey.p_count;
+_mt.ffill        := 0;
+_sysk            := a01sysnullkey;
+_sysk.sentrytyp  := cak_eresult;
+_sysk.stableid   := _mt.tabid;
+_sysk.slinkage   := cak_init_linkage;
+_site            := cgg_zero_c2;
+f_ok            := true;
+a10get_sysinfo (acv, _sysk, dstate, pbasep, _b_err);
+IF  _b_err <> e_ok
+THEN
+    BEGIN
+    IF  (_b_err = e_key_not_found)
+    THEN
+        _b_err := e_sysinfo_not_found;
+    (*ENDIF*) 
+    IF  (_b_err <> e_sysinfo_not_found)
+    THEN
+        a07_b_put_error (acv, _b_err, 1)
+    ELSE
+        a07_b_put_error (acv, e_from_select_not_allowed, 1);
+    (*ENDIF*) 
+    f_ok := false;
+    END
+ELSE
+    BEGIN
+    IF  NOT all
+    THEN
+        a10_rel_sysinfo (acv, pbasep^.syskey);
+    (*ENDIF*) 
+    ;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a661_is_fromsel_table (
+            VAR acv     : tak_all_command_glob;
+            VAR ftreeid : tgg00_FileId) : boolean;
+ 
+VAR
+      mt : tak_fromsel_tabid;
+ 
+BEGIN
+mt.tabid              := ftreeid.fileTabId_gg00;
+&IFDEF TRACE
+t01surrogate (ak_sem, 'tabid       ', ftreeid.fileTabId_gg00);
+t01int4      (ak_sem, 'ft          ', ord (mt.ft));
+t01int4      (ak_sem, 'from_sel_no ', mt.fs_no);
+&ENDIF
+(* PTS 1111510 *)
+a661_is_fromsel_table :=
+      (a101_IsExtendedTempFile (acv, ftreeid) ) AND
+      (a101_GetExtendedTempFileType (acv, ftreeid) = ttfnFromSelect_egg00) AND
+      gg06IsNilSession (mt.session);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_sub_build (
+            VAR acv               : tak_all_command_glob;
+            VAR dmli              : tak_dml_info;
+            sub_n                 : integer;
+            filled_part2_bytes    : integer;
+            VAR sr_rec            : tak71_strat_rec);
+ 
+VAR
+      _dummy           : boolean;
+      _md_subquery     : boolean;
+      _count           : integer;
+      _next_n          : integer;
+      _pos             : integer;
+      _subq_n          : integer;
+      _dummy_parsk     : tak_parskey;
+      _m_union_key     : tak_parskey;
+      _m_fromsel_n     : tsp00_Int2;
+      _m_select_n      : tsp00_Int2;
+      _m_from_select   : boolean;
+      _m_first_union   : boolean;
+      _m_union_order_n : integer;
+      _m_union_limit_n : tsp00_Int2;
+      _m_first_parsid  : char;
+      _m_command_kind  : tak_commandkind;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    _m_first_union    := dmli.d_first_union;
+    _m_union_order_n  := dmli.d_union_order_n;
+    _m_union_limit_n  := dmli.d_union_limit_n;
+    dmli.d_first_union := false;
+    _subq_n          := acv.a_ap_tree^[ sub_n ].n_pos;
+    _count   := acv.a_ap_tree^[ _subq_n ].n_length;
+    _next_n  := acv.a_ap_tree^[ sub_n ].n_lo_level;
+    _m_select_n    := acv.a_select_node;
+    acv.a_select_node := _subq_n;
+&   IFDEF TRACE
+    t01int4 (ak_sem, 'sub_n       ', sub_n);
+    t01int4 (ak_sem, 'next_n      ', _next_n);
+    t01int4 (ak_sem, 'subcount    ', _count);
+&   ENDIF
+    IF  _next_n > 0
+    THEN
+        BEGIN
+        (* PTS 1114017 E.Z. *)
+        _m_from_select := acv.a_from_select;
+        _m_fromsel_n   := acv.a_fromsel_n;
+        acv.a_from_select := false;
+        acv.a_fromsel_n   := 0;
+        dmli.d_act_node := acv.a_ap_tree^[ _next_n ].n_pos;
+        a661_sub_build (acv, dmli, _next_n, filled_part2_bytes, sr_rec);
+        acv.a_from_select := _m_from_select;
+        acv.a_fromsel_n   := _m_fromsel_n;
+        END;
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        IF  (acv.a_ap_tree^[ _subq_n ].n_proc = a63) AND
+            (acv.a_ap_tree^[ _subq_n ].n_subproc = cak_x_start_union)
+        THEN
+            BEGIN
+            _m_first_parsid := acv.a_first_parsid;
+            _m_command_kind := acv.a_command_kind;
+            a662_start_union_select (acv, sub_n, dmli, _dummy, _dummy_parsk);
+            IF  _m_command_kind = sub_in_union_command
+            THEN
+                acv.a_first_parsid := _m_first_parsid
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            dmli.d_act_node  := _subq_n;
+            dmli.d_subcount  := _count;
+            IF  (dmli.d_sparr.pparsp = NIL)  AND
+                (NOT dmli.d_only_sem_check)
+            THEN
+                a660_new_pparsp (acv, dmli.d_sparr,
+                      NOT c_first_parsinfo, c_complicate);
+            (*ENDIF*) 
+            IF  (acv.a_returncode = 0)              AND
+                (NOT dmli.d_only_sem_check)           AND
+                (acv.a_ap_tree^[ sub_n ].n_lo_level >  0)
+            THEN
+                BEGIN
+                dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel := -1;
+                ak661_subquery_found (acv, acv.a_ap_tree^[ sub_n ].n_lo_level,
+                      dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel);
+&           IFDEF TRACE
+            (*ENDIF*) 
+            t01int4(ak_sem, 'subcounter  ',
+                  dmli.d_sparr.pparsp^.sparsinfo.p_subcntlevel);
+&           ENDIF
+                END;
+            _dummy                    := false;
+            acv.a_rowno_allowed      := true;
+            sr_rec.sr_distinct_bytes := true;
+            IF  (acv.a_ap_tree^[ sub_n ].n_proc = a92fromsel)
+            THEN
+                BEGIN
+                acv.a_outer_join       := false;
+                _m_fromsel_n            := acv.a_fromsel_n;
+                acv.a_fromsel_n        := _subq_n;
+                _m_from_select          := acv.a_from_select;
+                acv.a_from_select      := true;
+                _md_subquery            := dmli.d_subquery;
+                dmli.d_subquery        := false;
+                dmli.d_use_sub         := false;
+                dmli.d_cntpar          := MAX_COL_PER_TAB_GG00;
+                _m_union_key            := acv.a_union_key;
+                a660select (acv, acv.a_ap_tree^[_subq_n].n_lo_level, dmli, _dummy);
+                acv.a_outer_join    := false;
+                dmli.d_use_sub      := true;
+                acv.a_union_key     := _m_union_key;
+                acv.a_fromsel_n     := _m_fromsel_n;
+                acv.a_from_select   := _m_from_select;
+                dmli.d_subquery     := _md_subquery;
+                END
+            ELSE
+                BEGIN
+                a660_query_execute (acv, dmli, _subq_n, NOT c_new_parsinfo,
+                      filled_part2_bytes, sr_rec, _dummy,
+                      1, 1, NOT c_from_sel_found);
+                acv.a_outer_join       := false;
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                IF  (NOT acv.a_insert_select) OR
+                    (* not top of insert select *)
+                    (dmli.d_subcount <> cak_maxsubcnt_per_level+2)
+                THEN
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_qual^.mstrat_pos > 0 ) AND
+                        ( acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].
+                        etype = st_strat )
+                    THEN
+                        acv.a_mblock.mb_strat_len :=
+                              acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos - 1;
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  acv.a_returncode = cak_e_corelated_subquery_not_allowed
+        THEN
+            BEGIN
+            IF  acv.a_main_returncode = 0
+            THEN
+                BEGIN
+                acv.a_main_returncode := cak_e_corelated_subquery_not_allowed;
+                acv.a_main_errorpos   := acv.a_errorpos
+                END;
+            (*ENDIF*) 
+            acv.a_returncode := 0;
+            acv.a_errorpos   := 0;
+            END;
+        (*ENDIF*) 
+        a06drop_fieldlist_references (acv.a_mblock.mb_fieldlists);
+        END;
+    (*ENDIF*) 
+    _next_n := acv.a_ap_tree^[ sub_n ].n_sa_level;
+    IF  _next_n > 0
+    THEN
+        BEGIN
+        a661_sub_build (acv, dmli, _next_n, filled_part2_bytes, sr_rec)
+        END;
+    (*ENDIF*) 
+    dmli.d_first_union   := _m_first_union;
+    dmli.d_union_order_n := _m_union_order_n;
+    dmli.d_union_limit_n := _m_union_limit_n;
+    acv.a_select_node    := _m_select_n;
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661_update_keys_of_parsrecords (
+            VAR acv     : tak_all_command_glob;
+            old_p_id    : tsp00_C1;
+            VAR lowpars : tsp00_Uint1;
+            old_lowpars : tsp00_Uint1);
+ 
+VAR
+      _b_err  : tgg00_BasisError;
+      _diff   : integer;
+      _old_no : integer;
+      _new_no : tsp00_Uint1;
+      _p      : tak_parskey;
+ 
+BEGIN
+_new_no := acv.a_pars_last_key.p_no + 1;
+_old_no := lowpars+1;
+_diff   := _old_no - _new_no;
+_p      := acv.a_pars_last_key;
+_p.p_id := old_p_id;
+&ifdef trace
+t01int4 (ak_sem, 'new_no      ', _new_no);
+t01int4 (ak_sem, 'old_no      ', _old_no);
+t01int4 (ak_sem, 'old_lowpars ', old_lowpars);
+t01int4 (ak_sem, 'diff        ', _diff);
+&endif
+WHILE ((acv.a_returncode = 0) AND
+      (_old_no <= old_lowpars)) DO
+    BEGIN
+    _p.p_no := _old_no;
+    a10_upd_key (acv, _p, _diff, _b_err);
+    IF  _b_err <> e_ok
+    THEN
+        a07_b_put_error (acv, _b_err, 1)
+    ELSE
+        _old_no := _old_no + 1
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+IF  acv.a_pars_last_key.p_id = old_p_id
+THEN
+    acv.a_pars_last_key := _p;
+(*ENDIF*) 
+lowpars           := old_lowpars;
+IF  (acv.a_command_kind  <> single_command) AND
+    (acv.a_command_kind  <> show_command)   AND
+    (acv.a_command_kind  <> link_command)   AND
+    (acv.a_union_cnt = 0)
+THEN
+    a54set_complex_entry (acv, c_set_p_no);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661a_subquery (
+            VAR acv                     : tak_all_command_glob;
+            VAR dmli                    : tak_dml_info;
+            VAR sr_rec                  : tak71_strat_rec;
+            curr_n                      : tsp00_Int2;
+            VAR pseudo_resultset_select : boolean);
+ 
+VAR
+      _del_cnt           : integer;
+      _low_first         : integer;
+      _m_ex_kind         : tak_execution_kind;
+      _m_acv_info_output : boolean;
+      _parsk             : tak_parskey;
+      _ke                : tgg00_SysInfoKey;
+      _b_err             : tgg00_BasisError;
+      _aux_return        : tsp00_Int2;
+      _aux_errorpos      : tsp00_Int4;
+ 
+BEGIN
+acv.a_ap_tree^[ curr_n ].n_length := 1;
+_low_first                    := 1;
+&ifdef TRACE
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+&ENDIF
+IF  dmli.d_view
+THEN
+    dmli.d_phase_cnt := cak_complex_view_indicator;
+(*ENDIF*) 
+_m_acv_info_output := acv.a_info_output;
+&IFDEF TRACE
+t01bool (ak_sem, 'new m_info  ', _m_acv_info_output);
+&ENDIF
+acv.a_info_output := false;
+_m_ex_kind     := acv.a_ex_kind;
+IF  NOT (dmli.d_view)
+THEN
+    acv.a_ex_kind := only_parsing;
+(*ENDIF*) 
+IF  ((hsTempLock_egg00 in dmli.d_globstate) OR
+    (hsPermLock_egg00 in dmli.d_globstate))
+    AND (acv.a_isolation_info <> temp_lock_rec_get)
+THEN
+    acv.a_isolation_info := temp_lock_rec_needed;
+(*ENDIF*) 
+pseudo_resultset_select := _m_acv_info_output
+      AND (_m_ex_kind <> only_parsing);
+&ifdef trace
+t01execution_kind (ak_sem, '_m_ex_kind  ', _m_ex_kind);
+t01bool (ak_sem, 'pseudo_resul', pseudo_resultset_select );
+t01bool (ak_sem, 'a_corr_selec', acv.a_corr_select );
+t01bool (ak_sem, 'd_only_sem_c', dmli.d_only_sem_check);
+&endif
+IF  acv.a_corr_select
+THEN
+    acv.a_ap_tree^[ curr_n ].n_symb := s_sum;
+(*ENDIF*) 
+IF  acv.a_ap_tree^[ curr_n ].n_symb = s_sum
+THEN
+    BEGIN
+    acv.a_corr_select := true;
+    ak661s_corr_start (acv, dmli, _parsk, sr_rec, curr_n,
+          pseudo_resultset_select, _m_ex_kind,
+          _m_acv_info_output);
+    END
+ELSE
+    BEGIN
+    ak661a_norm_sub (acv, dmli, _parsk, sr_rec, curr_n,
+          pseudo_resultset_select, _m_acv_info_output);
+    END;
+(*ENDIF*) 
+&IFDEF TRACE
+t01int4 (ak_sem, 'isolation_in', ord(acv.a_isolation_info));
+t01bool (ak_sem, 'd_union     ', dmli.d_union);
+t01bool (ak_sem, 'd_only_sem_c', dmli.d_only_sem_check);
+&ENDIF
+IF  (acv.a_returncode = 0)                         AND
+    (acv.a_corr_select OR (acv.a_isolation_info = temp_lock_rec_get)) AND
+    (NOT dmli.d_union)                            AND
+    (acv.a_max_intern_select = 0)                   AND
+    (NOT dmli.d_only_sem_check)                    AND
+    (acv.a_qualified_jv_upd = no_jv_upd)
+THEN
+    BEGIN
+    a54set_complex_entry (acv, c_set_last_pars);
+    IF  (acv.a_isolation_info = temp_lock_rec_get) AND
+        (NOT acv.a_from_select) AND
+        (NOT acv.a_insert_select)
+    THEN
+        a54_loc_temp_locks (acv,
+              acv.a_transinf.tri_global_state, acv.a_p_arr1);
+    (*ENDIF*) 
+    _parsk           := acv.a_pars_last_key;
+    _parsk.p_no      := 0;
+    _parsk.p_id[ 1 ] := acv.a_first_parskey;
+    _parsk.p_kind    := m_complex;
+    END;
+(*ENDIF*) 
+IF  (_m_ex_kind <> only_parsing) AND (NOT dmli.d_only_sem_check)
+THEN
+    BEGIN
+    a661exec_sub (acv, dmli, _parsk, curr_n, _del_cnt,
+          _m_acv_info_output, pseudo_resultset_select);
+    END
+ELSE
+    BEGIN
+    IF  acv.a_returncode <> 0
+    THEN
+        BEGIN
+&       ifdef trace
+        t01int4 (ak_sem, 'error return', acv.a_returncode );
+&       endif
+        IF  (acv.a_returncode      = cak_e_corelated_subquery_not_allowed) OR
+            (acv.a_main_returncode = cak_e_corelated_subquery_not_allowed)
+        THEN
+            BEGIN
+&           IFDEF TRACE
+            t01int4 (ak_sem, '661a_subquer', 661);
+            t01int4 (ak_sem, 'd_onlysemchk', ord (dmli.d_only_sem_check));
+            t01int4 (ak_sem, 'acv_unioncnt', acv.a_union_cnt);
+&           ENDIF
+            IF  (acv.a_union_cnt > 0) AND dmli.d_view
+            THEN
+                BEGIN
+                WITH acv.a_unionrec_ptr^.sunionrec DO
+                    IF  (acv.a_p_arr1.pbasep <> NIL)
+                    THEN
+                        ucolpos := acv.a_p_arr1.pbasep^.sresult.bfirstindex;
+&                   ifdef trace
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                t01int4 (ak_sem, 'ucolpos 1   ',
+                      acv.a_unionrec_ptr^.sunionrec.ucolpos);
+&               endif
+                END;
+            (*ENDIF*) 
+            IF  (_m_ex_kind <> only_parsing)
+            THEN
+                BEGIN
+                IF  (acv.a_union_cnt < 2) OR (NOT dmli.d_view)
+                THEN
+                    a660_prefix_delete (acv, _parsk,
+                          _del_cnt, cak_intern_prefix)
+                ELSE
+                    IF  (acv.a_union_cnt  >  0 ) AND
+                        (dmli.d_esparr.pbasep <> NIL)
+                    THEN
+                        BEGIN
+                        _aux_return   := acv.a_returncode;
+                        _aux_errorpos := acv.a_errorpos;
+                        acv.a_returncode := 0;
+                        _b_err              := e_ok;
+                        _ke                 := dmli.d_esparr.pbasep^.syskey;
+&                       IFDEF TRACE
+                        t01int4  (ak_sem, 'd_view      ', ord (dmli.d_view));
+                        t01int4  (ak_sem, 'd_union     ', ord (dmli.d_union));
+                        t01int4  (ak_sem, 'a_union_cnt ', acv.a_union_cnt);
+                        t01int4  (ak_sem, 'd_first_unio', ord (dmli.d_first_union));
+                        t01int4  (ak_sem, 'd_subquery  ', ord (dmli.d_subquery  ));
+                        t01int4 (ak_sem, ' first_corr?', ord (dmli.d_corr));
+                        t01buf (ak_sem, dmli.d_esparr.pbasep^, 1,
+                              dmli.d_esparr.pbasep^.b_kl + 4 );
+                        t01buf (ak_sem, acv.a_p_arr1.pbasep^, 1,
+                              acv.a_p_arr1.pbasep^.b_kl + 4 );
+&                       ENDIF
+                        a10del_sysinfo (acv, _ke, _b_err);
+                        IF  (_b_err <> e_ok)                AND
+                            (_b_err <> e_sysinfo_not_found) AND
+                            (_aux_return = 0)
+                        THEN
+                            a07_b_put_error (acv, _b_err, 1)
+                        ELSE
+                            BEGIN
+                            acv.a_returncode := _aux_return;
+                            acv.a_errorpos   := _aux_errorpos;
+                            END;
+                        (*ENDIF*) 
+&                       IFDEF TRACE
+                        t01basis_error  (ak_sem, 'b_err       ', _b_err);
+                        t01int4  (ak_sem, 'returncode  ',
+                              acv.a_returncode);
+                        t01int4  (ak_sem, 'd_view      ', ord (dmli.d_view));
+                        t01int4  (ak_sem, 'd_union     ', ord (dmli.d_union));
+                        t01int4  (ak_sem, 'a_union_cnt ', acv.a_union_cnt);
+                        t01int4  (ak_sem, 'd_first_unio', ord (dmli.d_first_union));
+                        t01int4  (ak_sem, 'd_subquery  ', ord (dmli.d_subquery  ));
+                        t01int4 (ak_sem, ' first_corr?', ord (dmli.d_corr));
+                        t01buf (ak_sem, dmli.d_esparr.pbasep^, 1,
+                              dmli.d_esparr.pbasep^.b_kl + 4 );
+                        t01buf (ak_sem, acv.a_p_arr1.pbasep^, 1,
+                              acv.a_p_arr1.pbasep^.b_kl + 4 );
+                        t01int4  (ak_sem, 'a_select_nod', acv.a_select_node);
+&                       ENDIF
+                        END;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            acv.a_tempinfo_key             := cgg_zero_id;
+            acv.a_ap_tree^[ acv.a_select_node ].n_symb := s_sum;
+            END
+        ELSE
+            BEGIN
+            acv.a_part_rollback := (acv.a_returncode <> 0) AND
+                  (acv.a_returncode <> 100);
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+acv.a_ex_kind := _m_ex_kind;
+&IFDEF TRACE
+t01bool (ak_sem, 'again m_info', _m_acv_info_output);
+t01bool (ak_sem, 'd_single    ', dmli.d_single);
+&ENDIF
+acv.a_info_output := _m_acv_info_output;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661del_all_fromtabs (
+            VAR acv : tak_all_command_glob;
+            sub_n : integer);
+ 
+VAR
+      _next_n      : integer;
+ 
+BEGIN
+(* PTS 1118537 E.Z. *)
+IF  (acv.a_returncode = 0) AND (sub_n > 0)
+THEN
+    BEGIN
+    _next_n := acv.a_ap_tree^[ sub_n ].n_lo_level;
+    IF  _next_n > 0
+    THEN
+        a661del_all_fromtabs (acv, _next_n);
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        WITH acv.a_ap_tree^[ sub_n ] DO
+            BEGIN
+            IF  (n_proc = a92fromsel)
+            THEN
+                BEGIN
+&               ifdef trace
+                t01int4 (ak_sem, 'sub_n       ', sub_n);
+&               endif
+                ak661_del_one_fromtab (acv, n_pos);
+                END;
+            (*ENDIF*) 
+            _next_n := n_sa_level;
+            IF  (_next_n > 0) AND
+                (acv.a_returncode = 0)
+            THEN
+                a661del_all_fromtabs (acv, _next_n);
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a661get_from_select_table (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            from_select_no : tsp00_Int2;
+            all            : boolean);
+ 
+VAR
+      _f_ok     : boolean;
+      _tableid  : tgg00_Surrogate;
+      _fn_tabid : tgg00_Surrogate;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_sem, 'fsel_no     ', from_select_no);
+t01bool (ak_sem, 'all         ', all);
+&endif
+(* PTS 1111510 E.Z. *)
+a661_build_t_fromsel_tableid (_tableid, _fn_tabid,
+      acv.a_curr_ex_parskey, cak_fromseltab_site, from_select_no);
+dmli.d_sparr.psynfound := false;
+dmli.d_sparr.pcount    := 0;
+a661_get_from_select_table (acv, _tableid, dmli.d_sparr.pbasep,
+      d_fix, all, _f_ok);
+IF  _f_ok
+THEN
+    BEGIN
+    dmli.d_table := a01_il_b_identifier;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].ouser         := acv.a_curr_user_name;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].otable        := a01_il_b_identifier;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].ospecialname  := [  ];
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oprivset      := [  ];
+    dmli.d_tabarr^[ dmli.d_acttabindex ].osetallpriv   := [  ];
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oattributes   := [  ];
+    dmli.d_tabarr^[ dmli.d_acttabindex ].ospecs_needed := ons_only_tablename;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oall_priv     := true;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oview         := false;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].ocomplex_view := false;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oviewqual     := false;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].oviewcheck    := false;
+    dmli.d_tabarr^[ dmli.d_acttabindex ].otreeid       :=
+          dmli.d_sparr.pbasep^.sbase.btreeid;
+    IF  dmli.d_acttabindex = 1
+    THEN
+        dmli.d_tabarr^[ dmli.d_acttabindex ].ocounttabs := 0;
+    (*ENDIF*) 
+    IF  dmli.d_acttabindex < dmli.d_cntfromtab
+    THEN
+        dmli.d_tabarr^[ dmli.d_acttabindex + 1 ].ocounttabs :=
+              dmli.d_tabarr^[ dmli.d_acttabindex ].ocounttabs +
+              dmli.d_sparr.pbasep^.sbase.bv_tabcount
+    ELSE
+        dmli.d_maxcounttabs :=
+              dmli.d_tabarr^[ dmli.d_acttabindex ].ocounttabs +
+              dmli.d_sparr.pbasep^.sbase.bv_tabcount;
+    (*ENDIF*) 
+    END
+ELSE
+    a07_b_put_error (acv, e_sysinfo_not_found, 1);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak661_subquery_found (
+            VAR acv         : tak_all_command_glob;
+            curr_n          : tsp00_Int2;
+            VAR subcntlevel : tsp00_Int2);
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'curr_n      ', curr_n);
+&ENDIF
+IF  acv.a_ap_tree^[ curr_n ].n_proc <> a92fromsel
+THEN
+    subcntlevel := acv.a_ap_tree^[ acv.a_ap_tree^[ curr_n ].n_pos ].
+          n_length DIV cak_maxsubcnt_per_level;
+(*ENDIF*) 
+IF  (subcntlevel = -1) AND
+    (acv.a_ap_tree^[ curr_n ].n_sa_level > 0)
+THEN
+    ak661_subquery_found(acv, acv.a_ap_tree^[ curr_n ].n_sa_level, subcntlevel);
+(*ENDIF*) 
+IF  (subcntlevel = -1) AND
+    (acv.a_ap_tree^[ curr_n ].n_lo_level > 0)
+THEN
+    ak661_subquery_found(acv, acv.a_ap_tree^[ curr_n ].n_lo_level, subcntlevel);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a661_fromsel_found (
+            VAR acv : tak_all_command_glob;
+            sub_n : integer) : boolean;
+ 
+VAR
+      _next_n      : integer;
+      _found       : boolean;
+ 
+BEGIN
+_found := false;
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    _next_n := acv.a_ap_tree^[ sub_n ].n_lo_level;
+    IF  _next_n > 0
+    THEN
+        _found := a661_fromsel_found (acv, _next_n);
+    (*ENDIF*) 
+    IF  (acv.a_returncode = 0) AND NOT _found
+    THEN
+        WITH acv.a_ap_tree^[ sub_n ] DO
+            BEGIN
+            IF  (n_proc = a92fromsel)
+            THEN
+                _found := true;
+            (*ENDIF*) 
+            _next_n := n_sa_level;
+            IF  (_next_n > 0) AND
+                (acv.a_returncode = 0) AND NOT _found
+            THEN
+                _found := a661_fromsel_found (acv, _next_n);
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+a661_fromsel_found := _found;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

@@ -1,0 +1,210 @@
+*   *ID* FROMSEL  VDNTEST  changed on 1992-09-28-13.23.50 by ADMIN     *
+* **** select in frompart ******** !
+file xinitdbk !
+file connect ( kern test !
+create table ta (a1 int, a2 int, a3 int) !
+insert ta values (1, 1, 1) !
+insert ta values (2, 1, 1) !
+create table tb (b1 int, b2 int, b3 int) !
+insert tb values (1, 2, 2) !
+insert tb values (2, 2, 2) !
+create table tc (c1 int, c2 int, c3 int) !
+insert tc values (1, 3, 3) !
+insert tc values (2, 3, 3) !
+commit work release !
+file FROMSEL1 ( internal !
+file FROMSEL1 ( ORACLE !
+* PTS 1118139 - 42 !
+* Robert Krüger [krueger@signal7.de] !
+file connect ( kern test !
+create index i3 on tc (c3)!
+create index i1 on tc (c1)!
+create view vcomplex as
+ select distinct ta.a2 
+   from ta,tb
+  where ta.a1 = tb.b1 !
+parsing !
+ SELECT *
+ FROM tc, (SELECT *
+       FROM TB, vcomplex) fromsel, ta
+where tc.c3 = :p
+  and fromsel.b1 = tc.c1 
+  and tc.c1 = ta.a1 !
+executing !
+data !
+ SELECT * !
+1, JDBC_CURSOR_18
+n 10 3 
+
+nodata !
+pars_execute !
+describe "JDBC_CURSOR_18" !
+pars_then_ex !
+FETCH "JDBC_CURSOR_18" !
+pars_execute !
+drop table ta !
+drop table tb !
+drop table tc !
+commit release !
+********************
+file connect ( kern test !
+create table t ( a fixed (7))!
+insert t set a = 5!
+create table t1 ( a1 fixed (7))!
+insert t1 select * from
+    (select a from t where a < 12) !
+insert t1 select * from
+    (select a from t where a < 12) !
+select * from t1 !
+fetch!
+rollback release !
+file frcorsub !
+* PTS 1110742 !
+file connect ( kern test !
+CREATE TABLE OM_ADMINISTRATION (
+        LIZENZEN int NOT NULL,
+        GLOBALE_ID fixed(20,0) NOT NULL,
+        DB_VERSION varchar (10) NULL,
+        MAX_LAENGE_NAMEN int NOT NULL,
+        GLOBALE_VID int NULL) !
+CREATE TABLE OM_KATEGORIE (
+        K_NAME varchar (30) primary key,
+        K_BEZEICHNUNG varchar (50) NOT NULL,
+        K_KOMMENTAR varchar (50) NULL) !
+insert into OM_KATEGORIE values ('OM_DOKUMENT','a','b')!
+insert into OM_KATEGORIE values ('OM_EXT_KAT_TAB_000001','c','d')!
+CREATE TABLE OM_VERKNUEPFUNG (
+        VON_OID int NOT NULL,
+        VON_K_NAME varchar (30) NOT NULL,
+        NACH_OID int NOT NULL,
+        NACH_K_NAME varchar (30) NOT NULL,
+        KOMMENTAR_V_N varchar (100) NULL,
+        KOMMENTAR_N_V varchar (100) NULL,
+        ANZAHL int NOT NULL,
+        CONSTRAINT CK_OM_VERK_1 CHECK (ANZAHL > 0),
+        CONSTRAINT PK_OM_VERK_1 PRIMARY KEY ( VON_OID, NACH_OID),
+        CONSTRAINT FK_OM_VERK_1 FOREIGN KEY ( NACH_K_NAME)
+		REFERENCES OM_KATEGORIE ( K_NAME),
+        CONSTRAINT FK_OM_VERK_2 FOREIGN KEY ( VON_K_NAME)
+		REFERENCES OM_KATEGORIE ( K_NAME))!
+insert into om_administration values (6,1,'2.2',30,0)!
+CREATE TABLE OM_DOKUMENT (
+	O_ID fixed(20,0) PRIMARY KEY,
+	V_ID int NULL,
+	PFAD varchar (150) NULL,
+	D_TYP varchar (20) NULL)!
+CREATE INDEX C_OM_DBPROC_000001 ON OM_DOKUMENT (PFAD)!
+CREATE TRIGGER OM_KAT_TRG_000001 FOR kern.OM_DOKUMENT 
+   AFTER INSERT EXECUTE(
+	var alt fixed(20,0);
+	select globale_id into :alt from kern.OM_ADMINISTRATION 
+       with lock;
+	update kern.OM_ADMINISTRATION set globale_id=:alt + 1;
+	update kern.OM_DOKUMENT set O_ID=:alt + 1 where O_ID=0;
+)!
+create table OM_EXT_KAT_TAB_000001 (
+	O_ID fixed(20,0) primary key,
+	V_ID int NULL,
+	OWNER varchar (32) NULL,
+	TABLENAME varchar (32) NULL)!
+CREATE TRIGGER OM_KAT_TRG_000002 FOR kern.OM_EXT_KAT_TAB_000001 
+    AFTER INSERT EXECUTE(
+	var alt fixed(20,0);
+	select globale_id into :alt from kern.OM_ADMINISTRATION 
+        with lock;
+	update kern.OM_ADMINISTRATION set globale_id=:alt + 1;
+	update kern.OM_EXT_KAT_TAB_000001 set O_ID=:alt + 1 
+     where O_ID=0;
+)!
+ * resulted in -9400 !
+delete from OM_DOKUMENT where o_id in
+   (select nach_oid from OM_VERKNUEPFUNG 
+     where nach_k_name='OM_DOKUMENT' and von_oid in 
+       (select o_id from (select b.o_id,a.OWNER from SYSDD.TABLES a 
+                      right outer join OM_EXT_KAT_TAB_000001 b 
+                      on a.OWNER=b.OWNER and a.TABLENAME=b.TABLENAME) x
+        where x.OWNER is null))!
+ * resulted in -9206 PTS 1111510 !
+delete from OM_DOKUMENT where o_id in
+   (select nach_oid from OM_VERKNUEPFUNG 
+     where nach_k_name='OM_DOKUMENT' and von_oid in 
+       (select o_id from (select b.o_id,a.OWNER from SYSDD.TABLES a 
+                      right outer join OM_EXT_KAT_TAB_000001 b 
+                      on a.OWNER=b.OWNER and a.TABLENAME=b.TABLENAME) x
+        where x.OWNER is null))!
+rollback release !
+* PTS 1131988-90 !
+file connect ( kern test !
+create table t ( a char (8), b int)!
+insert t values ('aaa', 1)!
+create view v1 as select distinct a,b from t !
+pars_then_ex !
+select * from v1,   
+( select * from t ) s1
+ where v1.a = s1.a !
+fetch!
+pars_execute !
+rollback release !
+* PTS 1133401/31 !
+file connect ( sut sut!
+create user elke password elke resource!
+create view elkecolumn as select * from sysdd.columns !
+grant select ( 
+SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,MOD,COMMENT) 
+on elkecolumn to elke !
+commit release !
+connect elke elke !
+select comment from columns !
+fetch1 !
+select * from (select comment from columns)!
+fetch1!
+select * from columns !
+fetch1!
+select * from (select * from columns)!
+fetch1!
+select distinct comment from columns !
+fetch1 !
+select * from (select distinct comment from columns)!
+fetch1!
+select distinct * from columns 
+order by SCHEMANAME, TABLENAME, COLUMNNAME!
+fetch1!
+select * from (select distinct * from columns)!
+fetch1!
+commit release !
+file connect ( elke elke !
+select * from sut.elkecolumn !
+fetch1!
+select * from (select * from sut.elkecolumn)!
+fetch1!
+select distinct * from sut.elkecolumn  
+order by SCHEMANAME, TABLENAME, COLUMNNAME!
+fetch1!
+select * from (select distinct * from sut.elkecolumn)!
+fetch1!
+rollback release !
+file connect ( sut sut !
+drop user elke !
+drop view elkecolumn !
+commit release !
+* PTS 1138962
+file connect ( kern test !
+create table t ( a int)!
+insert t values (1)!
+insert t values (2)!
+insert t values (3)!
+insert t values (4)!
+noscript !
+create function myfunc
+ (in1 integer) returns integer as
+ var sumres integer;
+ select sum (a) into :sumres from 
+    (select * from kern.t where a <> 2);
+ return sumres;
+!
+script !
+select 'abc',*,'def' from (select myfunc(1), * from dual)!
+fetch!
+rollback release !
+file shutdwnk !
+vdnexit !

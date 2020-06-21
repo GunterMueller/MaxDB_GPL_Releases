@@ -1,0 +1,801 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS90C$
+.tt 2 $$$
+.tt 3 $R.Roedling$START DATABASE$1997-05-13$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       START_DATABASE
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1994-11-17
+.sp
+.cp 3
+Version : 1994-11-17
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-05-13
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+#include           <stdarg.h>
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS90C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define TIMEOUT                   120
+
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+static HEV                 hevStartStopSem      = 0;
+static HEV                 hevStartStopCrashSem = 0;
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+static LONG sql90_init_wait ( PSZ pszServerDB,
+                              PSZ pszSemName,
+                              PSZ pszCrashSemName );
+static LONG sql90_wait      ( INT TimeOut, PSZ pszSemTitle );
+
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+#if defined(_WIN32)
+
+ APIRET sql90_start_db_gw_service ( PSZ     pszNodeName,
+                                    PSZ     pszServerDB,
+                                    ULONG   ulOptions,
+                                    ULONG   ulKernelType )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql90_start_db_gw_service"
+   APIRET                                rc           = NO_ERROR;
+   ULONG                                 ulTimeout    = TIMEOUT;
+   SERVICE_STATUS                        ssSeviceStatus;
+   SC_HANDLE                             hScM;
+   SC_HANDLE                             hS;
+   CHAR                                  szServiceDB[MX_DBNAME + 80];
+   CHAR                                  szServDisplayDB[MX_DBNAME + 80];
+   CHAR                                  szServiceGW[MX_DBNAME + 80];
+   CHAR                                  szServDisplayGW[MX_DBNAME + 80];
+   PSZ                                   pszService;
+   PSZ                                   pszServDisplay;
+   DWORD                                 dwAccess;
+   CHAR                                  szOptions[20];
+   CHAR                                  *pszArg[1] = { szOptions };
+   ULONG                                 ulArgs = 1;
+
+   DBGIN;
+
+   if (  ulOptions  )
+     sprintf ( szOptions, "%d", ulOptions  );
+
+   // --- convert to upper case
+   CharUpper(pszServerDB);
+
+   dwAccess = SERVICE_START | SERVICE_QUERY_STATUS;
+
+   if (( ulKernelType == KERNEL_TYPE_FAST_ORA_GW ) ||
+       ( ulKernelType == KERNEL_TYPE_SLOW_ORA_GW ))
+     {
+     strcpy(szServDisplayGW, SERVICE_DISPLAY_STR_GW);
+     strcat(szServDisplayGW, pszServerDB);
+
+     strcpy(szServiceGW, SERVICE_ID_GW);
+     strcat(szServiceGW, pszServerDB);
+
+     pszService     = szServiceGW;
+     pszServDisplay = szServDisplayGW;
+     }
+   else
+     {
+     strcpy(szServDisplayDB, SERVICE_DISPLAY_STR);
+     strcat(szServDisplayDB, pszServerDB);
+
+     strcpy(szServiceDB, SERVICE_ID);
+     strcat(szServiceDB, pszServerDB);
+     pszService     = szServiceDB;
+     pszServDisplay = szServDisplayDB;
+     }
+
+   switch ( ulKernelType )
+     {
+     case KERNEL_TYPE_QUICK:
+       strcat(pszService, SERVICE_QUICK_EXT);
+       strcat(pszServDisplay, SERVICE_QUICK_EXT);
+       break;
+
+     case KERNEL_TYPE_SLOW_ORA_GW:
+     case KERNEL_TYPE_SLOW:
+       strcat(pszService, SERVICE_SLOW_EXT);
+       strcat(pszServDisplay, SERVICE_SLOW_EXT);
+       break;
+     }
+
+   if (!(hScM = OpenSCManager(pszNodeName, NULL, SC_MANAGER_CONNECT)) ||
+       !(hS   = OpenService(hScM, pszService, dwAccess   )) ||
+       !StartService(hS, ulArgs, pszArg))
+     {
+     rc = GetLastError();
+
+     if ( hS != NULL )
+       CloseServiceHandle(hS);
+
+     if ( hScM != NULL )
+       CloseServiceHandle(hScM);
+     }
+   else
+     {
+     do
+       {
+       SLEEP( 1000 );
+       ulTimeout--;
+
+       if ( !QueryServiceStatus( hS, &ssSeviceStatus ))
+         rc = GetLastError();
+       else if ( ssSeviceStatus.dwCurrentState == SERVICE_RUNNING )
+         {
+         MSGCD(( INFO_XSTRT_DB_STARTED, pszServerDB ));
+         break;
+         }
+       else if ( ssSeviceStatus.dwCurrentState == SERVICE_STOPPED )
+         {
+         MSGCD(( ERR_XSTRT_DB_STOPPED_EV_LOG, pszServerDB ));
+         DBGOUT;
+         return( (APIRET) -2 );
+         }
+
+       if ( ulTimeout == 0 )
+         rc = ERROR_TIMEOUT;
+       }
+     while ( rc == NO_ERROR );
+
+     CloseServiceHandle(hS);
+     CloseServiceHandle(hScM);
+     }
+
+   switch (rc)
+     {
+     case NO_ERROR:                        break;
+     case ERROR_SERVICE_DATABASE_LOCKED:   MSGCD (( ERR_SERVICE_DB_LOCKED ));
+                                           break;
+     case ERROR_FILE_NOT_FOUND:
+     case ERROR_PATH_NOT_FOUND:            MSGCD (( INFO_SERVICE_NOT_INST_CORR ));
+                                           break;
+     case ERROR_SERVICE_DOES_NOT_EXIST:    MSGCD (( ERR_DB_SERVICE_NOT_INSTALLED, pszServDisplay ));
+                                           break;
+     case ERROR_SERVICE_ALREADY_RUNNING:   MSGCD (( ERR_XSTRT_ALREADY_RUNNING, pszServerDB ));
+                                           break;
+     case RPC_S_SERVER_UNAVAILABLE:        MSGCD (( ERR_SERVER_NODE_UNKNOWN, pszNodeName ));
+                                           break;
+     case ERROR_ACCESS_DENIED:             MSGCD (( ERR_ACCESS_DENIED ));
+                                           break;
+     case ERROR_TIMEOUT:                   MSGCD (( ERR_TIMEOUT_NO_DB_RESPONSE ));
+                                           break;
+     case ERROR_SERVICE_LOGON_FAILED:      MSGCD ((ERR_XSTRT_LOGON_FAILURE, pszServDisplay));
+                                           break;
+     default:                              MSGCD (( ERR_XSTRT_CANNOT_STRT_DB, pszServerDB, rc ));
+                                           break;
+     }
+
+
+   DBGOUT;
+   return( rc );
+   }
+
+/*------------------------------*/
+
+ APIRET sql90_stop_db_gw_service ( PSZ     pszNodeName,
+                                   PSZ     pszServerDB )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql90_stop_db_gw_service"
+   APIRET                                rc           = NO_ERROR;
+   ULONG                                 ulTimeout    = TIMEOUT;
+   BOOL                                  fFinish      = FALSE;
+   SERVICE_STATUS                        ssSeviceStatus;
+   SC_HANDLE                             hScM;
+   SC_HANDLE                             hS;
+   CHAR                                  szServiceName[MX_DBNAME + 80];
+   CHAR                                  szServDisplay[MX_DBNAME + 80];
+   PSZ                                   pszServiceNameExt;
+   PSZ                                   pszServiceDisplayExt;
+   DWORD                                 dwAccess;
+   ULONG                                 ulKernelType;
+
+   DBGIN;
+
+   // --- convert to upper case
+   CharUpper(pszServerDB);
+
+   dwAccess = SERVICE_STOP | SERVICE_QUERY_STATUS;
+   //
+   // --- start with slow kernel
+   //
+   strcpy(szServDisplay, SERVICE_DISPLAY_STR);
+   strcat(szServDisplay, pszServerDB);
+   pszServiceDisplayExt = &szServDisplay[strlen(szServDisplay)];
+   strcat(szServDisplay, SERVICE_SLOW_EXT);
+
+   strcpy(szServiceName, SERVICE_ID);
+   strcat(szServiceName, pszServerDB);
+   pszServiceNameExt = &szServiceName[strlen(szServiceName)];
+   strcpy(pszServiceNameExt, SERVICE_SLOW_EXT);
+
+   ulKernelType = KERNEL_TYPE_SLOW;
+
+   if (!(hScM = OpenSCManager(pszNodeName, NULL, SC_MANAGER_CONNECT)))
+     rc = GetLastError();
+   else
+     {
+     do
+       {
+       if ( !(hS = OpenService(hScM, szServiceName, dwAccess )))
+         rc = GetLastError();
+       else
+         {
+         if (!ControlService(hS, SERVICE_CONTROL_STOP, &ssSeviceStatus))
+           rc = GetLastError();
+         else
+           {
+           rc = NO_ERROR;
+
+           do
+             {
+             SLEEP( 1000 );
+             ulTimeout--;
+
+             if ( !QueryServiceStatus( hS, &ssSeviceStatus ))
+               rc = GetLastError();
+             else if ( ssSeviceStatus.dwCurrentState == SERVICE_STOPPED )
+               {
+               MSGCD(( INFO_XSTOP_DB_STOPPED, pszServerDB ));
+               break;
+               }
+
+             if ( ulTimeout == 0 )
+               rc = ERROR_TIMEOUT;
+             }
+           while ( rc == NO_ERROR );
+           }
+
+         CloseServiceHandle(hS);
+         }
+
+       switch ( ulKernelType )
+         {
+         case KERNEL_TYPE_SLOW:
+           strcpy(pszServiceNameExt,    SERVICE_QUICK_EXT);
+           strcpy(pszServiceDisplayExt, SERVICE_QUICK_EXT);
+           ulKernelType = KERNEL_TYPE_QUICK;
+           break;
+
+         case KERNEL_TYPE_QUICK:
+           *pszServiceNameExt    = '\0';
+           *pszServiceDisplayExt = '\0';
+           ulKernelType = KERNEL_TYPE_FAST;
+           break;
+
+         case KERNEL_TYPE_FAST:
+           strcpy(szServDisplay, SERVICE_DISPLAY_STR_GW);
+           strcat(szServDisplay, pszServerDB);
+           pszServiceDisplayExt = &szServDisplay[strlen(szServDisplay)];
+           strcat(szServDisplay, SERVICE_SLOW_EXT);
+
+           strcpy(szServiceName, SERVICE_ID_GW);
+           strcat(szServiceName, pszServerDB);
+           pszServiceNameExt = &szServiceName[strlen(szServiceName)];
+           strcpy(pszServiceNameExt, SERVICE_SLOW_EXT);
+           ulKernelType = KERNEL_TYPE_SLOW_ORA_GW;
+           break;
+
+         case KERNEL_TYPE_SLOW_ORA_GW:
+           *pszServiceNameExt    = '\0';
+           *pszServiceDisplayExt = '\0';
+           ulKernelType = KERNEL_TYPE_FAST_ORA_GW;
+           break;
+
+         case KERNEL_TYPE_FAST_ORA_GW:
+           fFinish = TRUE;
+           break;
+         }
+       }
+     while (( rc != NO_ERROR ) && ( !fFinish ));
+
+     CloseServiceHandle(hScM);
+     }
+
+   switch ( rc )
+     {
+     case NO_ERROR:                        break;
+     case ERROR_SERVICE_DATABASE_LOCKED:   MSGCD (( ERR_SERVICE_DB_LOCKED ));
+                                           break;
+     case ERROR_SERVICE_DOES_NOT_EXIST:    strcpy(szServDisplay, SERVICE_DISPLAY_STR);
+                                           strcat(szServDisplay, pszServerDB);
+                                           MSGCD (( ERR_DB_SERVICE_NOT_INSTALLED, szServDisplay ));
+                                           break;
+     case ERROR_SERVICE_NOT_ACTIVE:        MSGCD (( ERR_DB_NOT_STARTED, pszServerDB));
+                                           break;
+     case RPC_S_SERVER_UNAVAILABLE:        MSGCD (( ERR_SERVER_NODE_UNKNOWN, pszNodeName ));
+                                           break;
+     case ERROR_ACCESS_DENIED:             MSGCD (( ERR_ACCESS_DENIED ));
+                                           break;
+     case ERROR_TIMEOUT:                   MSGCD (( ERR_TIMEOUT_NO_DB_RESPONSE ));
+                                           break;
+     default:                              MSGCD (( ERR_XSTOP_CANNOT_STP_DB, pszServerDB, rc ));
+                                           break;
+     }
+
+
+   DBGOUT;
+   return( rc );
+   }
+
+#endif
+
+/*------------------------------*/
+
+APIRET sql90_start_serverdb ( PSZ     pszServerDB,
+                              PSZ     pszDBRoot,
+                              ULONG   ulOptions,
+                              ULONG   ulKernelType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql90_start_serverdb"
+  APIRET                                 rc          = NO_ERROR;
+  CHAR                                   szPgmTitle[32];
+  PATHNAME                               szIconFile;
+  PATHNAME                               szPgmName;
+  CHAR                                   szOptions[20];
+  CHAR                                   szArgList[MAX_PATH + MX_DBNAME + 2];
+
+  #if defined(_WIN32)
+   static STARTUPINFO                    StartupInfo = {sizeof(STARTUPINFO)};
+   PROCESS_INFORMATION                   ProcInfo;
+  #else
+   STARTDATA                             stdataSession;
+   ULONG                                 idSession;
+   PID                                   idProcess;
+   UCHAR                                 ObjBuf[100];
+  #endif
+
+
+  if (  ulOptions  )
+    sprintf ( szOptions, "%d", ulOptions  );
+
+  #if defined(_WIN32)
+   // --- convert to upper case
+   CharUpper(pszServerDB);
+  #endif
+
+  rc = sql90_init_wait ( pszServerDB, SEM_XSTART, SEM_XSTART_CRASH );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return(rc);
+    }
+
+  /*
+   * Build STARTDATA for DB Session
+   */
+  szArgList[0] = '\0';
+
+  strcpy (szPgmTitle, "ServerDB: ");
+  strcat (szPgmTitle, pszServerDB);
+
+  strcpy (szIconFile, pszDBRoot);
+  strcat (szIconFile, "\\");
+  strcat (szIconFile, DB_KERN_ICON_NAME);
+
+  strcpy (szPgmName, pszDBRoot);
+  strcat (szPgmName, "\\");
+
+  switch ( ulKernelType )
+    {
+    case KERNEL_TYPE_QUICK:
+      lstrcat(szPgmName, DB_QUICK_KERN_FILE_NAME);
+      break;
+
+    case KERNEL_TYPE_SLOW:
+      lstrcat(szPgmName, DB_SLOW_KERN_FILE_NAME);
+      break;
+
+    default:
+      lstrcat(szPgmName, DB_FAST_KERN_FILE_NAME);
+      break;
+    }
+
+
+  #if defined(_WIN32)
+   if (lstrlen(szPgmName) + lstrlen(pszServerDB) + 1 < sizeof(szArgList))
+     {
+     strcpy(szArgList, szPgmName);
+     strcat(szArgList, " ");
+     strcat(szArgList, pszServerDB);
+     strcat(szArgList, " ");
+     strcat(szArgList, szOptions);
+     StartupInfo.lpTitle     = szPgmTitle;
+     StartupInfo.dwFlags     = STARTF_USESHOWWINDOW;
+     StartupInfo.wShowWindow = SW_MINIMIZE;
+
+     if (!CreateProcess(szPgmName, szArgList, NULL, NULL, FALSE,
+                        CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,
+                        NULL, NULL, &StartupInfo, &ProcInfo))
+       rc = GetLastError();
+     else
+       rc = NO_ERROR;
+     }
+   else
+     rc = ERROR_NOT_ENOUGH_MEMORY;
+  #else
+   strcpy(szArgList, pszServerDB);
+   strcat(szArgList, " ");
+   strcat(szArgList, szOptions);
+
+   stdataSession.Length        = sizeof(STARTDATA);
+   stdataSession.Related       = SSF_RELATED_INDEPENDENT;
+   stdataSession.FgBg          = SSF_FGBG_BACK;
+   stdataSession.TraceOpt      = SSF_TRACEOPT_NONE;
+   stdataSession.PgmTitle      = szPgmTitle;
+   stdataSession.PgmName       = szPgmName;
+   stdataSession.PgmInputs     = szArgList;
+   stdataSession.TermQ         = 0;
+   stdataSession.Environment   = 0;
+   stdataSession.InheritOpt    = SSF_INHERTOPT_SHELL;
+   stdataSession.SessionType   = SSF_TYPE_DEFAULT;
+   stdataSession.IconFile      = szIconFile;
+   stdataSession.PgmHandle     = 0;
+   if ( ulOptions & AUTOCLOSE )
+     stdataSession.PgmControl  = SSF_CONTROL_VISIBLE;
+   else
+     stdataSession.PgmControl  = SSF_CONTROL_NOAUTOCLOSE;
+   stdataSession.InitXPos      = 0;
+   stdataSession.InitYPos      = 0;
+   stdataSession.InitXSize     = 100;
+   stdataSession.InitYSize     = 100;
+   stdataSession.Reserved      = 0;
+   stdataSession.ObjectBuffer  = ObjBuf;
+   stdataSession.ObjectBuffLen = sizeof(ObjBuf);
+
+   DBG3 ((MF__, "Starting Kernel: %s - ServerDB: %s",
+          szPgmName, pszServerDB));
+   rc = DosStartSession (&stdataSession, &idSession, &idProcess);
+  #endif
+
+  if (rc != NO_ERROR)
+    {
+    MSGCD((ERR_XSTRT_CANNOT_STRT_DB, rc ));
+    DBGOUT;
+    return(rc);
+    }
+
+  rc = sql90_wait ( TIMEOUT * 1000, XSTART_TITLE );
+
+  if ( rc == NO_ERROR )
+    MSGCD(( INFO_XSTRT_DB_STARTED, pszServerDB ))
+  else if ( rc == ERROR_GEN_FAILURE )
+    MSGCD(( ERR_XSTRT_DB_STOPPED_DIAG, pszServerDB ))
+
+
+  DBGOUT;
+  return(rc);
+  }
+
+/*------------------------------*/
+
+APIRET sql90_stop_serverdb ( PSZ          pszServerDB,
+                             BOOL         fDump )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql90_stop_serverdb"
+  APIRET                          rc            = NO_ERROR;
+  HEV                             hevSemCoord   = 0;    // - should be zero
+  KERNEL_SHARED_SEG               *pKSS         = NULL;
+  HANDLE                          hShrdMem;
+
+  DBGIN;
+
+  #if defined(_WIN32)
+   // --- convert to upper case
+   CharUpper(pszServerDB);
+  #endif
+
+  rc = sql90_init_wait ( pszServerDB, SEM_XSTOP, NULL );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return(rc);
+    }
+
+  if (fDump == TRUE)
+    {
+    rc = sql41c_get_named_shrd_mem ( (PPVOID)&pKSS, SHM_KSS, pszServerDB,
+                                     &hShrdMem );
+
+    if (rc == ERROR_FILE_NOT_FOUND)
+      {
+      MSGCD((ERR_DB_NOT_STARTED, pszServerDB));
+      DBGOUT;
+      return ( rc );
+      }
+    else if (rc != NO_ERROR)
+      {
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (strcmp(pKSS->RTEVersion, sql02_get_RTE_version_string()))
+      {
+      MSGCD((ERR_WRONG_DB_VERSION));
+      printf (XSTOP_WRONG_VERS_KERNEL, pKSS->RTEVersion);
+      printf (XSTOP_WRONG_VERS_XSTOP , sql02_get_RTE_version_string());
+      DBGOUT;
+      return ( 1 );
+      }
+    pKSS->fDump = TRUE;
+    }
+
+  rc = sql41c_open_event_sem ( &hevSemCoord, SEM_COORD, pszServerDB,
+                               ERROR_ACCESS_DENIED);
+
+  if (rc == ERROR_ACCESS_DENIED)
+    {
+    MSGCD(( ERR_ACCESS_DENIED ));
+    DBGOUT;
+    return ( rc );
+    }
+  else if (rc == ERROR_SEM_NOT_FOUND)
+    {
+    MSGCD(( ERR_DB_NOT_STARTED, pszServerDB));
+    DBGOUT;
+    return ( rc );
+    }
+  else if (rc != NO_ERROR)
+    {
+    DBGOUT;
+    return ( rc );
+    }
+  else
+    {
+    rc = sql41c_post_event_sem ( hevSemCoord, "COORD" );
+
+    if ((rc != NO_ERROR) &&  (rc != ERROR_ALREADY_POSTED))
+      {
+      DBGOUT;
+      sql41c_close_event_sem ( hevSemCoord, "COORD" );
+      return ( rc );
+      }
+    sql41c_close_event_sem ( hevSemCoord, "COORD" );
+    }
+
+  rc = sql90_wait ( TIMEOUT * 1000, XSTOP_TITLE );
+
+  if ( rc == NO_ERROR )
+    MSGCD(( INFO_XSTOP_DB_STOPPED, pszServerDB ))
+
+  DBGOUT;
+  return(rc);
+  }
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static LONG sql90_init_wait ( PSZ pszServerDB,
+                              PSZ pszSemName,
+                              PSZ pszCrashSemName )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql90_init_wait"
+  #if defined(_WIN32)
+   SECURITY_ATTRIBUTES                   SA;
+   ACCESS_RIGHTS_REC                     Access;
+  #endif
+  APIRET                                 rc;
+  PSECURITY_ATTRIBUTES                   pSA = NULL;
+
+  #if defined(_WIN32)
+   SA.nLength              = sizeof(SA);
+   SA.bInheritHandle       = TRUE;       // why not...
+   pSA                     = &SA;
+
+   memset ( &Access, 0, sizeof (Access) );   // - this must be done first!
+   Access.World.ulAccess   = SPECIFIC_RIGHTS_ALL |
+                             STANDARD_RIGHTS_ALL;
+
+   rc = sql49c_alloc_and_init_SD( &Access, &SA.lpSecurityDescriptor );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return( 1 );
+     }
+  #endif
+
+  rc = sql41c_create_event_sem ( &hevStartStopSem, pszSemName, pszServerDB,
+                                 0, FALSE, pSA );
+
+  if (rc == ERROR_DUPLICATE_NAME)
+    {
+    MSGCD(( ERR_CREATING_SEM, "wait" ));
+    DBGOUT;
+    }
+  else
+    {
+    if ( pszCrashSemName != NULL )
+      {
+      rc = sql41c_create_event_sem ( &hevStartStopCrashSem, pszCrashSemName,
+                                     pszServerDB, 0, FALSE, pSA );
+
+      if (rc == ERROR_DUPLICATE_NAME)
+        {
+        MSGCD(( ERR_CREATING_SEM, "wait" ));
+        DBGOUT;
+        }
+      }
+    }
+
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+static LONG sql90_wait ( INT TimeOut, PSZ pszSemTitle )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql90_wait"
+  APIRET                                 rc;
+
+  rc = sql41c_wait_event_sem ( hevStartStopSem, TimeOut, pszSemTitle );
+
+  if ( rc == ERROR_TIMEOUT )
+    {
+    MSGCD((ERR_TIMEOUT_NO_DB_RESPONSE))
+    }
+  else if (( rc == NO_ERROR ) && ( hevStartStopCrashSem ))
+    {
+    rc = sql41c_wait_event_sem ( hevStartStopCrashSem, 1, pszSemTitle );
+
+
+    if ( rc == NO_ERROR )   // --- database crashed?
+      rc = ERROR_GEN_FAILURE;
+    else
+      rc = NO_ERROR;
+    }
+
+  sql41c_close_event_sem ( hevStartStopSem, pszSemTitle );
+
+  if ( hevStartStopCrashSem )
+    sql41c_close_event_sem ( hevStartStopCrashSem, pszSemTitle );
+
+  return ( rc );
+  }
+
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :             38               PRETTY  1.07
+*-PRETTY-*  lines in file :        141            1989-01-20
+.PA

@@ -1,0 +1,2319 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-22
+*****************************************************
+modname : VAK70
+changed : 2000-11-22
+module  : Build_Strategy
+ 
+Author  : GertG / HolgerB
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : Main module for the strategy search in a table
+ 
+Define  :
+ 
+        VAR
+              a70_glob_zstrat_rec               : tak70_strategy_record;
+              a70glob_key_strats                : tgg07_StratEnumSet;
+              a70glob_inv_strats                : tgg07_StratEnumSet;
+              a70glob_join_strats               : tgg07_StratEnumSet;
+              a70glob_join_key_strats           : tgg07_StratEnumSet;
+              a70glob_join_inv_strats           : tgg07_StratEnumSet;
+              a70glob_fetch_strats              : tgg07_StratEnumSet;
+              a70glob_build_strats              : tgg07_StratEnumSet;
+              a70glob_key_build_strats          : tgg07_StratEnumSet;
+              a70glob_inv_build_strats          : tgg07_StratEnumSet;
+              a70glob_key_fetch_strats          : tgg07_StratEnumSet;
+              a70glob_inv_fetch_strats          : tgg07_StratEnumSet;
+              a70glob_in_strats                 : tgg07_StratEnumSet;
+              a70glob_subq_strats               : tgg07_StratEnumSet;
+              a70glob_accessop_uknwn_strats     : tgg07_StratEnumSet;
+              a70glob_accessop_known_strats     : tgg07_StratEnumSet;
+              a70glob_accessop_key_build_strats : tgg07_StratEnumSet;
+              a70glob_accessop_inv_build_strats : tgg07_StratEnumSet;
+              a70glob_accessop_key_fetch_strats : tgg07_StratEnumSet;
+              a70glob_accessop_inv_fetch_strats : tgg07_StratEnumSet;
+ 
+        PROCEDURE
+              a70_strategy_search (
+                    VAR acv       : tak_all_command_glob;
+                    VAR dmli      : tak_dml_info;
+                    VAR rtree     : tgg00_FileId;
+                    VAR strat_rec : tak71_strat_rec);
+ 
+        PROCEDURE
+              a70strategy (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    config           : tak00_access_configuration);
+ 
+        PROCEDURE
+              a70L1_strat_search (
+                    VAR acv          : tak_all_command_glob;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    VAR order_fields : tak00_ord_fields;
+                    VAR L1_pageIO    : tsp00_Int4;
+                    VAR L1_stratvalue: tsp00_Longreal);
+ 
+        PROCEDURE
+              a70L2L3_strat_search (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    morestratpos     : tsp00_Int4;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    VAR L1_terms     : tak70_term;
+                    VAR order_fields : tak00_ord_fields;
+                    L1_pageIO        : tsp00_Int4;
+                    VAR L1_stratvalue: tsp00_Longreal);
+ 
+        PROCEDURE
+              a70_invkeylen (
+                    VAR acv         : tak_all_command_glob;
+                    VAR gg_strategy : tgg07_StrategyInfo;
+                    VAR invkeylen   : tsp00_Int2);
+ 
+        PROCEDURE
+              a70_keylengths (
+                    VAR acv           : tak_all_command_glob;
+                    strategy          : tgg07_StratEnum;
+                    fetch_primkeylen  : integer;
+                    fetch_invkeylen   : tsp00_Int2;
+                    build_primkeylen  : integer;
+                    VAR primlen       : integer;
+                    VAR invlen        : integer);
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01sysnullkey        : tgg00_SysInfoKey;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06_systable_get (
+                    VAR acv      : tak_all_command_glob;
+                    dstate       : tak_directory_state;
+                    VAR tableid  : tgg00_Surrogate;
+                    VAR base_ptr : tak_sysbufferaddress;
+                    vtrAll_gg00  : boolean;
+                    VAR ok       : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10rel_sysinfo (p : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10mblock_into_cache (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    VAR mblock   : tgg00_MessBlock;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : vak101;
+ 
+        FUNCTION
+              a101_IsTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_finish : VAK507;
+ 
+        FUNCTION
+              a507optim_select_fetch (
+                    VAR acv   : tak_all_command_glob;
+                    VAR dmli  : tak_dml_info;
+                    prepare   : boolean;
+                    info_byte : tsp00_Uint1;
+                    loop_cnt  : integer) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK54;
+ 
+        PROCEDURE
+              a54_fixedpos (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Strategy_Explain  : VAK728;
+ 
+        PROCEDURE
+              a728_explain (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    joininfo_ptr     : tak68_join_ptr;
+                    VAR morestratbuf : tsp00_MoveObj;
+                    morestratbufsize : tsp00_Int4;
+                    morestratpos     : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_2 : VAK71;
+ 
+        PROCEDURE
+              a71check_fetch_optimization (
+                    VAR acv         : tak_all_command_glob;
+                    VAR config      : tak00_access_configuration;
+                    VAR qprop       : tak70_query_properties;
+                    VAR gg_strategy : tgg07_StrategyInfo;
+                    VAR strategy    : tgg07_StratEnum;
+                    VAR strat_data  : tgg07_StrRaw);
+ 
+        FUNCTION
+              a71code_distinct_optim (
+                    VAR gg_strategy : tgg07_StrategyInfo) : tsp00_Int2;
+ 
+        PROCEDURE
+              a71set_rescnt(
+                    VAR acv         : tak_all_command_glob;
+                    VAR sparr       : tak_syspointerarr;
+                    str_rowno       : tsp00_Int4;
+                    VAR qprop       : tak70_query_properties);
+ 
+        PROCEDURE
+              a71adjust_configuration (
+                    VAR dmli        : tak_dml_info;
+                    VAR config_qprop : tak70_strategy_record);
+ 
+        PROCEDURE
+              a71default_strat (VAR gg_strategy : tgg07_StrategyInfo);
+ 
+        PROCEDURE
+              a71decide_min_rows (
+                    VAR acv          : tak_all_command_glob;
+                    VAR access_info  : tak70_strategy_record;
+                    readIO_pages     : tsp00_Int4;
+                    readIO_rows      : tsp00_Int4);
+ 
+        PROCEDURE
+              a71change_stack_code(
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR strategy    : tgg07_StrategyInfo);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_Decision : VAK720;
+ 
+        PROCEDURE
+              a720strategy_decision (
+                    VAR acv              : tak_all_command_glob;
+                    VAR sparr            : tak_syspointerarr;
+                    VAR access_info      : tak70_strategy_record;
+                    VAR gg_strategy      : tgg07_StrategyInfo;
+                    VAR chosen_strat     : tak70_one_strat;
+                    VAR order_fields     : tak00_ord_fields;
+                    VAR StratInfo_len    : tsp00_Int2;
+                    call_for_L1          : boolean);
+ 
+        PROCEDURE
+              a720decide_L2_range(
+                    VAR acv          : tak_all_command_glob;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    L1_pageIO        : tsp00_Int4;
+                    VAR L1_stratvalue: tsp00_Longreal;
+                    VAR key_range    : tgg07_StrKeyInRange);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_4 : VAK721;
+ 
+        PROCEDURE
+              a721transfer_parse_info (
+                    VAR acv           : tak_all_command_glob;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR access_info   : tak70_strategy_record;
+                    VAR L1_terms      : tak70_term;
+                    VAR order_fields  : tak00_ord_fields;
+                    work_kind         : tak70_backup);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Catalog_Select_Optimizer : VAK722;
+ 
+        PROCEDURE
+              a722strategy (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    VAR eval_info  : tak71_page_eval_rec;
+                    VAR gg_strategy: tgg07_StrategyInfo;
+                    VAR strat_len  : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_Index_Only : VAK723;
+ 
+        PROCEDURE
+              a723analyse_used_cols (
+                    VAR acv           : tak_all_command_glob;
+                    VAR dmli          : tak_dml_info;
+                    VAR access_info   : tak70_strategy_record;
+                    VAR gg_strategy   : tgg07_StrategyInfo);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_Level1_terms : VAK726;
+ 
+        PROCEDURE
+              a726combine_terms (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR astrats      : tak70_all_strat;
+                    VAR order_fields : tak00_ord_fields;
+                    VAR L1_terms     : tak70_term;
+                    VAR nextstratpos : tsp00_Int4;
+                    L1term_cnt       : tsp00_Int2;
+                    L2pL3t_cnt       : tsp00_Int2;
+                    L1_pageIO        : tsp00_Int4;
+                    VAR strat_status : tak70_l2l3_strat_status);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_1 : VAK725;
+ 
+        PROCEDURE
+              a725output_gg_strat (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR gg_strat  : tgg07_StrategyInfo);
+ 
+        PROCEDURE
+              a725L1_terms_output (
+                    level        : tgg00_Debug;
+                    VAR L1_terms : tak70_term);
+ 
+        PROCEDURE
+              a725output_one_strat (
+                    layer           : tgg00_Debug;
+                    VAR one_strat   : tak70_one_strat);
+ 
+        PROCEDURE
+              a725output_end_strat(
+                    debug             : tgg00_Debug;
+                    nam               : tsp00_Sname;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR eval_info     : tak71_page_eval_rec;
+                    VAR StratInfo_len : tsp00_Int2);
+ 
+        PROCEDURE
+              a725output_more_strat(
+                    VAR acv         : tak_all_command_glob;
+                    debug           : tgg00_Debug;
+                    VAR gg_strategy : tgg07_StrategyInfo;
+                    VAR all_strats  : tak70_all_strat);
+ 
+        PROCEDURE
+              a725output_query_prop (
+                    debug   : tgg00_Debug;
+                    qprop   : tak70_query_properties);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_2 : VAK727;
+ 
+        PROCEDURE
+              a727trace_tablename (
+                    VAR transid     : tgg00_TransContext;
+                    name            : tsp00_Sname;
+                    VAR tabname     :tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a727trace_one_strat (
+                    VAR transid     : tgg00_TransContext;
+                    proc_name       : tsp00_Name;
+                    VAR one_strat   : tak70_one_strat);
+ 
+        PROCEDURE
+              a727trace_strategy_text(
+                    VAR transid : tgg00_TransContext;
+                    name       : tsp00_Sname;
+                    strategy   : tgg07_StratEnum);
+ 
+        PROCEDURE
+              a727trace_query_prop (
+                    VAR transid     : tgg00_TransContext;
+                    VAR qprop       : tak70_query_properties);
+ 
+        PROCEDURE
+              a727trace_eval_costs (
+                    VAR transid    : tgg00_TransContext;
+                    VAR eval_costs : tak71_page_eval_rec );
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_term_structure : VAK724;
+ 
+        PROCEDURE
+              a724all_L1_terms (
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR access_info : tak70_strategy_record;
+                    VAR L1_terms    : tak70_term);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Hint_Handling   : VAK80;
+ 
+        PROCEDURE
+              a80get_access_hint(
+                    VAR acv         : tak_all_command_glob;
+                    parskey         : tak_parskey;
+                    VAR access_hint : tak00_access_configuration );
+ 
+      ------------------------------ 
+ 
+        FROM
+              hint_trace_routines : VAK81;
+ 
+        PROCEDURE
+              a81trace_access_config (
+                    VAR transid     : tgg00_TransContext;
+                    VAR config      : tak00_access_configuration);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select : VKB720;
+ 
+        PROCEDURE
+              k720ref_statistic (
+                    VAR arr_index : tgg00_RefInfoIndex;
+                    VAR strat     : tgg07_StrategyInfo);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120MessBlockTrace (
+                    VAR Trans     : tgg00_TransContext;
+                    TraceType     : tgg00_VtraceType;
+                    VAR MessBlock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              FileDir_Wrapper : VBD998;
+ 
+        PROCEDURE
+              bd998GetPageAndRecordCount (
+                    VAR trans          : tgg00_TransContext;
+                    VAR surrogate      : tgg00_Surrogate;
+                    VAR leafPageCount  : tsp00_Int4;
+                    VAR indexPageCount : tsp00_Int4;
+                    VAR entryCount     : tsp00_Int4);
+ 
+        FUNCTION
+              bd998ArePagesClustered(
+                    VAR trans     : tgg00_TransContext;
+                    VAR tableSurr : tgg00_Surrogate) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              bd999GetDataIOBlockCount : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace    : tgg00_VtraceState;
+              g01tabid     : tgg04_TabIdGlobals;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04spec_null_check (
+                    VAR mblock : tgg00_MessBlock;
+                    VAR b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              g04inbetween_change (
+                    VAR mblock           : tgg00_MessBlock;
+                    VAR finding_possible : boolean);
+ 
+        PROCEDURE
+              g04mblock_optimize_info (VAR mblock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Help_Procedures : VGG041;
+ 
+        PROCEDURE
+              g041c30_to_trace (
+                    VAR t : tgg00_TransContext;
+                    msg : tsp00_C30);
+ 
+        PROCEDURE
+              g041name_to_trace (
+                    VAR t  : tgg00_TransContext;
+                    name   : tsp00_Name);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Record_Encapsulate_Procedures : VGG09;
+ 
+        PROCEDURE
+              g09StratStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_startpos      : tsp00_Int2;
+                    inp_len           : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    destin_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    destin         : tsp00_MoveObjPtr;
+                    destin_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove  (
+                    size1    : tsp00_Int4;
+                    size2    : tsp00_Int4;
+                    val1     : tsp00_MoveObjPtr;
+                    p1       : tsp00_Int4;
+                    val2     : tsp00_MoveObjPtr;
+                    p2       : tsp00_Int4;
+                    cnt      : tsp00_Int4);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vdebug_break (debug_break_pos : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01treeid (
+                    level      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    VAR treeid : tgg00_FileId);
+ 
+        PROCEDURE
+              t01corr_type (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    corr_type : tak_corr_type);
+ 
+        PROCEDURE
+              t01knl_identifier (
+                    debug      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    identifier : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              t01execution_kind (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    ex_kind   : tak_execution_kind);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug       : tgg00_Debug;
+                    nam         : tsp00_Sname;
+                    VAR mblock  : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01sname (
+                    level : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01name (
+                    level : tgg00_Debug;
+                    nam : tsp00_Name);
+ 
+        PROCEDURE
+              t01strat_enum (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    strat : tgg07_StratEnum);
+ 
+        PROCEDURE
+              t01columnset (
+                    debug           : tgg00_Debug;
+                    nam             : tsp00_Sname;
+                    columnset       : tak_columnset);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+Specification:
+ 
+This module should not be analyzed until you are familiar with the
+Internals training with regard to the optimizer. This training explains in
+detail which conditions can be used for a good search strategy, which
+strategies exist and how they are described for KB. Therefore, not
+everything is described in full detail in this module.
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+Description:
+ 
+A70STRATEGY
+------------------------
+ 
+This is the main procedure for the strategy search in a table.
+The best strategy is to be chosen for the specified table with the aid of
+the conditions contained in the Mess-Buffer.
+STRAT is, at the end, to contain the strategy and, when the procedure is
+called, it has in it information on the source file name (primary table),
+result file name etc. It is specified whether the result set has to be built,
+whether only a certain number of results is allowed or whether DISTINCT was
+specified.
+ATORDER contains information on the fields to be used for sorting
+(specified by the user in ORDER BY).
+UPD_COL_SET is empty for normal Selects. In the case of Select FOR UPDATE,
+the set contains the columns that are specified behind 'FOR UPDATE'
+and, in the case of
+Updates, it contains the columns that are to receive a new value resulting from
+an expression. The inversions of the fields contained in the set must not be
+used in some strategies, since e.g.
+   UPDATE tab
+      SET f = f+3
+    WHERE f > 9
+would lead to an endless loop when one inversion list from field f after
+the other is processed.
+In eval_info.costcheck, it is specified whether it is to be determined for each
+condition how many percent of the records of the primary table will satisfy the
+condition. This is necessary in the case of Joins and for the EXPLAIN.
+The result of the procedure is the information on:
+ 
+- strategy to be taken for accessing the table (strat.strategy)
+ 
+- parameters of the chosen strategy (e.g. strat.str_key_in_range, str_key_in_range. ]
+ 
+- strategy value (eval_info.strat_value) representing the expected fraction
+of pages to be searched for evaluating the qualification.
+ 
+- qualification value (eval_info.qual_value) representing the expected
+number of result records (as fraction of base table pages)
+ 
+A98_READ_STRETCHES is used for testing in order to make the strategy search
+think it is dealing with a larger database.
+If a cost check is required for the user (COSTCHECK), the conditions must
+all be evaluated (see also eval_info.costcheck).
+All ANDed conditions at the highest level of the Search Condition are
+entered in zstrat by A724ALL_L1_TERMS; the conditions on lower levels (ORed) are
+entered in L1_TERMS.
+The conditions recorded in L1_TERMS are analyzed for their usability for good
+search strategies only if the top-level conditions from zstrat have not
+resulted in a good strategy.
+The analysis of the descriptions of the conditions stored in zstrat takes
+place in A70L1_STRAT_SEARCH. The procedure checks whether a good search
+strategy can be found using these conditions alone.
+If a strategy has been found in which searching need not be sequential,
+this strategy is considered good (good_enough). The strategy is likewise <>
+sequential (eval_strat), if, because of missing data input (parsing only), the
+descriptions of the conditions are stored by A721STORE_ALL_STRATS, but are not
+analyzed.
+If a cost estimate is to be performed, it must be determined
+for the conditions stored in L1_TERMS that are not at the highest level of the
+Search Condition how many percent of the records will satisfy these conditions.
+This value is shown by qual_value.
+Since all conditions that are to be evaluated are in L1_TERMS (if a cost
+estimate is to be performed), not only those that can be used for a strategy,
+the unusable strategies are removed from L1_TERMS in A70EVAL_WHOLE_TERM_QUAL.
+FIRST_COST specifies the search cost in the primary and secondary tables.
+INV_OVERHEAD attempts to evaluate the extra cost for the reading and
+analyzing of secondary pages.
+If it has not been possible to determine a good strategy from the
+conditions at the highest level alone, but there are still usable conditions at
+lower levels, these are analyzed.
+Structures of the following type can be stored in L1_TERMS, with each letter
+intended to signify a condition, a predicate:
+  (a OR b AND c OR d) AND (e AND f OR g OR h).
+Up to 6 Or parts (big brackets) each with up to 6 ORed terms each with up
+to 7 conditions for each term can be stored in L1_TERMS.
+In A726STRAT_COMBINE, these brackets are transformed :
+  (a AND e AND f) OR (a AND g) OR (a AND h) OR
+  (b AND c AND e AND f) OR (b AND c AND g) OR ...
+For each of these brackets, an attempt is made to choose a good strategy
+that can then be executed individually in KB.
+Identical strategies are not contained more than once. There may be a
+maximum of 36 different strategies. These are entered in astrats.
+If each bracket can be processed with a better strategy
+than by a sequential search across
+the entire primary table (NOT seq), these strategies are used and are sent to
+KB (z_strat = more_than_one).
+The information on these strategies is stored in a character array, in each
+case with strategy, length of the strategy description and the strategy
+description itself.
+An evaluation of the search cost has been performed within
+A726STRAT_COMBINE for each individual strategy. These costs are added up in a
+FOR loop and result in the estimated total costs.
+If, according to the evaluation, more records satisfy all conditions than
+the total number of records that have to be accessed because of the strategies,
+the smaller of the two values is taken. This case may occur in that
+computations are performed partly with estimated values and partly with values
+that have been determined in the database (number of records, pages).
+The total costs (accessing of all pages necessary for the strategies,
+writing of all records that satisfy the conditions, writing of each primary key
+from whose record a result record has been built in order to prevent one
+primary record being made into more than one result record within different
+strategies) are determined.
+If the result set has to be physically built (for Joins, in the case of
+subqueries, if ROWNO or DISTINCT was specified, if the other information to be
+stored for FETCH will not fit into one parse buffer), the strategy is retained.
+If there is still a chance of being able to cut out the costs of physically
+building the result set, analysis is continued:
+Normally, the result set must be physically built if ORDER BY has been
+specified. These costs can be cut out only if a good strategy has not been
+found but the ORDER-BY fields form the first part of the key or
+an inversion. The corresponding analysis is
+performed in ORDER_MULTI.
+If the result set need not be built, this is indicated by the strategy
+prefix fe_ (fetch_). Such strategies are processed in VKB73, with all others
+being processed in VKB720,721.
+If the whole strategy would not fit in part2 of the Mess-Buffer, it is
+better to search sequentially than not to be able to execute the entire
+command.
+The strategy is entered in the Mess-Buffer by the calling procedures (VAK67/68).
+ 
+A70L1_STRAT_SEARCH
+---------------------------------------
+ 
+This procedure is called by A70_STRATEGY to determine if there is a non-
+sequential strategy using only the simple top-level terms of the qualification.
+Input :
+ 
+z_strat_rec - contains all parameters of the simple top-level terms (e.g.
+              BETWEEN-bounds)
+ 
+Output:
+ 
+strat
+1. strategy chosen (strat.strategy)
+2. parameters of strategy (e.g. str_sinv_in, str_key_in_range)
+3. value describing what fraction of pages will have to be searched using this
+   strategy (ostrat_value)
+ 
+z_strat_rec^- z_strat, identical to ostrategy
+z_strat_value, identical to ostrat_value
+ 
+Sequence of Actions:
+ 
+1. If z_strat equals 'key_in' (established by all_ands) then any further search
+is stopped and ostrat is assigned the key_in- parameters.
+ 
+2. In all other cases (unless separate parse-execute) A720STRATEGY_DECISION is
+called to determine the strategy from the information in z_strat_rec. All
+parameters of this strategy besides the key-range (which is in z_strat_rec
+anyway) are returned via one_strat of type ostrategy. The information in
+'one_strat' and the key-range from 'z_strat_rec' are both copied to the
+variable 'strat' of type 'strategy_info', which is then returned. (str_inv_in_range is
+the longest possible strategy)
+ 
+If, for any data specification that is not a part of the condition IS NULL,
+the null value is found in the data part (part2) of the Mess-Buffer, this means
+that the initialization of the buffer still exists, i.e. that the value will
+not be known until at the time of execution (srec_broken_access). Therefore, it is not
+yet possible at this time to decide on the best strategy and it is necessary to
+store all available information by means of A721TRANSFER_PARSE_INFO in order,
+during execution, to be able to determine the best strategy.
+ 
+A70DEL_SYSINFO_STRATEGY
+------------------------
+ 
+This procedure is called from VAK10 if all system information for a table is to
+be deleted and a strategy is needed for this. It is in this module so that, in
+the case of alterations to the STRAT record, it is not (again and again)
+forgotten to alter this procedure.
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+Structure:
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      eval_whole_term_qual;
+ 
+BEGIN
+WHILE there_is_another_Or_part DO
+    BEGIN
+    mark_old_number_of_terms;
+    IF  entries_in_this_Or_part_are_still_valid
+    THEN
+        BEGIN
+        WHILE there_is_another_term DO
+            BEGIN
+            WHILE another_condition_entered DO
+                BEGIN
+                multiplication_of_evaluation_factors_of_the
+                      conditions_of_an_and;
+                IF  condition_is_useful_for_strategy
+                THEN
+                    look_at_the_next_condition
+                ELSE
+                    forget_this_condition
+                (*ENDIF*) 
+                END;
+            (*ENDWHILE*) 
+            Add_up_evaluation_factors_for_the_different
+                  terms;
+            IF  not_all_conditions_of_a_term_have_been
+                forgotten
+            THEN
+                look_at_the_next_term
+            ELSE
+                forget_the_whole_term
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        multiplication_of_the_evaluation_factors_for_the_or_parts
+        END;
+    (*ENDIF*) 
+    IF  a_term_could_be_forgotten_for_an_Or_part_because
+        all_conditions_for_it_could_be_forgotten
+    THEN
+        the_entire_Or_part_must_be_forgotten,_because,_for_the
+              strategy_search,_all_terms_from_each_participating
+              Or_part_must_be_contained,_because,_otherwise,
+              it_is_possible_that_records_that_would_belong
+              to_the_result_set_will_not_be_checked_(because
+              no_strategy_specified)
+    (*ENDIF*) 
+    END
+(*ENDWHILE*) 
+END;
+ 
+.CM *-END-* structure -----------------------------------
+**********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      (* the following constants should also be *)
+      (* defined in VAK71 with the same values: *)
+      c_get_all          = true (* a06_systable_get      *);
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70_strategy_search (
+            VAR acv       : tak_all_command_glob;
+            VAR dmli      : tak_dml_info;
+            VAR rtree     : tgg00_FileId;
+            VAR strat_rec : tak71_strat_rec);
+ 
+CONST
+      c_prepare = true;
+ 
+VAR
+      _e             : tgg00_BasisError;
+      _eval_info     : tak71_page_eval_rec;
+      _ix            : tsp00_Int2;
+      _jx            : tsp00_Int2;
+      _prev          : tsp00_Int2;
+      _StratInfo_len : tsp00_Int2;
+      _mv_strat_len  : tsp00_Int4;
+      _strat_pos     : tsp00_Int4;
+      _page_cnt      : tsp00_Int4;
+      _dummy_cnt     : tsp00_Int4;
+      _ibuf          : tak_sysbufferaddress;
+      _ke            : tgg00_SysInfoKey;
+      _gg_strategy   : tgg07_StrategyInfo;
+      _config        : tak00_access_configuration;
+ 
+BEGIN
+&IFDEF TRACE
+t01messblock (ak_strat, 'a70_strat_s1', acv.a_mblock);
+t01treeid  (ak_strat, 'resulttreeid', rtree);
+t01int4    (ak_strat, 'd_pos_result', dmli.d_pos_result);
+t01bool    (ak_strat, 'd_single    ', dmli.d_single);
+t01corr_type(ak_strat, 'd_corr      ', dmli.d_corr);
+t01int4    (ak_strat, 'd_rowno     ', dmli.d_rowno);
+t01int4    (ak_strat, 'd_inoutpos  ', dmli.d_inoutpos);
+t01int4    (ak_strat, 'd_reclen    ', dmli.d_reclen);
+t01bool    (ak_strat, 'd_join      ', dmli.d_join);
+t01bool    (ak_strat, 'sr_must_resu', strat_rec.sr_must_result);
+t01bool    (ak_strat, 'sr_use_rowno', strat_rec.sr_use_rowno);
+t01bool    (ak_strat, 'sr_distinct_', strat_rec.sr_distinct_bytes);
+&ENDIF
+IF  ( acv.a_mblock.mb_strat_len MOD ALIGNMENT_GG00 <> 0 )
+THEN
+    acv.a_mblock.mb_strat_len := acv.a_mblock.mb_strat_len -
+          ( acv.a_mblock.mb_strat_len MOD ALIGNMENT_GG00 ) + ALIGNMENT_GG00;
+(*ENDIF*) 
+_strat_pos := acv.a_mblock.mb_strat_len + 1;
+_e := e_ok;
+a71default_strat( _gg_strategy );
+_gg_strategy.str_rowno      := dmli.d_rowno;
+_gg_strategy.str_result_id  := rtree;
+_gg_strategy.str_result_id.fileHandling_gg00 :=
+      _gg_strategy.str_result_id.fileHandling_gg00 + [ hsCreateFile_egg00 ];
+_gg_strategy.str_build_result := strat_rec.sr_must_result;
+_gg_strategy.str_distinc      := dmli.d_distinct;
+_gg_strategy.str_use_order    := dmli.d_use_order;
+IF  ( dmli.d_single )
+THEN
+    BEGIN
+    IF  ( dmli.d_corr = first_correlation )
+    THEN
+        _gg_strategy.str_corr_single := true;
+    (*ENDIF*) 
+    _gg_strategy.str_selinto := true;
+    END
+ELSE
+    BEGIN
+    IF  a507optim_select_fetch (acv, dmli, NOT c_prepare,
+        acv.a_precomp_info_byte, cgg04_first_and_only_of_all)
+        AND
+        (dmli.d_limit_offset = cgg04_no_rowno_predicate)
+        AND
+        (dmli.d_upper_limit  = cgg04_no_rowno_predicate)
+    THEN
+        _gg_strategy.str_search_first := false;
+    (*ENDIF*) 
+    IF  ( dmli.d_corr = first_correlation ) AND
+        ( dmli.d_rowno = cgg04_one_record_at_most_internal )
+    THEN
+        _gg_strategy.str_corr_single := true;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+_gg_strategy.str_key_len      := dmli.d_keylen;
+(* PTS 1000843 E.Z. *)
+IF  ( dmli.d_inoutpos > 0 )
+THEN
+    _gg_strategy.str_rec_len := dmli.d_inoutpos - 1;
+(*ENDIF*) 
+_gg_strategy.str_all_files := ( acv.a_recursive_state = rs_last_select );
+IF  a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree) AND
+    (a101_GetExtendedTempFileType (acv, acv.a_mblock.mb_qual^.mtree)
+    = ttfnCorrelation_egg00)
+THEN
+    BEGIN
+    (* messblock for correlation test:                    *)
+    (* 'orig mblock' + 'AND CORRVALUE = <act corrvalue>'  *)
+    _ix := acv.a_mblock.mb_qual^.mfirst_free - 1;
+    WHILE (acv.a_mblock.mb_st^[ _ix ].etype <> st_varkey) DO
+        _ix := pred( _ix );
+    (*ENDWHILE*) 
+    _gg_strategy.str_strategy := strat_key_equal;
+    _gg_strategy.str_key_in_range.skir_keystart[ 0 ] := _ix;
+    _gg_strategy.str_key_in_range.skir_keystop[ 0 ]  := _ix;
+    _StratInfo_len  := STRATEGY_START_MXGG07 +
+          sizeof( _gg_strategy.str_key_in_range );
+    _eval_info.pev_wholeIO_pages := 1000;
+    END
+ELSE
+    IF  a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree)
+        AND (a101_GetExtendedTempFileType (acv, acv.a_mblock.mb_qual^.mtree)
+        <> ttfnTempTable_egg00)
+        AND (acv.a_mblock.mb_qual^.mtree.fileTabId_gg00 <>
+        g01tabid.sys_diag_parse.fileTabId_gg00)
+        (* table SYSPARSEID has a primary key *)
+    THEN (* h.b. PTS 1002121 *)
+        BEGIN
+        IF  ( acv.a_from_select )
+            OR
+            ( _gg_strategy.str_build_result )
+            OR
+            (* h.b. PTS 1105126 *)
+            ( _gg_strategy.str_use_order )
+            OR
+            ( _gg_strategy.str_distinc <> no_distinct )
+            OR
+            ( _gg_strategy.str_selinto )
+            OR
+            (( _gg_strategy.str_rowno < cgg04_valid_rowno )
+            AND
+            ( _gg_strategy.str_rowno <> cgg04_no_rowno_predicate )
+            AND
+            ( _gg_strategy.str_rowno <> cgg04_rowno_given_as_parameter ))
+        THEN
+            _gg_strategy.str_strategy := strat_key_range
+        ELSE
+            _gg_strategy.str_strategy := strat_key_range_fetch;
+        (*ENDIF*) 
+        _StratInfo_len := STRATEGY_START_MXGG07 +
+              sizeof( _gg_strategy.str_key_in_range );
+        (* (read + write frac) * page count for temporary result *)
+        bd998GetPageAndRecordCount( acv.a_transinf.tri_trans,
+              acv.a_mblock.mb_qual^.mtree.fileTabId_gg00,
+              _page_cnt, _dummy_cnt, _dummy_cnt );
+        IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+        THEN
+            BEGIN
+            IF  acv.a_transinf.tri_trans.trError_gg00 = e_file_not_found
+            THEN
+                BEGIN
+                _page_cnt := cak_initpages;
+                acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+                END
+            ELSE
+                a07_b_put_error( acv,
+                      acv.a_transinf.tri_trans.trError_gg00, 1 );
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        _eval_info.pev_wholeIO_pages := ( 1 + 1 ) * _page_cnt + 1;
+        END
+    ELSE
+        BEGIN
+        _gg_strategy.str_strategy := strat_undecided;
+        _StratInfo_len            := STRATEGY_START_MXGG07;
+&       ifdef TRACE
+        IF  ( dmli.d_sparr.pparsp = NIL )
+        THEN
+            t01int4( ak_sem, 'sparsp = nil', 1 )
+        ELSE
+            t01int4( ak_sem, 'sparsp<> nil', 0 );
+        (*ENDIF*) 
+&       endif
+        IF  (( acv.a_ex_kind = only_parsing ) AND
+            ( dmli.d_sparr.pparsp <> NIL ))
+        THEN
+            a54_fixedpos( acv, dmli );
+        (*ENDIF*) 
+        IF  (dmli.d_sparr.pbasep^.sbase.bv_tablekind = tcatalog_table)
+            AND
+            (acv.a_mblock.mb_qual^.mtree.fileTfn_gg00 = tfnSys_egg00)
+        THEN
+            a722strategy( acv, dmli, _eval_info, _gg_strategy, _StratInfo_len )
+        ELSE
+            BEGIN
+            a80get_access_hint( acv, acv.a_pars_last_key, _config );
+            a70strategy( acv, dmli, _gg_strategy,
+                  _StratInfo_len, _eval_info, _config );
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    IF  (acv.a_mblock.mb_type = m_delete) AND
+        (acv.a_mblock.mb_qual^.mqual_cnt = 0) AND
+        (acv.a_mblock.mb_qual^.mstring_cnt = 0) AND
+        (acv.a_mblock.mb_qual^.mlink_cnt = 0)
+    THEN
+        _eval_info.pev_wholeIO_pages := 2;
+    (* DELETE_ALL_RECORDS in VKB61 *)
+    (*ENDIF*) 
+    IF  ( acv.a_costcheck )
+    THEN
+        BEGIN
+        IF  ( csp_maxint4 - acv.a_costsum > _eval_info.pev_wholeIO_pages )
+        THEN
+            BEGIN
+            IF  ( _eval_info.pev_wholeIO_pages = IS_UNDEFINED_GG07 )
+            THEN
+                acv.a_costsum := cak_is_undefined
+            ELSE
+                acv.a_costsum := acv.a_costsum + _eval_info.pev_wholeIO_pages;
+            (*ENDIF*) 
+            END
+        ELSE
+            acv.a_costsum := csp_maxint4;
+        (*ENDIF*) 
+&       ifdef trace
+        t01int4( ak_strat, 'a_costsum   ', acv.a_costsum );
+        t01int4( ak_strat, 'a_costwarn_v', acv.a_costlimit_value );
+        t01int4( ak_strat, 'a_costwarn_v', acv.a_costwarn_value );
+&       endif
+        IF  ( NOT acv.a_intern_explain ) (* no EXPLAIN command *)
+        THEN
+            IF  (acv.a_costsum > acv.a_costlimit_value)
+            THEN
+                a07_b_put_error( acv, e_costlimit_overflow, 1 )
+            ELSE
+                IF  (acv.a_costsum > acv.a_costwarn_value) AND
+                    (acv.a_comp_type <> at_odbc) AND
+                    (acv.a_comp_type <> at_jdbc)
+                THEN
+                    a07_b_put_error( acv, e_costwarning_overflow, 1 )
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    strat_rec.sr_strategy       := _gg_strategy.str_strategy;
+    IF  (( strat_rec.sr_strategy in a70glob_key_fetch_strats ) AND
+        ( ksp_order_support_reverse in _gg_strategy.str_key_in_range.skir_strat_props ))
+        OR
+        (( strat_rec.sr_strategy in a70glob_inv_fetch_strats ) AND
+        ( isp_order_support_reverse in _gg_strategy.str_inv_in_range.siir_strat_props ))
+    THEN
+        strat_rec.sr_reverse_access := true;
+    (*ENDIF*) 
+    _gg_strategy.str_use_rowno  := strat_rec.sr_use_rowno;
+    _gg_strategy.str_union_kind := 0;
+    _gg_strategy.str_ordering   := strat_rec.sr_distinct_bytes;
+    (* means that there are 4 bytes available for distinct they *)
+    (* are not available only for GROUP BY without set-function *)
+    a70_invkeylen( acv, _gg_strategy, strat_rec.sr_invkeylen );
+    END;
+(*ENDIF*) 
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    IF  ( acv.a_mblock.mb_qual^.mfirst_free > acv.a_mblock.mb_st_max )
+    THEN
+        a07_b_put_error( acv, e_too_many_mb_stackentries, 1 );
+    (*ENDIF*) 
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        BEGIN
+        IF  ( strat_rec.sr_strategy in a70glob_fetch_strats )
+            AND
+            _gg_strategy.str_res_possible
+            AND
+            ( NOT acv.a_intern_explain )
+            AND (* no ... WITH LINK *)
+            ( acv.a_ex_kind <> only_parsing )
+        THEN
+            BEGIN
+            g04spec_null_check( acv.a_mblock, _e );
+            IF  _e <> e_ok
+            THEN
+                a07_b_put_error( acv, _e, 1 )
+            ELSE
+                g04inbetween_change( acv.a_mblock,
+                      _gg_strategy.str_res_possible );
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            BEGIN
+&           IFDEF TRACE
+            t01execution_kind( ak_strat, 'a_ex_kind   ', acv.a_ex_kind );
+            t01bool( ak_strat, 'd_join      ', dmli.d_join );
+            t01bool( ak_strat, 'd_view      ', dmli.d_view );
+&           ENDIF
+            dmli.d_qual_kind := _gg_strategy.str_qual_kind;
+            ;
+            IF  ( _gg_strategy.str_strategy in
+                [ strat_more_than_one, strat_undecided, strat_no_result ] )
+            THEN
+                _mv_strat_len := STRATEGY_START_MXGG07
+            ELSE
+                _mv_strat_len := _StratInfo_len;
+            (*ENDIF*) 
+            IF  ( (_strat_pos - 1) + _mv_strat_len <= acv.a_mblock.mb_strat_size )
+                OR
+                (* a721transfer_parse_info() assures space *)
+                ( _gg_strategy.str_strategy = strat_undecided )
+            THEN
+                BEGIN
+                SAPDB_PascalForcedMove (
+                      sizeof( _gg_strategy ), acv.a_mblock.mb_strat_size,
+                      @_gg_strategy, 1,
+                      @acv.a_mblock.mb_strat^, _strat_pos,
+                      _mv_strat_len );
+                acv.a_mblock.mb_qual^.mstrat_pos   :=
+                      acv.a_mblock.mb_qual^.mfirst_free;
+                acv.a_mblock.mb_qual^.mstrat_cnt   := 1;
+                acv.a_mblock.mb_qual^.mfirst_free  :=
+                      succ( acv.a_mblock.mb_qual^.mfirst_free );
+                g09StratStackentry( acv.a_mblock.
+                      mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ],
+                      _strat_pos, _mv_strat_len );
+                (*  |---------------|-----------------------| *)
+                (*  | Strategy      | parse data            | *)
+                (*  | data          | (optional)            | *)
+                (*  |---------------|-----------------------| *)
+                END
+            ELSE
+                a07_b_put_error( acv, e_too_many_mb_strat, 1 );
+            (*ENDIF*) 
+            IF  acv.a_intern_explain AND ( acv.a_returncode = 0 )
+            THEN
+                a728_explain( acv, dmli, _gg_strategy, NIL,
+                      acv.a_mblock.mb_strat^,
+                      acv.a_mblock.mb_strat_size, _strat_pos );
+            (*ENDIF*) 
+            IF  ( _gg_strategy.str_strategy <> strat_undecided )
+            THEN
+                acv.a_mblock.mb_strat_len := ( _strat_pos - 1 ) +
+                      _StratInfo_len;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+&IFDEF TRACE
+(*ENDIF*) 
+t01int4      (ak_strat, 'd_pos_result', dmli.d_pos_result);
+t01messblock (ak_strat, 'a70_strat_s2', acv.a_mblock);
+&ENDIF
+IF  ( acv.a_returncode = 0 )
+    AND
+    ( strat_rec.sr_strategy in a70glob_fetch_strats ) AND
+    NOT dmli.d_single (* no resname record for select into *)
+    AND
+    ( dmli.d_pos_result <> 0 ) (* no link *)
+THEN
+    BEGIN
+    acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.resstate :=
+          acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.resstate -
+          [ rs_result ];
+    CASE strat_rec.sr_strategy OF
+        strat_inv_range_fetch :
+            acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.resstate :=
+                  acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.
+                  resstate + [ rs_noresult ] + [ rs_useinv ];
+        strat_inv_range_merge_fetch :
+            acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.resstate :=
+                  acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.
+                  resstate + [ rs_intinvnoresult ] + [ rs_useinv ];
+        strat_key_equal_fetch,
+        strat_key_range_fetch :
+            acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.resstate :=
+                  acv.a_resname_addr[ dmli.d_pos_result ]^.sresname.
+                  resstate + [ rs_noresult ];
+        OTHERWISE
+            BEGIN
+            END
+        END;
+    (*ENDCASE*) 
+    IF  ( NOT acv.a_intern_explain ) AND ( acv.a_ex_kind <> only_parsing )
+    THEN
+        BEGIN
+        _ke := a01sysnullkey;
+        _ke.stempid   := acv.a_curr_res_id;
+        _ke.sentrytyp := cak_emessblock;
+        ;
+        acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 := dmli.d_globstate;
+        acv.a_mblock.mb_qual_len  := MB_PART1_HEAD_MXGG00;
+        IF  ( acv.a_mblock.mb_qual^.mqual_cnt > 0 ) AND
+            ( acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mqual_pos ].
+            etype = st_jump_output)
+        THEN
+            BEGIN
+            _prev := acv.a_mblock.mb_qual^.mqual_pos + 1;
+            FOR _ix := acv.a_mblock.mb_qual^.mqual_pos + 1 TO
+                  acv.a_mblock.mb_qual^.mqual_pos +
+                  acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mqual_pos ].
+                  epos - 1 DO
+                IF  ( acv.a_mblock.mb_st^[ _ix ].etype = st_output )
+                THEN
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_st^[ _ix ].epos <=
+                        cgg_rec_key_offset + dmli.d_keylen )
+                    THEN
+                        FOR _jx := _ix DOWNTO _prev DO
+                            acv.a_mblock.mb_st^[ _jx ].etype := st_dummy
+                        (*ENDFOR*) 
+                    ELSE
+                        IF  ( acv.a_mblock.mb_st^[ _ix ].eop_out = op_o_output_hold )
+                            AND
+                            ( acv.a_mblock.mb_st^[ _ix + 1 ].epos <=
+                            cgg_rec_key_offset + dmli.d_keylen )
+                        THEN
+                            acv.a_mblock.mb_st^[ _ix ].eop_out := op_o_none;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    _prev := _ix + 1;
+                    END;
+                (*ENDIF*) 
+            (*ENDFOR*) 
+            acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mqual_pos ].elen_var :=
+                  cgg_rec_key_offset + dmli.d_keylen + 1;
+&           ifdef trace
+            t01int4( ak_sem, 'output_offse',
+                  acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mqual_pos ].
+                  elen_var );
+&           endif
+            END;
+        (*ENDIF*) 
+        g04mblock_optimize_info( acv.a_mblock );
+        a10mblock_into_cache( acv, _ke, acv.a_mblock, d_release, _ibuf, _e );
+        IF  ( _e = e_ok )
+        THEN
+            BEGIN
+            a10add_sysinfo( acv, _ibuf, _e );
+            END;
+        (*ENDIF*) 
+        IF  ( _e <> e_ok )
+        THEN
+            a07_b_put_error( acv, _e, 1 );
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70L2L3_strat_search (
+            VAR acv          : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR sparr        : tak_syspointerarr;
+            VAR access_info  : tak70_strategy_record;
+            VAR gg_strategy  : tgg07_StrategyInfo;
+            VAR StratInfo_len: tsp00_Int2;
+            morestratpos     : tsp00_Int4;
+            VAR eval_info    : tak71_page_eval_rec;
+            VAR L1_terms     : tak70_term;
+            VAR order_fields : tak00_ord_fields;
+            L1_pageIO        : tsp00_Int4;
+            VAR L1_stratvalue: tsp00_Longreal);
+ 
+VAR
+      _actstratlen : tsp00_Int4;
+ 
+BEGIN
+&ifdef TRACE
+t01strat_enum( ak_strat, 'L1 strategy ', gg_strategy.str_strategy );
+t01int4( ak_strat, 'L1 page IO  ', L1_pageIO );
+t01int4( ak_strat, 'trm_L1termcn', L1_terms.trm_L1termcnt );
+&endif
+IF  ( acv.a_returncode = 0 )
+    AND
+    ( L1_terms.trm_L1termcnt > 0 )
+    AND
+    (( NOT (gg_strategy.str_strategy in [ strat_key_equal, strat_key_equal_fetch ] )) OR
+    ( cs_L2_strategy in access_info.srec_config.cfg_switches ))
+    AND
+    ( NOT ( cs_L1_strategy in access_info.srec_config.cfg_switches ))
+THEN
+    ak70L2L3_strat_search( acv, dmli, sparr, access_info, gg_strategy,
+          StratInfo_len, morestratpos, eval_info, L1_terms,
+          order_fields, L1_pageIO, L1_stratvalue );
+(*ENDIF*) 
+;
+dmli.d_dist_optim := a71code_distinct_optim( gg_strategy );
+;
+IF  ( acv.a_returncode = 0 ) AND
+    ( gg_strategy.str_strategy in a70glob_inv_strats ) AND
+    ( NOT dmli.d_join )
+THEN
+    a71change_stack_code( acv, dmli, gg_strategy );
+(*ENDIF*) 
+;
+IF  ( acv.a_mblock.mb_qual^.mstrat_pos > 0 ) AND
+    ( acv.a_mblock.mb_qual^.mstrat_cnt = 1 )
+THEN
+    _actstratlen :=
+          acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos - 1
+ELSE
+    _actstratlen := acv.a_mblock.mb_strat_len;
+(*ENDIF*) 
+;
+(* error handling *)
+IF  ( _actstratlen + StratInfo_len > acv.a_mblock.mb_strat_size )
+THEN
+    IF  ( _actstratlen + STRATEGY_START_MXGG07 <= acv.a_mblock.mb_strat_size )
+    THEN
+        BEGIN
+        IF  ( g01vtrace.vtrStrategy_gg00 )
+        THEN
+            g041c30_to_trace ( acv.a_transinf.tri_trans,
+                  '!!! LOW SPACE IN MB_STRAT !!! ' );
+        (*ENDIF*) 
+        gg_strategy.str_strategy  := strat_key_range;
+        gg_strategy.str_cnt_strat := 1;
+        StratInfo_len             := STRATEGY_START_MXGG07;
+        END
+    ELSE
+        a07_b_put_error( acv, e_too_many_mb_strat, 1 );
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70strategy (
+            VAR acv          : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR gg_strategy  : tgg07_StrategyInfo;
+            VAR StratInfo_len: tsp00_Int2;
+            VAR eval_info    : tak71_page_eval_rec;
+            config           : tak00_access_configuration);
+ 
+VAR
+      _ok             : boolean;
+      _L1_pageIO      : tsp00_Int4;
+      _L1_stratvalue  : tsp00_Longreal;
+      _sparr          : tak_syspointerarr;
+      _basetable      : tgg00_Surrogate;
+      _L1_terms       : tak70_term;
+      _access_info    : tak70_strategy_record;
+      _order_fields   : tak00_ord_fields;
+ 
+BEGIN
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    IF  ( NOT ( g01vtrace.vtrStrategy_gg00 ) AND ( cs_trace in config.cfg_switches ))
+    THEN
+        BEGIN
+        g01vtrace.vtrStrategy_gg00 := true;
+        g01vtrace.vtrSession_gg00  := acv.a_transinf.tri_trans.trSessionId_gg00;
+        END;
+    (*ENDIF*) 
+    _order_fields := dmli.d_order_or_group_cols^;
+    ;
+    gg_strategy.str_key_order_support := kos_no_support;
+    gg_strategy.str_out_keyseqlen     := NOT_SEQUENCED_GG07;
+    ;
+&   ifdef trace
+    IF  ( dmli.d_sparr.pbasep^.sbase.btablen <> NIL )
+    THEN
+        t01knl_identifier( ak_strat, 'view/table  ',
+              dmli.d_sparr.pbasep^.sbase.btablen^ );
+    (*ENDIF*) 
+    t01messblock( ak_strat, 'A70STRATEGY ', acv.a_mblock );
+    a725output_gg_strat( ak_strat, 'gg_strategy ', gg_strategy );
+    t01execution_kind( ak_strat, 'init ex kind', acv.a_init_ex_kind );
+    t01execution_kind( ak_strat, 'exec kind   ', acv.a_ex_kind );
+    t01int4( ak_strat, 'StratInfo_le', StratInfo_len );
+    t01columnset( ak_strat, 'expr updcols', dmli.d_foundset );
+&   endif
+    IF  ( dmli.d_sparr.pbasep^.sbase.btablekind = tonebase )
+    THEN
+        BEGIN
+        _basetable := dmli.d_sparr.pbasep^.sbase.btreeid.fileTabId_gg00;
+        a10rel_sysinfo( dmli.d_sparr.pbasep );
+        a06_systable_get( acv, d_fix, _basetable, dmli.d_sparr.pbasep,
+              c_get_all, _ok );
+        IF  ( NOT _ok )
+        THEN
+            a07_b_put_error( acv, e_old_fileversion, 1 )
+        ELSE
+            BEGIN
+&           ifdef trace
+            t01knl_identifier( ak_strat, 'base table  ',
+                  dmli.d_sparr.pbasep^.sbase.btablen^ );
+&           endif
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    ;
+    _sparr := dmli.d_sparr;
+    IF  ( acv.a_mblock.mb_qual^.mfirst_free > acv.a_mblock.mb_st_max )
+    THEN
+        a07_b_put_error( acv, e_too_many_mb_stackentries, 1 )
+    ELSE
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            BEGIN
+            gg_strategy.str_inv_in_range.siir_invroot := NIL_PAGE_NO_GG00;
+            _access_info := a70_glob_zstrat_rec;
+            _access_info.srec_config := config;
+            ;
+            ak70set_given_query_props( acv, dmli, _sparr, gg_strategy,
+                  _order_fields, _access_info.srec_query_prop );
+            ;
+            a71adjust_configuration( dmli, _access_info );
+            ;
+            IF  ( g01vtrace.vtrStrategy_gg00 )
+            THEN
+                BEGIN
+                g041name_to_trace( acv.a_transinf.tri_trans,
+                      '>> A70STRATEGY >> ' );
+                IF  ( _sparr.pbasep^.sbase.btablen <> NIL )
+                THEN
+                    BEGIN
+                    a727trace_tablename( acv.a_transinf.tri_trans,
+                          'base table  ', _sparr.pbasep^.sbase.btablen^ );
+                    END;
+                (*ENDIF*) 
+                b120MessBlockTrace(acv.a_transinf.tri_trans, ak_send, acv.a_mblock);
+                a81trace_access_config( acv.a_transinf.tri_trans,
+                      _access_info.srec_config );
+                a727trace_query_prop( acv.a_transinf.tri_trans,
+                      _access_info.srec_query_prop );
+                END;
+            (*ENDIF*) 
+            ;
+            (* initialize cost values *)
+            eval_info.pev_wholeIO_pages     := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_pages      := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_rows       := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_rows_min   := IS_UNDEFINED_GG07;
+            eval_info.pev_readInvIO_pages   := IS_UNDEFINED_GG07;
+            ;
+            _L1_terms.trm_L1termcnt   := 0; (* initial value = no strategies  *)
+            a724all_L1_terms( acv, dmli, _access_info, _L1_terms );
+            (* ================================================ *)
+            (* ak70all_L1_terms gathers all level-1-predicates  *)
+            (* into _access_info, level-1-terms into _L1_terms  *)
+            (* ================================================ *)
+            IF  NOT ( qp_no_result_set in _access_info.srec_query_prop.qps_switches )
+            THEN
+                BEGIN
+                a723analyse_used_cols( acv, dmli, _access_info, gg_strategy );
+&               ifdef trace
+                a725output_query_prop( ak_strat, _access_info.srec_query_prop );
+&               endif
+                IF  ( g01vtrace.vtrStrategy_gg00 )
+                THEN
+                    BEGIN
+                    a727trace_query_prop( acv.a_transinf.tri_trans,
+                          _access_info.srec_query_prop );
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( acv.a_returncode = 0 )
+            THEN
+                BEGIN
+                (* ignore qp_missing_value at the moment; we could found *)
+                (* strat_key_equal and for this strat parameters are of *)
+                (* no interest*)
+                a70L1_strat_search( acv, _sparr, _access_info, gg_strategy,
+                      StratInfo_len, eval_info, _order_fields, _L1_pageIO, _L1_stratvalue );
+                ;
+                IF  ( qp_missing_value in _access_info.srec_query_prop.qps_switches )
+                THEN
+                    BEGIN
+                    (* full stop, store collected access information *)
+                    a721transfer_parse_info( acv, gg_strategy,
+                          _access_info, _L1_terms, _order_fields, bckp_save );
+                    StratInfo_len            := STRATEGY_START_MXGG07;
+                    eval_info.pev_wholeIO_pages     := IS_UNDEFINED_GG07;
+                    eval_info.pev_readIO_pages      := IS_UNDEFINED_GG07;
+                    eval_info.pev_readIO_rows       := IS_UNDEFINED_GG07;
+                    eval_info.pev_readIO_rows_min   := IS_UNDEFINED_GG07;
+                    eval_info.pev_readInvIO_pages   := IS_UNDEFINED_GG07;
+                    END
+                ELSE
+                    BEGIN
+                    a70L2L3_strat_search( acv, dmli, _sparr,
+                          _access_info, gg_strategy, StratInfo_len,
+                          (* get place for strategy *)
+                          acv.a_mblock.mb_strat_len + 1 + STRATEGY_START_MXGG07,
+                          eval_info, _L1_terms, _order_fields, _L1_pageIO, _L1_stratvalue );
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+&               ifdef trace
+                t01int4( ak_strat, 'returncode  ', acv.a_returncode );
+&               endif
+                END;
+            (*ENDIF*) 
+&           ifdef trace
+            t01int4 (ak_strat, 'eval pagecnt', eval_info.pev_readIO_pages);
+            t01int4 (ak_strat, 'eval inv pcn', eval_info.pev_readInvIO_pages);
+&           endif
+            IF  NOT a101_IsTempFile(acv, dmli.d_sparr.pbasep^.sbase.btreeid) AND
+                ( bd999GetDataIOBlockCount > 0 ) AND
+                bd998ArePagesClustered( acv.a_transinf.tri_trans,
+                dmli.d_sparr.pbasep^.sbase.btreeid.fileTabId_gg00)
+            THEN
+                BEGIN
+                IF  gg_strategy.str_strategy in
+                    [ strat_key_range, strat_key_range_fetch ]
+                THEN
+                    gg_strategy.str_use_clusterIO :=
+                          (eval_info.pev_readIO_pages >= bd999GetDataIOBlockCount )
+                ELSE
+                    IF  gg_strategy.str_strategy in
+                        [ strat_inv_range, strat_inv_range_fetch, strat_inv_range_merge_fetch ]
+                    THEN
+                        gg_strategy.str_use_clusterIO :=
+                              (eval_info.pev_readInvIO_pages >= bd999GetDataIOBlockCount )
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( gg_strategy.str_strategy in
+                [ strat_undecided, strat_no_result, strat_more_than_one ] )
+            THEN
+                _access_info.srec_strat_cachable := false;
+            (*ENDIF*) 
+            ;
+            k720ref_statistic( dmli.d_strat_info, gg_strategy );
+            (* PTS 1112419 reset inv root for only index strategies
+                  to avoid problems with invalid roots after
+                  drop index or unqualified delete *)
+            IF  (acv.a_ex_kind = only_parsing) AND
+                ( gg_strategy.str_strategy in a70glob_inv_strats ) AND
+                ( isp_inv_only in gg_strategy.str_inv_in_range.siir_strat_props )
+            THEN
+                gg_strategy.str_inv_in_range.siir_invroot := NIL_PAGE_NO_GG00;
+            (*ENDIF*) 
+            ;
+&           ifdef TRACE
+            a725output_end_strat( ak_strat, 'ENDSTRAT >>>', gg_strategy,
+                  eval_info, StratInfo_len );
+&           endif
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( g01vtrace.vtrStrategy_gg00 )
+    THEN
+        BEGIN
+        a727trace_strategy_text( acv.a_transinf.tri_trans,
+              'CHOOSEN     ',  gg_strategy.str_strategy );
+        a727trace_eval_costs( acv.a_transinf.tri_trans, eval_info );
+        g041name_to_trace( acv.a_transinf.tri_trans,
+              '<< A70STRATEGY << ' );
+        IF  ( cs_trace in config.cfg_switches )
+        THEN
+            BEGIN
+            g01vtrace.vtrStrategy_gg00         := false;
+            g01vtrace.vtrSession_gg00.ci4_gg00 := cgg_nil_session;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70L1_strat_search (
+            VAR acv          : tak_all_command_glob;
+            VAR sparr        : tak_syspointerarr;
+            VAR access_info  : tak70_strategy_record;
+            VAR gg_strategy  : tgg07_StrategyInfo;
+            VAR StratInfo_len: tsp00_Int2;
+            VAR eval_info    : tak71_page_eval_rec;
+            VAR order_fields : tak00_ord_fields;
+            VAR L1_pageIO    : tsp00_Int4; (* out *)
+            VAR L1_stratvalue: tsp00_Longreal );
+ 
+VAR
+      _chosen_strat   : tak70_one_strat;
+      _raw_key_access : tak70_key_access;
+ 
+BEGIN
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    g041c30_to_trace ( acv.a_transinf.tri_trans,
+          '>> A70L1_STRAT_SEARCH >>      ' );
+(*ENDIF*) 
+;
+(* save original/raw key access data *)
+_raw_key_access := access_info.srec_keyaccess;
+;
+_chosen_strat.ostr_filler1 := ' ';
+_chosen_strat.ostr_filler2 := 0;
+;
+a720strategy_decision( acv, sparr, access_info, gg_strategy,
+      _chosen_strat, order_fields, StratInfo_len, true );
+(* initialize Level1 strategy *)
+gg_strategy.str_strategy := _chosen_strat.ostr_strategy;
+gg_strategy.str_raw      := _chosen_strat.ostr_raw;
+;
+L1_pageIO     := _chosen_strat.ostr_wholeIO_pages;
+L1_stratvalue := _chosen_strat.ostr_strat_value;
+eval_info.pev_wholeIO_pages     := _chosen_strat.ostr_wholeIO_pages;
+eval_info.pev_readIO_pages      := _chosen_strat.ostr_readIO_pages;
+eval_info.pev_readIO_rows       := _chosen_strat.ostr_readIO_rows;
+eval_info.pev_readIO_rows_min   := access_info.srec_readIO_rows_min;
+eval_info.pev_readInvIO_pages   := _chosen_strat.ostr_readIO_pages -
+      _chosen_strat.ostr_readIO_primpages;
+;
+&ifdef trace
+t01name( ak_strat, 'Level-1-strategy  ' );
+a725output_one_strat( ak_strat, _chosen_strat );
+&endif
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_one_strat( acv.a_transinf.tri_trans,
+          'LEVEL-1-STRATEGY  ', _chosen_strat );
+    END;
+(*ENDIF*) 
+;
+IF  ( qp_no_result_set in access_info.srec_query_prop.qps_switches )
+THEN
+    gg_strategy.str_res_possible := false;
+(*ENDIF*) 
+;
+(* restore original/raw key access data *)
+(* for L2/L3 strategy search            *)
+access_info.srec_keyaccess := _raw_key_access;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak70L2L3_strat_search (
+            VAR acv          : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR sparr        : tak_syspointerarr;
+            VAR access_info  : tak70_strategy_record;
+            VAR gg_strategy  : tgg07_StrategyInfo;
+            VAR StratInfo_len: tsp00_Int2;
+            actstratpos      : tsp00_Int4;
+            VAR eval_info    : tak71_page_eval_rec;
+            VAR L1_terms     : tak70_term;
+            VAR order_fields : tak00_ord_fields;
+            L1_pageIO        : tsp00_Int4;
+            VAR L1_stratvalue: tsp00_Longreal);
+ 
+VAR
+      _ix               : tsp00_Int2;
+      _combination_stat : tak70_l2l3_strat_status;
+      _nextstratpos     : tsp00_Int4;
+      _m_a_sample_pages : tsp00_Int4;
+      _used_strats      : tak70_all_strat;
+      _build_demand     : boolean;
+      _operator_join    : boolean;
+ 
+BEGIN
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    g041c30_to_trace ( acv.a_transinf.tri_trans,
+          'AK70L2L3_STRAT_SEARCH         ' );
+(*ENDIF*) 
+IF  (( L1_terms.trm_L1terms[ 0 ].l1t_is_usable ) AND
+    ( L1_terms.trm_L1terms[ 0 ].l1t_L2pL3tcnt > 0 ))
+THEN
+    BEGIN
+&   ifdef TRACE
+    a725L1_terms_output( ak_strat, L1_terms );
+&   endif
+    _used_strats.ast_cntstrats       := 0;
+    _used_strats.ast_wholeIO_pages   := 0;
+    _used_strats.ast_readIO_pages    := 0;
+    _used_strats.ast_readIO_primpages := 0;
+    _used_strats.ast_readIO_rows     := 0;
+    _used_strats.ast_key_range_poss  := true;
+    _used_strats.ast_init_key_range  := true;
+    FOR _ix := 0 TO MAX_COLPOSARR_IDX_GG07 DO
+        BEGIN
+        _used_strats.ast_key_range.skir_keystart[ _ix ]  := 0;
+        _used_strats.ast_key_range.skir_keystop [ _ix ]  := 0;
+        END;
+    (*ENDFOR*) 
+    _used_strats.ast_key_range.skir_IN_SUBQ_stpos := IS_UNDEFINED_GG07;
+    _used_strats.ast_key_range.skir_inelemcnt     := IS_UNDEFINED_GG07;
+    _used_strats.ast_key_range.skir_strat_props   := [];
+    _nextstratpos := actstratpos;
+    ;
+    (* set processing instructions *)
+    _build_demand :=
+          ( qp_build_result in access_info.srec_query_prop.qps_switches );
+    _operator_join :=
+          ( cs_operator_join in access_info.srec_config.cfg_switches );
+    _m_a_sample_pages := acv.a_sample_pages;
+    access_info.srec_query_prop.qps_switches :=
+          access_info.srec_query_prop.qps_switches + [ qp_build_result ];
+    (* strat_more_than_one will be handled with Join_LegacyAccessOperator *)
+    (* i.e. with call of k05function()                                    *)
+    access_info.srec_config.cfg_switches :=
+          access_info.srec_config.cfg_switches - [ cs_operator_join ];
+    (* work now for strategies part of several different strategies *)
+    access_info.srec_L1_strategy := false;
+    IF  (( cs_L2_range_strategy in access_info.srec_config.cfg_switches ) OR
+        ( cs_fetch_result in access_info.srec_config.cfg_switches ))
+    THEN
+        _combination_stat := lss_one_key_range
+    ELSE
+        _combination_stat := lss_several_strats;
+    (*ENDIF*) 
+    ;
+    a726combine_terms( acv, dmli, sparr, access_info, gg_strategy,
+          _used_strats, order_fields, L1_terms,
+          _nextstratpos, 0, 0,
+          L1_pageIO, _combination_stat );
+    ;
+    (* reset several switches *)
+    IF  ( NOT _build_demand )
+    THEN
+        access_info.srec_query_prop.qps_switches :=
+              access_info.srec_query_prop.qps_switches - [ qp_build_result ];
+    (*ENDIF*) 
+    IF  ( _operator_join )
+    THEN
+        BEGIN
+        access_info.srec_config.cfg_switches :=
+              access_info.srec_config.cfg_switches + [ cs_operator_join ];
+        END;
+    (*ENDIF*) 
+    access_info.srec_L1_strategy := true;
+    ;
+    IF  ( qp_missing_value in access_info.srec_query_prop.qps_switches )
+    THEN
+        BEGIN
+        IF  ( acv.a_ex_kind = only_executing )
+        THEN
+            BEGIN
+            IF  ( dmli.d_corr = no_correlation )
+            THEN
+                a07ak_system_error(acv, 70, 1 )
+            ELSE
+                BEGIN
+                (* =================================== *)
+                (* decision : use Level1 strategy      *)
+                (* =================================== *)
+                (* nothing to do, gg_strategy already contains L1-strategy *)
+&               ifdef TRACE
+                t01name( ak_strat, 'use Level1 strat X' );
+                t01strat_enum( ak_strat, 'strategy is ',
+                      gg_strategy.str_strategy );
+&               endif
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            (* parameters on L2/L3 predicates found *)
+            a721transfer_parse_info( acv, gg_strategy,
+                  access_info, L1_terms, order_fields, bckp_save );
+            StratInfo_len            := STRATEGY_START_MXGG07;
+            eval_info.pev_wholeIO_pages     := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_pages      := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_rows       := IS_UNDEFINED_GG07;
+            eval_info.pev_readIO_rows_min   := IS_UNDEFINED_GG07;
+            eval_info.pev_readInvIO_pages   := IS_UNDEFINED_GG07;
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            BEGIN
+            CASE _combination_stat OF
+                lss_use_L1_strat:
+                    BEGIN
+                    (* =================================== *)
+                    (* decision : use Level1 strategy      *)
+                    (* =================================== *)
+                    (* nothing to do, gg_strategy already contains L1-strategy *)
+&                   ifdef TRACE
+                    t01name( ak_strat, 'use Level1 strat  ' );
+                    t01strat_enum( ak_strat, 'strategy is ',
+                          gg_strategy.str_strategy );
+&                   endif
+                    acv.a_sample_pages := _m_a_sample_pages;
+                    END;
+                lss_one_key_range:
+                    BEGIN
+                    a720decide_L2_range( acv, sparr, access_info,
+                          gg_strategy, StratInfo_len,
+                          eval_info, L1_pageIO, L1_stratvalue,
+                          _used_strats.ast_key_range );
+                    END;
+                lss_several_strats:
+                    BEGIN
+                    (* several strats could be included (perhaps this depends )*)
+                    (* on parameter, therefore we could use this strategy      *)
+                    (* as cached strategy                                      *)
+                    (* example: WHERE KEYCOL = :a OR KEYCOL = :b               *)
+                    (* with :a == :b -> KEY_EQUAL strategy but only for this   *)
+                    (* special parameter set                                   *)
+                    access_info.srec_strat_cachable := false;
+                    IF  ( cs_fetch_result in access_info.srec_config.cfg_switches )
+                    THEN
+                        a07ak_system_error(acv, 70, 2 );
+                    (*ENDIF*) 
+                    IF  ( _used_strats.ast_cntstrats > 0 )
+                    THEN
+                        BEGIN
+                        (* =================================== *)
+                        (* decision : several strategies       *)
+                        (*            will be used             *)
+                        (* =================================== *)
+                        (* all stategies are build strategies !! *)
+                        gg_strategy.str_strategy     := strat_more_than_one;
+                        gg_strategy.str_cnt_strat    := _used_strats.ast_cntstrats;
+                        StratInfo_len := _nextstratpos - actstratpos +
+                              STRATEGY_START_MXGG07;
+&                       ifdef TRACE
+                        a725output_more_strat( acv, ak_strat, gg_strategy, _used_strats );
+&                       endif
+                        IF  ( _used_strats.ast_cntstrats = 1 )
+                        THEN
+                            (* all strategies are nested strategies *)
+                            BEGIN
+                            gg_strategy.str_strategy :=
+                                  _used_strats.ast_strats[ 1 ].osr_strategy;
+                            SAPDB_PascalMove('VAK70 ',   1,    
+                                  acv.a_mblock.mb_strat_size,
+                                  sizeof( gg_strategy.str_raw ),
+                                  @acv.a_mblock.mb_strat^,
+                                  _used_strats.ast_strats[ 1 ].osr_stratpos + cgg07_stratpos_offs,
+                                  @gg_strategy.str_raw, 1,
+                                  _used_strats.ast_strats[ 1 ].osr_stratlen,
+                                  acv.a_returncode );
+                            StratInfo_len := STRATEGY_START_MXGG07 +
+                                  _used_strats.ast_strats[ 1 ].osr_stratlen;
+                            a71check_fetch_optimization( acv,
+                                  access_info.srec_config,
+                                  access_info.srec_query_prop,
+                                  gg_strategy, gg_strategy.str_strategy,
+                                  gg_strategy.str_raw );
+                            END;
+                        (*ENDIF*) 
+                        IF  ( cs_count_records in access_info.srec_config.cfg_switches )
+                        THEN
+                            BEGIN
+                            a71decide_min_rows( acv, access_info,
+                                  _used_strats.ast_readIO_primpages,
+                                  _used_strats.ast_readIO_rows );
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+&                       ifdef trace
+                        t01name ( ak_strat, 'no poss strats -->' );
+                        t01sname( ak_strat, 'no resultset' );
+&                       endif
+                        gg_strategy.str_strategy     := strat_no_result;
+                        gg_strategy.str_res_possible := false;
+                        StratInfo_len                := STRATEGY_START_MXGG07;
+                        IF  ( cs_count_records in access_info.srec_config.cfg_switches )
+                        THEN
+                            access_info.srec_readIO_rows_min := 0;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    eval_info.pev_wholeIO_pages     := _used_strats.ast_wholeIO_pages;
+                    eval_info.pev_readIO_pages      := _used_strats.ast_readIO_pages;
+                    eval_info.pev_readIO_rows       := _used_strats.ast_readIO_rows;
+                    eval_info.pev_readIO_rows_min   := access_info.srec_readIO_rows_min;
+                    eval_info.pev_readInvIO_pages   := IS_UNDEFINED_GG07;
+                    END;
+                OTHERWISE
+                    BEGIN
+                    END;
+                END;
+            (*ENDCASE*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak70set_given_query_props (
+            VAR acv         : tak_all_command_glob;
+            VAR dmli        : tak_dml_info;
+            VAR sparr       : tak_syspointerarr;
+            VAR gg_strategy : tgg07_StrategyInfo;
+            VAR order_fields: tak00_ord_fields;
+            VAR qprop       : tak70_query_properties);
+ 
+VAR
+      _check_st_result  : boolean;
+      _i                : tsp00_Int2;
+ 
+BEGIN
+IF  ( gg_strategy.str_build_result )
+    OR
+    ((NOT dmli.d_join ) AND ( acv.a_from_select ))
+THEN
+    (* could be set while executing *)
+    qprop.qps_switches := qprop.qps_switches + [ qp_build_result ];
+(*ENDIF*) 
+;
+IF  dmli.d_view (* avoid stack change *)
+    OR
+    ( acv.a_mblock.mb_qual^.mqual_pos = 0 )
+    OR
+    ( acv.a_mblock.mb_qual^.mqual_cnt = 0 )
+    OR
+    ( acv.a_mblock.mb_type = m_delete )
+    OR
+    ( acv.a_mblock.mb_type = m_update )
+THEN
+    qprop.qps_switches := qprop.qps_switches + [ qp_inv_only_impossible ];
+(*ENDIF*) 
+;
+IF  NOT dmli.d_join
+THEN
+    BEGIN
+    IF  ( gg_strategy.str_selinto )
+        OR
+        (( gg_strategy.str_rowno < cgg04_valid_rowno )
+        AND
+        ( gg_strategy.str_rowno <> cgg04_no_rowno_predicate )
+        AND
+        ( gg_strategy.str_rowno <> cgg04_rowno_given_as_parameter ))
+        OR
+        (( acv.a_mblock.mb_type2 = mm_with_functions ) AND
+        ( dmli.d_group_cols.ocntord = 0 ))
+    THEN
+        BEGIN
+        (* i.e. SELECT INTO , COUNT( * ) *)
+        qprop.qps_switches := qprop.qps_switches + [ qp_build_result ];
+        qprop.qps_switches := qprop.qps_switches + [ qp_given_rescnt ];
+        qprop.qps_rescnt   := 1;
+        END
+    ELSE
+        BEGIN
+        IF  ( gg_strategy.str_rowno >= cgg04_valid_rowno ) OR
+            ( gg_strategy.str_rowno = cgg04_rowno_given_as_parameter )
+            (* If a ROWNO predicate in a join is given,         *)
+            (* optimizer isn't allowed to take it into account  *)
+            (* for cost calculating of single table access      *)
+        THEN
+            a71set_rescnt( acv, sparr, gg_strategy.str_rowno, qprop );
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+IF  ( gg_strategy.str_use_order ) AND ( order_fields.ocntord > 0 ) AND
+    (* NOT ( implizit ORDER BY (e.g. subquery ) ) *)
+    NOT (( order_fields.ocntord = 1 ) AND ( order_fields.ofield[ 1 ].ofstno = 0 ))
+THEN
+    BEGIN
+    _i := 1;
+    qprop.qps_switches := qprop.qps_switches + [ qp_check_order_support ];
+    WHILE  (( qp_check_order_support in qprop.qps_switches ) AND
+          ( _i <= order_fields.ocntord ) ) DO
+        BEGIN
+        IF  ( order_fields.ofield[ _i ].offno <= 0 )
+            (* offno < 0 => used column but with internal expressions  *)
+            (* offno = 0 => column with expression or order by fieldno *)
+        THEN
+            (* order support by usage of index/key ordering *)
+            (* can't be realized                            *)
+            (* we have to build result to achieve ordering  *)
+            (* without qp_check_order_support no access path support *)
+            (* ordering, hence result is written                     *)
+            qprop.qps_switches := qprop.qps_switches - [ qp_check_order_support ];
+        (*ENDIF*) 
+        IF  ( order_fields.ocntord = 1 )
+        THEN
+            BEGIN
+            (* check whether ordering by user defined function is required. *)
+            (* in that case there's a chance that a function based index    *)
+            (* supports the required ordering                               *)
+            ;
+            _i := order_fields.ofield[ 1 ].ofstno - 1;
+            IF  ( acv.a_mblock.mb_st^[ _i ].etype        = st_build_in_func   ) AND
+                ( acv.a_mblock.mb_st^[ _i ].eop_build_in = op_b_user_def_func )
+            THEN
+                BEGIN
+                (* order by user defined function required, check if only    *)
+                (* columns of current table are used as function parameters. *)
+                (* if this is not true we can exclude  that a function based *)
+                (* may used for ordering                                  *)
+                ;
+                _i               := _i - 2; (* skip st_surrogate *)
+                _check_st_result := true;
+                qprop.qps_switches := qprop.qps_switches + [ qp_check_order_support ];
+                WHILE ( _i >= acv.a_mblock.mb_qual^.mqual_pos ) AND
+                      ( acv.a_mblock.mb_st^[_i].etype <> st_output ) DO
+                    BEGIN
+                    IF  ( _check_st_result AND
+                        ( acv.a_mblock.mb_st^[_i].etype <> st_result )) OR
+                        ( NOT _check_st_result AND
+                        NOT ( acv.a_mblock.mb_st^[_i].etype in
+                        [ st_fixkey, st_varkey, st_fixcol, st_varcol ] ))
+                    THEN
+                        BEGIN
+                        qprop.qps_switches := qprop.qps_switches - [ qp_check_order_support ];
+                        _i := 0; (* exit loop *)
+                        END
+                    ELSE
+                        BEGIN
+                        IF  _check_st_result                                       AND
+                            (_i >= acv.a_mblock.mb_qual^.mqual_pos)                AND
+                            (acv.a_mblock.mb_st^[_i - 1].etype = st_build_in_func) AND
+                            (acv.a_mblock.mb_st^[_i - 1].eop_build_in = op_b_uni_trans)
+                        THEN
+                            _i := _i - 1;
+                        (*ENDIF*) 
+                        _check_st_result := NOT _check_st_result;
+                        _i               := _i - 1;
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWHILE*) 
+&               ifdef trace
+                t01bool (ak_strat, 'fctindex ord', qp_check_order_support in
+                      qprop.qps_switches);
+&               endif
+                _i := order_fields.ocntord; (* exit loop *)
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        _i := succ( _i );
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+;
+IF  ( ftsArchive_egg00 in sparr.pbasep^.sbase.btreeid.fileType_gg00 )
+THEN
+    BEGIN
+    qprop.qps_switches := qprop.qps_switches + [ qp_archive_access ];
+    END;
+&ifdef trace
+(*ENDIF*) 
+a725output_query_prop( ak_strat, qprop );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70_invkeylen (
+            VAR acv         : tak_all_command_glob;
+            VAR gg_strategy : tgg07_StrategyInfo;
+            VAR invkeylen   : tsp00_Int2);
+ 
+BEGIN
+&IFDEF TRACE
+t01strat_enum (ak_strat, 'act strat   ', gg_strategy.str_strategy);
+&ENDIF
+IF  ( gg_strategy.str_strategy in a70glob_build_strats )
+    OR
+    ( gg_strategy.str_strategy in a70glob_key_fetch_strats )
+    OR
+    ( gg_strategy.str_strategy in [ strat_undecided, strat_no_result ] )
+THEN
+    BEGIN
+    invkeylen := 0;
+    END
+ELSE
+    BEGIN
+    IF  ( gg_strategy.str_strategy in a70glob_inv_fetch_strats )
+    THEN
+        BEGIN
+        invkeylen := gg_strategy.str_inv_in_range.siir_invlen;
+        END
+    ELSE
+        BEGIN
+        a07_b_put_error (acv, e_unknown_strategy, 1)
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&ifdef TRACE
+t01int4( ak_strat, 'invkeylen   ', invkeylen );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a70_keylengths (
+            VAR acv           : tak_all_command_glob;
+            strategy          : tgg07_StratEnum;
+            fetch_primkeylen  : integer;
+            fetch_invkeylen   : tsp00_Int2;
+            build_primkeylen  : integer;
+            VAR primlen       : integer;
+            VAR invlen        : integer);
+ 
+BEGIN
+IF  ( strategy in a70glob_build_strats ) OR ( strategy = strat_no_result )
+THEN
+    BEGIN
+    primlen := build_primkeylen;
+    invlen  := 0;
+    END
+ELSE
+    BEGIN
+    IF  ( strategy in a70glob_fetch_strats )
+    THEN
+        BEGIN
+        primlen := fetch_primkeylen;
+        invlen  := fetch_invkeylen;
+        END
+    ELSE
+        BEGIN
+        IF  ( strategy = strat_undecided )
+        THEN
+            BEGIN
+            primlen := 0;
+            invlen  := 0;
+            END
+        ELSE
+            a07_b_put_error( acv, e_unknown_strategy, 1 );
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&ifdef TRACE
+t01int4 (ak_sem, 'fetch primk ', fetch_primkeylen);
+t01int4 (ak_sem, 'fetch invk  ', fetch_invkeylen);
+t01int4 (ak_sem, 'primlen     ', primlen);
+t01int4 (ak_sem, 'invlen      ', invlen);
+&endif
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

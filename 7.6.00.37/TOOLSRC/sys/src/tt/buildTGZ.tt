@@ -1,0 +1,283 @@
+#!/bin/sh
+#
+#	$TOOL/bin/buildTGZ
+#
+#
+#	script generate TGZ package:
+#				sapdb-server-x.x.x.x.tgz
+#
+#	no args, targets in $WRK/fast/tgz
+#
+####################################################
+
+#needed vars
+######################################################
+&if $OSSPEC == HPUX
+	OS=hpux
+	ARCH=hppa
+	SOEXT=sl
+&else
+	SOEXT=so
+&endif
+&if $OSSPEC == LINUX
+	OS=linux
+	ARCH=i386
+&endif
+&if $OSSPEC == OSF1
+	OS=true64
+	ARCH=alpha
+&endif
+
+&if $OSSPEC == SOLARIS
+	OS=solaris
+&  if $MACH == SPARC
+	ARCH=sparc
+	BIT=-64bit
+&  elif $MACH == X86_64
+	ARCH=x86_64
+	BIT=-64bit
+&  elif $MACH == I386
+	ARCH=i386
+&  else
+	echo "Unknown architecture for Solaris OS"
+	exit 1
+&  endif	
+&endif
+
+&if $MACH == SUN
+	OS=solaris
+	ARCH=sparc
+	BIT=-64bit
+&endif
+&if $OSSPEC == AIX
+	OS=aix
+	ARCH=ppc
+&endif
+
+_LIBPATH=lib
+
+BIT64=${BIT64:=0}
+if [ "$BIT64" -eq "1" ]
+then
+	BIT=-64bit
+	_LIBPATH=${_LIBPATH}/lib64
+fi
+
+DEPLISTE=$INSTROOT/etc/CAR.LISTE.SRV
+INDLISTE=$INSTROOT/etc/CAR.LISTE.IND
+INSTSCRIPT=insapdb
+INSTEXEC=sapdbinstall
+BUILDROOT=$WRK/fast/buildtgz
+TGZPATH=$WRK/fast/install
+INDPATH=$BUILDROOT/sapdb-ind
+DEPPATH=$BUILDROOT/sapdb-srv
+_RELEASE=`expr $RELVER : ".\(.\)"`.`expr $RELVER : ".*\(.\)"`.$CORRECTION_LEVEL.$BUILDPRAEFIX
+REL4NAME=`expr $RELVER : ".\(.\)"`_`expr $RELVER : ".*\(.\)"`_${CORRECTION_LEVEL}_${BUILDPRAEFIX}
+REL4PATH=`expr $RELVER : ".\(.\)"``expr $RELVER : ".*\(.\)"``echo $CORRECTION_LEVEL`0
+DEPNAME=SAPDBDEP.TGZ
+INDNAME=SAPDBIND.TGZ
+SRVNAME=sapdb-server-$OS$BIT-$ARCH-$REL4NAME.sar
+
+
+#check file lists
+#######################################################
+for _LIST in \
+		$DEPLISTE \
+		$INDLISTE
+do
+	if	 [ ! -f $_LIST ]
+	then	
+		echo "server file list \"$_LIST\" not found!"
+		echo "please run \"$INSTROOT/etc/makeCARLIST\" before executing \"buildTGZ\""
+		exit 1
+	fi
+
+done
+
+
+#check files in tgz layer
+#######################################################
+#$TGZPATH/dbmcli_46d_eng.pdf \
+	#$TGZPATH/meldungen_72eng.pdf \
+	#$TGZPATH/referenz_72eng.pdf \
+for _file in \
+	$TGZPATH/$INSTSCRIPT \
+	$TGZPATH/$INSTEXEC 
+do
+	if [ ! -f $_file ]
+	then
+		echo "file \"$_file\" not found - please start \"imf sapdbinst\""
+		exit 1
+	fi
+done
+
+#if [ ! -d $WRK/fast/rpm/demo ]
+#then
+#	echo "directory \"$WRK/fast/rpm/demo\" not found - please start \"imf sapdbinst\""
+#	exit 1
+#fi
+
+#generate directory tree
+###################################################
+echo "generate directory tree and environment"
+mkdir -p $INDPATH/wrk
+mkdir -p $DEPPATH/wrk
+
+
+
+# copy files from server list
+##################################################
+echo "copy files from srv list"
+filename=$DEPLISTE
+fileliste=`cat $filename`
+sumlist=$fileliste
+for file in $fileliste
+do
+	_path=`echo $file | sed "s/[^\/]*$//"`
+	#copy files for server package
+	destpath=$DEPPATH/$_path
+	if [ ! -d $destpath ]
+	then
+		mkdir -p $destpath
+	fi
+	cp $INSTROOT/$file $DEPPATH/$file
+done 
+
+#append libpcr to indlist
+######################################
+cp $INDLISTE $OWN/TMPINDLISTE
+echo "runtime/$REL4PATH/$_LIBPATH/libpcr.$SOEXT" >> $OWN/TMPINDLISTE 
+mkdir -p $INSTROOT/runtime/$REL4PATH/$_LIBPATH
+cp $INSTROOT/$_LIBPATH/libpcr.$SOEXT $INSTROOT/runtime/$REL4PATH/$_LIBPATH/libpcr.$SOEXT
+
+
+
+# copy files from independend list
+#################################################
+echo "copy files from ind list"
+filename=$OWN/TMPINDLISTE
+fileliste=`cat $filename`
+sumlist="$sumlist $fileliste"
+for file in $fileliste
+do
+	_path=`echo $file | sed "s/[^\/]*$//"`
+	#copy files for independent package
+	destpath=$INDPATH/$_path
+	if [ ! -d $destpath ]
+	then
+		mkdir -p $destpath
+	fi
+	cp $INSTROOT/$file $INDPATH/$file
+done
+
+
+#copy installation files
+##################################################
+echo "copy installation files"
+sed "s/\$release\ =\ .*$/\$release\ =\ \"$_RELEASE\";/" $TGZPATH/$INSTSCRIPT | sed "s/\$srv_tarname=.*$/\$srv_tarname=\"$DEPNAME\";/" | sed "s/\$ind_tarname=.*$/\$ind_tarname=\"$INDNAME\";/" > $TGZPATH/tmpscript
+mv $TGZPATH/tmpscript $BUILDROOT/$INSTSCRIPT
+cp $TGZPATH/$INSTEXEC $BUILDROOT
+
+
+#copy file lists and attach md5sum
+###################################################
+echo "copy file lists and get md5sums"
+dest=$INDPATH/`echo $INDLISTE | sed "s/^.*\///g"`
+fileliste=`cat $OWN/TMPINDLISTE`
+if [ ! -f $dest ]
+then
+        touch $dest
+else
+        rm $dest
+        touch $dest
+fi
+for file in $fileliste
+do
+        sum=`md5sum $INSTROOT/$file`
+        sum=`echo $sum | sed "s/\ .*$//"`
+        echo "\"$file\" $sum" >> $dest
+done
+dest=$DEPPATH/`echo $DEPLISTE | sed "s/^.*\///g"`
+fileliste=`cat $DEPLISTE`
+if [ ! -f $dest ]
+then
+        touch $dest
+else
+        rm $dest
+        touch $dest
+fi
+for file in $fileliste
+do
+        sum=`md5sum $INSTROOT/$file`
+        sum=`echo $sum | sed "s/\ .*$//"`
+        echo "\"$file\" $sum" >> $dest
+done
+
+
+
+#copy PDFs
+##################################################
+#echo "copy PDFs"
+#cp $TGZPATH/*.pdf $DOCPATH
+
+
+#copy demo files
+#################################################
+#echo "copy demo files"
+#cp -R $TGZPATH/demo $INDPATH
+
+
+#set permissions
+####################################################
+echo "set permissions"
+find $BUILDROOT -type d -exec chmod 775 {} \;
+find $DEPPATH/bin -type f -exec chmod 775 {} \;
+find $DEPPATH/env -type f -exec chmod 664 {} \;
+find $DEPPATH/incl -type f -exec chmod 664 {} \;
+find $DEPPATH/lib -type f -exec chmod 664 {} \;
+find $DEPPATH/lib -type f -name \*\.$SOEXT -exec chmod 775 {} \;
+find $DEPPATH/misc -type f -exec chmod 775 {} \;
+find $DEPPATH/pgm -type f -exec chmod 775 {} \;
+find $DEPPATH/sap -type f -exec chmod 664 {} \;
+find $INDPATH/bin -type f -exec chmod 775 {} \;
+find $INDPATH/pgm -type f -exec chmod 775 {} \;
+find $INDPATH/terminfo -type f -exec chmod 664 {} \;
+
+#chmod 664 $DEPPATH/misc/dbm.pm \
+#	  $DEPPATH/misc/instperl.pl \
+#	  $DEPPATH/misc/repman.pm \
+#	  $DEPPATH/misc/sapdb.pm \
+#	  $DEPPATH/misc/sapdbc.jar
+
+chmod 777 $DEPPATH/pgm/lserver
+#chmod 4775 $DEPPATH/pgm/dbmsrv
+chmod 775 $BUILDROOT/$WHATSO \
+		$BUILDROOT/$INSTEXEC \
+		$BUILDROOT/$INSTSCRIPT		
+
+
+#build tgz
+#########################################################
+echo "build tgz"
+cd $INDPATH
+#tar -cpzf $BUILDROOT/sapdb-ind-$_RELEASE.tgz *
+echo "first"
+tar -cpf - . | gzip -9 > $BUILDROOT/$INDNAME 
+cd  $DEPPATH
+rm -Rf $INDPATH
+#tar -cpzf $BUILDROOT/sapdb-dep-$_RELEASE.tgz *
+echo "second"
+tar -cpf - . | gzip -9 > $BUILDROOT/$DEPNAME
+cd  $BUILDROOT
+rm -Rf $DEPPATH
+#tar -cpzf $TGZPATH/sapdb-server-$_RELEASE.tgz *
+echo "third"
+SAPCAR -cf $TGZPATH/$SRVNAME *
+cd $TGZPATH
+
+#clean
+########################################################
+echo "cleaning buildroot and temporary files"
+rm $OWN/TMPINDLISTE
+rm -R $BUILDROOT
+rm -rf $INSTROOT/runtime

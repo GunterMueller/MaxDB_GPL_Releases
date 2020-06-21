@@ -1,0 +1,155 @@
+#!/usr/bin/perl
+#
+# @(#)idiff		1998-11-11
+#
+# G. Großmann, SAP AG
+#
+# &gar 14.03.99:  PTS 1102352 => new level syntax
+#                 windiff available
+# 
+# Vergleicht Source auf 2 hintereinanderfolgenden Ebenen 
+# der Entwicklungshierarchie. idiff sucht sich die ersten
+# beiden existierenden Ebenen.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package idiff;
+use Env;
+use Getopt::Std;
+use File::Basename;
+use ICopy;
+&if $OS in [ WIN32 ]
+die "" if !getopts('hwbl:d:');
+&else
+die "" if !getopts('hbl:d:');
+&endif
+if (  @ARGV == 0 && !defined($opt_h))  {
+&if $OS in [ WIN32 ]
+	die "usage: idiff [-h] [-d<diff options>] [-w] [-b] [-l<level>[,<level>]] file\n";
+&else
+	die "usage: idiff [-h] [-d<diff options>] [-b] [-l<level>[,<level>]] file\n";
+&endif
+}
+if ( $opt_h ) {
+	print <DATA>;
+	exit 0;
+}
+$source = shift;
+if ( defined($opt_l) ) 
+{
+	die $Usage unless ($opt_l =~ /^(\d+)(,(\d+))?$/i) ;
+	$level1 = $1;
+    $level2 = $3 if $3;
+}
+$level1 = 0 unless defined($level1);
+local $max_level = scalar ICopy::_GetPathList($VMAKE_PATH) - 1;
+if ( ($max_level < $level1) or ($max_level < $level2) ) {
+	die "The level value dont match! Use a lower level.\n";
+}
+if ($opt_b)
+{
+    $level2 = 0;
+    die "'$source' not found!\n" 
+        unless ( $file1 = ICopy::GetFilePath($source, $level1, 0, 1) );
+    die "backup not found!\n" 
+        unless ( $file2 = ICopy::GetLastBackupName($source) );
+}
+else
+{
+    if ( defined($level1) and defined($level2) )
+    {
+        die "Missing '$source' on level $level1\n" 
+            unless ( $file1 = ICopy::GetFilePath($source, $level1, 1, 1) );
+        die "Missing '$source' on level $level2\n" 
+            unless ($file2 = ICopy::GetFilePath($source, $level2, 1, 1) );
+    }
+    else
+    {
+        $level2 = $level1;
+        if ( $file1 = ICopy::GetFilePath($source, $level1, 0, 1) )
+        {
+            $file2 = undef; 
+            while( (!$file2 and ($level2 <= $max_level)) or ($file1 eq $file2) )
+            {
+                $file2 = ICopy::GetFilePath($source, $level2++, 0, 1);
+            }
+            die "comparable '$source' not found!\n" if ( !$file2 ) ;
+        }
+        else { die "'$source' not found!\n" }
+    }
+}
+
+print "< $file1\n";
+print "---\n";
+print "> $file2\n\n";
+
+
+if ( ICopy::_get_path_status($file1) eq 'remote' )
+{
+    my $tmp1 = "$TMP/file1.tmp";
+    ICopy::copy($file1, $tmp1, 1);
+    $file1 = $tmp1;
+}
+if ( ICopy::_get_path_status($file2) eq 'remote' )
+{
+    my $tmp2 = "$TMP/file2.tmp";
+    ICopy::copy($file2, $tmp2, 1);
+    $file2 = $tmp2;
+}
+$opt_d = "-$opt_d" if $opt_d;
+
+if ($opt_w)
+{
+	$rc = system("start windiff $opt_d $file1 $file2");
+}
+else
+{
+# PTS 1107336
+open(PIPE_IN, "$TOOL/Posix/diff $opt_d \"$file1\" \"$file2\" |" ) 
+    || die "Can't get differences: $!\n";
+while (<PIPE_IN>) { print; }; 
+close (PIPE_IN);
+$rc = $?;
+}
+caller() ? $rc : exit $rc ;
+
+__DATA__
+
+&if $OS in [ WIN32 ]
+usage: idiff [-h] [-d<diff options>] [-w] [-b] [-l] [-l level1[,level2]] file
+&else
+usage: idiff [-h] [-d<diff options>] [-b] [-l] [-l level1[,level2]] <source>
+&endif
+
+options:
+
+ -l<level>           : compare the next two files found from the specified 
+                       level down to the final level
+
+ -l<level1>,<level2> : compare the files between the level1 and level2 
+
+ -b                  : SAPDB internal option
+                       compare the local file with the the last backup file
+
+ -d<diff options>    : options for diff
+
+&if $OS in [ WIN32 ]
+ -w                  : use windiff as viewer 
+&endif

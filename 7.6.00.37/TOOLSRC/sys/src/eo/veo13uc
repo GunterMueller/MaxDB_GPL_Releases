@@ -1,0 +1,1126 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$veo13uc$
+.tt 2 $$$
+.tt 3 $R.Roedling$XUSER$1997-08-29$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       XUSER
+=========
+.sp
+Purpose :       Handle XUSER-File I/O
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1993-01-08
+.sp
+.cp 3
+Version : 1994-02-01
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-08-29
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+/*
+//  MODULE - SQLUSER
+*/
+
+
+/*
+//  INCLUDE FILES
+*/
+
+
+/*
+//  DEFINES
+*/
+
+#define MOD__  "VEO13UC : "
+#undef  MF__
+#define MF__   MOD__"UNDEFINED"
+
+#define ERRMSG_DATA_NEWER_THAN_COMPONENT    "USER data newer than component"
+#define ERRMSG_ILLEGAL_USER_INDEX           "illegal USER index"
+#define ERRMSG_BLANK_USERKEY                "blank user key not allowed"
+#define ERRMSG_NO_XUSER_ENTRY_FOUND         "the USERKEY is unknown"
+#define ERRMSG_NO_SPACE_LEFT                "space for USER entries exhausted"
+#define ERRMSG_READ_XUSER_REG_DATA          "could not read USER data"
+#define ERRMSG_WRONG_XUSER_REG_DATA_LEN     "wrong USER data length"
+#define ERRMSG_DIFFERENT_SIDS               "incorrect USER data owner"
+
+
+#define ERR_ILLEGAL_USER_INDEX        19407,ERR_TYPE, "XUSER   ","Illegal USER index, index = %d"
+#define ERR_BLANK_USERKEY             19408,ERR_TYPE, "XUSER   ","Blank user key not allowed"
+#define ERR_NO_XUSER_ENTRY_FOUND      19409,ERR_TYPE, "XUSER   ","No entry found"
+#define ERR_NO_SPACE_LEFT             19410,ERR_TYPE, "XUSER   ","Space for USER entries exhausted"
+#define ERR_READ_XUSER_REG_DATA       19417,ERR_TYPE, "XUSER   ","Could not read USER data, rc = %d"
+#define ERR_WRONG_XUSER_REG_DATA_LEN  19420,ERR_TYPE, "XUSER   ","Wrong USER data length"
+#define ERR_DIFFERENT_SIDS            19415,ERR_TYPE, "XUSER   ","Incorrect USER data owner"
+
+/*
+//  MACROS
+*/
+
+
+/*
+//  LOCAL TYPE AND STRUCT DEFINITIONS
+*/
+
+
+/*
+//  EXTERNAL VARIABLES
+*/
+
+
+/*
+//  EXPORTED VARIABLES
+*/
+
+
+/*
+//  LOCAL VARIABLES
+*/
+
+static CHAR               cDataBuffer [ XUSER_DATA_SIZE ] ;
+
+static PXUSER_INFO_PAGE   pXUserInfoPage    = (PXUSER_INFO_PAGE)cDataBuffer;
+static PXUSER_PAGE        pXUserPageBuf     = (PXUSER_PAGE)(cDataBuffer +
+                                                     sizeof(XUSER_INFO_PAGE));
+static BOOLEAN            fXuserBufEmpty    = TRUE;
+static BOOLEAN            fReadDataIsNewer  = FALSE;
+
+/*
+//  LOCAL FUNCTION PROTOTYPES
+*/
+
+static LONG   sql13u_init_user_params     ( tsp4_xuser_record  *prcUserParams );
+static LONG   sql13u_put_user             ( tsp4_xuser_record  *prcUserParams,
+                                            tsp_errtext        acErrorText );
+static BOOLEAN   sql13u_xuser_key_is_blank   ( tsp4_xuserkey       acXUserKey );
+static BOOLEAN   sql13u_find_xuser_key       ( tsp4_xuserkey       acXUserKey,
+                                            ULONG               *pulPage );
+static LONG   sql13u_read_xuser_entries   ( tsp_errtext         acErrorText );
+static LONG   sql13u_check_user_id        ( PXUSER_INFO_PAGE    pInfoPage,
+                                            tsp_errtext         acErrorText );
+static LONG   sql13u_create_info_page     ( tsp_errtext         acErrorText );
+
+static void   sql13u_crypt_name_to_c20    ( tsp_cryptname      alCryptedName,
+                                            tsp_c20            acC20Array[MAX_CRYPT] );
+ static void   sql13u_recrypt_name         ( tsp_c20            acReCryptName[MAX_CRYPT],
+                                             tsp_cryptname      alCryptedName );
+/*
+// ========================== GLOBAL FUNCTIONS ================================
+*/
+
+/*------------------------------*/
+
+void sqlxuopenuser ( tsp_errtext acErrorText,
+                     BOOLEAN     *pbOk)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlxuopenuser"
+  LONG      rc;
+
+  DBGIN;
+
+  memset (( char* ) acErrorText, ' ', sizeof ( tsp_errtext ));
+  *pbOk = FALSE;
+
+  rc = sql13u_read_xuser_entries ( acErrorText );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return;
+    }
+
+  *pbOk = TRUE;
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+void sqlxucloseuser ( tsp_errtext acErrorText,
+                      BOOLEAN     *pbOk )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlxucloseuser"
+  LONG      rc;
+
+  DBGIN;
+
+  /* --- initialize outgoing parms */
+  memset (( char* ) acErrorText, ' ', sizeof ( tsp_errtext ));
+  *pbOk = FALSE;
+
+  if ( fReadDataIsNewer )
+   {
+   sql46c_build_error_string ( acErrorText, ERRMSG_DATA_NEWER_THAN_COMPONENT, 0 );
+   DBGOUT;
+   return;
+   }
+
+  if ( fXuserBufEmpty == FALSE )
+    {
+    rc = sql13u_write_xuser_entries ( (char *)cDataBuffer,
+                                      pXUserInfoPage, acErrorText );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return;
+      }
+    }
+
+  /* --- reset global vars */
+  *pbOk = TRUE;
+
+  DBG3 (( MF__, "bReadXuserEntries = TRUE" ));
+
+  DBGOUT;
+  }
+
+/*------------------------------*/
+
+void sqlputuser ( tsp4_xuser_record  *prcUserParams,
+                  tsp_errtext        acErrorText,
+                  BOOLEAN             *pbOk )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlputuser"
+  LONG      rc;
+
+  DBGIN;
+
+  /* --- initialize outgoing parms */
+  memset (( char* ) acErrorText, ' ', sizeof ( tsp_errtext ));
+  *pbOk = FALSE;
+
+  if ( fXuserBufEmpty )
+    {
+    rc = sql13u_read_xuser_entries ( acErrorText );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return;
+      }
+    }
+
+  rc = sql13u_put_user ( prcUserParams, acErrorText );
+
+  if ( rc == NO_ERROR )
+   *pbOk = TRUE;
+
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+void sqlgetuser ( tsp4_xuser_record  *prcUserParams,
+                  tsp_errtext        acErrorText,
+                  BOOLEAN            *pbOk )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlgetuser"
+
+  LONG      rc;
+
+  DBGIN;
+
+  rc = sql13u_getuser ( prcUserParams, acErrorText );
+
+  if ( rc != NO_ERROR )
+    {
+    *pbOk = FALSE;
+    DBGOUT;
+    return;
+    }
+
+  *pbOk = TRUE;
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+void sqlindexuser ( tsp_int2            kUserIndex,
+                    tsp4_xuser_record  *prcUserParams,
+                    tsp_errtext        acErrorText,
+                    BOOLEAN            *pbOk )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlindexuser"
+  LONG      rc;
+
+  DBGIN;
+
+  memset ( acErrorText, ' ', sizeof ( tsp_errtext ));
+  *pbOk = FALSE;
+
+  /* --- initialize outgoing parms */
+  sql13u_init_user_params ( prcUserParams );
+
+  /* --- check user_index */
+  if (( kUserIndex < 1 ) || ( kUserIndex > MX_XUSER_ENTRIES  ))
+    {
+    DBG1    (( MF__, ERRMSG_ILLEGAL_USER_INDEX ));
+    MSGD    (( ERR_ILLEGAL_USER_INDEX, kUserIndex ));
+    sql46c_build_error_string ( acErrorText, ERRMSG_ILLEGAL_USER_INDEX, 0 );
+
+    DBGOUT;
+    return;
+    }
+
+  if ( fXuserBufEmpty )
+    {
+    rc = sql13u_read_xuser_entries ( acErrorText );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return;
+      }
+    }
+
+  /* --- get xuser page */
+  if ( (ULONG)kUserIndex <= pXUserInfoPage->ulPages )
+    {
+    memcpy ( prcUserParams, &pXUserPageBuf[kUserIndex - 1],
+             sizeof ( tsp4_xuser_record));
+    *pbOk = TRUE;
+    }
+
+  DBGOUT;
+  return;
+  }
+
+/*------------------------------*/
+
+int sqlclearuser ( void )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlclearuser"
+
+  tsp_errtext   acErrorText;
+
+  DBGIN;
+
+  memset ( cDataBuffer, 0, sizeof(cDataBuffer) );
+  fXuserBufEmpty = TRUE;
+
+
+  if ( fReadDataIsNewer )
+   {
+   sql46c_build_error_string ( acErrorText, ERRMSG_DATA_NEWER_THAN_COMPONENT, 0 );
+   DBGOUT;
+   return ( ERROR_ACCESS_DENIED );
+   }
+
+  if ( sql13u_remove_xuser_entries( acErrorText ) != NO_ERROR )
+    {
+    DBGOUT;
+    return ( FALSE );
+    }
+
+  DBGOUT;
+
+  return ( TRUE );
+  }
+
+/*------------------------------*/
+
+void sqlinfouser ( tsp_username        acUser,
+                   tsp_cryptpw         acPassword,
+                   tsp_c64             acComponent,
+                   tsp_int1           *pfResult )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlinfouser"
+
+
+  DBGPAS;
+
+  *pfResult = INFO_OK;
+  }
+
+/*------------------------------*/
+
+LONG sql13u_getuser ( tsp4_xuser_record  *prcUserParams,
+                      tsp_errtext        acErrorText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_getuser"
+
+  LONG        rc         = NO_ERROR;
+  ULONG       ulPage;
+
+  DBGIN;
+
+  memset ( acErrorText, ' ', sizeof ( tsp_errtext ) );
+
+  /* --- initialize outgoing parms */
+  sql13u_init_user_params ( prcUserParams );
+
+  /* --- look for the appropriate entries identified by xuser key.
+         check xuser key for blanks, it is prohibited to be clear */
+  if ( sql13u_xuser_key_is_blank ( prcUserParams -> xu_key ))
+    {
+    DBG1    (( MF__, ERRMSG_BLANK_USERKEY ));
+    MSGD    (( ERR_BLANK_USERKEY ));
+    sql46c_build_error_string ( acErrorText, ERRMSG_BLANK_USERKEY, 0 );
+
+    DBGOUT;
+    return ( -1 );
+    }
+
+  if ( fXuserBufEmpty )
+    {
+    rc = sql13u_read_xuser_entries ( acErrorText );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  /* --- search for specified xuser key and get them */
+  if ( sql13u_find_xuser_key ( prcUserParams->xu_key, &ulPage ))
+    {
+    memcpy ( prcUserParams, &pXUserPageBuf[ulPage],
+             sizeof ( tsp4_xuser_record));
+    }
+  else
+    {
+    /* --- xuser key not found */
+    DBG1    (( MF__, ERRMSG_NO_XUSER_ENTRY_FOUND ));
+    sql46c_build_error_string ( acErrorText, ERRMSG_NO_XUSER_ENTRY_FOUND, 0 );
+
+    DBGOUT;
+    return ( -1 );
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+
+/*
+// ========================== LOCAL FUNCTIONS =================================
+*/
+
+static LONG sql13u_init_user_params ( tsp4_xuser_record  *prcUserParams )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_init_user_params"
+  PSZ         pszServerDB;
+  PSZ         pszDBLang;
+
+  DBGIN;
+
+  /*
+  // --- initialize outgoing parms
+  */
+  memset ( prcUserParams->xu_servernode, ' ',
+           sizeof ( prcUserParams->xu_servernode ));
+  memset ( prcUserParams->xu_user, ' ',
+           sizeof ( prcUserParams->xu_user ));
+  memset ( prcUserParams->xu_password, '\0',
+           sizeof ( prcUserParams->xu_password ));
+  memset ( prcUserParams->xu_sqlmode, ' ',
+           sizeof ( prcUserParams->xu_sqlmode ));
+
+  if ( GET_SERVERDB ( &pszServerDB ) )
+    SQL47_CTOP(prcUserParams->xu_serverdb, pszServerDB,
+               sizeof (prcUserParams->xu_serverdb));
+  else
+    memset ( prcUserParams->xu_serverdb, ' ',
+             sizeof ( prcUserParams->xu_serverdb ));
+
+  prcUserParams->xu_cachelimit = - 1;
+  prcUserParams->xu_timeout    = - 1;
+  prcUserParams->xu_isolation  = - 1;
+
+  if ( GET_DBLANG ( &pszDBLang ) )
+    SQL47_CTOP(prcUserParams->xu_dblang, pszDBLang,
+               sizeof (prcUserParams->xu_dblang));
+  else
+    memset ( prcUserParams->xu_dblang, ' ',
+             sizeof (prcUserParams->xu_dblang));
+
+  DBGOUT;
+  return ( 0 );
+  }
+
+/*------------------------------*/
+
+static LONG sql13u_put_user ( tsp4_xuser_record  *prcUserParams,
+                              tsp_errtext        acErrorText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_put_user"
+  ULONG            ulPage;
+  PSZ              pszServerDB;
+  char             szServerDB [ sizeof ( tsp_dbname ) + 1 ];
+  BOOLEAN             fLocalOpen = FALSE;
+  LONG            rc = NO_ERROR;
+
+  DBGIN;
+
+  /* --- initialize outgoing parms */
+  memset (( char* ) acErrorText, ' ', sizeof ( tsp_errtext ));
+  #if defined (_WIN32)
+   if ( sql13u_user_is_guest() == TRUE )
+     {
+     DBG1    (( MF__, ERRMSG_NO_GUEST_ACCESS ));
+     MSGD    (( ERR_ACCESS_DENIED ));
+     sql46c_build_error_string ( acErrorText, ERRMSG_NO_GUEST_ACCESS, 0 );
+     DBGOUT;
+     return ( ERROR_ACCESS_DENIED );
+     }
+  #endif
+
+
+  memcpy( prcUserParams->xu_user_61, prcUserParams->xu_user,
+          sizeof(prcUserParams->xu_user_61) ) ;
+  memcpy( prcUserParams->xu_dblang_61, prcUserParams->xu_dblang,
+          sizeof(prcUserParams->xu_dblang_61) ) ;
+
+  /* --- check user parameters! */
+  SQL47_PTOC( szServerDB, prcUserParams->xu_serverdb,
+               sizeof (prcUserParams->xu_serverdb) );
+
+  /* --- no SERVERDB specified ? */
+  if ( szServerDB[0] == '\0' )
+    {
+    if ( GET_SERVERDB ( &pszServerDB ) )
+      {
+      SQL47_CTOP( prcUserParams->xu_serverdb, pszServerDB,
+                  sizeof (prcUserParams->xu_serverdb));
+      }
+    }
+
+  /* --- if XUSER file exists look for the appropriate entries identified by
+  //     xuser key otherwise put the info page and the "DEFAULT" user
+         into the XUSER file
+  */
+  if ( sql13u_xuser_key_is_blank ( prcUserParams->xu_key ))
+    {
+    DBG1    (( MF__, ERRMSG_BLANK_USERKEY ));
+    MSGD    (( ERR_BLANK_USERKEY ));
+    sql46c_build_error_string ( acErrorText, ERRMSG_NO_XUSER_ENTRY_FOUND, 0 );
+
+    DBGOUT;
+    return ( -1 ) ;
+    }
+
+   if ( fReadDataIsNewer )
+    {
+    sql46c_build_error_string ( acErrorText, ERRMSG_DATA_NEWER_THAN_COMPONENT, 0 );
+
+    DBGOUT;
+    return ( -1 );
+    }
+
+  if ( fXuserBufEmpty )
+    {
+    /* --- install default user:
+             1. create info page
+             2. put defaultuser page */
+    memset ( cDataBuffer, 0, sizeof(cDataBuffer) );
+
+    /* --- create info page */
+    rc = sql13u_create_info_page ( acErrorText );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return ( rc );
+      }
+
+    /* --- put defaultuser page */
+    memcpy ( prcUserParams->xu_key, DEFAULT_USER, sizeof ( tsp4_xuserkey ));
+    memcpy ( &pXUserPageBuf[pXUserInfoPage->ulPages], prcUserParams,
+             sizeof ( tsp4_xuser_record));
+
+    pXUserInfoPage->ulPages++;
+    fXuserBufEmpty = FALSE;
+    }
+  /* --- search for specified xuser key and put the parameters into the
+         xuser data buffer */
+  else if ( sql13u_find_xuser_key ( prcUserParams->xu_key, &ulPage ))
+    {
+    memcpy ( &pXUserPageBuf[ulPage], prcUserParams,
+              sizeof ( tsp4_xuser_record));
+    }
+  else
+    {
+    /* --- look for free space */
+    if ( pXUserInfoPage->ulPages < MX_XUSER_ENTRIES )
+      {
+      /* --- build up new user page */
+      memcpy ( &pXUserPageBuf[pXUserInfoPage->ulPages], prcUserParams,
+                sizeof ( tsp4_xuser_record));
+      pXUserInfoPage->ulPages++;
+      }
+    else
+      {
+      DBG1    (( MF__, ERRMSG_NO_SPACE_LEFT ));
+      MSGD    (( ERR_NO_SPACE_LEFT ));
+      sql46c_build_error_string ( acErrorText, ERRMSG_NO_SPACE_LEFT, 0 );
+
+      DBGOUT;
+      return ( -1 ) ;
+      }
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static BOOLEAN sql13u_xuser_key_is_blank ( tsp4_xuserkey   acXUserKey )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_xuser_key_is_blank"
+  char szXUserKey [ sizeof(tsp4_xuserkey)+1 ] ;
+
+  DBGPAS;
+
+  SQL47_PTOC( szXUserKey, acXUserKey, sizeof(tsp4_xuserkey) );
+
+  if ( szXUserKey[0] == '\0' )
+    return ( TRUE );
+
+  return ( FALSE );
+  }
+
+/*------------------------------*/
+
+static BOOLEAN sql13u_find_xuser_key ( tsp4_xuserkey       acXUserKey,
+                                       ULONG               *pulPage  )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_find_xuser_key"
+  BOOLEAN    fFound = FALSE;
+
+  DBGIN;
+
+  *pulPage  = (ULONG)UNDEF;
+
+  /* --- compare userkeys */
+  for ( *pulPage = 0; *pulPage < MX_XUSER_ENTRIES; (*pulPage)++ )
+    {
+    if ( !memcmp (( char* )acXUserKey,
+                  ( char* )pXUserPageBuf[*pulPage].xu_key,
+                  sizeof ( tsp4_xuserkey )))
+      {
+      fFound = TRUE;
+      break;
+      }
+    }
+
+
+  DBGOUT;
+  return ( fFound );
+  }
+
+/*------------------------------*/
+
+static LONG sql13u_create_info_page ( tsp_errtext         acErrorText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_create_info_page"
+  #if defined (_WIN32)
+   PSZ               pszSrc;
+   PSZ               pszDest;
+   PSZ               pszTextualSID;
+   tsp_c20           acTextualSID;
+   ULONG             ulLen;
+   ULONG             ulMaxLen;
+   #if defined WIN95_USER_CHECK
+    PSZ              pszUserName;
+   #endif
+  #endif
+  tsp_cryptname      alCryptedName;
+  tsp_c20            acUserName;
+  char               acUserNameC [ sizeof ( acUserName ) + 1 ] ;
+  LONG               rc = NO_ERROR;
+
+  DBGIN;
+
+  #if defined (_WIN32)
+   if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+     {
+     rc = sql49c_get_own_textual_SID ( &pszTextualSID );
+
+     if ( rc != NO_ERROR )
+       {
+       sql46c_build_error_string ( acErrorText, ERRMSG_GET_LOGON_USER_NAME,
+                                   rc );
+       DBGOUT;
+       return ( rc );
+       }
+
+     if ( strlen ( pszTextualSID ) > sizeof (acTextualSID) )
+       {
+       ulMaxLen = sizeof (acTextualSID);
+       ulLen    = strlen ( pszTextualSID );
+       pszDest  = pszTextualSID + (ulMaxLen / 2);
+       pszSrc   = pszTextualSID + ulLen - (ulMaxLen / 2);
+       memcpy ( pszDest, pszSrc, (ulMaxLen / 2) );
+       pszTextualSID[sizeof(tsp_c20)] = '\0';
+       }
+
+
+     SQL47_CTOP ( acTextualSID, pszTextualSID, sizeof (acTextualSID));
+     FREE_MEM ( pszTextualSID );
+
+     sql21put_name ( acTextualSID, alCryptedName );
+     }
+   else
+     {
+     #if defined WIN95_USER_CHECK
+      rc = sql49c_get_user_info ( &pszUserName, NULL );
+
+      if ( rc != NO_ERROR )
+        {
+        sql46c_build_error_string ( acErrorText, ERRMSG_GET_LOGON_USER_NAME,
+                                   rc );
+        DBGOUT;
+        return ( rc );
+        }
+
+      if ( strlen ( pszUserName ) > 20 )
+        pszUserName[sizeof(tsp_c20)] = '\0';
+
+
+      SQL47_CTOP ( acUserName, pszUserName, sizeof (acUserName));
+      FREE_MEM ( pszUserName );
+
+      sql21put_name ( acUserName, alCryptedName );
+     #else
+      SQL47_CTOP ( acUserName, "UNKOWN", sizeof (acUserName));
+      sql21put_name ( acUserName, alCryptedName );
+     #endif
+     }
+  #else
+    sprintf ( acUserNameC , "%.18ld" , (long) geteuid() ) ;
+    SQL47_CTOP ( acUserName , acUserNameC, sizeof ( acUserName ) ) ;
+    sql21put_name ( acUserName, alCryptedName );
+  #endif
+
+  pXUserInfoPage->ulInfoPageSize   = sizeof (XUSER_INFO_PAGE);
+  pXUserInfoPage->ulXUserVersionID = XUSER_RECORD_VERSION;
+  pXUserInfoPage->ulPages          = 0;
+  pXUserInfoPage->ulPageSize       = sizeof(XUSER_PAGE);
+  sql13u_crypt_name_to_c20 ( alCryptedName, pXUserInfoPage->uidField );
+#ifdef WIN32
+  sql02_get_RTE_version    ( &pXUserInfoPage->RTEVersionID );
+#endif
+  DBGOUT;
+  return ( NO_ERROR );
+  }
+
+#define IS_USERDATA_611_OLD(_pInfoPage) (_pInfoPage == NULL)
+#define IS_USERDATA_611(_pInfoPage)     (_pInfoPage->ulXUserVersionID == 0 )
+#define IS_USERDATA_627(_pInfoPage)     (_pInfoPage->ulXUserVersionID == 1 )
+
+/*------------------------------*/
+
+static LONG sql13u_read_xuser_entries ( tsp_errtext   acErrorText )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql13u_read_xuser_entries"
+
+   LONG                      rc               = NO_ERROR;
+   PXUSER_INFO_PAGE          pInfoPage        ;
+   ULONG                     ulDataLen;
+   char                     *pcDataBuffer;
+   ULONG                     ulPage;
+   ULONG                     ulLen;
+   PREL611_XUSER_PAGE_UNION  pRel611XUserPages ;
+
+   DBGIN;
+
+   fXuserBufEmpty = TRUE;
+   memset ( cDataBuffer, 0, sizeof(cDataBuffer) );
+
+   rc = sql13u_create_info_page ( acErrorText );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return ( rc );
+     }
+
+   rc = sql13u_get_all_entries ( &pcDataBuffer, &ulDataLen, &pRel611XUserPages,
+                                 acErrorText );
+
+   if ( rc != NO_ERROR )
+     {
+     if ( rc == ERROR_FILE_NOT_FOUND )
+       { rc = NO_ERROR;
+         DBGOUT;
+         return ( rc );
+       }
+     else
+       {
+         DBG1    (( MF__, ERRMSG_READ_XUSER_REG_DATA ));
+         MSGD    (( ERR_READ_XUSER_REG_DATA, rc ));
+         sql46c_build_error_string ( acErrorText,
+                                     ERRMSG_READ_XUSER_REG_DATA, rc );
+         DBGOUT;
+         return ( -1 );
+       }
+     }
+
+   if ( pRel611XUserPages == NULL && pcDataBuffer != NULL )
+     {
+     pInfoPage = (PXUSER_INFO_PAGE)pcDataBuffer;
+     ulLen     = pInfoPage->ulInfoPageSize +
+                   (pInfoPage->ulPages * pInfoPage->ulPageSize);
+
+     if ( ulLen > ulDataLen )
+       {
+       FREE_MEM ( pcDataBuffer );
+
+       DBG1  (( MF__, ERRMSG_WRONG_XUSER_REG_DATA_LEN ));
+       MSGD  (( ERR_WRONG_XUSER_REG_DATA_LEN ));
+       sql46c_build_error_string ( acErrorText,
+                                   ERRMSG_WRONG_XUSER_REG_DATA_LEN, 0 );
+       DBGOUT;
+       return ( -1 );
+       }
+
+     /* --- check user-id wether you have the permissions to modify
+            the XUSER content? */
+     rc = sql13u_check_user_id ( pInfoPage, acErrorText );
+
+     if ( rc != NO_ERROR )
+       {
+       FREE_MEM ( pcDataBuffer );
+       DBGOUT;
+       return ( rc );
+       }
+
+     if ( pInfoPage->ulXUserVersionID > XUSER_RECORD_VERSION )
+       fReadDataIsNewer = TRUE;
+     else
+       fReadDataIsNewer = FALSE;
+
+     pXUserInfoPage->ulPages = pInfoPage->ulPages;
+
+     for ( ulPage = 0; ulPage < pXUserInfoPage->ulPages; ulPage++ )
+       {
+       sql13u_init_user_params ( &pXUserPageBuf[ulPage] );
+
+       memcpy ( &pXUserPageBuf[ulPage],
+                pcDataBuffer + pInfoPage->ulInfoPageSize +
+                               (ulPage * pInfoPage->ulPageSize),
+                min (pInfoPage->ulPageSize, sizeof(XUSER_PAGE) ));
+       }
+
+     FREE_MEM ( pcDataBuffer );
+
+     fXuserBufEmpty = FALSE;
+     }
+   else
+     {
+     pInfoPage = NULL ; 
+     pXUserInfoPage->ulPages = (ulDataLen /
+                                    sizeof(REL611_XUSER_PAGE_UNION)) - 1;
+
+     for ( ulPage = 1; ulPage <= pXUserInfoPage->ulPages; ulPage++ )
+       {
+#ifndef WIN32
+       if ( pRel611XUserPages[ulPage].xu_rec.rec_no == EOF_XUSER_PAGE )
+         {
+         pXUserInfoPage->ulPages = ulPage - 1 ;
+         break;
+         }
+#endif
+       sql13u_init_user_params ( &pXUserPageBuf[ulPage - 1] );
+
+       DBG3 (( MF__, "copy old xuserentry #%d to new", ulPage  ));
+       memcpy( &pXUserPageBuf[ulPage - 1],
+               &pRel611XUserPages[ulPage].xu_rec.params,
+               min (sizeof(XUSER_PAGE), sizeof(REL611_XUSER_PARAMS_REC) ));
+       }
+
+     FREE_MEM ( pRel611XUserPages );
+     fXuserBufEmpty = FALSE;
+     }
+
+
+   if ( IS_USERDATA_611_OLD(pInfoPage) || 
+        IS_USERDATA_611(pInfoPage)     ||
+        IS_USERDATA_627(pInfoPage) )
+     {
+     for ( ulPage = 1; ulPage <= pXUserInfoPage->ulPages; ulPage++ )
+       {
+       DBG3 (( MF__, "converting old username '%18.18s' to new", 
+               pXUserPageBuf[ulPage - 1].xu_user_61  ));
+       memcpy( pXUserPageBuf[ulPage - 1].xu_user,
+               pXUserPageBuf[ulPage - 1].xu_user_61,
+               sizeof(pXUserPageBuf[ulPage - 1].xu_user_61) ) ;
+       if ( IS_USERDATA_627(pInfoPage) )
+         { DBG3 (( MF__, "converting old dblang '%18.18s' to new", 
+                   pXUserPageBuf[ulPage - 1].xu_dblang_61  ));
+           memcpy( pXUserPageBuf[ulPage - 1].xu_dblang,
+                   pXUserPageBuf[ulPage - 1].xu_dblang_61,
+                   sizeof(pXUserPageBuf[ulPage - 1].xu_dblang_61) ) ;
+         }
+       }
+     }
+
+   DBGOUT;
+   return  ( rc );
+   }
+
+/*------------------------------*/
+
+static LONG sql13u_check_user_id ( PXUSER_INFO_PAGE  pInfoPage,
+                                   tsp_errtext       acErrorText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_check_user_id"
+  PSZ             pszSrc;
+  PSZ             pszDest;
+  tsp_cryptname   alXUserCryptedName;
+  tsp_cryptname   alCryptedName;
+  PSZ             pszTextualSID;
+  tsp_c20        acTextualSID;
+  int             nIndex;
+  ULONG           ulLen;
+  ULONG           ulMaxLen;
+  LONG            rc = NO_ERROR;
+  #if defined WIN95_USER_CHECK
+   PSZ            pszUserName;
+   tsp_c20        acUserName;
+  #endif
+
+  DBGIN;
+
+  sql13u_recrypt_name ( pInfoPage->uidField, alXUserCryptedName );
+
+#ifdef WIN32
+  if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+    {
+    rc = sql49c_get_own_textual_SID ( &pszTextualSID );
+
+    if ( rc != NO_ERROR )
+      {
+      sql46c_build_error_string ( acErrorText, ERRMSG_GET_SID_STRING, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if ( strlen ( pszTextualSID ) > sizeof (acTextualSID) )
+      {
+      ulMaxLen = sizeof (acTextualSID);
+      ulLen    = strlen ( pszTextualSID );
+      pszDest  = pszTextualSID + (ulMaxLen / 2);
+      pszSrc   = pszTextualSID + ulLen - (ulMaxLen / 2);
+      memcpy ( pszDest, pszSrc, (ulMaxLen / 2) );
+      pszTextualSID[sizeof(tsp_c20)] = '\0';
+      }
+
+    SQL47_CTOP ( acTextualSID, pszTextualSID, sizeof (acTextualSID));
+    FREE_MEM ( pszTextualSID );
+
+    /* --- change textual SID to type "tsp_cryptname" */
+    sql21put_name ( acTextualSID, alCryptedName );
+    }
+  else
+    {
+    #if defined WIN95_USER_CHECK
+     rc = sql49c_get_user_info ( &pszUserName, NULL );
+
+     if ( rc != NO_ERROR )
+       {
+       sql46c_build_error_string( acErrorText, ERRMSG_GET_LOGON_USER_NAME, rc );
+       DBGOUT;
+       return ( rc );
+       }
+
+     if ( strlen ( pszUserName ) > 20 )
+       pszUserName[sizeof(tsp_c20)] = '\0';
+
+     SQL47_CTOP ( acUserName, pszUserName, sizeof (acUserName));
+     FREE_MEM ( pszUserName );
+
+     /* --- change eff. user  from type "tsp_c20" to type "tsp_cryptname" */
+     sql21put_name ( acUserName, alCryptedName );
+    #else
+     DBGOUT;
+     return ( NO_ERROR );
+    #endif
+    }
+
+#else
+    { uid_t           uid ;
+      tsp_name uid_name ;
+      char     uid_name_c [ sizeof ( tsp_name ) + 1 ] ;
+      uid = geteuid () ;
+      (void) sprintf ( uid_name_c , "%.18ld" , (long) uid ) ;
+      memset ( uid_name , ' ' , sizeof ( tsp_name ) ) ;
+      memcpy ( uid_name , uid_name_c  , sizeof ( tsp_name ) ) ;
+      sql21put_name ( uid_name, alCryptedName );
+    }
+#endif
+
+  /* --- test of equality */
+  for ( nIndex = 0; ( rc == NO_ERROR ) && ( nIndex < MAX_CRYPT ); nIndex++ )
+    {
+    if ( alCryptedName [ nIndex ] != alXUserCryptedName [ nIndex ] )
+      {
+      DBG3    (( MF__, ERRMSG_DIFFERENT_SIDS ));
+      MSGD    (( ERR_DIFFERENT_SIDS ));
+      sql46c_build_error_string ( acErrorText, ERRMSG_DIFFERENT_SIDS, 0 );
+
+      DBGOUT;
+      return ( ERROR_ACCESS_DENIED );
+      }
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+
+/*------------------------------*/
+
+static void sql13u_crypt_name_to_c20 ( tsp_cryptname   alCryptedName,
+                                       tsp_c20         acC20Array[MAX_CRYPT] )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_crypt_name_to_c20"
+  int nIndex;
+
+  DBGIN;
+
+  for ( nIndex = 0; nIndex < MAX_CRYPT; nIndex++ )
+    {
+    /* --- change crypted name to crypted string */
+    sql21write_crypt ( alCryptedName [ nIndex ], acC20Array [ nIndex ] );
+    }
+
+  DBGOUT;
+  return;
+  }
+
+
+/*------------------------------*/
+
+static void sql13u_recrypt_name ( tsp_c20         acReCryptName[MAX_CRYPT],
+                                  tsp_cryptname   alCryptedName )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql13u_recrypt_name"
+  int nIndex;
+
+
+  DBGIN;
+
+  for ( nIndex = 0; nIndex < MAX_CRYPT; nIndex++ )
+    {
+    /* --- change crypted string to crypted name */
+    alCryptedName [ nIndex ] = sql21read_crypt ( acReCryptName [ nIndex ]);
+    }
+
+  DBGOUT;
+  return;
+  }
+
+
+/*
+// =============================== END ========================================
+*/
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************

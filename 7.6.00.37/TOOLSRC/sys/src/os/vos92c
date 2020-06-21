@@ -1,0 +1,4449 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS92C$
+.tt 2 $$$
+.tt 3 $R.Roedling$CONS$1997-08-18$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       CONS
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 13.03.93
+.sp
+.cp 3
+Version :
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-08-18
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+#include           <stdarg.h>
+#include           <ctype.h>
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS92C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define MAX_WAIT          30       // --- 10 sec.
+#define MAX_ERRSTRING     200
+#define ARGS(max, cnt)      ((max-cnt) >= 1)
+
+#define COM_UNDEF           0
+#define COM_CANCEL          1
+#define COM_KILL            2
+#define COM_SHOW_UPDATE     3
+#define COM_HELP            4
+#define COM_DROP            5
+#define COM_TIME_MEASURE    6
+#define COM_RESET           7
+#define COM_GETPARAM        8
+#define COM_PUTPARAM        9
+#define COM_CRASH_DUMP     10
+#define COM_SET_DEBUGLEVEL 11
+#define COM_UKT_AFFINITY   12
+
+
+#define PARA_NONE         0x00
+#define PARA_ENABLE       0x01
+#define PARA_DISABLE      0x02
+
+#define PARA_IO           0x01
+#define PARA_STORAGE      0x02
+#define PARA_TASKS        0x04
+#define PARA_VERSIONS     0x08
+#define PARA_REGIONS      0x10
+#define PARA_STATE        0x20
+#define PARA_RTE          0x40
+#define PARA_TASK_STAT    0x100
+#define PARA_TASK_COUNTS  0x200
+#define PARA_QUEUE_STAT   0x400
+#define PARA_TOTAL_COUNTS 0x800
+#define PARA_ACTIVE       0x1000
+#define PARA_UKT_SL_STAT  0x2000
+#define PARA_SUSPENDS     0x4000
+#define PARA_UKT_QUEUES   0x8000
+#define PARA_RUNNABLE     0x10000
+#define PARA_AIO          0x20000
+#define PARA_ALL          ( 0xFFFFFFFF - PARA_ACTIVE - PARA_RUNNABLE )
+
+#define TASKS_INFO_P_LINE 2
+
+
+#ifdef  RUN_AS_SYSMON
+ #define PARA_DEFAULT     PARA_IO  | PARA_TASKS | PARA_REGIONS |     \
+                          PARA_RTE | PARA_STORAGE
+#else
+ #define PARA_DEFAULT     PARA_IO | PARA_TASKS | PARA_VERSIONS
+#endif
+
+
+/*
+ *  MACROS
+ */
+
+#define STATE_TIME_AVAIL(state) ( state.ulSec || state.ulMicroSec )
+
+#define TOT_TIME( State ) \
+            ((float )State.ulSec + (float )State.ulMicroSec / 1000000.0 )
+
+#define AVG_TIME( State ) State.ulCount == 0 ? 0 : \
+            (((float )State.ulSec + (float )State.ulMicroSec / 1000000.0 ) / (float )State.ulCount)
+
+#define AVG_ABS_TIME( State ) State.ulCount == 0 ? 0 : \
+            (((float )State.ulSec + (float )State.ulMicroSec / 1000000.0 ) / (float )State.ulCount)
+
+#define AVG_REL_TIME( State ) State.ulCount == 0 ? 0 : \
+            (((float )State.ulRelSec + (float )State.ulRelMicroSec / 1000000.0 ) / (float )State.ulCount)
+
+#define PRI_STAT_TM( _StrFormat, _Stat, _StrCount, _StrRelTm, _StrAbsTm ) \
+      if ( _Stat.ulCount && _Stat.ulSec || _Stat.ulMicroSec)              \
+        printf(_StrFormat, _StrCount, _Stat.ulCount,                      \
+               _StrRelTm, AVG_REL_TIME( _Stat )  ,                        \
+               _StrAbsTm, AVG_ABS_TIME( _Stat )  ) ;
+
+#define PRI_PG_PER_IO(_StrFormat, _Stat, _StrPg, _StrPgPerIO )            \
+      if ( _Stat.ulCount )                                                \
+        printf ( _StrFormat, _StrPg, _Stat.ulPageCount,                   \
+                 _StrPgPerIO,                                             \
+                 (float ) _Stat.ulPageCount / (float ) _Stat.ulCount ) ;  \
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+typedef struct xcons_record
+  {
+  BOOL                            fIsGateway;
+  PSZ                             pszServerDB;
+  PCONSOLE_REC                    pConsoleRec;
+  HANDLE                          hConsoleRec;
+  C40C                            RTEVersion;
+  C40C                            KernelVersion;
+  ULONG                           ulShmSize;
+  LONG                            lCommand;
+  LONG                            lParam;
+  PSZ                             pszParam;
+  LONG                            lExtParam;
+  LONG                            lInterval;
+  LONG                            lRepeatCount;
+  HANDLE                          hHandle;
+
+  PID                             pidQueueOwner; // --- OS/2 only
+  SECURITY_ATTRIBUTES             WorldSA;       // --- WIN32 only
+
+  #if defined(_WIN32)
+   IPC_BASE_OBJ_NAME              szShmName;
+  #endif
+
+  }  XCONS_REC;
+
+typedef XCONS_REC                 *PXCONS_REC;
+
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+/*
+ * LOCAL VARIABLES
+ */
+
+#ifdef  RUN_AS_SYSMON
+ EXEC SQL INCLUDE sqlca;
+ EXEC SQL BEGIN DECLARE SECTION;
+
+ #define S_MINLEN         7
+ #define S_LONGLEN        65
+ #define S_SHORTLEN       17
+
+ typedef int                      INDICATOR;
+
+ typedef struct
+   {
+   char                           szComp[S_SHORTLEN];
+   char                           szVers[S_LONGLEN];
+   } SYSMON_VERSION;
+
+ typedef struct
+   {
+   unsigned long                  ulTaskIndex;
+   unsigned long                  ulTid;
+   char                           szTaskType[S_SHORTLEN];
+   unsigned long                  ulApplPid;
+   char                           szTaskState[S_SHORTLEN];
+   unsigned long                  ulTimeOut;
+   unsigned long                  ulSid;
+   } SYSMON_PROCESS;
+
+ typedef struct
+   {
+   INDICATOR                      iTaskIndex;
+   INDICATOR                      iTid;
+   INDICATOR                      iTaskType;
+   INDICATOR                      iApplPid;
+   INDICATOR                      iTaskState;
+   INDICATOR                      iTimeOut;
+   INDICATOR                      iSid;
+   } SYSMON_PROCESS_IND;
+
+ typedef struct
+   {
+   unsigned long                  ulDevspaceNo;
+   char                           szDevspaceName[S_LONGLEN];
+   unsigned long                  ulReadCnt;
+   unsigned long                  ulWriteCnt;
+   } SYSMON_IOACCESS;
+
+ typedef struct
+   {
+   unsigned long                  ulSid;
+   char                           szSemaName[S_LONGLEN];
+   unsigned long                  ulOwnerTaskIndex;
+   unsigned long                  ulWaitTaskIndex;
+   unsigned long                  lGetCount;
+   unsigned long                  lTasCount;
+   unsigned long                  lCollisionCount;
+   unsigned long                  ulCollisionRate;
+   long                           lExclusive;
+   } SYSMON_REGIONS;
+
+ typedef struct
+   {
+   INDICATOR                      iSid;
+   INDICATOR                      iSemaName;
+   INDICATOR                      iOwnerTaskIndex;
+   INDICATOR                      iWaitTaskIndex;
+   INDICATOR                      iGetCount;
+   INDICATOR                      iTasCount;
+   INDICATOR                      iCollisionCount;
+   INDICATOR                      iCollisionRate;
+   INDICATOR                      iExclusive;
+   } SYSMON_REGIONS_IND;
+
+ typedef struct
+   {
+   char                           szDesc[S_LONGLEN];
+   unsigned long                  ulVal;
+   char                           szVDesc[S_MINLEN];
+   } SYSMON_STORAGE;
+
+ typedef struct
+   {
+   unsigned long                 ulTid;
+   char                          szName[S_SHORTLEN];
+   } SYSMON_DBPROCS;
+
+ typedef struct
+   {
+   unsigned long                 ulTid;
+   char                          szName[S_SHORTLEN];
+   unsigned long                 ulDispatcherCalls;
+   unsigned long                 ulActiveTasks;
+   unsigned long                 ulTotalTasks;
+   char                          szCluster[S_LONGLEN];
+   } SYSMON_UKPROCS;
+
+ typedef struct
+   {
+   unsigned long                 ulTid;
+   char                          szName[S_SHORTLEN];
+   unsigned long                 ulDevNo;
+   unsigned long                 ulReadCnt;
+   unsigned long                 ulWriteCnt;
+   long                          lIOQueLen;
+   long                          lMaxIOQueLen;
+   } SYSMON_DEVIOPROCS;
+
+ typedef struct
+   {
+   INDICATOR                     iTid;
+   INDICATOR                     iName;
+   INDICATOR                     iDevNo;
+   INDICATOR                     iReadCnt;
+   INDICATOR                     iWriteCnt;
+   INDICATOR                     iIOQueLen;
+   INDICATOR                     iMaxIOQueLen;
+   } SYSMON_DEVIOPROCS_IND;
+
+ SYSMON_VERSION        SysVersion;
+ SYSMON_PROCESS        SysProcess;
+ SYSMON_IOACCESS       SysIOAccess;
+ SYSMON_REGIONS        SysRegions;
+ SYSMON_STORAGE        SysStorage;
+ SYSMON_DBPROCS        SysDBProc;
+ SYSMON_UKPROCS        SysUKProc;
+ SYSMON_DEVIOPROCS     SysDevIO;
+
+ SYSMON_PROCESS_IND    SysProcessInd;
+ SYSMON_REGIONS_IND    SysRegionsInd;
+ SYSMON_DEVIOPROCS_IND SysDevIOInd;
+
+ char                  ServerDB[31];
+
+ EXEC SQL END DECLARE SECTION;
+#endif
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+LONG sql92c_get_server_db         ( PSZ                     *ppszServerDB );
+LONG sql92c_get_num_param         ( PSZ                     pszParam,
+                                    PLONG                   plNum  );
+LONG sql92c_get_idx_param         ( PSZ                     pszParam,
+                                    CHAR                    cPrefix,
+                                    PLONG                   plNum  );
+
+LONG sql92c_get_time_param        ( PSZ                     pszParam );
+LONG sql92c_get_show_res_param    ( PSZ                     pszParam,
+                                    LONG                    lCommand );
+LONG sql92c_init                  ( PXCONS_REC              pxcr );
+LONG sql92c_check_accesss         ( PXCONS_REC              pxcr );
+LONG sql92c_send_req              ( PXCONS_REC              pxcr );
+LONG sql92c_send                  ( PXCONS_REC              pxcr,
+                                    ULONG                   ulRequest,
+                                    PBOOL                   pfFlag );
+BOOL sql92c_wait                  ( PBOOL                   pfFlag);
+PSZ  sql92c_task_state_name       ( ULONG                   ulState );
+PSZ  sql92c_kt_state_name         ( ULONG                   ulState );
+PSZ  sql92c_ukt_state_name        ( ULONG                   ulState );
+PSZ  sql92c_type_name             ( INT1                    TaskType );
+PSZ  sql92c_req_type_name         ( ULONG                   ulReqType );
+VOID sql92c_compress_path         ( PSZ                     pszCompPathName,
+                                    PSZ                     pszPathName,
+                                    ULONG                   ulCompPathLen );
+LONG sql92c_show_version_info     ( PXCONS_REC              pxcr );
+LONG sql92c_show_task_info        ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_io_info          ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_aio_info         ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_region_info      ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_storage_info     ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_state_info       ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_rte_info         ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_queue_info       ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_task_count_info  ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_total_count_info ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_ukt_sl_info      ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_ukt_queues       ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_show_UKT_queue        ( ULONG ulUKTQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTUKTQueue);
+LONG sql92c_show_COM_queue        ( ULONG ulCOMQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTCOMQueue);
+LONG sql92c_show_RUN_queue        ( ULONG ulCOMQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTCOMQueue);
+LONG sql92c_show_suspends         ( PCONSOLE_REC            pConsoleRec );
+LONG sql92c_get_com_param         ( PSZ                     pszParam );
+
+LONG sql92c_create_version_tab    ( VOID );
+LONG sql92c_create_task_tab       ( VOID );
+LONG sql92c_create_io_tab         ( VOID );
+LONG sql92c_create_region_tab     ( VOID );
+LONG sql92c_create_storage_tab    ( VOID );
+LONG sql92c_create_rte_tabs       ( VOID );
+LONG sql92c_drop_tabs             ( VOID );
+
+LONG sql92c_show_param            ( PSZ                     pszParam,
+                                    PCONSOLE_REC            pConsoleRec );
+
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+#if !defined (CTRLCOMP)
+INT _CDECL  main (INT argc, CHAR *argv[])
+  {
+  #undef  MF__
+  #define MF__ MOD__"main"
+  XCONS_REC               xcr;
+  INT                     ArgN          = 1;
+  APIRET                  rc            = NO_ERROR;
+  LONG                    lCommand;
+  LONG                    lParam;
+
+
+  DBGIN;
+
+  memset ( &xcr, 0, sizeof(xcr) );
+  xcr.lInterval     = 0;
+  xcr.lRepeatCount  = 1;
+  xcr.lCommand      = COM_UNDEF;
+  xcr.lParam        = 0;
+  xcr.lExtParam     = 0;
+
+  if ( ARGS(argc, ArgN) )
+    {
+    if ((( argv [ ArgN ] [ 0 ] == '-' ) || ( argv [ ArgN ] [ 0 ] == '/' )) &&
+        (( argv [ ArgN ] [ 1 ] == '?' ) || ( argv [ ArgN ] [ 1 ] == 'h' )) &&
+        (  argv [ ArgN ] [ 2 ] == '\0' ))
+      {
+      xcr.lCommand = COM_HELP;
+      }
+    else
+      {
+      //
+      // --- get command and server database name
+      //
+      xcr.lCommand = sql92c_get_com_param ( argv[ArgN] );
+
+      if ( xcr.lCommand == COM_UNDEF )
+        {
+        #ifdef  RUN_AS_SYSMON
+         rc = ! NO_ERROR;
+        #else
+         xcr.pszServerDB = argv [ArgN++];
+
+         if ( ARGS(argc, ArgN) )
+           {
+           xcr.lCommand = sql92c_get_com_param ( argv[ArgN++] );
+
+           if ( xcr.lCommand == COM_UNDEF )
+             rc = ! NO_ERROR;
+           }
+         else
+           rc = ! NO_ERROR;
+        #endif
+        }
+      else if ( ARGS(argc, ++ArgN) )
+        {
+        lCommand = sql92c_get_com_param ( argv[ArgN] );
+
+        if ( lCommand != COM_UNDEF ) // - is there another command?
+          {
+          #ifdef  RUN_AS_SYSMON
+           rc = ! NO_ERROR;
+          #else
+           xcr.pszServerDB = argv [ArgN - 1];
+           ArgN++;
+          #endif
+          }
+        }
+
+      if (( rc == NO_ERROR ) && ( xcr.lCommand != COM_HELP ))
+        {
+        switch ( xcr.lCommand )
+          {
+          case COM_UKT_AFFINITY:
+            if ( ARGS(argc, ArgN) )
+              rc = sql92c_get_idx_param ( argv[ArgN++], 'u', &xcr.lParam );
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_CANCEL:
+            if ( ARGS(argc, ArgN) )
+              rc = sql92c_get_idx_param ( argv[ArgN++], 't', &xcr.lParam );
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_KILL  :
+            if ( ARGS(argc, ArgN) )
+              rc = sql92c_get_idx_param ( argv[ArgN++], 't', &xcr.lParam );
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_DROP  :
+
+            if ( !ARGS(argc, ArgN) ||
+                 !e92_strcont( XCONS_CMD_TABLES, strupr(argv[ArgN++]),
+                                  XCONS_MIN_CMD_LEN_TABLES ))
+              {
+              rc = ! NO_ERROR;
+              }
+            break;
+
+          case COM_CRASH_DUMP:
+            if ( !ARGS(argc, ArgN) ||
+                 !e92_strcont( XCONS_CMD_DUMP, strupr(argv[ArgN++]),
+                                  XCONS_MIN_CMD_LEN_DUMP ))
+              {
+              rc = ! NO_ERROR;
+              }
+            break;
+
+          case COM_TIME_MEASURE :
+            if ( ARGS(argc, ArgN) )
+              {
+              lParam = sql92c_get_time_param ( argv[ArgN++] );
+
+              if ( lParam != PARA_NONE )
+                xcr.lParam |= lParam;
+              else
+                rc = ! NO_ERROR;
+              }
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_RESET :
+            if ( ARGS(argc, ArgN) )
+              {
+              lParam = sql92c_get_show_res_param( argv[ArgN++], xcr.lCommand );
+
+              if ( lParam != PARA_NONE )
+                xcr.lParam |= lParam;
+              else
+                rc = ! NO_ERROR;
+              }
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_SET_DEBUGLEVEL :
+            if ( ARGS(argc, ArgN) )
+              rc = sql92c_get_num_param ( argv[ArgN++], &xcr.lParam );
+            else
+              rc = ! NO_ERROR;
+            break;
+
+          case COM_GETPARAM :
+
+            if ( ARGS(argc, ArgN) )
+              xcr.pszParam = argv[ArgN++];
+            else
+              xcr.pszParam = "";
+
+            break;
+
+          case COM_PUTPARAM :
+
+          case COM_SHOW_UPDATE :
+
+            // --- command parameter found?
+            if (( ARGS(argc, ArgN)) && ( !isdigit(argv[ArgN][0]) ))
+              {
+              xcr.lParam = 0;
+
+              do
+                {
+                lParam = sql92c_get_show_res_param(argv[ArgN++], xcr.lCommand);
+
+                if ( lParam != PARA_NONE )
+                  {
+                  BOOL fExtParamOk = FALSE ;
+                  if (( lParam == PARA_TASK_COUNTS ) &&
+                      ( ARGS(argc, ArgN)))
+                    {
+                    rc = sql92c_get_idx_param(argv[ArgN], 't', &xcr.lExtParam);
+
+                    if ( ! (fExtParamOk = rc == NO_ERROR ) )
+                      { rc = e92_get_tt_to_show (argv[ArgN], &xcr.lExtParam );
+                        fExtParamOk = rc == NO_ERROR;
+                      }
+                    else
+                      xcr.lExtParam = -xcr.lExtParam ;
+                    }
+                  else if ( lParam == PARA_ACTIVE || lParam == PARA_RUNNABLE )
+                    {
+                    xcr.lExtParam = SHOW_TT_ALL;
+                    if ( ARGS(argc, ArgN) )
+                      {
+                      rc = e92_get_tt_to_show (argv[ArgN], &xcr.lExtParam );
+                      fExtParamOk = rc == NO_ERROR;
+                      }
+                    }
+
+                  xcr.lParam |= lParam;
+                  if ( !fExtParamOk )
+                    rc = NO_ERROR;
+                  else
+                    ArgN++;
+                  }
+                else
+                  rc = ! NO_ERROR;
+                }
+              while (( rc == NO_ERROR )      &&
+                     ( ARGS(argc, ArgN))     &&
+                     ( !isdigit(argv[ArgN][0]) ));
+              }
+            else
+              xcr.lParam = PARA_DEFAULT;
+
+            // --- try to get interval and repeat count
+            if (( rc == NO_ERROR ) && ARGS(argc, ArgN))
+              {
+              xcr.lRepeatCount = -1;
+
+              // --- try to get interval
+              rc = sql92c_get_num_param (argv[ArgN++], &xcr.lInterval);
+
+              if ( rc == NO_ERROR )
+                {
+                if ( xcr.lInterval < 0 )
+                  rc = ! NO_ERROR;
+                else if ( ARGS(argc, ArgN))
+                  {
+                  // --- try to get repeat count
+                  rc = sql92c_get_num_param (argv[ArgN++], &xcr.lRepeatCount);
+
+                  if ( xcr.lRepeatCount < 1 )
+                    rc = ! NO_ERROR;
+                  }
+                }
+              }
+            break;
+
+          default :
+            rc = ! NO_ERROR;
+          }
+        ArgN++;
+        }
+      }
+    }
+  else
+    rc = ! NO_ERROR;
+
+  //
+  // --- display help info ?
+  //
+  if (( ARGS( argc, ArgN ) )     ||
+      ( rc != NO_ERROR  )        ||
+      ( xcr.lCommand == COM_HELP   ) ||
+      ( xcr.lCommand == COM_UNDEF  ))
+    {
+    #ifdef  RUN_AS_SYSMON
+     printf  (XCONS_USAGE_SYSMON);
+    #else
+     printf  (XCONS_USAGE);
+    #endif
+
+    DBGOUT;
+    exit(rc);
+    }
+
+  #ifdef  RUN_AS_SYSMON
+   EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+   rc = sql92c_get_server_db ( &xcr.pszServerDB );
+
+   if ( rc != NO_ERROR )
+     {
+     #ifdef  RUN_AS_SYSMON
+      EXEC SQL STOP;
+     #endif
+
+     DBGOUT;
+     exit(rc);
+     }
+  #else
+   if ( xcr.pszServerDB == NULL)
+     {
+     rc = GETENV(SERVERDB_ENV_VAR, &xcr.pszServerDB);
+     if (rc != NO_ERROR  ||  *xcr.pszServerDB == '\0')
+       {
+       rc = GETENV(DBNAME_ENV_VAR, &xcr.pszServerDB);
+       if (rc != NO_ERROR  ||  *xcr.pszServerDB == '\0')
+         {
+         #ifdef  RUN_AS_SYSMON
+          printf  (XCONS_USAGE_SYSMON);
+
+          EXEC SQL STOP;
+         #else
+          printf  (XCONS_USAGE);
+         #endif
+
+         DBGOUT;
+         exit(1);
+         }
+       }
+     }
+  #endif
+
+
+  if ( sql92c_init ( &xcr ) == NO_ERROR )
+    {
+    sql92c_send_req ( &xcr );
+
+    sql41c_free_shrd_mem ( xcr.pConsoleRec, xcr.hConsoleRec );
+    }
+
+  #ifdef  RUN_AS_SYSMON
+   EXEC SQL STOP;
+  #endif
+
+  DBGOUT;
+  exit(rc);
+
+  return(rc);
+  }
+#endif
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static LONG sql92c_send_req ( PXCONS_REC              pxcr )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_info"
+  APIRET                  rc = NO_ERROR;
+
+  DBGIN;
+
+
+  switch ( pxcr->lCommand )
+    {
+    case COM_UKT_AFFINITY :
+
+      if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+        return ( 1 );
+
+      memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+      pxcr->pConsoleRec->UKTAffinity.ulUKTIndex = pxcr->lParam;
+
+      rc = sql92c_send (pxcr, CON_REQ_SET_UKT_AFFINITY,
+                       &pxcr->pConsoleRec->UKTAffinity.fReturnCodeAvailable);
+
+      if ( rc != NO_ERROR ) return ( rc );
+
+      switch ( pxcr->pConsoleRec->UKTAffinity.usReturnCode )
+        {
+        case CON_NO_ERROR        :
+          break;
+        case CON_WRONG_UKT :
+          MSGCD (( ERR_XCONS_WRONG_UKT ));
+          return ( 1 );
+        case CON_ERROR          :
+          MSGCD (( ERR_XCONS_SET_UKT_AFFINITY ));
+          return ( 1 );
+        case CON_NO_PROCESSOR   :
+          MSGCD (( ERR_XCONS_AFFIN_NO_PROCESSOR ));
+          return ( 1 );
+        default:
+          MSGCD (( IERR_UNKNOWN_RET_CODE ));
+          return ( 1 );
+        }
+
+      break;
+
+
+    case COM_CANCEL:
+
+      if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+        return ( 1 );
+
+      memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+      pxcr->pConsoleRec->CancelTaskCtrl.ulTask = pxcr->lParam;
+
+      rc = sql92c_send (pxcr, CON_REQ_CANCEL,
+                       &pxcr->pConsoleRec->CancelTaskCtrl.fReturnCodeAvailable);
+
+      if ( rc != NO_ERROR ) return ( rc );
+
+      switch ( pxcr->pConsoleRec->CancelTaskCtrl.usReturnCode )
+        {
+        case CON_NO_ERROR       :
+          break;
+        case CON_WRONG_TASK     :
+          MSGCD ((ERR_XCONS_WRONG_TASK ));
+          return ( 1 );
+        case CON_WRONG_TASK_TYPE:
+          MSGCD ((ERR_XCONS_WRONG_TASK_TYPE ));
+          return ( 1 );
+        default:
+          MSGCD (( IERR_UNKNOWN_RET_CODE ));
+          return ( 1 );
+        }
+
+      break;
+
+    case COM_KILL:
+
+      if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+        return ( 1 );
+
+      memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+      pxcr->pConsoleRec->KillTaskCtrl.ulTask = pxcr->lParam;
+
+      rc = sql92c_send (pxcr, CON_REQ_KILL,
+                        &pxcr->pConsoleRec->KillTaskCtrl.fReturnCodeAvailable);
+
+      if ( rc != NO_ERROR ) return ( rc );
+
+      switch ( pxcr->pConsoleRec->KillTaskCtrl.usReturnCode )
+        {
+        case CON_NO_ERROR       :
+          break;
+        case CON_WRONG_TASK     :
+          MSGCD ((ERR_XCONS_WRONG_TASK ));
+          return ( 1 );
+        case CON_WRONG_TASK_TYPE:
+          MSGCD ((ERR_XCONS_WRONG_TASK_TYPE ));
+          return ( 1 );
+        default:
+          MSGCD (( IERR_UNKNOWN_RET_CODE ));
+          return ( 1 );
+        }
+
+      break;
+
+    case COM_CRASH_DUMP:
+
+      if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+        return (1);
+
+      memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+      rc = sql92c_send (pxcr, CON_REQ_CRASH_DUMP,
+                       &pxcr->pConsoleRec->CrashDump.fReturnCodeAvailable);
+
+      if ( rc != NO_ERROR ) return ( rc );
+
+      switch ( pxcr->pConsoleRec->CrashDump.usReturnCode )
+        {
+        case CON_NO_ERROR :
+          break;
+
+        default:
+          MSGCD (( IERR_UNKNOWN_RET_CODE ));
+          return ( 1 );
+        }
+
+      break;
+
+    case COM_DROP:
+
+      #ifdef RUN_AS_SYSMON
+        rc = sql92c_drop_tabs ();
+      #endif
+
+      break;
+
+    #ifndef RUN_AS_SYSMON
+
+     case COM_GETPARAM:
+
+       if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+         return ( 1 );
+
+       memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+       rc = sql92c_send (pxcr, CON_REQ_GETPARAM ,
+                         &pxcr->pConsoleRec->GetParamInfo.fGetParamAvailable );
+
+       rc = sql92c_show_param ( pxcr->pszParam, pxcr->pConsoleRec );
+
+       if ( rc != NO_ERROR )
+         return ( rc );
+
+       break;
+
+
+     case COM_PUTPARAM      :
+
+       if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+         return ( 1 );
+
+       rc = sql92c_send (pxcr, CON_REQ_PUTPARAM ,
+                         &pxcr->pConsoleRec->PutParamInfo.fPutParamAvailable );
+
+       break;
+
+    #endif
+
+     case COM_SET_DEBUGLEVEL:
+
+       if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+         return ( 1 );
+
+       pxcr->pConsoleRec->SetDebugLevelCtrl.ulDebugLevel = pxcr->lParam ;
+
+       rc = sql92c_send (pxcr, CON_REQ_SET_DEBUGLEVEL ,
+                         &pxcr->pConsoleRec->SetDebugLevelCtrl.fSetDebugLevelAvailable);
+
+       break;
+
+    case COM_TIME_MEASURE  :
+
+      if ( pxcr->lParam & PARA_ENABLE )
+          {
+          if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+            return ( 1 );
+          rc = sql92c_send (pxcr, CON_REQ_ENABLE_TIME_MEASURE ,
+                  &pxcr->pConsoleRec->TimeMeasureCtrl.fTimeMeasureAvailable );
+          }
+
+      if ( pxcr->lParam & PARA_DISABLE )
+          {
+          if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+            return ( 1 );
+          rc = sql92c_send (pxcr, CON_REQ_DISABLE_TIME_MEASURE ,
+                   &pxcr->pConsoleRec->TimeMeasureCtrl.fTimeMeasureAvailable );
+          }
+      break;
+
+    case COM_RESET:
+        if ( sql92c_check_accesss ( pxcr ) != NO_ERROR )
+          return ( 1 );
+
+        if ( pxcr->lParam & PARA_IO )
+            rc = sql92c_send (pxcr, CON_REQ_RES_ALL ,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_IO )
+            rc = sql92c_send (pxcr, CON_REQ_RES_IO ,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_REGIONS )
+             rc = sql92c_send (pxcr, CON_REQ_RES_REGION ,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_QUEUE_STAT )
+            rc = sql92c_send (pxcr, CON_REQ_RES_QUEUE_STAT ,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_TASK_COUNTS )
+            rc = sql92c_send (pxcr, CON_REQ_RES_TASK_COUNTS ,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_UKT_SL_STAT )
+            rc = sql92c_send (pxcr, CON_REQ_RES_UKT_SLEEPTIME_STAT,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+        else
+        if ( pxcr->lParam & PARA_SUSPENDS    )
+            rc = sql92c_send (pxcr, CON_REQ_RES_SUSPENDS,
+                    &pxcr->pConsoleRec->ResetCtrl.fResetAvailable );
+      break;
+
+    case COM_SHOW_UPDATE:
+
+      #ifndef RUN_AS_SYSMON
+       if ( pxcr->fIsGateway )
+         printf ( XCONS_GATEWAY, pxcr->pszServerDB );
+       else
+         printf ( XCONS_SERVERDB, pxcr->pszServerDB );
+      #endif
+
+      while ( pxcr->lRepeatCount )
+        {
+        if ( pxcr->lParam & PARA_VERSIONS )
+          {
+          rc = sql92c_show_version_info ( pxcr );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_IO )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_IO,
+                            &pxcr->pConsoleRec->IOInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_io_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_AIO )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_AIO,
+                            &pxcr->pConsoleRec->AIOInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_aio_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_REGIONS )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_REGION,
+                            &pxcr->pConsoleRec->SemInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_region_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_RTE )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_RTE,
+                            &pxcr->pConsoleRec->RTEInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_rte_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_STORAGE )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_STORAGE,
+                            &pxcr->pConsoleRec->StorageInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_storage_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_TASKS  ||
+             pxcr->lParam & PARA_ACTIVE ||
+             pxcr->lParam & PARA_RUNNABLE)
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          pxcr->pConsoleRec->TaskInfo.StateToShow =
+                pxcr->lParam & PARA_TASKS ? SHOW_TASK_ALL :
+                pxcr->lParam & PARA_ACTIVE? SHOW_ACTIVE_TASK : SHOW_RUN_TASK ;
+
+          pxcr->pConsoleRec->TaskInfo.TypeToShow  = (UINT1 )pxcr->lExtParam;
+
+          rc = sql92c_send (pxcr, CON_REQ_TASK,
+                            &pxcr->pConsoleRec->TaskInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_task_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+/*
+        if ( pxcr->lParam & PARA_ACTIVE )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+          pxcr->pConsoleRec->TaskInfo.StateToShow = SHOW_ACTIVE_TASK ;
+          pxcr->pConsoleRec->TaskInfo.TypeToShow  = (UINT1 )pxcr->lExtParam;
+
+          rc = sql92c_send (pxcr, CON_REQ_TASK,
+                            &pxcr->pConsoleRec->TaskInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_task_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+*/
+        if ( pxcr->lParam & PARA_UKT_SL_STAT )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_UKT_SLEEPTIME_STAT ,
+                          &pxcr->pConsoleRec->UKTSleepTimeInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_ukt_sl_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_SUSPENDS )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_SHOW_SUSPENDS,
+                         &pxcr->pConsoleRec->SuspendReasons.fSuspendsAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_suspends ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_UKT_QUEUES )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_UKT_QUEUES ,
+                          &pxcr->pConsoleRec->UKTQueues.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_ukt_queues ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+        #ifdef RUN_AS_SYSMON
+
+        #else
+
+         if ( pxcr->lParam & PARA_STATE )
+           {
+           memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+           rc = sql92c_send ( pxcr, CON_REQ_STATE,
+                              &pxcr->pConsoleRec->StateInfo.fInfoAvailable);
+
+           if ( rc != NO_ERROR ) return ( rc );
+
+           rc = sql92c_show_state_info ( pxcr->pConsoleRec );
+
+           if ( rc != NO_ERROR ) return ( rc );
+           }
+
+        if ( pxcr->lParam & PARA_QUEUE_STAT )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_QUEUE_STAT,
+                            &pxcr->pConsoleRec->QueInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_queue_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_TASK_COUNTS )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+          pxcr->pConsoleRec->TaskCountsInfo.lNumOfActiveTasks = pxcr->lExtParam;
+          rc = sql92c_send (pxcr, CON_REQ_TASK_COUNTS,
+                            &pxcr->pConsoleRec->TaskCountsInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_task_count_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        if ( pxcr->lParam & PARA_TOTAL_COUNTS )
+          {
+          memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+
+          rc = sql92c_send (pxcr, CON_REQ_TOTAL_COUNTS,
+                            &pxcr->pConsoleRec->TotalCountsInfo.fInfoAvailable);
+
+          if ( rc != NO_ERROR ) return ( rc );
+
+          rc = sql92c_show_total_count_info ( pxcr->pConsoleRec );
+
+          if ( rc != NO_ERROR ) return ( rc );
+          }
+
+        #endif
+
+        if (pxcr->lRepeatCount != -1 ) // --- don't loop forever?
+          pxcr->lRepeatCount--;
+
+        if (( pxcr->lInterval ) && ( pxcr->lRepeatCount ))
+          SLEEP( pxcr->lInterval * 1000 );
+        }
+
+      break;
+
+    default:
+      return ( 1 );
+    }
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+LONG sql92c_init ( PXCONS_REC  pxcr )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_init"
+  APIRET                  rc       = NO_ERROR;
+  HANDLE                  hKSS     = 0;
+  KERNEL_SHARED_SEG       *pKSS    = NULL;
+  PSZ                     pszPath  = NULL;
+  PSZ                     pszName  = NULL;
+
+  #if defined(_WIN32)
+   ULONG                  ulRetry  = 10;
+   ACCESS_RIGHTS_REC      Access;
+  #endif
+
+  DBGIN;
+
+
+  #if defined(_WIN32)
+   //
+   // --- allocate and initialize security attributes
+   //
+   pxcr->WorldSA.nLength             = sizeof(pxcr->WorldSA);
+   pxcr->WorldSA.bInheritHandle      = TRUE;       // why not...
+
+   memset ( &Access, 0, sizeof (Access) );   // - this must be done first!
+   Access.World.ulAccess = SPECIFIC_RIGHTS_ALL |
+                           STANDARD_RIGHTS_ALL;
+
+   rc = sql49c_alloc_and_init_SD( &Access,
+                                  &pxcr->WorldSA.lpSecurityDescriptor );
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+  //
+  // --- open the request queue/mailslot
+  //
+
+  #if defined(_WIN32)
+   strupr ( pxcr->pszServerDB );
+   pszPath = MAIL_CONS;
+   pszName = pxcr->pszServerDB;
+  #else
+   pszPath = QUE_CONS;
+   pszName = pxcr->pszServerDB;
+  #endif
+
+  DBG3 ((MF__, "sql41c_open_queue_mailslot: %s", pszName ));
+
+  rc = sql41c_open_queue_mailslot ( &pxcr->pidQueueOwner,       // - OS/2 only
+                                    &pxcr->hHandle,
+                                    pszPath, pszName );
+
+ if ( rc == ERROR_FILE_NOT_FOUND )
+   {
+   MSGCD ((ERR_DB_OR_GW_NOT_STARTED, pxcr->pszServerDB));
+   DBGOUT;
+   return ( rc );
+   }
+ else if ( rc != NO_ERROR )
+   {
+   DBGOUT;
+   return ( rc );
+   }
+
+
+  //
+  // --- check database version
+  //
+  rc = sql41c_get_named_shrd_mem ( (PPVOID)&pKSS, SHM_KSS, pxcr->pszServerDB,
+                                   &hKSS );
+
+  if ( rc == ERROR_INVALID_NAME )
+    {
+    MSGCD ((ERR_DB_OR_GW_NOT_STARTED, pxcr->pszServerDB));
+    DBGOUT;
+    return ( rc );
+    }
+  else if (rc != NO_ERROR)
+    {
+    DBGOUT;
+    return ( rc );
+    }
+
+  if (strcmp(pKSS->RTEVersion, sql02_get_RTE_version_string()))
+    {
+    if ( pKSS->fIsGateway )
+      MSGCD ((ERR_WRONG_GW_VERSION))
+    else
+      MSGCD ((ERR_WRONG_DB_VERSION));
+
+    printf (XCONS_WRONG_VERS_KERNEL, pKSS->RTEVersion);
+    printf (XCONS_WRONG_VERS_XCONS , sql02_get_RTE_version_string());
+    DBGOUT;
+    return ( 1 );
+    }
+
+  strcpy ( pxcr->RTEVersion,    pKSS->RTEVersion );
+  strcpy ( pxcr->KernelVersion, pKSS->KernelVersion );
+
+  pxcr->ulShmSize  = pKSS->ulConsoleShmSize;
+  pxcr->fIsGateway = pKSS->fIsGateway;
+
+  rc = sql41c_free_shrd_mem ( pKSS, hKSS );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return ( rc );
+    }
+
+  //
+  // --- allocate a shared memory segment
+  //
+  #if defined(_WIN32)
+   do
+     {
+     sql41c_build_unique_obj_name ( pxcr->szShmName );
+
+     rc = sql41c_create_shrd_mem ( (PVOID*) &pxcr->pConsoleRec,
+                                   pxcr->ulShmSize, SHM_CONSREC,
+                                   pxcr->szShmName,
+                                   &pxcr->WorldSA, &pxcr->hConsoleRec );
+
+     // --- unique name already in use?
+     if ( rc == ERROR_DUPLICATE_NAME )
+       SLEEP ( 1 );
+     }
+   while (( rc == ERROR_DUPLICATE_NAME ) && (--ulRetry) );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return ( rc );
+     }
+  #else
+   rc = sql41c_create_shrd_mem ( (PVOID*) &pxcr->pConsoleRec,
+                                 pxcr->ulShmSize, NULL, NULL, NULL, 0 );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+LONG sql92c_send ( PXCONS_REC     pxcr,
+                          ULONG          ulRequest,
+                          PBOOL          pfFlag )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_send"
+  APIRET            rc = NO_ERROR;
+  CONS_REQUEST_REC  Request;
+
+  DBGIN;
+
+  #if !defined(_WIN32)
+   rc = sql41c_give_shrd_mem (pxcr->pConsoleRec, pxcr->pidQueueOwner, 0, NULL);
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+  #if defined(_WIN32)
+   strcpy ( Request.szClientObjName, pxcr->szShmName );
+   Request.ulReqType       = ulRequest;
+   Request.ulConsoleRecLen = pxcr->ulShmSize;
+  #else
+   Request                 = ulRequest;
+  #endif
+
+  rc = sql41c_write_queue_mailslot ( pxcr->hHandle,
+                                     &Request,
+                                     sizeof (CONS_REQUEST_REC),
+                                     pxcr->ulShmSize,           // - OS/2 only
+                                     pxcr->pConsoleRec );       // - OS/2 only
+
+  if ( rc != NO_ERROR )
+    {
+    if ( rc == ERROR_HANDLE_EOF )
+      MSGCD (( ERR_DB_OR_GW_NOT_STARTED, pxcr->pszServerDB ));
+    DBGOUT;
+    return ( rc );
+    }
+
+  if (!sql92c_wait (pfFlag))
+    {
+    DBGOUT;
+    return ( 1 );
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_check_accesss ( PXCONS_REC  pxcr )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_check_accesss"
+  APIRET            rc           = NO_ERROR;
+  #if defined (_WIN32)
+   HEV              hevSemCoord  = 0;
+  #endif
+
+  DBGIN;
+
+  #if defined (_WIN32)
+   //
+   // --- try to open coordinators semaphore to check access rights
+   //
+   rc = sql41c_open_event_sem ( &hevSemCoord, SEM_COORD, pxcr->pszServerDB,
+                                ERROR_ACCESS_DENIED);
+
+   if (rc == NO_ERROR )
+     sql41c_close_event_sem ( hevSemCoord, "COORD" );
+   else if (rc == ERROR_ACCESS_DENIED)
+     MSGCD(( ERR_ACCESS_DENIED ))
+   else if (rc == ERROR_SEM_NOT_FOUND)
+     MSGCD ((ERR_DB_OR_GW_NOT_STARTED, pxcr->pszServerDB))
+  #endif
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_get_num_param  ( PSZ      pszParam,
+                                    PLONG    plNum  )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_num_param"
+  PSZ      pszTmp;
+  DBGIN;
+
+  // --- is the parameter valid?
+  pszTmp = pszParam;
+  while ( *pszTmp != '\0')
+    {
+    if (!isdigit ( *pszTmp ))
+      return ( 1 );
+
+    pszTmp++;
+    }
+
+  *plNum = atol (pszParam);
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_get_idx_param  ( PSZ      pszParam,
+                                    CHAR     cPrefix,
+                                    PLONG    plNum  )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_idx_param"
+  PSZ      pszTmp;
+  PSZ      pszParamTmp;
+  DBGIN;
+
+  // --- is the parameter valid?
+  if ( *pszParam == _toupper(cPrefix) || *pszParam == cPrefix )
+    {
+    pszTmp      = pszParam + 1;
+    pszParamTmp = pszParam + 1;
+    }
+  else
+    {
+    pszTmp      = pszParam;
+    pszParamTmp = pszParam;
+    }
+
+  while ( *pszTmp != '\0')
+    {
+    if (!isdigit ( *pszTmp ))
+      return ( 1 );
+
+    pszTmp++;
+    }
+
+  *plNum = atol (pszParamTmp);
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_get_time_param  ( PSZ pszParam )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_time_param"
+  DBGIN;
+
+  strupr (pszParam);
+
+  if ( e92_strcont( XCONS_CMD_ENABLE, pszParam,
+                       XCONS_MIN_CMD_LEN_ENABLE ))
+   return( PARA_ENABLE );
+
+  if ( e92_strcont( XCONS_CMD_DISABLE,  pszParam,
+                       XCONS_MIN_CMD_LEN_DISABLE ))
+   return( PARA_DISABLE );
+
+  return ( PARA_NONE );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_get_show_res_param  ( PSZ    pszParam,
+                                         LONG   lCommand )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_show_res_param"
+  DBGIN;
+
+  strupr (pszParam);
+
+  if ( e92_strcont( XCONS_CMD_IO, pszParam,
+                       XCONS_MIN_CMD_LEN_IO ))
+   return( PARA_IO );
+
+  if ( e92_strcont( XCONS_CMD_AIO, pszParam,
+                       XCONS_MIN_CMD_LEN_AIO ))
+   return( PARA_AIO );
+
+  if ( e92_strcont( XCONS_CMD_REGIONS, pszParam,
+                       XCONS_MIN_CMD_LEN_REGIONS  ) )
+   return( PARA_REGIONS );
+
+  if ( e92_strcont( XCONS_CMD_UKT_SLEEP_STAT, pszParam,
+                       XCONS_MIN_CMD_LEN_UKT_SLEEP_STAT ) )
+   return( PARA_UKT_SL_STAT );
+
+  if ( e92_strcont( XCONS_CMD_ALL, pszParam,
+                       XCONS_MIN_CMD_LEN_ALL ))
+   return( PARA_ALL );
+
+  #ifndef RUN_AS_SYSMON
+   if ( e92_strcont( XCONS_CMD_UKT_QUEUES, pszParam,
+                       XCONS_MIN_CMD_LEN_UKT_QUEUES ) )
+    return( PARA_UKT_QUEUES );
+
+   if ( e92_strcont( XCONS_CMD_SUSPENDS, pszParam,
+                        XCONS_MIN_CMD_LEN_SUSPENDS ) )
+    return( PARA_SUSPENDS );
+
+   if ( e92_strcont( XCONS_CMD_TASK_COUNTS, pszParam,
+                        XCONS_MIN_CMD_LEN_TASK_COUNTS ) )
+    return( PARA_TASK_COUNTS );
+
+   if ( e92_strcont( XCONS_CMD_QUEUE_STAT, pszParam,
+                        XCONS_MIN_CMD_LEN_QUEUE_STAT ))
+    return( PARA_QUEUE_STAT );
+  #endif
+
+ if ( lCommand == COM_SHOW_UPDATE )
+   {
+   if ( e92_strcont( XCONS_CMD_VERSIONS, pszParam,
+                        XCONS_MIN_CMD_LEN_VERSIONS ))
+   return( PARA_VERSIONS );
+
+   if ( e92_strcont( XCONS_CMD_STORAGE,  pszParam,
+                        XCONS_MIN_CMD_LEN_STORAGE ))
+   return( PARA_STORAGE );
+
+   if ( e92_strcont( XCONS_CMD_RTE, pszParam,
+                        XCONS_MIN_CMD_LEN_RTE ))
+    return( PARA_RTE );
+
+   if ( e92_strcont( XCONS_CMD_TASKS, pszParam,
+                        XCONS_MIN_CMD_LEN_TASKS ))
+    return( PARA_TASKS );
+
+   if ( e92_strcont( XCONS_CMD_ACTIVE_TASKS, pszParam,
+                        XCONS_MIN_CMD_LEN_ACTIVE_TASKS ))
+    return( PARA_ACTIVE );
+
+   if ( e92_strcont( XCONS_CMD_RUNNABLE_TASKS, pszParam,
+                        XCONS_MIN_CMD_LEN_RUNNABLE_TASKS ))
+    return( PARA_RUNNABLE );
+
+    #ifndef RUN_AS_SYSMON
+     if ( e92_strcont( XCONS_CMD_STATE, pszParam,
+                          XCONS_MIN_CMD_LEN_STATE ))
+      return( PARA_STATE );
+
+     if ( e92_strcont( XCONS_CMD_TASK_STAT, pszParam,
+                          XCONS_MIN_CMD_LEN_TASK_STAT ))
+      return( PARA_TASK_STAT );
+
+     if ( e92_strcont( XCONS_CMD_TOTAL_COUNTS, pszParam,
+                          XCONS_MIN_CMD_LEN_TOTAL_COUNTS ))
+      return( PARA_TOTAL_COUNTS );
+    #endif
+    }
+
+  return ( PARA_NONE );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_get_com_param  ( PSZ    pszParam )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_get_com_param"
+  DBGIN;
+
+  strupr (pszParam);
+
+
+  if ( e92_strcont( XCONS_CMD_HELP1, pszParam,
+                       XCONS_MIN_CMD_LEN_HELP1 ))
+   return( COM_HELP );
+
+  if ( e92_strcont( XCONS_CMD_HELP2, pszParam,
+                       XCONS_MIN_CMD_LEN_HELP2 ))
+   return( COM_HELP );
+
+  #ifdef RUN_AS_SYSMON
+
+   if ( e92_strcont( XCONS_CMD_UPDATE, pszParam,
+                        XCONS_MIN_CMD_LEN_UPDATE ))
+     return( COM_SHOW_UPDATE );
+
+   if ( e92_strcont( XCONS_CMD_DROP, pszParam,
+                        XCONS_MIN_CMD_LEN_DROP ))
+     return( COM_DROP );
+
+  #else
+
+   if ( e92_strcont( XCONS_CMD_CANCEL, pszParam,
+                        XCONS_MIN_CMD_LEN_CANCEL ))
+    return( COM_CANCEL );
+
+   if ( e92_strcont( XCONS_CMD_UKT_AFFINITY, pszParam,
+                        XCONS_MIN_CMD_LEN_UKT_AFFINITY ))
+    return( COM_UKT_AFFINITY );
+
+   if ( e92_strcont( XCONS_CMD_KILL, pszParam,
+                        XCONS_MIN_CMD_LEN_KILL ))
+    return( COM_KILL );
+
+   if ( e92_strcont( XCONS_CMD_SHOW, pszParam,
+                        XCONS_MIN_CMD_LEN_SHOW ))
+     return( COM_SHOW_UPDATE );
+
+   if ( e92_strcont( XCONS_CMD_TIME_MEASURE,  pszParam,
+                        XCONS_MIN_CMD_LEN_TIME_MEASURE ))
+     return( COM_TIME_MEASURE );
+
+   if ( e92_strcont( XCONS_CMD_RESET_CNT, pszParam,
+                        XCONS_MIN_CMD_LEN_RESET_CNT ))
+     return( COM_RESET );
+
+   if ( e92_strcont( XCONS_CMD_GETPARAM, pszParam,
+                        XCONS_MIN_CMD_LEN_GETPARAM ))
+     return( COM_GETPARAM );
+
+   if ( e92_strcont( XCONS_CMD_PUTPARAM , pszParam,
+                        XCONS_MIN_CMD_LEN_PUTPARAM ))
+     return( COM_PUTPARAM );
+
+   if ( e92_strcont( XCONS_CMD_DEBUGLEVEL , pszParam,
+                        XCONS_MIN_CMD_LEN_DEBUGLEVEL ))
+     return( COM_SET_DEBUGLEVEL );
+
+   if ( sql02_get_platform_id () == VER_PLATFORM_WIN32_NT )
+     {
+     if ( e92_strcont( XCONS_CMD_CRASH, pszParam,
+                          XCONS_MIN_CMD_LEN_CRASH ))
+       return( COM_CRASH_DUMP );
+     }
+  #endif
+
+  return ( COM_UNDEF );
+  }
+
+
+/*------------------------------*/
+
+
+static BOOL  sql92c_wait ( PBOOL pfFlag )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_wait"
+  INT i = MAX_WAIT * 10;
+
+  DBGPAS;
+
+  while ( *pfFlag == FALSE && --i )
+    SLEEP( 100 );
+
+  if (i == 0)
+    MSGCD (( ERR_COMMAND_TIMEOUT ));
+
+  return (i);
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_version_info ( PXCONS_REC pxcr )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_version_info"
+  #ifdef RUN_AS_SYSMON
+   APIRET    rc = NO_ERROR;
+  #endif
+
+  DBGPAS;
+
+  #ifdef RUN_AS_SYSMON
+
+   rc = sql92c_create_version_tab ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+
+   strcpy  ( SysVersion.szVers, pxcr->KernelVersion );
+   strcpy  ( SysVersion.szComp, XCONS_VERS_DESC_KERNEL );
+
+   EXEC SQL INSERT INTO SYSMON$VERSION VALUES ( :SysVersion );
+
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy  ( SysVersion.szVers, pxcr->RTEVersion );
+     strcpy  ( SysVersion.szComp, XCONS_VERS_DESC_RTE );
+
+     EXEC SQL INSERT INTO SYSMON$VERSION VALUES ( :SysVersion );
+     }
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     MSGCD (( ERR_UPDATING_TAB, "SYSMON$VERSION",sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL COMMIT WORK;
+
+  #else
+   printf ( XCONS_SHOW_VERS_KERNEL, pxcr->KernelVersion );
+   printf ( XCONS_SHOW_VERS_RTE   , pxcr->RTEVersion    );
+  #endif
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_task_info ( PCONSOLE_REC  pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_task_info"
+  INT                         i;
+  PCONS_SINGLE_TASK_INFO_REC  pTaskInfos;
+  #ifdef RUN_AS_SYSMON
+   APIRET                     rc = NO_ERROR;
+  #else
+   CHAR                       szRegionIndex[20];
+   CHAR                       szBegExclCnt[20];
+   CHAR                       szApplPid[14];
+   CHAR                       szTimeOut[20];
+   CHAR                       szTid[12];
+   ULONG                      ulUnconnectedTasks   = 0;
+   ULONG                      ulUnusedServerTasks  = 0;
+   ULONG                      ulTimeOut            = 0;
+   static  BOOL               FirstCall = TRUE ;
+  #endif
+
+  DBGPAS;
+
+  pTaskInfos = (PCONS_SINGLE_TASK_INFO_REC)
+                   ((PCHAR)pConsoleRec +
+                           pConsoleRec->TaskInfo.ulTaskInfoOffset);
+
+  #ifdef RUN_AS_SYSMON
+   rc = sql92c_create_task_tab ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+
+   for ( i = 0; i < pConsoleRec->TaskInfo.lNumOfActiveTasks; i++ )
+     {
+     if (( pTaskInfos[i].TaskState == TSK_INITIALIZED         ||
+           pTaskInfos[i].TaskState == TSK_INACTIVE            ||
+           pTaskInfos[i].TaskState == TSK_MARKED_FOR_STARTUP  ||
+           pTaskInfos[i].TaskState == TSK_CONNECTWAIT       ) &&
+           pTaskInfos[i].TaskType  != TT_UT )
+       continue;
+
+
+     strcpy ( SysProcess.szTaskType,
+              sql92c_type_name ( pTaskInfos[i].TaskType ));
+     strcpy ( SysProcess.szTaskState,
+              pTaskInfos[i].ulStateReason
+                ? SuspendReasonText[pTaskInfos[i].ulStateReason].szShortReason
+                : sql92c_task_state_name (pTaskInfos[i].TaskState));
+
+     SysProcess.ulTaskIndex      = pTaskInfos[i].ulTaskIndex;
+     SysProcess.ulTid            = pTaskInfos[i].Tid;
+     SysProcess.ulApplPid        = pTaskInfos[i].ApplPid;
+     SysProcess.ulSid            = pTaskInfos[i].Sid;
+
+     // --- set indicator
+     SysProcessInd.iTaskIndex = 0;
+     SysProcessInd.iTid       = 0;
+     SysProcessInd.iTaskType  = 0;
+     SysProcessInd.iTaskState = 0;
+
+     if ( pTaskInfos[i].ulTaskTimeOut == (ULONG) UNDEF )
+       SysProcess.ulTimeOut   = (ULONG) UNDEF;
+     else if (pTaskInfos[i].ulTaskTimeOut < (ULONG)time(NULL))
+       SysProcess.ulTimeOut   = 0;
+     else
+       SysProcess.ulTimeOut   = pTaskInfos[i].ulTaskTimeOut
+                                  - time (NULL);
+
+     if ( pTaskInfos[i].ApplPid == (PID)UNDEF)
+       SysProcessInd.iApplPid = -1;
+     else
+       SysProcessInd.iApplPid = 0;
+
+     if ( pTaskInfos[i].Sid == 0 )
+       SysProcessInd.iSid = -1;
+     else
+       SysProcessInd.iSid = 0;
+
+     if (( pTaskInfos[i].TaskState     != TSK_VRECEIVE ) ||
+         ( pTaskInfos[i].ulTaskTimeOut == (ULONG) UNDEF ))
+       SysProcessInd.iTimeOut = -1;
+     else
+       SysProcessInd.iTimeOut = 0;
+
+
+     EXEC SQL INSERT INTO SYSMON$PROCESS VALUES ( :SysProcess:SysProcessInd );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_UPDATING_TAB, "SYSMON$PROCESS",sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     EXEC SQL COMMIT WORK;
+     }
+  #else
+
+   if ( FirstCall )
+     {
+       printf ( XCONS_SHOW_TASK_HEADER );
+       FirstCall = FALSE ;
+     }
+   else
+      printf ("\n" ) ;
+
+   if ( pConsoleRec->TaskInfo.lNumOfActiveTasks == 0 )
+     return ( NO_ERROR );
+
+   for ( i = 0; i < pConsoleRec->TaskInfo.lNumOfActiveTasks; i++)
+     {
+     if ( pTaskInfos[i].ApplPid != (PID)UNDEF)
+       {
+       szApplPid[0] = pTaskInfos[i].szClientNode[0] != '\0' ? '*' : ' ';
+       szApplPid[1] = ' ';
+       szApplPid[2] = '0';
+       szApplPid[3] = 'x';
+       _ultoa ( pTaskInfos[i].ApplPid,
+                szApplPid + 2, 16 );
+       strupr ( szApplPid + 2 );
+       }
+     else
+       szApplPid[0] = '\0';
+
+
+     if ( pTaskInfos[i].Sid )
+       {
+       _ultoa ( pTaskInfos[i].Sid, szRegionIndex, 10 );
+
+       if ( pTaskInfos[i].ulBegExclCnt )
+         _ultoa (pTaskInfos[i].ulBegExclCnt, szBegExclCnt, 10);
+       else
+         szBegExclCnt[0] = '\0';
+       }
+     else
+       {
+       szRegionIndex[0] = '\0';
+       szBegExclCnt[0]  = '\0';
+       }
+
+     if ( pTaskInfos[i].TaskState == TSK_VRECEIVE )
+       {
+       if ( pTaskInfos[i].ulTaskTimeOut == (ULONG) UNDEF )
+         strncpy (szTimeOut, XCONS_SHOW_TASK_NO_TIMEOUT, 10);
+       else if (pTaskInfos[i].ulTaskTimeOut < (ULONG)time(NULL))
+         ulTimeOut = 0;
+       else
+         ulTimeOut = pTaskInfos[i].ulTaskTimeOut - time (NULL);
+
+       if ( pTaskInfos[i].ulTaskTimeOut != (ULONG) UNDEF )
+         _ultoa ( ulTimeOut, szTimeOut, 10 );
+       else
+         // strncpy (szTimeOut, XCONS_SHOW_TASK_NO_TIMEOUT, 10);
+
+       szTimeOut[10] = '\0';
+       }
+     else
+       szTimeOut[0] = '\0';
+
+     if (( pTaskInfos[i].TaskState == TSK_INITIALIZED         ||
+           pTaskInfos[i].TaskState == TSK_INACTIVE            ||
+           pTaskInfos[i].TaskState == TSK_MARKED_FOR_STARTUP  ||
+           pTaskInfos[i].TaskState == TSK_CONNECTWAIT       ) &&
+           pTaskInfos[i].TaskType  != TT_UT )
+       {
+       if ( pTaskInfos[i].TaskType == TT_SV )
+         ulUnusedServerTasks++;
+       else
+         ulUnconnectedTasks++;
+       }
+     else
+       {
+       szTid[0] = '0';
+       szTid[1] = 'x';
+       _ultoa ( pTaskInfos[i].Tid, szTid + 2, 16 );
+       strupr ( szTid + 2 );
+
+       printf ( XCONS_SHOW_TASK_INFO,
+                pTaskInfos[i].ulTaskIndex,
+                szTid,
+                sql92c_type_name ( pTaskInfos[i].TaskType ),
+                szApplPid,
+                pTaskInfos[i].QueLocation == TASK_IS_IN_RUN_QUEUE ? '*' : ' ' ,
+                pTaskInfos[i].ulStateReason
+                 ? SuspendReasonText[pTaskInfos[i].ulStateReason].szShortReason
+                 : sql92c_task_state_name (pTaskInfos[i].TaskState) ,
+                ! pTaskInfos[i].PrioFlag ? ' ' :
+                         '0' + pTaskInfos[i].PrioFlag
+                             + pTaskInfos[i].SavePrioFlag ,
+                szTimeOut,
+                szBegExclCnt,
+                szRegionIndex );
+       }
+     }
+
+   if ( ulUnusedServerTasks )
+     {
+     printf ( XCONS_SHOW_SERVER_UNUSED, ulUnusedServerTasks );
+     }
+
+   if ( ulUnconnectedTasks )
+     {
+     printf ( XCONS_SHOW_TASK_CONN_INFO,
+              ulUnconnectedTasks, XCONS_TSK_STATE_CONNECTWAIT );
+     }
+  #endif
+
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_io_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_io_info"
+  INT                i;
+  ULONG              ulDevspaceNo;
+  PCONS_DEV_INFO_REC pDevspaceInfos;
+
+  #ifdef RUN_AS_SYSMON
+   APIRET            rc = NO_ERROR;
+  #else
+   PATHNAME          szPathName;
+   ULONG             ulReadCnt  = 0;
+   ULONG             ulWriteCnt = 0;
+   ULONG             ulTotal    = 0;
+  #endif
+
+  DBGPAS;
+
+  pDevspaceInfos = (PCONS_DEV_INFO_REC)
+                     ((PCHAR)pConsoleRec +
+                             pConsoleRec->IOInfo.ulDevspaceInfoOffset);
+
+  #ifdef RUN_AS_SYSMON
+   rc = sql92c_create_io_tab ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+  #else
+   printf ( XCONS_SHOW_IO_HEADER );
+  #endif
+
+  for ( i = 0; i < pConsoleRec->IOInfo.lNumOfDevspaces; i++)
+    {
+    ulDevspaceNo = pDevspaceInfos[ i ].ulDevspaceNo;
+
+
+    #ifdef RUN_AS_SYSMON
+     SysIOAccess.ulDevspaceNo = ulDevspaceNo;
+     SysIOAccess.ulReadCnt    = pDevspaceInfos[ i ].ulReadCnt;
+     SysIOAccess.ulWriteCnt   = pDevspaceInfos[ i ].ulWriteCnt; 
+
+     sql92c_compress_path ( SysIOAccess.szDevspaceName,
+                            pDevspaceInfos[ i ].DevspaceName,
+                            sizeof (SysIOAccess.szDevspaceName) - 1 );
+
+     EXEC SQL INSERT INTO SYSMON$IOACCESS VALUES ( :SysIOAccess );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_UPDATING_TAB, "SYSMON$IOACCESS",sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     EXEC SQL COMMIT WORK;
+
+    #else
+
+     // --- The compress value (44) must be identical to the value
+     //     defined in 'XCONS_SHOW_IO_INFO'!!!!!!!!!!!
+     sql92c_compress_path( szPathName, pDevspaceInfos[ i ].DevspaceName, 44 );
+
+     printf ( XCONS_SHOW_IO_INFO,
+              szPathName,
+              ulDevspaceNo,
+              pDevspaceInfos[ i ].ulReadCnt,
+              pDevspaceInfos[ i ].ulWriteCnt,
+              pDevspaceInfos[ i ].ulReadCnt +
+              pDevspaceInfos[ i ].ulWriteCnt );
+
+     ulReadCnt  += pDevspaceInfos[ i ].ulReadCnt;
+     ulWriteCnt += pDevspaceInfos[ i ].ulWriteCnt;
+     ulTotal    += pDevspaceInfos[ i ].ulReadCnt +
+                   pDevspaceInfos[ i ].ulWriteCnt;
+    #endif
+    }
+
+  #ifdef RUN_AS_SYSMON
+  #else
+   printf ( XCONS_SHOW_IO_INFO_TOTAL,
+            XCONS_SHOW_IO_INFO_TOTAL_STR,
+            ulReadCnt,
+            ulWriteCnt,
+            ulTotal );
+  #endif
+
+  return ( NO_ERROR );
+  }
+
+
+/*------------------------------*/
+
+
+static LONG sql92c_show_aio_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_aio_info"
+  #ifndef RUN_AS_SYSMON
+  INT                        i;
+  PCONS_ASYNCI_INFO_REC      pASYNCiInfos;
+  CHAR                       szTid[12];
+  PATHNAME                   szPathName;
+  CHAR                       szMode[2];
+
+  pASYNCiInfos    = (PCONS_ASYNCI_INFO_REC)
+                      ((PCHAR)pConsoleRec +
+                          pConsoleRec->AIOInfo.ulASYNCiInfoOffset);
+
+
+  if ( pConsoleRec->AIOInfo.lNumOfASYNCis )
+   {
+   printf ( XCONS_SHOW_ASYNCIO_HEADER );
+
+   for ( i = 0; i < pConsoleRec->AIOInfo.lNumOfASYNCis; i++ )
+     {
+     // --- The compress value (20) must be identical to the value
+     //     defined in 'XCONS_SHOW_ASYNCIO_DEV_INFO'!!!!!!!!!!!
+     sql92c_compress_path ( szPathName,
+                            pASYNCiInfos[i].szLogDeviceName,
+                            20 );
+
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pASYNCiInfos[i].Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+
+     if ( pASYNCiInfos[i].fForWriting )
+       {
+       szMode[0] = 'W';
+       szMode[1] = '\0';
+       }
+     else
+       {
+       szMode[0] = 'R';
+       szMode[1] = '\0';
+       }
+
+     printf ( XCONS_SHOW_ASYNCIO_INFO,
+              szPathName,
+              szTid,
+              szMode,
+              pASYNCiInfos[i].ulMaxBlockCnt,
+              pASYNCiInfos[i].ulBlockSize,
+              pASYNCiInfos[i].DevIOStat.DevRead.ulCount,
+              pASYNCiInfos[i].DevIOStat.DevWrite.ulCount,
+              pASYNCiInfos[i].DevIOStat.ulIOQueLen,
+              pASYNCiInfos[i].DevIOStat.ulMaxIOQueLen );
+     }
+  }
+  #endif
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_region_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_region_info"
+  INT                        i;
+  INT                        j;
+  PCONS_SINGLE_SEM_INFO_REC  pSingleSemInfos;
+  PULONG                     pulWaitTasks;
+  float                      flPercent;
+  #ifdef RUN_AS_SYSMON
+   APIRET                    rc = NO_ERROR;
+  #else
+   CHAR                      szOwnerTaskIndex[20];
+  #endif
+
+  DBGPAS;
+
+  pSingleSemInfos = (PCONS_SINGLE_SEM_INFO_REC)
+                        ((PCHAR)pConsoleRec +
+                                pConsoleRec->SemInfo.ulSingleSemInfoOffset);
+
+  #ifdef RUN_AS_SYSMON
+   rc = sql92c_create_region_tab ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+  #else
+   printf ( XCONS_SHOW_REGION_HEADER );
+  #endif
+
+  for ( i = 0; i < pConsoleRec->SemInfo.lNumOfSems; i ++ )
+    {
+    pulWaitTasks = (PULONG)((PCHAR)pConsoleRec +
+                                pSingleSemInfos[i].ulWaitTaskOffset);
+
+    if (( ! pSingleSemInfos[i].lGetCount ) ||
+        ( ! pSingleSemInfos[i].lCollisionCount ))
+      flPercent = 0.0f;
+    else
+      flPercent = (float) pSingleSemInfos[i].lCollisionCount * 100.0f /
+                  (float) pSingleSemInfos[i].lGetCount;
+
+
+    #ifdef RUN_AS_SYSMON
+
+     // --- set values
+     strcpy( SysRegions.szSemaName, pSingleSemInfos[i].szSemaName );
+     SysRegions.ulSid            = pSingleSemInfos[i].ulSid;
+     SysRegions.ulOwnerTaskIndex = pSingleSemInfos[i].ulOwnerTaskIndex;
+     SysRegions.lGetCount        = pSingleSemInfos[i].lGetCount;
+     SysRegions.lTasCount        = pSingleSemInfos[i].lBegExclTasCount
+                                 + pSingleSemInfos[i].lEndExclTasCount;
+     SysRegions.lCollisionCount  = pSingleSemInfos[i].lCollisionCount;
+     SysRegions.ulCollisionRate  = (ULONG)flPercent;
+     SysRegions.lExclusive       = pSingleSemInfos[i].lExclusive;
+
+     // --- set indicators
+     SysRegionsInd.iSid            = 0;
+     SysRegionsInd.iSemaName       = 0;
+     SysRegionsInd.iWaitTaskIndex  = -1;
+     SysRegionsInd.iGetCount       = 0;
+     SysRegionsInd.iTasCount       = 0;
+     SysRegionsInd.iCollisionCount = 0;
+     SysRegionsInd.iCollisionRate  = 0;
+     SysRegionsInd.iExclusive      = 0;
+
+     if (SysRegions.ulOwnerTaskIndex == 0 )
+       SysRegionsInd.iOwnerTaskIndex = -1;
+     else
+       SysRegionsInd.iOwnerTaskIndex = 0;
+
+     EXEC SQL INSERT INTO SYSMON$REGIONS VALUES ( :SysRegions:SysRegionsInd );
+
+
+     for ( j = 0; ( sqlca.sqlcode == 0 ) &&
+           (j < (INT)pSingleSemInfos[i].lNumWaitTasks); j++ )
+       {
+       // --- set values
+       SysRegions.ulWaitTaskIndex = pulWaitTasks[j];
+
+       // --- set indicators
+       SysRegionsInd.iSid            = 0;
+       SysRegionsInd.iSemaName       = 0;
+       SysRegionsInd.iOwnerTaskIndex = 0;
+       SysRegionsInd.iWaitTaskIndex  = 0;
+       SysRegionsInd.iGetCount       = -1;
+       SysRegionsInd.iTasCount       = -1;
+       SysRegionsInd.iCollisionCount = -1;
+       SysRegionsInd.iCollisionRate  = -1;
+       SysRegionsInd.iExclusive      = -1;
+
+       EXEC SQL INSERT INTO SYSMON$REGIONS VALUES ( :SysRegions:SysRegionsInd );
+       }
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_UPDATING_TAB, "SYSMON$REGIONS",sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     EXEC SQL COMMIT WORK;
+
+    #else
+
+     if (pSingleSemInfos[i].ulOwnerTaskIndex)
+       {
+       szOwnerTaskIndex[0] = 'T';
+       _ltoa ( pSingleSemInfos[i].ulOwnerTaskIndex, szOwnerTaskIndex + 1, 10 );
+       }
+     else
+       szOwnerTaskIndex[0] = '\0';
+
+     printf ( XCONS_SHOW_REGION_INFO,
+              pSingleSemInfos[i].ulSid,
+              pSingleSemInfos[i].szSemaName,
+              szOwnerTaskIndex,
+              pSingleSemInfos[i].lGetCount,
+              pSingleSemInfos[i].lBegExclTasCount +
+              pSingleSemInfos[i].lEndExclTasCount,
+              pSingleSemInfos[i].lCollisionCount,
+              pSingleSemInfos[i].lWaitCount,
+              pSingleSemInfos[i].lExclusive,
+              flPercent );
+
+     if ( pSingleSemInfos[i].lNumWaitTasks)
+       {
+       printf ( XCONS_SHOW_REGION_WAIT_HD );
+
+       for ( j = 0; j < (INT)pSingleSemInfos[i].lNumWaitTasks; j++ )
+         {
+         if ( !(j % TASKS_INFO_P_LINE) && j)
+           printf ( XCONS_SHOW_REGION_WAIT_ILF,
+                    pulWaitTasks[j] );
+         else
+           printf ( XCONS_SHOW_REGION_WAIT_I,
+                    pulWaitTasks[j] );
+         }
+       printf ("\n");
+       }
+
+    #endif
+
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_storage_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_storage_info"
+  PCONS_TASK_STORAGE_INFO_REC pTaskStorInfos;
+  #ifdef RUN_AS_SYSMON
+   APIRET                     rc = NO_ERROR;
+  #else
+   INT                        i;
+  #endif
+  DBGPAS;
+
+  pTaskStorInfos = (PCONS_TASK_STORAGE_INFO_REC)
+                       ((PCHAR)pConsoleRec +
+                               pConsoleRec->StorageInfo.ulTaskStorInfoOffset);
+
+  #ifdef RUN_AS_SYSMON
+   rc = sql92c_create_storage_tab ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+
+   #if 0
+   //
+   // --- CODESIZE
+   //
+   strcpy( SysStorage.szDesc,  XCONS_STOR_DES_CODESIZE  );
+   strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_CODESIZE );
+   SysStorage.ulVal = ;
+
+   EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+   #endif
+
+   //
+   // --- STACKSIZE
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_TSK_STACK_SIZE  );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_TSK_STACK_SIZE );
+     SysStorage.ulVal = pConsoleRec->StorageInfo.lTaskStacks / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+
+   //
+   // --- KGS Size
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_KGS );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_KGS );
+     SysStorage.ulVal = pConsoleRec->StorageInfo.ulKGSSize   / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   //
+   // --- KSS Size
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_KSS );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_KSS );
+     SysStorage.ulVal = pConsoleRec->StorageInfo.ulKSSSize   / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   //
+   // --- SHARED DYN. POOL
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_SHRD_DYN_POOLFREE );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_SHRD_DYN_POOLFREE );
+     SysStorage.ulVal          = pConsoleRec->StorageInfo.lDynPoolAvail / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_SHRD_DYN_POOL_USED );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_SHRD_DYN_POOL_USED );
+     SysStorage.ulVal          = pConsoleRec->StorageInfo.lDynPoolUsed / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   //
+   // --- SHARED DYN. DATA
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_SHRD_DYN_DATFREE  );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_SHRD_DYN_DATFREE );
+     SysStorage.ulVal          = pConsoleRec->StorageInfo.lDynDatAvail / 4096;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_SHRD_DYN_DAT_USED  );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_SHRD_DYN_DAT_USED );
+     SysStorage.ulVal          = pConsoleRec->StorageInfo.lDynDatUsed / 4096;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   //
+   // --- RTE ALLOCATION POOL
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_RTE_ALL_POOL_USED  );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_RTE_ALL_POOL_USED );
+     SysStorage.ulVal = pConsoleRec->StorageInfo.ulRTEAllocPoolUsed / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   #if !defined(_WIN32)
+    if ( sqlca.sqlcode == 0 )
+      {
+      strcpy( SysStorage.szDesc,  XCONS_STOR_DES_RTE_ALL_POOL_MAX  );
+      strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_RTE_ALL_POOL_MAX );
+      SysStorage.ulVal = pConsoleRec->StorageInfo.ulRTEAllocPoolMax / ( 1 MB );
+
+      EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+      }
+   #endif
+
+   //
+   // --- KERNEL ALLOCATION POOL
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_KRN_ALL_POOL_USED  );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_KRN_ALL_POOL_USED );
+     SysStorage.ulVal = pConsoleRec->StorageInfo.ulKernelAllocPoolUsed / 1024;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   #if !defined(_WIN32)
+    if ( sqlca.sqlcode == 0 )
+      {
+      strcpy( SysStorage.szDesc,  XCONS_STOR_DES_KRN_ALL_POOL_MAX  );
+      strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_KRN_ALL_POOL_MAX );
+      SysStorage.ulVal = pConsoleRec->StorageInfo.ulKernelAllocPoolMax / 1024;
+
+      EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+      }
+   #endif
+
+   //
+   // --- EXISTING TASKS
+   //
+   if ( sqlca.sqlcode == 0 )
+     {
+     strcpy( SysStorage.szDesc,  XCONS_STOR_DES_EXISTING_TASKS );
+     strcpy( SysStorage.szVDesc, XCONS_STOR_VDES_EXISTING_TASKS );
+     SysStorage.ulVal          = pConsoleRec->StorageInfo.ulTasksTotal;
+
+     EXEC SQL INSERT INTO SYSMON$STORAGE VALUES ( :SysStorage );
+     }
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     MSGCD (( ERR_UPDATING_TAB, "SYSMON$STORAGE",sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL COMMIT WORK;
+
+  #else
+   printf ( XCONS_SHOW_STOR_DYN_POOL,
+            (pConsoleRec->StorageInfo.lDynPoolUsed +
+             pConsoleRec->StorageInfo.lDynPoolAvail  )      / 1024,
+            pConsoleRec->StorageInfo.lDynPoolUsed           / 1024,
+            pConsoleRec->StorageInfo.lDynPoolAvail          / 1024 );
+   printf ( XCONS_SHOW_STOR_DYN_DATA,
+            (pConsoleRec->StorageInfo.lDynDatUsed  +
+             pConsoleRec->StorageInfo.lDynDatAvail   )      / 1024,
+            pConsoleRec->StorageInfo.lDynDatUsed            / 1024,
+            pConsoleRec->StorageInfo.lDynDatAvail           / 1024 );
+
+   #if defined(_WIN32)
+    printf ( XCONS_SHOW_STOR_RTE_ALLOC_POOL,
+            pConsoleRec->StorageInfo.ulRTEAllocPoolUsed     / 1024,
+            pConsoleRec->StorageInfo.ulRTEAllocPoolCnt );
+    printf ( XCONS_SHOW_STOR_KERN_ALLOC_POOL,
+            pConsoleRec->StorageInfo.ulKernelAllocPoolUsed  / 1024,
+            pConsoleRec->StorageInfo.ulKernelAllocPoolCnt );
+   #else
+    printf ( XCONS_SHOW_STOR_RTE_ALLOC_POOL_MX,
+            pConsoleRec->StorageInfo.ulRTEAllocPoolUsed     / 1024,
+            pConsoleRec->StorageInfo.ulRTEAllocPoolMax      / ( 1 MB ),
+            pConsoleRec->StorageInfo.ulRTEAllocPoolCnt );
+    printf ( XCONS_SHOW_STOR_KERN_ALLOC_POOL_MX,
+            pConsoleRec->StorageInfo.ulKernelAllocPoolUsed  / 1024,
+            pConsoleRec->StorageInfo.ulKernelAllocPoolMax   / 1024,
+            pConsoleRec->StorageInfo.ulKernelAllocPoolCnt );
+   #endif
+
+   printf ( XCONS_SHOW_STOR_ALLOC_STCK,
+            pConsoleRec->StorageInfo.lTaskStacks      / 1024 );
+   printf ( XCONS_SHOW_STOR_KGS,
+            pConsoleRec->StorageInfo.ulKGSSize        / 1024 );
+   printf ( XCONS_SHOW_STOR_KSS,
+            pConsoleRec->StorageInfo.ulKSSSize        / 1024 );
+
+   printf ( XCONS_SHOW_STOR_TSK_HEADER );
+
+   for ( i = 0; i < pConsoleRec->StorageInfo.lNumOfTasks; i++)
+     {
+     printf ( XCONS_SHOW_STOR_TSK_INFO,
+              pTaskStorInfos[i].ulTaskIndex,
+              sql92c_type_name ( pTaskStorInfos[i].TaskType ),
+              (float)pTaskStorInfos[i].ulStackUsed / 1024.0,
+              (float)pTaskStorInfos[i].ulStackFree / 1024.0 );
+     }
+  #endif
+
+  return ( NO_ERROR );
+  }
+
+
+/*------------------------------*/
+
+static LONG sql92c_show_rte_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_rte_info"
+  ULONG                       ulDevspaceNo;
+  INT                         i;
+  INT                         j;
+  PCONS_UKT_INFO_REC          pUKTInfos;
+  PCONS_DEV_INFO_REC          pDevspaceInfos;
+  PCONS_DEVI_INFO_REC         pDEViInfos;
+  PCONS_DEV_WORKER_INFO_REC   pDevWorkerInfos;
+  BOOL                        fUKTAffinity = FALSE;
+  #ifdef RUN_AS_SYSMON
+   APIRET                     rc = NO_ERROR;
+  #else
+   CHAR                       szTid[12];
+   PATHNAME                   szPathName;
+  #endif
+
+  DBGPAS;
+
+  pDevWorkerInfos = (PCONS_DEV_WORKER_INFO_REC)
+                   ((PCHAR)pConsoleRec +
+                       pConsoleRec->RTEInfo.ulDevWorkerInfoOffset);
+
+  pUKTInfos       = (PCONS_UKT_INFO_REC)
+                      ((PCHAR)pConsoleRec +
+                          pConsoleRec->RTEInfo.ulUKTInfoOffset);
+
+
+  pDEViInfos      = (PCONS_DEVI_INFO_REC)
+                      ((PCHAR)pConsoleRec +
+                          pConsoleRec->RTEInfo.ulDEViInfoOffset);
+
+
+  #ifdef RUN_AS_SYSMON
+   rc = sql92c_create_rte_tabs ();
+
+   if ( rc != NO_ERROR )
+     return ( rc );
+
+   //
+   // --- COORDINATOR
+   //
+   if ( pConsoleRec->RTEInfo.CoordTid != (TID)UNDEF)
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_COORD );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.CoordTid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- TIMER
+   //
+   if (( sqlca.sqlcode == 0 ) || ( pConsoleRec->RTEInfo.TimerTid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_TIMER );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.TimerTid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- CLOCK
+   //
+   if (( sqlca.sqlcode == 0 ) || ( pConsoleRec->RTEInfo.ClockTid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_CLOCK );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.ClockTid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- DEV0
+   //
+   if (( sqlca.sqlcode == 0 ) || ( pConsoleRec->RTEInfo.Dev0Tid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_DEV0 );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.Dev0Tid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- ASYNC0
+   //
+   if (( sqlca.sqlcode == 0 ) || ( pConsoleRec->RTEInfo.Async0Tid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_ASYNC0 );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.Async0Tid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- CONSOLE
+   //
+   if ((sqlca.sqlcode == 0) || (pConsoleRec->RTEInfo.ConsoleTid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_CONSOLE );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.ConsoleTid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   //
+   // --- REQUESTOR
+   //
+   if ((sqlca.sqlcode == 0)||(pConsoleRec->RTEInfo.RequestorTid != (TID)UNDEF))
+     {
+     strcpy( SysDBProc.szName, XCONS_SHOW_RTE_KT_REQUESTOR );
+     SysDBProc.ulTid = pConsoleRec->RTEInfo.RequestorTid;
+
+     EXEC SQL INSERT INTO SYSMON$DBPROCS VALUES ( :SysDBProc );
+     }
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     MSGCD (( ERR_UPDATING_TAB, "SYSMON$DBPROCS",sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   //
+   // --- UKT's
+   //
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfUKTs; i++ )
+     {
+     sprintf ( SysUKProc.szName, XCONS_RTE_DESC_UKT,
+               pUKTInfos[i].ulUKTIndex );
+     strcpy ( SysUKProc.szCluster, pUKTInfos[i].szCluster );
+
+     SysUKProc.ulTid             = pUKTInfos[i].Tid;
+     SysUKProc.ulActiveTasks     = pUKTInfos[i].ulActiveTasks;
+     SysUKProc.ulTotalTasks      = pUKTInfos[i].ulTotalTasks;
+     SysUKProc.ulDispatcherCalls = (ULONG)pUKTInfos[i].dDispatcherCalls;
+
+     EXEC SQL INSERT INTO SYSMON$UKPROCS VALUES ( :SysUKProc );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_UPDATING_TAB, "SYSMON$UKPROCS",sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+
+   //
+   // --- UKT I/O
+   //
+
+   // --- set indicator
+   SysDevIOInd.iTid         = 0;
+   SysDevIOInd.iName        = 0;
+   SysDevIOInd.iDevNo       = 0;
+   SysDevIOInd.iReadCnt     = 0;
+   SysDevIOInd.iWriteCnt    = 0;
+   SysDevIOInd.iIOQueLen    = -1;
+   SysDevIOInd.iMaxIOQueLen = -1;
+
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfUKTs; i++ )
+     {
+     pDevspaceInfos = (PCONS_DEV_INFO_REC)
+                        ((PCHAR)pConsoleRec +
+                                pUKTInfos[i].ulDevspaceInfoOffset);
+
+     for ( j = 0; j < pUKTInfos[i].lNumOfDevspaces; j++ )
+       {
+       ulDevspaceNo = pDevspaceInfos[j].ulDevspaceNo;
+
+       sprintf ( SysDevIO.szName, XCONS_RTE_DESC_UKT,
+                 pUKTInfos[i].ulUKTIndex );
+
+       SysDevIO.ulTid      = pUKTInfos[i].Tid;
+       SysDevIO.ulDevNo    = ulDevspaceNo;
+       SysDevIO.ulReadCnt  = pDevspaceInfos[j].ulReadCnt;
+       SysDevIO.ulWriteCnt = pDevspaceInfos[j].ulWriteCnt;
+
+       EXEC SQL INSERT INTO SYSMON$DEVIOPROCS VALUES ( :SysDevIO:SysDevIOInd );
+
+       if ( sqlca.sqlcode != 0 )
+         {
+         MSGCD (( ERR_UPDATING_TAB, "SYSMON$DEVIOPROCS",sqlca.sqlcode ))
+         EXEC SQL ROLLBACK WORK;
+         return ( sqlca.sqlcode );
+         }
+       }
+     }
+
+   //
+   // --- DEVi I/O
+   //
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfDEVis; i++ )
+     {
+     ulDevspaceNo = pDEViInfos[i].ulDevspaceNo;
+
+     if ( ulDevspaceNo == (ULONG)pConsoleRec->RTEInfo.lTraceDevspaceNo )
+       strcpy (SysDevIO.szName, XCONS_RTE_DESC_DEV_VTRACE );
+     else
+       strcpy (SysDevIO.szName, XCONS_RTE_DESC_DEV );
+
+     SysDevIO.ulTid       = pDEViInfos[i].Tid;
+     SysDevIO.ulDevNo     = ulDevspaceNo;
+     SysDevIO.ulReadCnt   = pDEViInfos[i].DevIOStat.DevRead.ulCount;
+     SysDevIO.ulWriteCnt  = pDEViInfos[i].DevIOStat.DevWrite.ulCount;
+     SysDevIO.lIOQueLen   = pDEViInfos[i].DevIOStat.ulIOQueLen;
+     SysDevIO.lMaxIOQueLen= pDEViInfos[i].DevIOStat.ulMaxIOQueLen;
+
+     EXEC SQL INSERT INTO SYSMON$DEVIOPROCS VALUES ( :SysDevIO );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_UPDATING_TAB, "SYSMON$DEVIOPROCS",sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   EXEC SQL COMMIT WORK;
+
+  #else
+
+   // --- show kernel thread info
+   printf ( XCONS_SHOW_RTE_KT_HEADER );
+
+   //
+   // --- COORDINATOR
+   //
+   if ( pConsoleRec->RTEInfo.CoordTid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.CoordTid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_COORD, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.CoordState ) );
+
+   //
+   // --- TIMER
+   //
+   if ( pConsoleRec->RTEInfo.TimerTid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.TimerTid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_TIMER, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.TimerState ) );
+
+   //
+   // --- CLOCK
+   //
+   if ( pConsoleRec->RTEInfo.ClockTid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.ClockTid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_CLOCK, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.ClockState ) );
+
+   //
+   // --- DEV0
+   //
+   if ( pConsoleRec->RTEInfo.Dev0Tid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.Dev0Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_DEV0, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.Dev0State ) );
+
+   //
+   // --- ASYNC0
+   //
+   if ( pConsoleRec->RTEInfo.Async0Tid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.Async0Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_ASYNC0, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.Async0State ) );
+
+   //
+   // --- CONSOLE
+   //
+   if ( pConsoleRec->RTEInfo.ConsoleTid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.ConsoleTid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_CONSOLE, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.ConsoleState ) );
+
+   //
+   // --- REQUESTOR
+   //
+   if ( pConsoleRec->RTEInfo.RequestorTid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.RequestorTid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_REQUESTOR, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.RequestorState ) );
+
+   //
+   // --- DCOM0
+   //
+   if ( pConsoleRec->RTEInfo.DCOM0Tid != (TID)UNDEF)
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pConsoleRec->RTEInfo.DCOM0Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+     }
+   else
+     szTid[0] = '\0';
+
+   printf ( XCONS_SHOW_RTE_KT_INFO, XCONS_SHOW_RTE_KT_DCOM0, szTid,
+            sql92c_kt_state_name( pConsoleRec->RTEInfo.DCOM0State ) );
+
+
+   if ( pConsoleRec->RTEInfo.lNumOfDevWorkers )
+     {
+     printf ( XCONS_SHOW_RTE_DEV_WORKER_HEADER );
+
+     for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfDevWorkers; i++ )
+       {
+       szTid[0] = '0';
+       szTid[1] = 'x';
+       _ultoa ( pDevWorkerInfos[i].Tid, szTid + 2, 16 );
+       strupr ( szTid + 2 );
+       printf ( XCONS_SHOW_RTE_DEV_WORKER_INFO,
+                i,
+                szTid,
+                sql92c_ukt_state_name( pDevWorkerInfos[i].ThrdState ),
+                pDevWorkerInfos[i].ulIOCount );
+       }
+     printf ( XCONS_SHOW_RTE_CONCURR_DEV_WORKER,
+              pConsoleRec->RTEInfo.ulNumOfConcurrentDevWorkers );
+     }
+
+   printf ( XCONS_SHOW_RTE_UKT_HEADER );
+
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfUKTs; i++ )
+     {
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pUKTInfos[i].Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+
+     printf ( XCONS_SHOW_RTE_UKT_INFO,
+              pUKTInfos[i].ulUKTIndex,
+              szTid,
+              sql92c_ukt_state_name( pUKTInfos[i].ThrdState ),
+              pUKTInfos[i].dDispatcherCalls,
+              pUKTInfos[i].ulActiveTasks,
+              pUKTInfos[i].ulTotalTasks,
+              pUKTInfos[i].szCluster );
+
+
+     if ( pUKTInfos[i].ulProcessor )
+       fUKTAffinity = TRUE;
+     }
+
+   if ( fUKTAffinity )
+     {
+     printf ( XCONS_SHOW_RTE_UKT_AFFIN_HEADER );
+
+     for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfUKTs; i++ )
+       {
+       if ( pUKTInfos[i].ulProcessor )
+         {
+         printf ( XCONS_SHOW_RTE_UKT_AFFIN_INFO,
+                  pUKTInfos[i].ulUKTIndex,
+                  pUKTInfos[i].ulProcessor );
+         }
+       }
+     }
+
+   printf ( XCONS_SHOW_RTE_IO_HEADER );
+
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfUKTs; i++ )
+     {
+     pDevspaceInfos = (PCONS_DEV_INFO_REC)
+                        ((PCHAR)pConsoleRec +
+                                pUKTInfos[i].ulDevspaceInfoOffset);
+
+     for ( j = 0; j < pUKTInfos[i].lNumOfDevspaces; j++ )
+       {
+       ulDevspaceNo = pDevspaceInfos[j].ulDevspaceNo;
+
+       // --- The compress value (20) must be identical to the value
+       //     defined in 'XCONS_SHOW_RTE_IO_UKT_INFO'!!!!!!!!!!!
+       sql92c_compress_path( szPathName, pDevspaceInfos[j].DevspaceName, 20 );
+
+       szTid[0] = '0';
+       szTid[1] = 'x';
+       _ultoa ( pUKTInfos[i].Tid, szTid + 2, 16 );
+       strupr ( szTid + 2 );
+
+       printf ( XCONS_SHOW_RTE_IO_UKT_INFO,
+                pUKTInfos[i].ulUKTIndex,
+                szTid,
+                szPathName,
+                ulDevspaceNo,
+                pDevspaceInfos[j].ulReadCnt,
+                pDevspaceInfos[j].ulWriteCnt );
+       }
+     }
+
+   for ( i = 0; i < pConsoleRec->RTEInfo.lNumOfDEVis; i++ )
+     {
+     ulDevspaceNo = pDEViInfos[i].ulDevspaceNo;
+
+     // --- The compress value (20) must be identical to the value
+     //     defined in 'XCONS_SHOW_RTE_IO_DEV_INFO'!!!!!!!!!!!
+     sql92c_compress_path ( szPathName, pDEViInfos[i].DevspaceName, 20 );
+
+     szTid[0] = '0';
+     szTid[1] = 'x';
+     _ultoa ( pDEViInfos[i].Tid, szTid + 2, 16 );
+     strupr ( szTid + 2 );
+
+     printf ( XCONS_SHOW_RTE_IO_DEV_INFO,
+              pDEViInfos[i].ulDEViIndex,
+              szTid,
+              szPathName,
+              ulDevspaceNo,
+              pDEViInfos[i].DevIOStat.DevRead.ulCount,
+              pDEViInfos[i].DevIOStat.DevWrite.ulCount,
+              pDEViInfos[i].DevIOStat.ulIOQueLen,
+              pDEViInfos[i].DevIOStat.ulMaxIOQueLen );
+     }
+
+  #endif
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_total_count_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_total_count_info"
+
+  CONS_TOTAL_COUNTS_INFO_REC      *TotCntInfo ;
+  TotCntInfo = & pConsoleRec->TotalCountsInfo ;
+
+  printf ( XCONS_SHOW_TOTAL_STAT_HEADER ) ;
+
+  printf ( XCONS_SHOW_TOTAL_DISP_COMMAND_CNT ,
+               XCONS_SHOW_TOTAL_KT_DISP_CALL_CNT ,
+               TotCntInfo->ulTotalDispCalls,
+               XCONS_SHOW_TOTAL_KT_COMMAND_CNT ,
+               TotCntInfo->ulTotalCommands);
+
+  printf ( XCONS_SHOW_TOTAL_KT_STATE_VWAIT_VSUSP_CNT ,
+               XCONS_SHOW_TOTAL_KT_STATE_VWAIT_CNT,
+               TotCntInfo->ulTotalVwait,
+               XCONS_SHOW_TOTAL_KT_STATE_VSUSP_CNT,
+               TotCntInfo->ulTotalVsusp );
+
+  printf ( XCONS_SHOW_TOTAL_KT_STATE_VSLEEP,
+               XCONS_SHOW_TOTAL_KT_STATE_VSLEEP_CNT,
+               TotCntInfo->ulTotalVsleep);
+
+  printf ( XCONS_SHOW_TOTAL_SELFIO_DEVIO_CNT ,
+               XCONS_SHOW_TOTAL_KT_SELFIO_CNT ,
+               TotCntInfo->ulTotalSelfIO,
+               XCONS_SHOW_TOTAL_KT_DEVIO_CNT,
+               TotCntInfo->ulTotalDevIO);
+
+  printf ( XCONS_SHOW_TOTAL_REG_ACC_BEGEXCL_COLL,
+               XCONS_SHOW_TOTAL_KT_REG_ACCESS,
+               TotCntInfo->ulTotalRegAccess,
+               XCONS_SHOW_TOTAL_KT_BEGEXCL_COLL,
+               TotCntInfo->ulTotalBegExclTasCount);
+
+  printf ( XCONS_SHOW_TOTAL_REG_COLL_ENDEXCL_COLL,
+               XCONS_SHOW_TOTAL_KT_REG_COLL,
+               TotCntInfo->ulTotalRegColl,
+               XCONS_SHOW_TOTAL_KT_ENDEXCL_COLL,
+               TotCntInfo->ulTotalEndExclTasCount);
+
+  printf ( XCONS_SHOW_TOTAL_KT_REG_WAIT ,
+               XCONS_SHOW_TOTAL_KT_REG_WAIT_CNT ,
+               TotCntInfo->ulTotalRegWait);
+
+  if ( TotCntInfo->TotalPrioStat.ulTotalCount )
+   { printf ( XCONS_SHOW_TOTAL_PRIO_CNT_AND_OTHER,
+                  XCONS_SHOW_TOTAL_KT_PRIO_CNT,
+                  TotCntInfo->TotalPrioStat.ulTotalCount,
+                  XCONS_SHOW_TOTAL_KT_PRIO_OTHER ,
+                  TotCntInfo->TotalPrioStat.ulOtherUkt);
+   }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_task_count_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_task_count_info"
+  INT                                i;
+  CHAR                               szApplPid[12];
+  PCONS_SINGLE_TASK_COUNTS_INFO_REC  pTaskCountsInfo;
+  TASK_STATE_STATISTIC               *pTaskStateStat;
+  PRIO_STATISTIC                     *pTaskPrioStat;
+  BOOL                               fTimeMeasureActive;
+
+  pTaskCountsInfo = (PCONS_SINGLE_TASK_COUNTS_INFO_REC)
+                        ((PCHAR)pConsoleRec +
+                          pConsoleRec->TaskCountsInfo.ulTaskCountsInfoOffset);
+
+  fTimeMeasureActive = pConsoleRec->TaskCountsInfo.fTimeMeasureActive;
+
+  for ( i = 0;
+        i < pConsoleRec->TaskCountsInfo.lNumOfActiveTasks;
+        i++, pTaskCountsInfo++ )
+    {
+    pTaskStateStat  = &pTaskCountsInfo->StateStat;
+    pTaskPrioStat   = &pTaskCountsInfo->PrioStat;
+
+    if ( pTaskCountsInfo->ApplPid != (PID)UNDEF )
+      {
+      szApplPid[0] = '0';
+      szApplPid[1] = 'x';
+      _ultoa ( pTaskCountsInfo->ApplPid, szApplPid + 2, 16 );
+      strupr ( szApplPid + 2 );
+      }
+    else
+      {
+      szApplPid[0] = '?';
+      szApplPid[1] = '\0';
+      }
+
+
+    printf ( XCONS_SHOW_TASK_COUNT_HEADER,
+                XCONS_INFO_LINE ,
+                pTaskCountsInfo->ulTaskIndex,
+                sql92c_type_name ( pTaskCountsInfo->TaskType ),
+                szApplPid,
+                XCONS_INFO_LINE ) ;
+
+    if ( pTaskCountsInfo->szClientNode[0] )
+      {
+        printf ( XCONS_SHOW_TASK_COUNT_REM_NODE_AND_PID ,
+                 XCONS_SHOW_TASK_COUNT_REM_NODE ,
+                 pTaskCountsInfo->szClientNode ,
+                 XCONS_SHOW_TASK_COUNT_REM_PID  ,
+                 szApplPid );
+      }
+
+    printf ( XCONS_SHOW_TASK_COUNT_DISP_COMMAND_CNT    ,
+                XCONS_SHOW_TASK_COUNT_KT_DISP_CALL_CNT,
+                pTaskCountsInfo->ulDispatcherCalls,
+                XCONS_SHOW_TASK_COUNT_KT_COMMAND_CNT,
+                pTaskCountsInfo->ulCommands );
+
+    printf ( XCONS_SHOW_TASK_COUNT_EXCL_SELF_SUSP_CNT  ,
+                XCONS_SHOW_TASK_COUNT_KT_EXCLUSIVE_CNT ,
+                pTaskCountsInfo->ulBegExclCalls ,
+                XCONS_SHOW_TASK_COUNT_KT_SELF_SUSP_CNT ,
+                pTaskCountsInfo->ulSelfSuspCount );
+
+    if ( ! fTimeMeasureActive )
+      {
+      if ( pTaskStateStat->AsynIOReadStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_ASYN_CNT_PG ,
+                       XCONS_SHOW_TASK_COUNT_KT_ASYN_R_CNT ,
+                       pTaskStateStat->AsynIOReadStat.ulCount   ,
+                       XCONS_SHOW_TASK_COUNT_KT_ASYN_R_PG ,
+                       pTaskStateStat->AsynIOWriteStat.ulPageCount);
+
+      if ( pTaskStateStat->AsynIOWriteStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_ASYN_CNT_PG ,
+                       XCONS_SHOW_TASK_COUNT_KT_ASYN_R_CNT ,
+                       pTaskStateStat->AsynIOWriteStat.ulCount   ,
+                       XCONS_SHOW_TASK_COUNT_KT_ASYN_W_CNT  ,
+                       pTaskStateStat->AsynIOWriteStat.ulPageCount);
+
+      if ( pTaskStateStat->SelfIOReadStat.ulCount ||
+           pTaskStateStat->DevIOReadStat.ulCount   )
+        printf ( XCONS_SHOW_TASK_COUNT_IO_CNT ,
+                       XCONS_SHOW_TASK_COUNT_KT_SELF_R_CNT ,
+                       pTaskStateStat->SelfIOReadStat.ulCount   ,
+                       XCONS_SHOW_TASK_COUNT_KT_DEV_R_CNT ,
+                       pTaskStateStat->DevIOReadStat.ulCount  ) ;
+
+      if ( pTaskStateStat->SelfIOWriteStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_IO_CNT ,
+                       XCONS_SHOW_TASK_COUNT_KT_SELF_W_CNT ,
+                       pTaskStateStat->SelfIOWriteStat.ulCount,
+                       XCONS_SHOW_TASK_COUNT_KT_SELF_W_PG ,
+                       pTaskStateStat->SelfIOWriteStat.ulPageCount);
+
+      if ( pTaskStateStat->DevIOWriteStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_IO_CNT ,
+                       XCONS_SHOW_TASK_COUNT_KT_DEV_W_CNT  ,
+                       pTaskStateStat->DevIOWriteStat.ulCount,
+                       XCONS_SHOW_TASK_COUNT_KT_DEV_W_PG ,
+                       pTaskStateStat->DevIOWriteStat.ulPageCount);
+
+      printf ( XCONS_SHOW_TASK_COUNT_WAIT_SLEEP_SUSP_CNT  ,
+                   XCONS_SHOW_TASK_COUNT_KT_STATE_VWAIT_CNT  ,
+                   pTaskStateStat->VwaitStat.ulCount,
+                   XCONS_SHOW_TASK_COUNT_KT_STATE_VSLEEP_CNT ,
+                   pTaskStateStat->VsleepStat.ulCount,
+                   XCONS_SHOW_TASK_COUNT_KT_STATE_VSUSP_CNT  ,
+                   pTaskStateStat->VsuspStat.ulCount ) ;
+      }
+    else
+      {
+      PRI_STAT_TM (  XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->AsynIOReadStat,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_R_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_R_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_R_ABS_TIME ) ;
+
+      PRI_PG_PER_IO( XCONS_SHOW_TASK_COUNT_PG_PER_IO,
+                     pTaskStateStat->AsynIOReadStat,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_R_PG,
+                     XCONS_SHOW_TASK_COUNT_KT_PG_PER_IO ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->AsynIOWriteStat,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_W_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_W_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_W_ABS_TIME ) ;
+
+      PRI_PG_PER_IO( XCONS_SHOW_TASK_COUNT_PG_PER_IO,
+                     pTaskStateStat->AsynIOWriteStat,
+                     XCONS_SHOW_TASK_COUNT_KT_ASYN_W_PG,
+                     XCONS_SHOW_TASK_COUNT_KT_PG_PER_IO ) ;
+
+      if ( pTaskStateStat->SelfIOReadStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_SELF_R_CNT_AVG_TIME ,
+                     XCONS_SHOW_TASK_COUNT_KT_SELF_R_CNT ,
+                     pTaskStateStat->SelfIOReadStat.ulCount   ,
+                     XCONS_SHOW_TASK_COUNT_KT_SELF_R_AVG_TIME ,
+                     AVG_TIME( pTaskStateStat->SelfIOReadStat ) ) ;
+
+      if ( pTaskStateStat->SelfIOWriteStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_IO_CNT_PG_TIME    ,
+                     XCONS_SHOW_TASK_COUNT_KT_SELF_W_CNT ,
+                     pTaskStateStat->SelfIOWriteStat.ulCount   ,
+                     XCONS_SHOW_TASK_COUNT_KT_SELF_W_PG  ,
+                     pTaskStateStat->SelfIOWriteStat.ulPageCount   ,
+                     XCONS_SHOW_TASK_COUNT_KT_SELF_W_AVG_TIME ,
+                     AVG_TIME( pTaskStateStat->SelfIOWriteStat ) ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->DevIOReadStat,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_R_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_R_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_R_ABS_TIME ) ;
+
+      PRI_PG_PER_IO( XCONS_SHOW_TASK_COUNT_PG_PER_IO,
+                     pTaskStateStat->DevIOReadStat,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_R_PG,
+                     XCONS_SHOW_TASK_COUNT_KT_PG_PER_IO ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->DevIOWriteStat,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_W_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_W_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_W_ABS_TIME ) ;
+
+      PRI_PG_PER_IO( XCONS_SHOW_TASK_COUNT_PG_PER_IO,
+                     pTaskStateStat->DevIOWriteStat,
+                     XCONS_SHOW_TASK_COUNT_KT_DEV_W_PG,
+                     XCONS_SHOW_TASK_COUNT_KT_PG_PER_IO ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->VwaitStat,
+                     XCONS_SHOW_TASK_COUNT_KT_STATE_VWAIT_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_VWAIT_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_VWAIT_ABS_TIME ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->VsuspStat,
+                     XCONS_SHOW_TASK_COUNT_KT_STATE_VSUSP_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_VSUSP_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_VSUSP_ABS_TIME ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->VsleepStat,
+                     XCONS_SHOW_TASK_COUNT_KT_STATE_VSLEEP_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_VSLEEP_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_VSLEEP_ABS_TIME ) ;
+
+      if ( pTaskStateStat->RcvRplStat.ulCount )
+        printf ( XCONS_SHOW_TASK_COUNT_RCV_RPL_INFO ,
+                     XCONS_SHOW_TASK_COUNT_KT_RCV_RPL_CNT,
+                     pTaskStateStat->RcvRplStat.ulCount,
+                     XCONS_SHOW_TASK_COUNT_KT_RCV_RPL_TO_LONG,
+                     pTaskStateStat->ulRcvRplToLong ,
+                     XCONS_SHOW_TASK_COUNT_KT_RCV_RPL_AVG_TIME,
+                     AVG_TIME( pTaskStateStat->RcvRplStat )  ) ;
+
+      PRI_STAT_TM  ( XCONS_SHOW_TASK_COUNT_STATE_CNT_TIME,
+                     pTaskStateStat->RplRcvStat,
+                     XCONS_SHOW_TASK_COUNT_KT_RPL_RCV_CNT  ,
+                     XCONS_SHOW_TASK_COUNT_KT_RPL_RCV_REL_TIME,
+                     XCONS_SHOW_TASK_COUNT_KT_RPL_RCV_ABS_TIME ) ;
+      }
+
+    if ( pTaskPrioStat->ulTotalCount )
+       printf ( XCONS_SHOW_TASK_COUNT_PRIO_TOT_OTH,
+                      XCONS_SHOW_TASK_COUNT_KT_PRIO_CNT ,
+                      pTaskPrioStat->ulTotalCount   ,
+                      XCONS_SHOW_TASK_COUNT_KT_PRIO_FROM_OTHER,
+                      pTaskPrioStat->ulOtherUkt ) ;
+
+    printf ( XCONS_SHOW_TASK_COUNT_TRAILER ) ;
+    }
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_queue_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_queue_info"
+  INT                              i;
+  PCONS_SINGLE_QUEUE_STAT_INFO_REC pQueStatInfo;
+
+  pQueStatInfo  = (PCONS_SINGLE_QUEUE_STAT_INFO_REC)
+                      ((PCHAR)pConsoleRec +
+                              pConsoleRec->QueInfo.ulQueStatInfoOffset);
+
+  printf ( XCONS_SHOW_QUEUE_STAT_HEADER );
+
+  for ( i = 0; i < pConsoleRec->QueInfo.lNumOfActiveTasks; i++)
+    {
+    printf ( XCONS_SHOW_QUEUE_STAT_INFO ,
+             pQueStatInfo[i].ulTaskIndex,
+             pQueStatInfo[i].QueStat.ulUToUQueCount,
+             pQueStatInfo[i].QueStat.ulUKTQueCount,
+             pQueStatInfo[i].QueStat.ulCOMQueCount ) ;
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_ukt_sl_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_ukt_sl_info"
+  INT                               i;
+  PCONS_SINGLE_UKT_SL_STAT_INFO_REC pSleepStatInfo;
+
+
+  if ( pConsoleRec->UKTSleepTimeInfo.lNumOfActiveUKTs > 0 )
+    {
+    pSleepStatInfo = (PCONS_SINGLE_UKT_SL_STAT_INFO_REC)
+                         ((PCHAR)pConsoleRec +
+                         pConsoleRec->UKTSleepTimeInfo.ulSleepStatInfoOffset);
+
+    printf ( XCONS_SHOW_UKT_SLEEP_STAT_HEADER ) ;
+
+    for ( i = 0; i < pConsoleRec->UKTSleepTimeInfo.lNumOfActiveUKTs; i++)
+      {
+      printf( XCONS_SHOW_UKT_SLEEP_STAT_INFO ,
+              pSleepStatInfo[i].Tid ,
+              pSleepStatInfo[i].ulUKTIndex ,
+              pConsoleRec->UKTSleepTimeInfo.ulTotalTimeMeasureSec, 0 ,
+              pSleepStatInfo[i].SleepTimeStat.ulCount,
+              pSleepStatInfo[i].SleepTimeStat.ulSec,
+              pSleepStatInfo[i].SleepTimeStat.ulMicroSec / 1000 ,
+              (float) pSleepStatInfo[i].SleepTimeStat.ulSec * 100 /
+              (float) pConsoleRec->UKTSleepTimeInfo.ulTotalTimeMeasureSec,
+              pSleepStatInfo[i].ulRUNQueueLen );
+      }
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql92c_show_ukt_queues ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_ukt_queues"
+  PCONS_SINGLE_UKT_QUEUES_INFO_REC  pUKTQueues;
+  ULONG                             ulUKT;
+
+
+  if ( pConsoleRec->UKTQueues.lNumOfActiveUKTs > 0 )
+    {
+    pUKTQueues = (PCONS_SINGLE_UKT_QUEUES_INFO_REC)
+                         ((PCHAR)pConsoleRec +
+                         pConsoleRec->UKTQueues.ulUKTQueuesOffset);
+
+    for ( ulUKT = 0; ulUKT < (ULONG)pConsoleRec->UKTQueues.lNumOfActiveUKTs;
+          ulUKT++, pUKTQueues++ )
+      if ( pUKTQueues->ulUKTQueueLen ||
+           pUKTQueues->ulCOMQueueLen ||
+           pUKTQueues->ulRUNQueueLen )
+      {
+        printf ( XCONS_SHOW_QUEUES_HEAD,
+                         pUKTQueues->ulUKTIndex ,
+                         pUKTQueues->Tid ) ;
+
+        sql92c_show_UKT_queue ( pUKTQueues->ulUKTQueueLen,
+                               (PCONS_SINGLE_QUEUE_INFO_REC )
+                                ((PCHAR)pConsoleRec +
+                                      pUKTQueues->ulUKTQueueOffset)) ;
+
+        sql92c_show_COM_queue ( pUKTQueues->ulCOMQueueLen,
+                               (PCONS_SINGLE_QUEUE_INFO_REC )
+                                ((PCHAR)pConsoleRec +
+                                      pUKTQueues->ulCOMQueueOffset)) ;
+
+        sql92c_show_RUN_queue ( pUKTQueues->ulRUNQueueLen,
+                               (PCONS_SINGLE_QUEUE_INFO_REC )
+                                ((PCHAR)pConsoleRec +
+                                      pUKTQueues->ulRUNQueueOffset)) ;
+      }
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+
+static LONG sql92c_show_UKT_queue ( ULONG ulUKTQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTUKTQueue)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_UKT_queue"
+
+  ULONG                             ulQueuElem;
+
+  if ( ulUKTQueueLen > 0 )
+    { printf ( XCONS_SHOW_UKT_QUEUE_HEAD ) ;
+      for ( ulQueuElem = 0;
+            ulQueuElem < ulUKTQueueLen ;
+            ulQueuElem++, pUKTUKTQueue++ )
+               if ( pUKTUKTQueue->PrioFlag )
+                 printf( XCONS_SHOW_UKT_QUEUE_PRIO_ELEMENT,
+                          pUKTUKTQueue->ulTaskIndex ,
+                          pUKTUKTQueue->PrioFlag ) ;
+               else
+                 printf( XCONS_SHOW_UKT_QUEUE_ELEMENT,
+                          pUKTUKTQueue->ulTaskIndex ) ;
+    }
+
+  return ( NO_ERROR );
+  }
+
+
+/*------------------------------*/
+
+
+static LONG sql92c_show_COM_queue ( ULONG ulCOMQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTCOMQueue)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_COM_queue"
+
+  ULONG                             ulQueuElem;
+
+  if ( ulCOMQueueLen > 0 )
+    { printf ( XCONS_SHOW_COM_QUEUE_HEAD ) ;
+      for ( ulQueuElem = 0;
+            ulQueuElem < ulCOMQueueLen ;
+            ulQueuElem++, pUKTCOMQueue++ )
+               if ( pUKTCOMQueue->PrioFlag )
+                 printf( XCONS_SHOW_COM_QUEUE_PRIO_ELEMENT,
+                            pUKTCOMQueue->ulTaskIndex ,
+                            pUKTCOMQueue->PrioFlag ) ;
+               else
+                 printf( XCONS_SHOW_COM_QUEUE_ELEMENT,
+                            pUKTCOMQueue->ulTaskIndex ) ;
+    }
+
+  return ( NO_ERROR );
+  }
+
+
+/*------------------------------*/
+
+
+static LONG sql92c_show_RUN_queue ( ULONG ulRUNQueueLen,
+                                    PCONS_SINGLE_QUEUE_INFO_REC pUKTRUNQueue)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_RUN_queue"
+
+  ULONG                             ulQueuElem;
+  CHAR                              szFromTask[10] ;
+
+  if ( ulRUNQueueLen > 0 )
+    { printf ( XCONS_SHOW_RUN_QUEUE_HEAD ) ;
+      for ( ulQueuElem = 0;
+            ulQueuElem < ulRUNQueueLen ;
+            ulQueuElem++, pUKTRUNQueue++ )
+        {   if ( pUKTRUNQueue->ulFromTask != UNDEF )
+              sprintf(szFromTask, "(T%d)", pUKTRUNQueue->ulFromTask ) ;
+            else
+              szFromTask[0] = '\0' ;
+            if ( pUKTRUNQueue->ulReqType != UNDEF )
+               printf( XCONS_SHOW_RUN_QUEUE_ELEMENT_REQ,
+                          pUKTRUNQueue->ulTaskIndex ,
+                          sql92c_task_state_name ( pUKTRUNQueue->TaskState ),
+                          pUKTRUNQueue->ulDynPrio ,
+                          sql92c_req_type_name ( pUKTRUNQueue->ulReqType ),
+                          szFromTask) ;
+           else
+               printf( XCONS_SHOW_RUN_QUEUE_ELEMENT,
+                          pUKTRUNQueue->ulTaskIndex ,
+                          sql92c_task_state_name ( pUKTRUNQueue->TaskState ),
+                          pUKTRUNQueue->ulDynPrio , szFromTask) ;
+        }
+    }
+
+  return ( NO_ERROR );
+  }
+
+
+/*------------------------------*/
+
+static LONG sql92c_show_suspends ( PCONSOLE_REC  pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_suspends"
+  INT             i;
+  ULONG           ulTotalSuspends = 0 ;
+
+  printf ( XCONS_SHOW_SUSPEND_HEADER );
+
+  for ( i=0; i<MAX_SUSPEND_REASONS ; i++ )
+    ulTotalSuspends += pConsoleRec->SuspendReasons.ulSuspends [ i ] ;
+
+  printf ( XCONS_SHOW_SUSPEND_TOTAL , ulTotalSuspends ) ;
+
+  for ( i = 0; i < MAX_SUSPEND_REASONS ; i++ )
+    {
+    if ( pConsoleRec->SuspendReasons.ulSuspends [ i ] )
+      {
+      printf( XCONS_SHOW_SUSPEND_CNT_PERCENT,
+                SuspendReasonText[i] . szShortReason ,
+                pConsoleRec->SuspendReasons.ulSuspends [ i ] ,
+                (float ) pConsoleRec->SuspendReasons.ulSuspends [ i ] * 100.0 /
+                (float ) ulTotalSuspends ,
+                SuspendReasonText[i] . szLongReason ) ;
+      }
+    }
+
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+#ifndef RUN_AS_SYSMON
+
+static LONG sql92c_show_param ( PSZ pszParam , PCONSOLE_REC pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_param"
+
+  e92_print_param ( &(pConsoleRec->GetParamInfo.XParam) , pszParam );
+
+  return ( NO_ERROR );
+  }
+
+#endif
+
+/*------------------------------*/
+
+static LONG sql92c_show_state_info ( PCONSOLE_REC   pConsoleRec )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_show_storage_info"
+  #ifndef RUN_AS_SYSMON
+   PSZ      pszStateStr;
+  #endif
+  DBGPAS;
+
+  #ifndef RUN_AS_SYSMON
+
+   switch (pConsoleRec->StateInfo.DatabaseState)
+     {
+     case SERVER_STARTING      : pszStateStr = XCONS_SHOW_STATE_STARTING ; break;
+     case SERVER_COLD          : pszStateStr = XCONS_SHOW_STATE_COLD     ; break;
+     case SERVER_WARM          : pszStateStr = XCONS_SHOW_STATE_WARM     ; break;
+     case SERVER_SHUTDOWN      : pszStateStr = XCONS_SHOW_STATE_SHTDWN   ; break;
+     case SERVER_SHUTDOWNREINIT: pszStateStr = XCONS_SHOW_STATE_SHTDWNREI; break;
+     case SERVER_SHUTDOWNKILL  : pszStateStr = XCONS_SHOW_STATE_SHTDWNKIL; break;
+     case SERVER_STOP          : pszStateStr = XCONS_SHOW_STATE_STOP     ; break;
+     case SERVER_KILL          : pszStateStr = XCONS_SHOW_STATE_KILL     ; break;
+     case SERVER_ABORT         : pszStateStr = XCONS_SHOW_STATE_ABORT    ; break;
+     default                   : pszStateStr = XCONS_SHOW_STATE_UNKNOWN  ; break;
+     }
+
+   printf ( XCONS_SHOW_STATE_INFO, pszStateStr );
+
+  #endif
+
+  return ( NO_ERROR );
+  }
+/*------------------------------*/
+
+static PSZ sql92c_task_state_name ( ULONG ulState )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_task_state_name"
+
+  DBGPAS;
+
+  switch ( ulState )
+    {
+    case TSK_ASYNCLOSE:          return ( XCONS_TSK_STATE_ASYNCLOSE      );
+    case TSK_ASYNIO:             return ( XCONS_TSK_STATE_ASYNIO         );
+    case TSK_ASYNOPEN:           return ( XCONS_TSK_STATE_ASYNOPEN       );
+    case TSK_ASYNWAIT_READ:      return ( XCONS_TSK_STATE_ASYNWAIT_READ  );
+    case TSK_ASYNWAIT_WRITE:     return ( XCONS_TSK_STATE_ASYNWAIT_WRITE );
+    case TSK_CONNECTWAIT:        return ( XCONS_TSK_STATE_CONNECTWAIT    );
+    case TSK_INACTIVE:           return ( XCONS_TSK_STATE_INACTIVE       );
+    case TSK_INITIALIZED:        return ( XCONS_TSK_STATE_INITIALIZE     );
+    case TSK_IO2_READ:           return ( XCONS_TSK_STATE_IO2_READ       );
+    case TSK_IO2_WRITE:          return ( XCONS_TSK_STATE_IO2_WRITE      );
+    case TSK_IO_READ:            return ( XCONS_TSK_STATE_IO_READ        );
+    case TSK_IO_WRITE:           return ( XCONS_TSK_STATE_IO_WRITE       );
+    case TSK_LOCKED:             return ( XCONS_TSK_STATE_LOCKED         );
+    case TSK_MARKED_FOR_STARTUP: return ( XCONS_TSK_STATE_MARKED_FOR_STRT);
+    case TSK_RUNNABLE:           return ( XCONS_TSK_STATE_RUNNABLE       );
+    case TSK_RUNNING:            return ( XCONS_TSK_STATE_RUNNING        );
+    case TSK_TERMINATED:         return ( XCONS_TSK_STATE_TERMINATED     );
+    case TSK_V2INFO:             return ( XCONS_TSK_STATE_V2INFO         );
+    case TSK_V2BLOCKIO:          return ( XCONS_TSK_STATE_V2BLOCKIO      );
+    case TSK_VATTACH:            return ( XCONS_TSK_STATE_VATTACH        );
+    case TSK_VBEGEXCL:           return ( XCONS_TSK_STATE_VBEGEXCL       );
+    case TSK_VCREATE:            return ( XCONS_TSK_STATE_VCREATE        );
+    case TSK_VDETACH:            return ( XCONS_TSK_STATE_VDETACH        );
+    case TSK_VDEVSIZE:           return ( XCONS_TSK_STATE_VDEVSIZE       );
+    case TSK_VDIAGINIT:          return ( XCONS_TSK_STATE_VDIAGINIT      );
+    case TSK_VENDEXCL:           return ( XCONS_TSK_STATE_VENDEXCL       );
+    case TSK_VFCLOSE:            return ( XCONS_TSK_STATE_VFCLOSE        );
+    case TSK_VFOPEN:             return ( XCONS_TSK_STATE_VFOPEN         );
+    case TSK_VFREAD:             return ( XCONS_TSK_STATE_VFREAD         );
+    case TSK_VFWRITE:            return ( XCONS_TSK_STATE_VFWRITE        );
+    case TSK_VKILL:              return ( XCONS_TSK_STATE_VKILL          );
+    case TSK_VNCLEAR:            return ( XCONS_TSK_STATE_VNCLEAR        );
+    case TSK_VNCLOSE:            return ( XCONS_TSK_STATE_VNCLOSE        );
+    case TSK_VNOPEN:             return ( XCONS_TSK_STATE_VNOPEN         );
+    case TSK_VNRECEIVE:          return ( XCONS_TSK_STATE_VNRECEIVE      );
+    case TSK_VNREQUEST:          return ( XCONS_TSK_STATE_VNREQUEST      );
+    case TSK_VNRESTART:          return ( XCONS_TSK_STATE_VNRESTART      );
+    case TSK_VNSHUTDOWN:         return ( XCONS_TSK_STATE_VNSHUTDOWN     );
+    case TSK_VOPMSG:             return ( XCONS_TSK_STATE_VOPMSG         );
+    case TSK_VRECEIVE:           return ( XCONS_TSK_STATE_VRECEIVE       );
+    case TSK_VRELEASE:           return ( XCONS_TSK_STATE_VRELEASE       );
+    case TSK_VREPLY:             return ( XCONS_TSK_STATE_VREPLY         );
+    case TSK_VSHUTDOWN:          return ( XCONS_TSK_STATE_VSHUTDOWN      );
+    case TSK_VSLEEP:             return ( XCONS_TSK_STATE_VSLEEP         );
+    case TSK_VSUSPEND:           return ( XCONS_TSK_STATE_VSUSPEND       );
+    case TSK_VWAIT:              return ( XCONS_TSK_STATE_VWAIT          );
+    }
+
+  return ( XCONS_TSK_STATE_UNKNOWN );
+  }
+
+/*------------------------------*/
+
+static PSZ sql92c_kt_state_name ( ULONG ulState )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_kt_state_name"
+
+  DBGPAS;
+
+  switch ( ulState )
+    {
+    case KT_INITIALIZED:    return ( XCONS_KT_STATE_INITIALIZED );
+    case KT_RUNNING    :    return ( XCONS_KT_STATE_RUNNING     );
+    case KT_TERMINATING:    return ( XCONS_KT_STATE_TERMINATING );
+    case KT_TERMINATED :    return ( XCONS_KT_STATE_TERMINATED  );
+    case KT_SLEEPING   :    return ( XCONS_KT_STATE_SLEEPING    );
+    case KT_DETACHED   :    return ( XCONS_KT_STATE_DETACHED    );
+    case KT_ATTACHED   :    return ( XCONS_KT_STATE_ATTACHED    );
+    }
+
+  return ( XCONS_KT_STATE_UNKNOWN );
+  }
+
+/*------------------------------*/
+
+static PSZ sql92c_ukt_state_name ( ULONG ulState )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_ukt_state_name"
+
+  DBGPAS;
+
+  switch ( ulState )
+    {
+    case UKT_INITIALIZED:    return ( XCONS_UKT_STATE_INITIALIZE );
+    case UKT_RUNNING    :    return ( XCONS_UKT_STATE_RUNNING    );
+    case UKT_TERMINATED :    return ( XCONS_UKT_STATE_TERMINATED );
+    case UKT_SLEEPING   :    return ( XCONS_UKT_STATE_SLEEPING   );
+    }
+
+  return ( XCONS_UKT_STATE_UNKNOWN );
+  }
+
+/*------------------------------*/
+
+static PSZ  sql92c_req_type_name ( ULONG ulReqType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_req_type_name"
+
+  DBGPAS;
+
+  switch ( ulReqType )
+    {
+      case REQ_VATTACH                 : return ( XCONS_REQ_VATTACH ) ;
+      case REQ_VBLOCKIO                : return ( XCONS_REQ_VBLOCKIO ) ;
+      case REQ_VDETACH                 : return ( XCONS_REQ_VDETACH ) ;
+      case REQ_INITOK                  : return ( XCONS_REQ_INITOK ) ;
+      case REQ_VRESUME                 : return ( XCONS_REQ_VRESUME ) ;
+      case REQ_VSIGNAL                 : return ( XCONS_REQ_VSIGNAL ) ;
+      case REQ_CONNECT                 : return ( XCONS_REQ_CONNECT );
+      case REQ_RELEASE                 : return ( XCONS_REQ_RELEASE ) ;
+      case REQ_VRECEIVE                : return ( XCONS_REQ_VRECEIVE) ;
+      case REQ_SHUTDOK                 : return ( XCONS_REQ_SHUTDOK ) ;
+      case REQ_SENDER_JOB_FREE         : return ( XCONS_REQ_SENDER_JOB_FREE) ;
+      case REQ_VENDEXCL                : return ( XCONS_REQ_VENDEXCL ) ;
+      case REQ_RESCHEDULE              : return ( XCONS_REQ_RESCHEDULE ) ;
+      case REQ_SHUTDOWN_RESUME_TW      : return ( XCONS_REQ_SHUTDOWN_RESUME_TW);
+      case REQ_ASYNOPEN                : return ( XCONS_REQ_ASYNOPEN ) ;
+      case REQ_ASYNCLOSE               : return ( XCONS_REQ_ASYNCLOSE ) ;
+      case REQ_ASYNIO                  : return ( XCONS_REQ_ASYNIO ) ;
+      case REQ_ASYNWAIT                : return ( XCONS_REQ_ASYNWAIT ) ;
+      case REQ_VNSHUTDOWN_REPLY        : return ( XCONS_REQ_VNSHUTDOWN_REPLY) ;
+      case REQ_OUTGOING_CONNECT        : return ( XCONS_REQ_OUTGOING_CONNECT) ;
+      case REQ_OUTGOING_CONNECT_REPLY  : return ( XCONS_REQ_OUTGOING_CONNECT_REPLY) ;
+      case REQ_OPEN_WAKEUP_SD          : return ( XCONS_REQ_OPEN_WAKEUP_SD ) ;
+      case REQ_CONNECT_RC              : return ( XCONS_REQ_CONNECT_RC ) ;
+      case REQ_RELEASE_RC              : return ( XCONS_REQ_RELEASE_RC ) ;
+      case REQ_CLOSE_OUTGOING          : return ( XCONS_REQ_CLOSE_OUTGOING ) ;
+      case REQ_CLOSE_OUTGOING_REPLY    : return ( XCONS_REQ_CLOSE_OUTGOING_REPLY) ;
+      case REQ_FINISH_SV               : return ( XCONS_REQ_FINISH_SV ) ;
+      case REQ_ASYNCNTL                : return ( XCONS_REQ_ASYNCNTL ) ;
+   }
+
+
+  return ( XCONS_REQ_TYPE_UNKNOWN );
+  }
+
+
+/*------------------------------*/
+
+static PSZ  sql92c_type_name ( INT1 TaskType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_type_name"
+
+  DBGPAS;
+
+  switch ( TaskType )
+    {
+    case TT_TI:     return ( XCONS_TSK_TYPE_TI );
+    case TT_AL:     return ( XCONS_TSK_TYPE_AL );
+    case TT_TW:     return ( XCONS_TSK_TYPE_TW );
+    case TT_DW:     return ( XCONS_TSK_TYPE_DW );
+    case TT_SN:     return ( XCONS_TSK_TYPE_SN );
+    case TT_RC:     return ( XCONS_TSK_TYPE_RC );
+    case TT_CS:     return ( XCONS_TSK_TYPE_CS );
+    case TT_UT:     return ( XCONS_TSK_TYPE_UT );
+    case TT_SV:     return ( XCONS_TSK_TYPE_SV );
+    case TT_US:     return ( XCONS_TSK_TYPE_US );
+    }
+
+  return ( XCONS_TSK_TYPE_UNKNOWN );
+  }
+
+/*------------------------------*/
+
+static VOID sql92c_compress_path ( PSZ    pszCompPathName,
+                                   PSZ    pszPathName,
+                                   ULONG  ulCompPathLen )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql92c_compress_path"
+  LONG           lPathLen;
+  LONG           lSplitPos;
+  LONG           lRest;
+
+  DBGPAS;
+
+  if ( ulCompPathLen < 4 )
+    {
+    pszCompPathName[0] = '\0';
+    return;
+    }
+
+  lPathLen = strlen ( pszPathName );
+
+  if ( lPathLen > (INT)ulCompPathLen )
+    {
+    lSplitPos = (ulCompPathLen / 2) - 2;
+    lRest     = ulCompPathLen - lSplitPos - 4;
+
+    strncpy ( pszCompPathName, pszPathName, lSplitPos );
+    pszCompPathName [ lSplitPos ] = '\0';
+    strcat ( pszCompPathName, "...." );
+    strcat ( pszCompPathName, pszPathName + lPathLen - lRest );
+    }
+  else
+    {
+    strcpy ( pszCompPathName, pszPathName );
+    }
+
+  return;
+  }
+
+/*------------------------------*/
+
+#ifdef RUN_AS_SYSMON
+
+ static LONG sql92c_get_server_db ( PSZ *ppszServerDB )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_get_server_db"
+   LONG                    rc     = NO_ERROR;
+
+   DBGIN;
+
+   EXEC SQL SHOW SERVERDB;
+
+   if ( sqlca.sqlcode == 0 )
+     {
+     EXEC SQL SELECT SERVERDB FROM SHOW;
+
+     if ( sqlca.sqlcode == 0 )
+       {
+       EXEC SQL FETCH INTO :ServerDB;
+       }
+     }
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     MSGCD (( ERR_GET_SERVER_DB, sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     rc = sqlca.sqlcode;
+     }
+   else
+    *ppszServerDB = ServerDB;
+
+
+   DBGOUT;
+   return ( rc );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_create_version_tab ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_version_tab"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$VERSION;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$VERSION ( COMPONENT       CHAR(16),
+                                            VERSION         CHAR(64) );
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$VERSION", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$VERSION", OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_create_task_tab ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_task_tab"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$PROCESS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$PROCESS ( dbpid           FIXED(10),
+                                            ospid           FIXED(10),
+                                            proctype        CHAR(16),
+                                            appid           FIXED(10),
+                                            statedesc       CHAR(16),
+                                            timeout         FIXED(10),
+                                            regid           FIXED(10) );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$PROCESS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$PROCESS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+
+ static LONG sql92c_create_io_tab ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_io_tab"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$IOACCESS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$IOACCESS ( devid           FIXED(10),
+                                             devname         CHAR(64),
+                                             phyreads        FIXED(10),
+                                             phywrites       FIXED(10) );
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$IOACCESS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$IOACCESS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_create_region_tab ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_region_tab"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$REGIONS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$REGIONS ( regid           FIXED(10),
+                                            regionname      CHAR(16),
+                                            ownerdbpid      FIXED(10),
+                                            reqstdbpid      FIXED(10),
+                                            accesses        FIXED(10),
+                                            waits           FIXED(10),
+                                            collisions      FIXED(10),
+                                            collision_rate  FIXED(10),
+                                            locked          FIXED(10) );
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$REGIONS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$REGIONS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_create_storage_tab ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_storage_tab"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$STORAGE;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$STORAGE ( desc            CHAR(64),
+                                            val             FIXED(10),
+                                            vdesc           CHAR(6) );
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$STORAGE", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$STORAGE",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_create_rte_tabs ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_rte_tabs"
+   INT     OldSqlCode;
+
+   DBGPAS;
+
+   EXEC SQL DELETE FROM SYSMON$DBPROCS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$DBPROCS ( ospid           FIXED(10),
+                                            procname        CHAR(16) );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$DBPROCS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$DBPROCS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   EXEC SQL DELETE FROM SYSMON$UKPROCS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$UKPROCS ( ospid           FIXED(10),
+                                            procname        CHAR(16),
+                                            dispatchcnt     FIXED(10),
+                                            tasks_active    FIXED(10),
+                                            tasks_total     FIXED(10),
+                                            taskcluster     CHAR(64) );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$UKPROCS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$UKPROCS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   EXEC SQL DELETE FROM SYSMON$DEVIOPROCS;
+   OldSqlCode = sqlca.sqlcode;
+
+   if ( sqlca.sqlcode != 0 )
+     {
+     EXEC SQL CREATE TABLE SYSMON$DEVIOPROCS ( ospid           FIXED(10),
+                                               procname        CHAR(16),
+                                               devid           FIXED(10),
+                                               reads           FIXED(10),
+                                               writes          FIXED(10),
+                                               queuelen        FIXED(10),
+                                               queuemax        FIXED(10) );
+
+     if ( sqlca.sqlcode != 0 )
+       {
+       MSGCD (( ERR_CREATING_TAB, "SYSMON$DEVIOPROCS", sqlca.sqlcode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+
+     if( OldSqlCode != -4004 )
+       {
+       MSGCD (( ERR_DELETING_TAB, "SYSMON$DEVIOPROCS",  OldSqlCode ))
+       EXEC SQL ROLLBACK WORK;
+       return ( sqlca.sqlcode );
+       }
+     }
+
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ static LONG sql92c_drop_tabs ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql92c_create_version_tab"
+
+   DBGPAS;
+
+   EXEC SQL DROP TABLE SYSMON$VERSION;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$VERSION", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$PROCESS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$PROCESS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$IOACCESS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$IOACCESS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$REGIONS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$REGIONS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$STORAGE;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$STORAGE", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$DBPROCS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$DBPROCS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$UKPROCS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$UKPROCS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL DROP TABLE SYSMON$DEVIOPROCS;
+
+   if (( sqlca.sqlcode != 0 ) && ( sqlca.sqlcode != -4004 ))
+     {
+     MSGCD (( ERR_DROPPING_TAB, "SYSMON$DEVIOPROCS", sqlca.sqlcode ))
+     EXEC SQL ROLLBACK WORK;
+     return ( sqlca.sqlcode );
+     }
+
+   EXEC SQL COMMIT WORK;
+
+   return ( NO_ERROR );
+   }
+
+#endif
+
+#if defined (CTRLCOMP)
+/**\
+--------------------------------------- MF__ MOD__ (controlling)
+\**/
+
+/**\
+--------------------------------------- MF__ MOD__ (monitoring)
+\**/
+
+typedef struct KernelMonitorT {
+    teo5_monitor_object super;
+    XCONS_REC           consoleRec;
+    int                 requestTag;
+    PBOOL               pfFlag;
+} KernelMonitorT;
+
+tsp9_cstr os903dbname (void);
+
+    #undef MF__
+    #define MF__ MOD__"allocMonitor_MF"
+static KernelMonitorT *
+allocMonitor_MF (
+    tsp9_rte_xerror* xerror)
+{
+    KernelMonitorT * result;
+
+    result = (KernelMonitorT*) malloc (sizeof (KernelMonitorT));
+    if (result == NULL) {
+        eo44anyError (xerror, "Out of memory");
+        return NULL;
+    }
+    result->consoleRec.pszServerDB = (char*) os903dbname ();
+    if ( sql92c_init (&result->consoleRec) != NO_ERROR ) {
+        free (result);
+        eo44anyError (xerror, "Allocation of shared memory failed");
+        return NULL;
+    }
+    return result;
+}
+
+    #undef MF__
+    #define MF__ MOD__"monitorTasks_MF"
+void
+monitorTasks_MF (
+    KernelMonitorT* processes,
+    tsp9_rte_readdirection flag,
+    char* outbuf,
+    int bufSize,
+    tsp9_rte_xerror* xerror)
+{
+}
+
+    #undef MF__
+    #define MF__ MOD__"os92allTasks"
+teo5_monitor_object*
+os92allTasks (
+    tsp9_cstr args,
+    int flags,
+    tsp9_rte_xerror* xerror)
+{
+    KernelMonitorT* kernelMonitor;
+
+    kernelMonitor = allocMonitor_MF (xerror);
+    if (kernelMonitor == NULL) {
+        return NULL;
+    }
+    USEVAR_LINT (args);
+    USEVAR_LINT (flags);
+    kernelMonitor->super.nextRecord = (teo5_monitor_function*)monitorTasks_MF;
+    kernelMonitor->super.description = "";
+    return &kernelMonitor->super;
+}
+
+    #undef MF__
+    #define MF__ MOD__"showState_MF"
+static void
+showState_MF (
+    KernelMonitorT* state,
+    tsp9_rte_readdirection direction,
+    char* outbuf,
+    int bufSize,
+    tsp9_rte_xerror* xerror)
+{
+    tsp9_cstr result;
+
+    USEVAR_LINT (direction);
+    if (!state->super.started) {
+        state->super.started = TRUE;
+        switch (state->consoleRec.pConsoleRec->StateInfo.DatabaseState) {
+            case SERVER_STARTING:
+                result = XCONS_SHOW_STATE_STARTING ;
+                break;
+            case SERVER_COLD:
+                result = XCONS_SHOW_STATE_COLD;
+                break;
+            case SERVER_WARM:
+                result = XCONS_SHOW_STATE_WARM;
+                break;
+            case SERVER_SHUTDOWN:
+                result = XCONS_SHOW_STATE_SHTDWN;
+                break;
+            case SERVER_SHUTDOWNREINIT:
+                result = XCONS_SHOW_STATE_SHTDWNREI;
+                break;
+            case SERVER_SHUTDOWNKILL:
+                result = XCONS_SHOW_STATE_SHTDWNKIL;
+                break;
+            case SERVER_STOP:
+                result = XCONS_SHOW_STATE_STOP;
+                break;
+            case SERVER_KILL:
+                result = XCONS_SHOW_STATE_KILL;
+                break;
+            case SERVER_ABORT:
+                result = XCONS_SHOW_STATE_ABORT;
+                break;
+            default:
+                fprintf (stdout, "state id %d; info available %s\n",
+                    state->consoleRec.pConsoleRec->StateInfo.DatabaseState,
+                    state->consoleRec.pConsoleRec->StateInfo.fInfoAvailable
+                        ? "True" : "False");
+                result = XCONS_SHOW_STATE_UNKNOWN;
+                break;
+         }
+         if ((int) strlen (result) + 1 <= bufSize) {
+             strcpy (outbuf, result);
+        }
+        else {
+            eo44anyError (xerror, "buffer too small");
+        }
+    }
+    else {
+        eo44eoshowError (xerror);
+    }
+}
+
+    #undef MF__
+    #define MF__ MOD__"os92state"
+teo5_monitor_object*
+os92state (
+    tsp9_cstr args,
+    int flags,
+    tsp9_rte_xerror* xerror)
+{
+    KernelMonitorT* result;
+
+    result = allocMonitor_MF (xerror);
+    if (result == NULL) {
+        return NULL;
+    }
+    USEVAR_LINT (args);
+    USEVAR_LINT (flags);
+    result->super.nextRecord = (teo5_monitor_function*)showState_MF;
+    result->super.description = "State";
+    result->requestTag = CON_REQ_STATE;
+    result->pfFlag = &result->consoleRec.pConsoleRec->StateInfo.fInfoAvailable;
+    return &result->super;
+}
+
+    #undef MF__
+    #define MF__ MOD__"os92getRemoteInfo"
+void
+os92getRemoteInfo (
+    teo5_monitor_object* monitorHandle,
+    tsp9_rte_xerror* xerror)
+{
+    int                 rc;
+    KernelMonitorT     *monitor = (KernelMonitorT*) monitorHandle;
+    XCONS_REC          *pxcr = &monitor->consoleRec;
+
+    memset ( pxcr->pConsoleRec, 0, pxcr->ulShmSize );
+    rc = sql92c_send (pxcr, monitor->requestTag,
+        monitor->pfFlag);
+    if (rc != NO_ERROR) {
+        eo44anyError (xerror, "Exchange of shared memory failed");
+    }
+}
+
+    #undef MF__
+    #define MF__ MOD__"sqlxknlclosemonitor"
+void
+sqlxknlclosemonitor (
+    void* monitorHandle)
+{
+    KernelMonitorT     *monitor = (KernelMonitorT*) monitorHandle;
+    XCONS_REC          *pxcr = &monitor->consoleRec;
+
+    /* ?? keep for next show on same result ?? */
+    sql41c_free_shrd_mem (pxcr->pConsoleRec, pxcr->hConsoleRec);
+    free (monitorHandle);
+}
+#endif
+
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20
+.PA

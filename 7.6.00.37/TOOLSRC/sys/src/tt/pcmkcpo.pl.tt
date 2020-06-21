@@ -1,0 +1,157 @@
+#!/usr/bin/perl
+# pcmkcpo 
+#
+# @(#)pctest  6.2  1998-01-09 
+#
+# Creates and moves compacted testoutputs
+# 
+# Burkhard Diesing
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package pcmkcpo;
+use Env;
+use PCTest;
+use Getopt::Std;
+use ICopy;
+$Trace=1 if ($ENV{PCTOOL_TRACE});
+
+local($source, $pref, $FNAME, $FDIR, $j, $i, $cpo);
+$cpoext="cpo";
+$cpopath="$ENV{src}/pf";
+$extensions="l o t";
+
+$useperf=0;
+$relver = $ENV{RELVER};
+if ($relver eq "") {
+  print "Environment variable RELVER not set.\n";
+  exit;
+} elsif ( $relver ge "R72" ) {
+  $useperf = 1;;
+}
+
+$quiet=0 if ($Trace);
+
+if (!getopts ('hcgmp') || $opt_h ) {
+  print <DATA>;
+  exit;
+}
+
+print "@ARGV" if ($Trace);
+
+$j=0;
+foreach $i (@ARGV) {
+    $j++;
+    if ( $i =~ /-v(.*)/ )  {
+        $VARSPEC = $1;
+        NEXT;
+    }
+    ($FNAME[$j]) = $i =~ m!.*/(.*)!;
+    ($FDIR[$j]) = $i =~ m!(.*)/.*!;
+} 
+print "$FNAME[$j],$FDIR[$j]" if ($Trace);
+
+$pref=PCTest::GetPrefix($FDIR[$j]);
+
+$source="$pref.$FNAME[$j].$cpoext";
+$target="$cpopath/$source";
+if ($opt_g) {
+    if ($useperf) {
+        $cmd = "pnew -e0 $target";
+        print $cmd if ( $Trace );
+        if (system($cmd)) {
+        }
+        $cmd = "pget -e0 $target";
+        print $cmd if ( $Trace );
+        if (system($cmd)) {
+        }
+    } else {
+        $cmd = "inew -n -e0 $target";
+        print $cmd if ( $Trace );
+        if (system($cmd)) {
+        }
+    }
+}
+
+if ( $opt_m ) {  
+  @extensions=split(' ', $extensions);
+  print "@extensions" if ($Trace);
+  foreach $extension (@extensions) {
+      $TESTNAME = $FNAME[$j];
+    #  $TESTNAME =~ m/(.*)(-.*)/;    
+    #  $TESTNAME = $1 if ($1);
+    #  if ($VARSPEC eq "") {
+    #      $VARSPEC = $2 if ($2);
+    #  }
+    #  else {
+    #      # -v was set ignore -<variantspec>
+    #      $FNAME[$j]=$TESTNAME;
+    #  }
+      $wrkfile=PCTest::GetWrkDir."/$pref.$FNAME[$j].$extension";
+      $oldfile=PCTest::GetOldDir."/$pref.$FNAME[$j].$extension";
+      print "\$wrkfile=$wrkfile" if ($Trace);
+      print "\$oldfile=$oldfile" if ($Trace);
+      if ( ! -f "$oldfile" ) {
+          $wrkfile=PCTest::GetWrkDir."/$pref.$TESTNAME.$extension";          
+          print "\$wrkfile=$wrkfile" if ($Trace);
+      }
+      if ( -f "$wrkfile" ) {
+	  print "copy $wrkfile $oldfile" if ($Trace);
+	File::Copy::copy("$wrkfile", "$oldfile");
+      }
+  }
+  print "$pref $FNAME[$j] @extensions" if ( $Trace );
+  PCTest::MakeCompactProt ( $pref, $TESTNAME, @extensions );
+}
+
+if ( $opt_c ) {
+    $reffile=PCTest::GetOldDir."/$source";
+    if ( -f "$reffile" ) {
+	print "copy $reffile $target";	
+      File::Copy::copy($reffile, $target);
+    }
+}
+
+if ( $opt_p ) {
+    if ($useperf) {
+      $cmd = "p4put -d \"Add new testprogram\" $target";
+    } else {
+      $cmd = "iput -s $target";
+    }
+    print $cmd if ( $Trace );
+    if (!system("$cmd")) {
+    }
+}
+__DATA__
+
+ USAGE: pcmkcpo -hcgmnp dirname/filename[-<variantspec>]
+
+           Creates a compacted outputfile.
+           <dirname> specifies the testlayer and <filename> the name of the testfile.
+           No Extension is needed for <filename>. pcmkcpo will try to build one by itselve.
+           Use the <variantspec> to run the same test against different serverdbs or with different options. Note if you use <variantspec> the reference protocol gots the same name as test including <variantspec>.
+
+ OPTIONS:    -h    prints this help
+
+             -g    gets the cpo file from develop.
+             -p    puts the cpo file to develop.
+             -m    makes a cpo file.
+             -c    copies the cpo file to src.

@@ -1,0 +1,124 @@
+#!/usr/bin/perl
+#
+# @(#)nisttest   1997-12-09
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+
+$TESTNIST="$TEST/nist";
+$SRCNIST="D:/share/nist";
+chdir($TESTNIST) || die "Can't change to directory $TESTNIST: $!";
+
+print ("clear report, objects, wrk, diff \n");
+system ("rm -f report/*");
+system ("rm -f objects/*");
+system ("rm -f wrk/*");
+system ("rm -f diff/*");
+
+chdir(wrk) || die "Can't change to directory $TESTNIST\wrk: $!";
+print ("initialize DB\n");
+system("x_stop $SERVERDB");
+
+system("$DBROOT/pgm/putparam $SERVERDB LOCK_TIMEOUT 120") == 0
+	or die "Error while executing \"$DBROOT/pgm/putparam $SERVERDB LOCK_TIMEOUT 120\"\n";
+system("$DBROOT/pgm/putparam $SERVERDB REQUEST_TIMEOUT 60") == 0
+	or die "Error while executing \"$DBROOT/pgm/putparam $SERVERDB REQUEST_TIMEOUT 60\"\n";
+system("x_start $SERVERDB") == 0 or die "x_start doesn't work";
+
+system("$DBROOT/pgm/slowci -b $TEST/pc/bin/DBINIT $SUPERUID $SUPERPWD") == 0
+        or die "slowci DBINIT doesn't work with $SERVERDB , $SUPERUID , $SUPERPWD";
+#system("$DBROOT/pgm/slowci -b $TEST/pc/bin/DBINIT -d$SERVERDB -u$SUPERUID,$SUPERPWD") == 0
+#        or die "slowci DBINIT doesn't work with $SERVERDB , $SUPERUID , $SUPERPWD";
+
+system("xload -u $SUPERUID,$SUPERPWD -b $DBROOT/env/SYSDBA.ins") == 0 or die "xload SYSDBA doesn't work";
+
+#
+#            START OF SCHEMA-CREATING FOR TEST
+#
+#
+#     Use ted for schema-changes and write the output to the 
+#     subdirectory where all intermediate files are written to.
+#
+chdir($TESTNIST) || die "Can't change to directory $TESTNIST: $!";
+system ("$SRCNIST/streams/ted -o objects/schema1.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema1.std");
+system ("$SRCNIST/streams/ted -o objects/schema2.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema2.std");
+system ("$SRCNIST/streams/ted -o objects/schema3.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema3.std");
+system ("$SRCNIST/streams/ted -o objects/schema4.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema4.std");
+system ("$SRCNIST/streams/ted -o objects/schema5.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema5.std");
+system ("$SRCNIST/streams/ted -o objects/schema7.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema7.std");
+system ("$SRCNIST/streams/ted -o objects/schema8.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema8.std");
+system ("$SRCNIST/streams/ted -o objects/schema9.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schema9.std");
+system ("$SRCNIST/streams/ted -o objects/schem10.std -t $SRCNIST/other/upd400.ted -t $SRCNIST/streams/chgsch.ted $SRCNIST/other/schem10.std");
+#
+#
+# Go to the subdirectory where all protocols shall be saved.
+#
+chdir(report) || die "Can't change to directory $TEST\nist\report: $!";
+#
+# Create all users for the test.
+# Load the schemas, which are necessary for all tests.
+# Behind '-u' the name of the user and his password is given,
+# which shall be used for connecting.
+# '-d $DBNAME' specifies the database which shall be used for the test.
+# '-b .....' tells xload to work as a batch-job without terminal
+# interaction. A file is specified as input to xload.
+# xload will always write a file named load.prt as protocol.
+#
+system("xload -u $SUPERUID,$SUPERPWD -d $SERVERDB -b $SRCNIST/streams/nistinit.load");
+system ("mv load.prt nistinit.prt");
+system ("diff $SRCNIST/oldreport/nistinit.prt nistinit.prt > $TEST/nist/diff/nistinit.diff");
+#
+# If you inspect ansiinit.prt, there will be
+# several errors with SQLCODE 42000 and different texts
+#
+# Go back to the main NIST-directory.
+#
+chdir($TESTNIST) || die "Can't change to directory $TESTNIST: $!";
+#
+#
+#                   START OF C-TESTS
+#
+# Call a routine to precompile and compile AUTHID. It is not
+# part of the runpc.bas.
+#
+system ("$TOOLSHELL $SRCNIST/streams/RUNPC$TOOLEXT AUTHID HU > report/authid.res");
+#
+# Now call the unchanged runpc.bas, as given by NIST which is
+# stored in subdirectory pc.
+#
+system ("$TOOLSHELL $SRCNIST/streams/runpcall$TOOLEXT > report/runpc.res");
+chdir($TEST) || die "Can't change to directory $TEST: $!";
+#
+#                 END OF C-TESTS
+#
+##############################################################
+#
+system ("diff $SRCNIST/oldreport/reportz.res $TEST/nist/report/reportz.res > $TEST/nist/diff/reportz.diff");
+system ("diff $SRCNIST/oldreport/runpc.res   $TEST/nist/report/runpc.res   > $TEST/nist/diff/runpc.diff");
+system ("diff $SRCNIST/oldreport/tallz.res   $TEST/nist/report/tallz.res   > $TEST/nist/diff/tallz.diff");
+#
+#
+system("x_stop $SERVERDB");
+system("$DBROOT/pgm/putparam $SERVERDB LOCK_TIMEOUT 360") == 0
+	or die "Error while executing \"$DBROOT/pgm/putparam $SERVERDB LOCK_TIMEOUT 360\"\n";
+system("$DBROOT/pgm/putparam $SERVERDB REQUEST_TIMEOUT 180") == 0
+	or die "Error while executing \"$DBROOT/pgm/putparam $SERVERDB REQUEST_TIMEOUT 180\"\n";

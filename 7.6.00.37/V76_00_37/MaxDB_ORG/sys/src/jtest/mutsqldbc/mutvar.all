@@ -1,0 +1,606 @@
+# @(#)mutvar.all	2005-09-01
+
+# Environment for MUT-Benchmark
+
+# Included in: muti, mutparam, mutsave 
+
+use Env;
+use File::Basename;
+use Cwd; 
+
+$SELF = basename ($0,".pl");
+
+$DB_SPEED="-f" ;
+#-----------------------------------------------
+# used for "mutsave.pl" only
+#-----------------------------------------------
+
+if ( $SizeMultiplier == 0 )
+{ 
+	$SizeMultiplier = 1;
+}
+
+if ( $MUT_SIZE_FACTOR == 0 )
+{ 
+	$MUT_SIZE_FACTOR = 1;
+}
+
+$EXIT   =1 ;
+$NO_EXIT=0 ;
+$already_called=0;
+
+&if $OS=WIN32
+$DEVNUL = "NUL";
+&else
+$DEVNUL = "dev/null";
+&endif
+
+$MUTSAVE_RUNNING="mutsave.act" ;
+$MUTSAVE_ABORT="mutsave.abo";
+$MUTSAVE_STARTED="mutsave.sta";
+$MUT_RUNNING="mut.act";
+$MUT_USER_ABORT="mut.abo";
+$STOPONERROR="stoponerror.act";
+
+if ( "$SEND_SCRIPT" eq "" )
+{
+  $SEND_SCRIPT="muterror.pl"
+}
+
+#***********************
+sub read_mutvar_file {
+#***********************
+    open(FILE_IN, "<./mutvar") or die "Can't open ./mutvar: $!";
+    chomp($_ = <FILE_IN>); 
+    close FILE_IN;
+    ($DBNAME, $SYSUSR, $SYSPWD, $CTRL_USR, $CTRL_PWD, $Node) = split / /, $_;
+
+    if(!$RELVER)
+    {
+	$DBNAME=~/MU(\d\d)..../;
+	$RELVER="R$1";
+    }
+}
+
+read_mutvar_file();
+
+#***********************
+sub call_traceshow {
+#***********************
+    my($CMD_LINE)="$DBMCLI_PROG -u $CTRL_USR,$CTRL_PWD -d $DBNAME -o trace_show.txt TRACE_SHOW";
+    $ERR_MSG = "TRACE_SHOW failed!";
+    my($RC)=system("$CMD_LINE");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, "\n" ;
+    }
+}
+
+#***********************
+sub call_protconv {
+#***********************
+    $CMD_LINE = "protconv -d $DBNAME -t KNLDIAG > $DBNAME.knldiag.txt";
+    $ERR_MSG = "protconv failed!";
+    my($RC)=system("$CMD_LINE");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, "\n" ;
+    }
+}
+
+#***********************
+sub call_xkernprot {
+#***********************
+    $CMD_LINE = "xkernprot -d $DBNAME akbxm";
+    $ERR_MSG = "xkernprot failed!";
+    my($RC)=system("$CMD_LINE");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, "\n" ;
+    }
+    else
+    {
+	rename "$DBNAME.prt", "$DBNAME.vtrace.txt";
+    }
+}
+
+#***********************
+sub call_x_cons {
+#***********************
+    $CMD_LINE = "x_cons $DBNAME show all";
+    $ERR_MSG = "x_cons show all failed!";
+    my($RC)=system("$CMD_LINE 1>x_cons.stdout.prt 2>x_cons.stderr.prt");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, " exiting ... \n" ;
+	DbStop() ;
+    }
+}
+
+#***********************
+sub call_system {
+#***********************
+    my($CMD_LINE,$ERR_MSG) = @_ ;
+    my($RC)=system("$CMD_LINE 1>>$SELF.stdout.prt 2>>$SELF.stderr.prt");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, " exiting ... \n" ;
+	send_error_msg ($ERR_MSG, $EXIT) ;
+    }
+}
+
+#***********************
+sub call_system2 {
+#***********************
+    my($CMD_LINE,$ERR_MSG) = @_ ;
+    my($RC)=system("$CMD_LINE 1>>$SELF.2.stdout.prt 2>>$SELF.2.stderr.prt");
+    if ($RC != 0)
+    {
+	print "$SELF '$CMD_LINE' returned with code ", $RC>>8, " exiting ... \n" ;
+	send_error_msg ($ERR_MSG, $EXIT) ;
+    }
+}
+
+#***********************
+sub CallDbmCli {
+#***********************
+    my($DBMCLI_CMD,$ERR_MSG) = @_ ;
+    my($CMD)="$DBMCLI_PROG -o $DBMCLI_PROT $DBMCLI_CMD" ;
+    if ( $Verbose )
+    { print "$SELF $CMD \n" }
+    my($RC)=system($CMD) ;
+
+    if ($RC != 0)
+    {
+	open(_FH, ">>$DBMCLI_ERRORS") || die "open $DBMCLI_ERRORS failed\n";
+	print _FH "\n'$DBMCLI_PROG $DBMCLI_CMD' failed with returncode ", $RC>>8, " at ", scalar localtime(), "\n";
+	open(_FHO, "<$DBMCLI_PROT") || die "open $DBMCLI_PROT failed\n";
+	while(<_FHO>)
+	{
+		print _FH $_;
+	}
+	print _FH "\n";
+	close _FHO;
+	close _FH;
+	if ($ERR_MSG ne "")
+	{
+		print "$SELF $CMD returned with code ", $RC>>8, " exiting ... \n" ;
+		print "$SELF see  $DBMCLI_PROT for errors\n" ;
+		send_error_msg ("$ERR_MSG, see $DBMCLI_PROT or $DBMCLI_ERRORS for detailed error information", $EXIT) ;
+	}
+    }
+    return ( $RC ) ; 
+}
+
+#***********************
+sub DbStop {
+#***********************
+CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME db_stop", "can't stop serverdb $DBNAME");
+}
+
+#***********************
+sub DbStart {
+#***********************
+CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME start $DB_SPEED", "can't start serverdb $DBNAME");
+CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME db_cons time enable", "time enable failed");
+}
+
+#***********************
+sub DbUtilExecute {
+#***********************
+my($DBMCLI_CMD) = @_ ;
+CallDbmCli("-u $CTRL_USR,$CTRL_PWD -uUTL -d $DBNAME util_execute $DBMCLI_CMD", "$DBMCLI_CMD failed");
+}
+
+#***********************
+sub GetParam {
+#***********************
+    my($PARAM_ID, $PARAM_VAL)  = @_ ;
+    open(TMP, "$DBMCLI_PROG -u $CTRL_USR,$CTRL_PWD -d $DBNAME param_getvalue $PARAM_ID|") || 
+               die "'$DBMCLI_PROG -u $CTRL_USR,* -d $DBNAME param_getvalue $PARAM_ID' failed\n";
+    chomp($RC = <TMP>);
+    chomp($$PARAM_VAL = <TMP>);
+    close TMP;
+    die "GetParam  $PARAM_ID failed: RC=$RC" if ( $RC ne "OK")
+}
+
+#***********************
+sub check_xparam {
+#***********************
+    my($PARAM_CHK)="param.chk";
+    print "$SELF checking DB parameters ...\n";
+    open (_PP, ">$DBMCLI_CMD_SCRIPT" ) || die "open putparam-scriptfile failed\n";
+    print _PP "param_startsession \n" ;
+    print _PP "param_checkall      \n" ;
+    print _PP "param_extgetall     \n" ;
+    print _PP "param_commitsession \n" ;
+    close _PP ;
+    CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME -i $DBMCLI_CMD_SCRIPT","check param failed");
+    unlink $PARAM_CHK ;
+    rename($DBMCLI_PROT,$PARAM_CHK);
+}
+
+#***********************
+sub set_serverdb {
+#***********************
+    my($DB_MODE) = @_;
+    print "$SELF stopping database $DBNAME";
+    if ($Node)
+    {
+	print " on host '$Node'\n";
+    }
+    else
+    {
+	print "\n";
+    }
+    DbStop();
+    check_xparam();
+    print "$SELF starting database $DBNAME";
+    if ($Node)
+    {
+	print " on host '$Node'\n";
+    }
+    else
+    {
+	print "\n";
+    }
+    DbStart();
+    if ( $DB_MODE eq "WARM" )
+    {
+      print "$SELF restart database $DBNAME\n";
+      DbUtilExecute("restart");
+    }
+}
+
+#***********************
+sub revers {
+#***********************
+	my(@chars) = split //, $_[0];
+	return reverse(@chars);
+}
+
+
+#***********************
+sub send_error_msg {
+#***********************
+    my($ERR_MSG, $_EXIT ) = @_ ;
+    my($counter)=0;
+    if ( "$SEND_SCRIPT" ne "" && !is_sema_posted($MUT_USER_ABORT) )
+    {
+	my($ERR_FILE_NAME) = "mut.err" ;
+	open(ERR_FILE,">$ERR_FILE_NAME") ;
+	print ERR_FILE "$SELF: $ERR_MSG" ;
+	close ERR_FILE ;
+	system("$SEND_SCRIPT $ERR_FILE_NAME" ) ;
+    }
+    if ( $_EXIT && $already_called==0)
+	{
+		$already_called=1;
+		my($DUMP_FILE_NAME) = "dump.prt";
+
+		reset_sema($MUTSAVE_RUNNING) ;
+		post_sema($MUTSAVE_ABORT);
+		reset_sema($MUTDBANA_RUNNING) ;
+		post_sema($MUTDBANA_ABORT);
+
+		if (is_sema_posted($STOPONERROR))
+		{
+			if (!-e $DUMP_FILE_NAME) 
+			{
+				open(DUMP_FILE,">$DUMP_FILE_NAME");
+				print DUMP_FILE "$SELF: $ERR_MSG\n";
+				print DUMP_FILE "stopping database $DBNAME\n";
+				my($DBANA_FILE_NAME) = "$MUTDBANA_OUTPUT_DIR_ONLY/DBAN.err";
+				if (-e $DBANA_FILE_NAME) 
+				{
+					print DUMP_FILE "\ncontent of DBAN.err:\n";
+					print DUMP_FILE "===============\n";
+					open(DBANA_FILE,"<$DBANA_FILE_NAME");
+					while(<DBANA_FILE>)
+					{
+						print DUMP_FILE $_;
+					}
+					print DUMP_FILE "\n";
+					print DUMP_FILE "===============\n";
+					close DBANA_FILE;
+				}
+				close DUMP_FILE;
+			}
+			if (is_db_warm()) 
+			{
+				DbStop();
+			}
+			reset_sema($MUT_RUNNING);
+			print "call of protconv and xkernprot after database is offline\n";
+			while (!is_db_offline() && $counter<100) 
+			{
+				$counter=$counter+1;
+				print ".";
+				sleep 2;
+			}
+			print "\n";
+			print "Database offline after $counter loops (each 2 sec.)\n";
+			sleep 15;
+			call_protconv();
+			sleep 5;
+			call_xkernprot();
+			exit($_EXIT) ;
+		}
+	}
+	else
+	{
+		print "Function 'send_error_msg' was already called.\n";
+		exit($_EXIT);
+	}
+}
+
+#***********************
+sub is_db_offline {
+#***********************
+	my($RC)       = 0 ;
+	CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME db_state", "");
+	open(_DBMCLI_PRT, "$DBMCLI_PROT" ) || die "Could not open dbmcli.prt\n" ;
+	while (<_DBMCLI_PRT>)
+	{
+		if($_ =~ /^OFFLINE/){
+			$RC=1;
+		}
+	}
+	return($RC) ;
+}
+
+#***********************
+sub is_db_warm {
+#***********************
+	my($RC)       = 0 ;
+	CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME db_state", "db_state failed");
+	open(_DBMCLI_PRT, "$DBMCLI_PROT" ) || die "Could not open dbmcli.prt\n" ;
+	while (<_DBMCLI_PRT>)
+	{
+		if($_ =~ /^ONLINE/){
+			$RC=1;
+		}
+	}
+	return($RC) ;
+}
+
+#***********************
+sub get_lpno {
+#***********************
+    my($_SV_FILE, $_WHICH_LPNO) = @_ ;
+    my($BACKUP_BLOCK_CNT);
+    GetParam("BACKUP_BLOCK_CNT", \$BACKUP_BLOCK_CNT);
+    open(_SV_D_LOG_NEEDED, "g_fl_lpno $_SV_FILE $BACKUP_BLOCK_CNT $_WHICH_LPNO |");
+    chomp($_LPNO_NEEDED=<_SV_D_LOG_NEEDED>); 
+    close _SV_D_LOG_NEEDED;
+    return($_LPNO_NEEDED) ;
+}
+
+#***********************
+sub make_full_sv_path {
+#***********************
+    my($FULL_SV_PATH) ;
+    my($SV_NAME) = @_ ;
+    my($name,$path) = fileparse ($SV_NAME) ;
+	if ( "$path" eq ".\\" || "$path" eq "./")
+    {
+      GetParam("RUNDIRECTORY",\$FULL_SV_PATH) ;
+      $FULL_SV_PATH .= "/" ;
+      $FULL_SV_PATH .= $SV_NAME;
+	}
+	else
+    {
+      $FULL_SV_PATH = $SV_NAME ;
+	}
+    return($FULL_SV_PATH) ;
+}
+
+#***********************
+sub post_sema {
+#***********************
+   my($SEMA_FILE) = @_ ;
+   if ( !is_sema_posted($SEMA_FILE) )
+   {
+     open(FILE,">$SEMA_FILE");
+     close FILE ;
+   }
+}
+
+#***********************
+sub reset_sema {
+#***********************
+   my($SEMA_FILE) = @_ ;
+   unlink $SEMA_FILE ;
+}
+
+#***********************
+sub is_sema_posted{
+#***********************
+   my($SEMA_FILE ) = @_ ;
+#   my($RC)= ( -f "$SEMA_FILE" ) ;
+   my($RC)= ( -e "$SEMA_FILE" ) ;
+   return( $RC );
+}
+
+#***********************
+sub SetDbmCliLocation{
+#***********************
+$DBMCLI_PROG="dbmcli" ;
+$DBMCLI_PROT="dbmcli.$SELF.prt" ;
+$DBMCLI_ERRORS="dbmcli.$SELF.error.prt";
+$DBMCLI_CMD_SCRIPT="dbmcli.$SELF.inp";
+$CWD = getcwd() ;
+$CWD_SEPARATOR="/";
+
+if ( $Node )
+{
+	if ($Node ne "")
+	{
+		$DBMCLI_PROG .= " -n $Node" ;
+		$CWD="";
+		$CWD_SEPARATOR="";
+	}
+#	else
+#	{
+#	$DBMCLI_PROG .= " -s" ; 
+#	}
+}
+
+if ( $Debug )
+{ 
+	$DBMCLI_PROG .= " -t dbmcli.trc" ; 
+} 
+
+$MEDIA_ID_SD="MUT_SV_D" ;
+$SAVEDATA_FILE=$CWD.$CWD_SEPARATOR."sv_dat";
+
+$MEDIA_ID_SP="MUT_SV_P" ;
+$SAVEPAGES_FILES=$CWD.$CWD_SEPARATOR."sv_pag";
+
+$MEDIA_ID_SL="MUT_SV_L" ;
+$SAVELOG_FILES=$CWD.$CWD_SEPARATOR."sv_log";
+
+$SAVEPAGES_INTERVAL=120;
+$NUM_SAVE_PAGES=1;
+$NUM_LOG_SEGMENTS=3;
+$DIR_CMD="ls -tr" ;
+
+$NUM_DATA_DEVS=3 ;
+
+}
+
+#***********************
+sub check_data{
+#***********************
+  my($CHECK_TYPE) = @_ ;
+  if ( is_db_warm() )
+  {
+    print "$CHECK_TYPE ..." ;
+    my($RC)=CallDbmCli("-u $CTRL_USR,$CTRL_PWD -uUTL -d $DBNAME db_execute $CHECK_TYPE","");
+  }
+  else
+  {
+    print "$CHECK_TYPE with update ..." ;
+    my($RC)=CallDbmCli("-u $CTRL_USR,$CTRL_PWD -uUTL -d $DBNAME db_execute $CHECK_TYPE with update","");
+  }
+  print " finished \n" ;
+
+  if ( $RC && (system("fgrep 9041 $DBMCLI_PROT >$DEVNUL 2>&1") eq 0) ) 
+  {
+    if ( ! is_db_warm() )
+    { print "recreating index later in warm mode !\n" ; }
+	else
+	{
+      print "recreating index ...\n" ;
+      CallDbmCli("-u $CTRL_USR,$CTRL_PWD -d $DBNAME -uSQL $SYSUSR,$SYSPWD sql_execute restart index","restart index failed");
+	}
+  }
+}
+
+#***********************
+sub AnalyzeAndSetMutArgGlobals{
+#***********************
+$Usage = "Usage: $SELF \n
+	[-r]\t\t- for restore\n
+	[-R <dependent_path>]\t- path for dependent_path (old=INSTROOT)\n
+	[-c]\t\t- for restart after crash\n
+	[-v]\t\t- for more output (verbose)\n
+	[-f|-s]\t\t- for kernel version (fast/slow; fast is default)\n
+	[-T <Runtime>]\t- for the maximum runtime of MUT (in seconds)\n
+	[-t]\t\t- debug modus (create trace for each dbmcli command)\n
+	[-stoponerror]\t- stops test in case of any error\n
+	[-nodbana]\t- starts test without dbanalyzer\n
+	[-noadddelvol]\t- starts test without adding/deleting data volumes\n
+	[-nomutsave]\t- starts test without mutsave\n
+	[-norandom]\t- starts test without randomized functions, all functions will be executed\n
+	[-cluster]\t- uses cluster test\n" ;
+$RestartAfterCheckpointAndCrash = 0 ;
+$MaxRuntime = 0 ;
+$DURCH = 0 ;
+$DBMCLI_PROG="dbmcli" ;
+$use_dbana=1;
+$use_adddelvol=1;
+$use_mutsave=1;
+$USE_CLUSTER=0;
+$use_random=1;
+@actfiles=();
+
+for ( $i = 0 ; $i < @ARGV ; $i++ )
+{
+	$argv0 = substr ( $ARGV[$i] , 0 , 1 ) ;
+	if ( $argv0 eq "-" ) 
+	{
+		$argv1 = substr ( $ARGV[$i] , 1 ) ; 		# necessary because '-stoponerror' will be detected as '-s'
+		if ( $argv1 eq "r" )
+			{ $Restore = 1 }
+		elsif ( $argv1 eq "R" )
+		{ 
+              		if ( $i < @ARGV )
+              		{ 
+                		$i++ ;
+                		$INSTROOT=$ARGV[$i] ;
+              		}
+            	}
+		elsif ( $argv1 eq "c" )
+			{ $RestartAfterCheckpointAndCrash = 1; }
+		elsif ( $argv1 eq "v" )
+			{ $Verbose = 1 }
+		elsif ( $argv1 eq "f" )
+			{ $DB_SPEED="-f" ; }
+		elsif ( $argv1 eq "s" )
+			{ $DB_SPEED="-s" ; }
+		elsif ( $argv1 eq "T" )
+		{ 
+              		if ( $i < @ARGV )
+              		{ 
+                		$i++ ;
+                		$MaxRuntime=$ARGV[$i] ;
+              		}
+            	}		
+		elsif ( $argv1 eq "t" )
+  			{ $Debug=1; }
+		elsif ( $argv1 eq "nodbana" )
+  			{ $use_dbana=0; }
+		elsif ( $argv1 eq "noadddelvol" )
+  			{ $use_adddelvol=0; }
+		elsif ( $argv1 eq "nomutsave" )
+  			{ $use_mutsave=0; }
+		elsif ( $argv1 eq "cluster" )
+  			{ $USE_CLUSTER=1; 
+			  $use_adddelvol=0; }
+		elsif ( $argv1 eq "norandom" )
+			{ $use_random=0; }
+		elsif ( $argv1 eq "stoponerror" )
+  			{ post_sema($STOPONERROR); 
+			  push @actfiles, $STOPONERROR; }
+		else 
+			{ die $Usage."\n" } 
+	}
+}
+
+if ( $MaxRuntime == 0 )
+{
+	$DURCH = $ARGV[@ARGV-1];
+}
+
+die $Usage."\n" if ($DURCH < 1 && $MaxRuntime < 1 ) ;
+if ( $Verbose )
+{
+	print "$SELF Restore    = " , $Restore , "\n";
+	print "$SELF Verbose    = " , $Verbose , "\n";
+	print "$SELF Node       = " , $Node , "\n";
+	print "$SELF Durch      = " , $BIG_DURCH , "\n" ;
+	print "$SELF Crash/Rest = " , $RestartAfterCheckpointAndCrash , "\n" ;
+	print "$SELF MaxRuntime = " , $MaxRuntime , "\n" ;
+	print "$SELF use_dbana  = " , $use_dbana , "\n";
+	print "$SELF adddelvol  = " , $use_adddelvol , "\n";
+	print "$SELF use_mutsave= " , $use_mutsave , "\n";
+	print "$SELF use_random = " , $use_random , "\n";
+	print "$SELF use_cluster= " , $USE_CLUSTER , "\n";
+}
+
+SetDbmCliLocation();
+
+}
+
+SetDbmCliLocation();

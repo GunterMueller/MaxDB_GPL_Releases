@@ -1,0 +1,625 @@
+/*!***************************************************************************
+
+  module:        o3c2sqltest.c
+
+  -------------------------------------------------------------------------
+
+  responsible:   Anton Arsenov
+
+  special area:  Unicode conversion tests
+
+  description:   Tests for converting to CHAR UNICODE, VARCHAR UNICODE, LONG VARCHAR UNICODE
+				 from:
+				 SQL_C_CHAR, SQL_C_BINARY, SQL_C_BIT
+				 SQL_C_SSHORT, SQL_C_USHORT, SQL_C_SHORT,
+				 SQL_C_SLONG, SQL_C_ULONG, SQL_S_LONG,
+				 SQL_C_STINYINT, SQL_C_UTINYINT, SQL_C_TINYINT,
+				 SQL_C_SBIGINT, SQL_C_UBIGINT,
+				 SQL_C_NUMERIC, SQL_C_TYPE_DATE,
+				 SQL_C_TYPE_TIME, SQL_C_TYPE_TIMESTAMP.
+
+  [optional tags]:
+
+  -------------------------------------------------------------------------
+
+  copyright:    Copyright (c) 2001-2005 SAP AG
+
+\if EMIT_LICENCE
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+\endif
+*****************************************************************************/
+
+#define _UNICODE
+#define _ODBC
+/*===========================================================================*
+ *  INCLUDES                                                                 *
+ *===========================================================================*/
+#include "uniutil.c"
+
+/*===========================================================================*
+ *  DEFINES                                                                  *
+ *===========================================================================*/
+#define TABNAME "C2SQLTAB"
+#define COLDEF "COLCHAR CHAR(128) UNICODE, COLVARCHAR VARCHAR(128) UNICODE, COLLONG LONG VARCHAR UNICODE"
+
+/*===========================================================================*
+ *  FUNCTIONS                                                                *
+ *===========================================================================*/
+int main(int argc, char **argv) {
+	HENV henv   = SQL_NULL_HENV;
+	HENV *phenv = &henv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC *phdbc = &hdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT *phstmt = &hstmt;
+	SQLLEN pcbValue;
+	RETCODE rc;
+
+	SQLCHAR insert[MAX_NAME_LEN+1];
+	SQLCHAR select[MAX_NAME_LEN+1];
+
+	SQLCHAR str1[] = "INSERT INTO ";
+	SQLCHAR str2[] = " VALUES(?, ?, ?)";
+	SQLCHAR str3[] = "SELECT * FROM ";
+	SQLCHAR str4[] = "";
+
+	SQLCHAR buffer[O3UTIL_TEXT_BUFFER_LEN];
+
+	SQLCHAR col1[128];
+	SQLCHAR col2[128];
+	SQLCHAR col3[128];
+
+	UINT i;
+	BOOL	okflag;
+
+	SQLCHAR valChar[] = "Jackdaws love my big sphinkx of quartz. 1234567890";
+	SQLCHAR *valBinary;  /* = {'A', 0, 'B', 0, 'C', 0, 'D', 0, 'E', 0, 'F', 0}; */
+        SQLWCHAR valDummy[6];
+	SQLSCHAR		valSTinyint = -123;
+	SQLCHAR			valUTinyint = 123;
+	SQLCHAR			valTinyint = 123;
+	SQLSMALLINT		valSShort = -12345;
+	SQLUSMALLINT	valUShort = 12345;
+	SQLUSMALLINT	valShort = 12345;
+	SQLINTEGER		valSLong = -123456789;
+	SQLUINTEGER		valULong = 123456789;
+	SQLUINTEGER		valLong = 123456789;
+	SQLBIGINT		valSBigint = -123456789;
+	SQLUBIGINT		valUBigint = 123456789;
+	SQLREAL			valFloat = 1.234567;
+	SQLDOUBLE		valDouble = 1.23456789;
+	SQLCHAR			valBit = '1';
+	SQLCHAR			retMas[18][64] = {"ABCDEF",
+                                                  "-123",
+                                                  "123",
+                                                  "123",
+                                                  "-12345",
+                                                  "12345",
+                                                  "12345",
+                                                  "-123456789",
+                                                  "123456789",
+                                                  "123456789",
+                                                  "-123456789",
+                                                  "123456789",
+                                                  "1.234567",
+                                                  "1.23456789",
+                                                  "",
+                                                  "",
+                                                  "",
+                                                  "1"};
+	SQL_TIME_STRUCT			valsts;
+	SQL_DATE_STRUCT			valsds;
+	SQL_TIMESTAMP_STRUCT	valstss;
+	SQL_NUMERIC_STRUCT		valsns;
+
+        UINT dummy1, dummy2;
+
+        StringToWString (valDummy, 12, &dummy1, FALSE, "ABCDEF", 6, &dummy2);
+        valBinary = malloc (100);
+        
+        if (((long) valBinary) % 2 == 0)     /* force not aligned memory */
+          valBinary++;
+
+        memcpy (valBinary, valDummy, 12);
+        
+	GenerateSQLTime(&valsts);
+	GenerateSQLDate(&valsds);
+	GenerateSQLTimeStamp(&valstss);
+	GenerateSQLDecimal(&valsns, 8, 0);
+
+        SPRINTF (retMas[14], "%02d:%02d:%02d", valsts.hour, valsts.minute, valsts.second);
+        SPRINTF (retMas[15], "%04d-%02d-%02d", valsds.year, valsds.month, valsds.day);
+        SPRINTF (retMas[16], "%04d-%02d-%02d %02d:%02d:%02d.%ld",
+                 valstss.year, valstss.month, valstss.day,
+                 valstss.hour, valstss.minute, valstss.second, valstss.fraction);
+
+	/* Connection to database and creation table rutine */
+	FullConnect(phenv, phdbc);
+    rc = SQLAllocStmt(hdbc, phstmt);
+    SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+    PRINTF(buffer);
+    ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	DropTestTable(hstmt, TABNAME);
+	CreateTestTable(hstmt, TABNAME, COLDEF);
+
+	/* Prepare for insert data in to the table */
+	STRCPY(insert, str1);
+	STRCAT(insert, TABNAME);
+	STRCAT(insert, str2);
+	SPRINTF(buffer,"Insert Stmt = '%s'"CRLF, insert);
+	PRINTF(buffer);
+	rc = SQLPrepare(hstmt, insert, SQL_NTS);
+	SPRINTF(buffer," SQLPrepare retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Insert C_CHAR data */
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR,
+							  SQL_WCHAR, 128, 0, valChar, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_CHAR -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR,
+							  SQL_WVARCHAR, 128, 0, valChar, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_CHAR -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_CHAR,
+							  SQL_WLONGVARCHAR, 128, 0, valChar, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_CHAR -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_BINARY data */
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WVARCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WLONGVARCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_STINYINT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_STINYINT,
+							  SQL_WCHAR, 128, 0, &valSTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_STINYINT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_STINYINT,
+							  SQL_WVARCHAR, 128, 0, &valSTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_STINYINT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_STINYINT,
+							  SQL_WLONGVARCHAR, 128, 0, &valSTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_STINYINT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_UTINYINT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_UTINYINT,
+							  SQL_WCHAR, 128, 0, &valUTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UTINYINT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_UTINYINT,
+							  SQL_WVARCHAR, 128, 0, &valUTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UTINYINT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_UTINYINT,
+							  SQL_WLONGVARCHAR, 128, 0, &valUTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UTINYINT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_TINYINT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_TINYINT,
+							  SQL_WCHAR, 128, 0, &valTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TINYINT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_TINYINT,
+							  SQL_WVARCHAR, 128, 0, &valTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TINYINT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_TINYINT,
+							  SQL_WLONGVARCHAR, 128, 0, &valTinyint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TINYINT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_SSHORT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SSHORT,
+							  SQL_WCHAR, 128, 0, &valSShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SSHORT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SSHORT,
+							  SQL_WVARCHAR, 128, 0, &valSShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SSHORT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_SSHORT,
+							  SQL_WLONGVARCHAR, 128, 0, &valSShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SSHORT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_USHORT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_USHORT,
+							  SQL_WCHAR, 128, 0, &valUShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_USHORT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_USHORT,
+							  SQL_WVARCHAR, 128, 0, &valUShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_USHORT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_USHORT,
+							  SQL_WLONGVARCHAR, 128, 0, &valUShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_USHORT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_SHORT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SHORT,
+							  SQL_WCHAR, 128, 0, &valShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SHORT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SHORT,
+							  SQL_WVARCHAR, 128, 0, &valShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SHORT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_SHORT,
+							  SQL_WLONGVARCHAR, 128, 0, &valShort, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SHORT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_SLONG data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG,
+							  SQL_WCHAR, 128, 0, &valSLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SLONG -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG,
+							  SQL_WVARCHAR, 128, 0, &valSLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SLONG -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_SLONG,
+							  SQL_WLONGVARCHAR, 128, 0, &valSLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SLONG -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_ULONG data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_ULONG,
+							  SQL_WCHAR, 128, 0, &valULong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_ULONG -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_ULONG,
+							  SQL_WVARCHAR, 128, 0, &valULong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_ULONG -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_ULONG,
+							  SQL_WLONGVARCHAR, 128, 0, &valULong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_ULONG -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_LONG data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_LONG,
+							  SQL_WCHAR, 128, 0, &valLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_LONG -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_LONG,
+							  SQL_WVARCHAR, 128, 0, &valLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_LONG -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_LONG,
+							  SQL_WLONGVARCHAR, 128, 0, &valLong, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_LONG -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+
+	/* Insert C_SBIGINT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SBIGINT,
+							  SQL_WCHAR, 128, 0, &valSBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SBIGINT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_SBIGINT,
+							  SQL_WVARCHAR, 128, 0, &valSBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SBIGINT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_SBIGINT,
+							  SQL_WLONGVARCHAR, 128, 0, &valSBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_SBIGINT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_UBIGINT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_UBIGINT,
+							  SQL_WCHAR, 128, 0, &valUBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UBIGINT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_UBIGINT,
+							  SQL_WVARCHAR, 128, 0, &valUBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UBIGINT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_UBIGINT,
+							  SQL_WLONGVARCHAR, 128, 0, &valUBigint, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_UBIGINT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_FLOAT data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_FLOAT,
+							  SQL_WCHAR, 128, 0, &valFloat, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_FLOAT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_FLOAT,
+							  SQL_WVARCHAR, 128, 0, &valFloat, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_FLOAT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_FLOAT,
+							  SQL_WLONGVARCHAR, 128, 0, &valFloat, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_FLOAT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_DOUBLE data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_DOUBLE,
+							  SQL_WCHAR, 128, 0, &valDouble, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DOUBLE -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_DOUBLE,
+							  SQL_WVARCHAR, 128, 0, &valDouble, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DOUBLE -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_DOUBLE,
+							  SQL_WLONGVARCHAR, 128, 0, &valDouble, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DOUBLE -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_TIME data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_TYPE_TIME,
+							  SQL_WCHAR, 128, 0, &valsts, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIME -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_TYPE_TIME,
+							  SQL_WVARCHAR, 128, 0, &valsts, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIME -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_TYPE_TIME,
+							  SQL_WLONGVARCHAR, 128, 0, &valsts, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIME -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_DATE data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_TYPE_DATE,
+							  SQL_WCHAR, 128, 0, &valsds, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DATE -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_TYPE_DATE,
+							  SQL_WVARCHAR, 128, 0, &valsds, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DATE -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_TYPE_DATE,
+							  SQL_WLONGVARCHAR, 128, 0, &valsds, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_DATE -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_TIMESTAMP data */
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_TYPE_TIMESTAMP,
+							  SQL_WCHAR, 128, 0, &valstss, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIMESTAMP -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_TYPE_TIMESTAMP,
+							  SQL_WVARCHAR, 128, 0, &valstss, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIMESTAMP -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_TYPE_TIMESTAMP,
+							  SQL_WLONGVARCHAR, 128, 0, &valstss, 0, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_TIMESTAMP -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_BIT data */
+	
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_BIT,
+							  SQL_WCHAR, 128, 0, &valBit, 1, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BIT -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_BIT,
+							  SQL_WVARCHAR, 128, 0, &valBit, 1, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BIT -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_BIT,
+							  SQL_WLONGVARCHAR, 128, 0, &valBit, 1, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BIT -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select date from the table */
+	STRCPY(select, str3);
+    STRCAT(select, TABNAME);
+	STRCAT(select, str4);
+	SPRINTF(buffer,"Select Stmt= '%s'"CRLF, select);
+	PRINTF(buffer);
+	rc = SQLExecDirect(hstmt, select, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	okflag = TRUE;
+	/* Print char data */
+	rc = SQLFetch(hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_CHAR, col1, 128, NULL);
+	rc = SQLGetData(hstmt, 2, SQL_C_CHAR, col2, 128, NULL);
+	rc = SQLGetData(hstmt, 3, SQL_C_CHAR, col3, 128, NULL);
+	SPRINTF(buffer," %s\n %s\n %s"CRLF, col1, col2, col3);
+	PRINTF(buffer);
+	if ((STRCMP(col1, valChar) != 0)||(STRCMP(col2, valChar) != 0)||(STRCMP(col3, valChar) != 0))
+		okflag = FALSE;
+
+	/*Print other data */
+	for(i = 0; i < 18; i++) {
+		/* Select data as CHAR */
+		rc = SQLFetch(hstmt);
+		rc = SQLGetData(hstmt, 1, SQL_C_CHAR, col1, 128, NULL);
+		rc = SQLGetData(hstmt, 2, SQL_C_CHAR, col2, 128, NULL);
+		rc = SQLGetData(hstmt, 3, SQL_C_CHAR, col3, 128, NULL);
+		if ((STRCMP(col1, retMas[i]) != 0)||(STRCMP(col2, retMas[i]) != 0)||(STRCMP(col3, retMas[i]) != 0))
+			okflag = FALSE;
+		SPRINTF(buffer," %s\t%s\t%s"CRLF, col1, col2, col3);
+		PRINTF(buffer);
+	}
+
+	if (okflag == TRUE)
+		PRINTF("Test state: OK\n\n");
+	else
+		PRINTF("Test state: Failure\n\n");
+	FullDisconnect(phenv, phdbc);
+	return 0;
+}

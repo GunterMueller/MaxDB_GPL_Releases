@@ -1,0 +1,145 @@
+#!/usr/bin/perl
+# lccheck
+#
+# @(#)lccheck		1999-08-19   h.b.
+#
+# show and handle result files from primary liveCache tests 
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Copy;
+use Cwd;
+use Getopt::Std;
+
+
+if (!getopts('h') || $opt_h) {
+    print <DATA>;
+    exit 1;
+}
+
+$ProtDir = cwd();
+
+opendir(DIR_IN, $ProtDir);
+@ProtFiles = grep /^[A-Z].*\.pdiff/i, readdir(DIR_IN);
+closedir DIR_IN;
+
+map { s/\.pdiff//i; tr/[a-z]/[A-Z]/} @ProtFiles;
+
+print "... there are followed differences:\n\n";
+
+$i = 1;
+foreach (@ProtFiles) {
+    print "$_\n";
+    $i++;
+    if ( $i == 20) {
+	print "\nmore ...\n";
+	$ANSW = <STDIN>;
+        $i = 1;
+    }
+}
+if ($i>1) {
+    print "\n... end\n";
+    $ANSW = <STDIN>;
+}
+print "\n\n";
+
+
+foreach $primary (@ProtFiles) {
+
+    @ARGV = "$ProtDir/$primary"; 
+    do "$TOOL/bin/diffview$TOOLEXT";
+    if ( $@ ) { die "Error while executing diffview$TOOLEXT: $@" }
+
+    if ( -f "$primary.prot" ) {
+	@statinfo = stat "$primary.prot";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+	scalar localtime(@statinfo[$$r_mtime]),
+	" $primary.prot\n";
+    }
+
+    if ( -f "$primary.pdiff" ) {
+	@statinfo = stat "$primary.pdiff";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+	scalar localtime(@statinfo[$$r_mtime]),
+	" $primary.pdiff\n";
+    }
+
+    $ANSW="x";
+    until (($ANSW =~ /^(q|r|p)/i) || $ANSW eq "" ) {
+	print "\n==> Quit / Put / Remove / Nothing";
+	print "\n==> Command : (Q/P/R/<CR>)";
+	$ANSW = <STDIN>;
+	chop($ANSW);
+
+    }
+
+
+
+  CASE: {
+
+      if ( $ANSW =~ /r/i ) {
+          unlink ("$ProtDir/$primary.pdiff", "$ProtDir/$primary.prot");
+          print "$primary.pdiff and $primary.prot removed\n";
+          last CASE;
+      }
+
+      if ( $ANSW =~ /q/i ) {
+
+          print "QUIT putlc.\n";
+          exit;
+          last CASE;
+      }
+
+      if ( $ANSW =~ /p/i ) {
+	  system ("iget -e0 $SRC/livecache/$primary.lcref") == 0
+	      || die "Can't iget $primary.lcref\n";
+
+	  copy   ("$primary.prot", "$SRC/liveCache/$primary.lcref")
+	      || die "Can't copy $primary";
+
+	  system ("iput $SRC/livecache/$primary.lcref") == 0
+	      || die "Can't iput $primary.lcref\n";
+
+	  unlink ("$primary.prot", "$primary.pdiff");
+
+          print "$primary.prot save as lcref\n";
+          last CASE;
+      }
+
+      if ( $ANSW eq "" ) {
+          print "$primary.prot und $primary.pdiff not removed\n";
+          last CASE;
+      }
+
+  }
+
+}
+
+__DATA__
+
+
+  USAGE:  lccheck  
+
+        tool to handle liveCache primary tests
+

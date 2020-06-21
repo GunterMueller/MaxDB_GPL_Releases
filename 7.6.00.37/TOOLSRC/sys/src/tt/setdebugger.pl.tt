@@ -1,0 +1,136 @@
+#!/usr/bin/perl
+# @(#) setdebugger    1999-05-04   h.b.
+#                     2000-02-25   f.h. 
+#                     usage of "xservice" instead direct registry access
+#
+# set default system debugger and debugger registry entry 
+# of the database to the specified debugger.
+#
+# Aenderungen:
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Win32::Registry;
+use Getopt::Std;
+
+
+my $Auto;
+my $Debugger;
+my $db;
+my $RegEntry;
+my $DBVersion;
+
+# check options
+if ( !getopts('hmwd:r:v:')   ||   
+     $opt_h                  || 
+     ($opt_m && $opt_w)      ||
+     (!$opt_m && !$opt_w) ) 
+{ 
+    print <DATA>;
+    exit 1;
+} 
+
+# get serverdb
+$db = $ENV{SERVERDB};
+$db = $opt_d if $opt_d;
+
+if ( ! $db )
+{
+    print "\$SERVERDB not set -- use '-d <dbname>'\n"; 
+    exit 1;
+} 
+
+# get dbversion 
+$DBVersion = "slow";
+$DBVersion = lc $opt_v if $opt_v;
+
+if ( !($DBVersion =~ /slow|quick|fast/)  )
+{
+    print "unknown DB version $DBVersion\n"; 
+    exit 1;
+} 
+
+# init registry values 
+if ( $opt_w )
+{
+    $SystemDebugger = "drwtsn32 -p %ld -e %ld -g";
+    $DBDebugger     = "DRWTSN32";
+    $AutoMode       = "1";
+
+} else {
+
+    if (defined($ENV{"DevEnvDir"}) and not defined($ENV{"NO_VC_NET"}))
+    {
+        $SystemDebugger ="\"$ENV{CommonProgramFiles}\\Microsoft Shared\\VS7Debug\\vs7jit.exe\" -p %ld";
+        $DBDebugger     = "VS7JIT";
+    }
+    else
+    {
+        $SystemDebugger ="\"$ENV{MSDevDir}\\Bin\\msdev.exe\" -p %ld -e %ld";
+        $DBDebugger     = "MSDEV";
+    }
+    $AutoMode       = "0";
+}
+
+# tell user what is going on 
+print "install $DBDebugger as debugger for $db ($DBVersion)\n";
+
+# set system debugger
+$main::HKEY_LOCAL_MACHINE->Open("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AeDebug", $RegADA)
+    || die "Cannot open registry key for system debugger!\n";
+
+$RegADA->SetValueEx('Debugger', 0, REG_SZ, "$SystemDebugger") 
+    || die "Cannot register system debugger in the registry!\n";
+$RegADA->SetValueEx('Auto', 0, REG_SZ, "$AutoMode") 
+    || die "Cannot register automode for debugger in the registry!\n";
+
+$RegADA->Close();
+
+# set debuger for database
+
+
+my($SET_DB_DEBUGGER)="xservice -d $db -P debugger,$DBDebugger" ;
+if ( $DBVersion =~ /^quick/i  )
+  { $SET_DB_DEBUGGER.=" -q" ; }
+if ( $DBVersion =~ /^slow/i  )
+  { $SET_DB_DEBUGGER.=" -s" ; }
+
+print"calling $SET_DB_DEBUGGER ...." ;
+system($SET_DB_DEBUGGER) ;
+
+__END__
+
+ set default system debugger and debugger registry entry 
+ of the database to the specified debugger.
+
+Usage: 
+    
+ settdebugger [-d <dbname>] [-v slow|quick|fast] -m | -w
+    
+Options:
+    
+ -d <dbname>         -- specifies the databasename    (default ::= $SERVERDB) 
+ -v slow|quick|fast  -- specifies the kernel version  (default ::= slow)
+ -m                  -- set debugger to MSDEV 
+ -w                  -- set debugger to DRWTSN32 
+

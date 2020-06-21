@@ -1,0 +1,397 @@
+* SERVERDB_FOR_SAP = NO --> optimization owner --> schema switched off!
+dbmcli superdba,colduser !
+param_directput _SERVERDB_FOR_SAP NO !
+param_startsession !
+param_checkall !
+param_commitsession !
+db_restart !
+db_admin!
+bye ! 
+file xinitdbk !
+
+* does RESTRICT work correctly !
+* is owner of a table allowed to drop its own table 
+* in a foreign schema? (table B) without having DROPIN priv !
+file connect ( kern test !
+create schema TESTSCHEMA!
+create user OTHERUSER password OTHERUSER resource!
+GRANT CREATEIN ON TESTSCHEMA to OTHERUSER!
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+create table TESTSCHEMA.A (a char (20) KEY)!
+create table TESTSCHEMA.B (a char (20) KEY)!
+drop table TESTSCHEMA.B !
+commit release !
+file connect ( kern test !
+drop schema TESTSCHEMA RESTRICT !
+* what is owner of schema (not table in schema) allowed to do? !
+ * should the owner of a schema be able to see all objects in his schema?!
+select * from tables where schemaname = 'TESTSCHEMA'!
+fetch!
+insert into TESTSCHEMA.B values ('aaa')!
+select * from TESTSCHEMA.B !
+drop table  TESTSCHEMA.B !
+drop schema TESTSCHEMA !
+drop user OTHERUSER !
+select * from schemas !
+fetch!
+commit release !
+
+* if schema, table and view on table belong to different users,
+* what if table-owner is dropped !
+file connect ( kern test !
+create schema TESTSCHEMA!
+create user OTHERUSER password OTHERUSER resource!
+create user SECONDUSER password SECUSER resource!
+GRANT CREATEIN ON TESTSCHEMA to OTHERUSER!
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+create table TESTSCHEMA.A (a char (20) KEY)!
+insert TESTSCHEMA.A values ( 'abcdef')!
+grant select on TESTSCHEMA.A to SECONDUSER with grant option !
+commit release !
+file connect ( SECONDUSER SECUSER !
+create view SECONDVIEW as select * from TESTSCHEMA.A !
+grant select on SECONDVIEW to kern !
+select * from VIEWDEFS
+  where schemaname = 'SECONDUSER' AND viewname = 'SECONDVIEW' !
+fetch!
+commit release !
+file connect ( kern test!
+select * from SECONDUSER.SECONDVIEW!
+fetch!
+drop user OTHERUSER !
+select * from SECONDUSER.SECONDVIEW!
+fetch!
+alter table TESTSCHEMA.A add (NEWCOL int)!
+select * from SECONDUSER.SECONDVIEW!
+fetch!
+drop user SECONDUSER!
+drop schema TESTSCHEMA !
+commit release !
+
+* if schema, table and view on table belong to different users,
+* what if schema-owner is dropped !
+file connect ( kern test !
+create schema TESTSCHEMA!
+create user OTHERUSER password OTHERUSER resource!
+create user SECONDUSER password SECUSER resource!
+GRANT CREATEIN ON TESTSCHEMA to OTHERUSER!
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+create table TESTSCHEMA.A (a char (20) KEY)!
+insert TESTSCHEMA.A values ( 'abcdef')!
+grant select on TESTSCHEMA.A to SECONDUSER with grant option !
+commit release !
+file connect ( SECONDUSER SECUSER !
+create view SECONDVIEW as select * from TESTSCHEMA.A !
+grant select on SECONDVIEW to kern !
+select * from VIEWDEFS
+  where schemaname = 'SECONDUSER' AND viewname = 'SECONDVIEW' !
+fetch!
+commit release !
+file connect ( kern test!
+select * from SECONDUSER.SECONDVIEW!
+fetch!
+drop user kern !
+select * from SECONDUSER.SECONDVIEW!
+rollback release ! 
+file connect ( kern test !
+drop schema TESTSCHEMA!
+drop user OTHERUSER !
+drop user SECONDUSER !
+commit release !
+
+* PTS 1132768 !
+file connect ( kern test !
+create schema TESTSCHEMA!
+create user OTHERUSER password OTHERUSER resource!
+* next one had wrong errorpos 
+create schema OTHERUSER !
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+* expect -5001 !
+create table TESTSCHEMA.A (a char (20) KEY) !
+rollback release !
+file connect ( kern test !
+GRANT CREATEIN ON TESTSCHEMA to OTHERUSER!
+create table TESTSCHEMA.B (a char (20) KEY)!
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+create table TESTSCHEMA.A (a char (20) KEY)!
+* expect error -5001 although another priv exists!
+drop table Testschema.B!
+rollback release !
+file connect ( kern test !
+drop schema testschema !
+drop user OTHERUSER !
+commit release !
+file connect ( kern test!
+create schema TESTSCHEMA!
+create user OTHERUSER password OTHERUSER resource!
+create table TESTSCHEMA.mytable ( a int)!
+GRANT CREATEIN ON TESTSCHEMA to OTHERUSER!
+commit release !
+file connect ( OTHERUSER OTHERUSER !
+create table TESTSCHEMA.A (a char (20) KEY)!
+commit release !
+file connect ( kern test!
+* expect no result, kern has no priv for this !
+select schemaname, owner, tablename from tables 
+   where tablename = 'MYTABLE'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where schemaname = 'TESTSCHEMA' AND tablename = 'MYTABLE'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where tablename = 'A'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where schemaname = 'TESTSCHEMA' AND tablename = 'A'!
+fetch!
+drop user OTHERUSER!
+* schemaowner kern now is owner of table a !
+* table A could not be seen in older versions, but could be dropped !
+select schemaname, owner, tablename from tables 
+   where tablename = 'MYTABLE'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where schemaname = 'TESTSCHEMA' AND tablename = 'MYTABLE'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where tablename = 'A'!
+fetch!
+select schemaname, owner, tablename from tables 
+   where schemaname = 'TESTSCHEMA' AND tablename = 'A'!
+fetch!
+drop table TESTSCHEMA.A !
+drop schema testschema !
+commit release !
+file connect ( sut sut !
+create table sut_t ( sut_a int)!
+insert sut_t values (1)!
+grant select on sut_t to kern !
+commit release !
+file connect ( kern test !
+select * from sut_t !
+fetch!
+create schema elke !
+create table kern_t ( kern_a int)!
+insert kern_t values (3)!
+create view v_ohne as select kern_a from kern_t where kern_a <> 1!
+create view v_kern as select kern_a from kern.kern_t 
+   where kern.kern_t.kern_a <> 1!
+create view v_user as select kern_a from user.kern_t 
+   where user.kern_t.kern_a <> 1!
+create view v_schema as select kern_a from current_schema.kern_t 
+   where current_schema.kern_t.kern_a <> 1!
+set current_schema = elke !   
+create table kern_elke_t ( kern_elke_a int) !
+insert kern_elke_t values (3)!
+create view ve_ohne as select kern_elke_a from kern_elke_t 
+   where kern_elke_a <> 1!
+create view ve_kern as select kern_a from kern.kern_t 
+   where kern.kern_t.kern_a <> 1!
+create view ve_user as select kern_a from user.kern_t 
+   where user.kern_t.kern_a <> 1!
+create view ve_schema as select kern_elke_a from current_schema.kern_elke_t 
+   where current_schema.kern_elke_t.kern_elke_a <> 1!
+select * from viewdefs where owner = user and 
+   schemaname between 'A' and 'Z' !
+fetch!
+commit !
+select * from ve_schema !
+fetch!
+select current_schema into :a from dual !
+drop schema elke !
+select current_schema into :a from dual !
+rollback !
+select current_schema into :a from dual !
+set current_schema = sut !
+select current_schema into :a from dual !
+select * from sut_t !
+fetch!
+select * from kern_t !
+fetch!
+set current_schema = "KERN" !
+select current_schema into :a from dual !
+select * from sut_t !
+fetch!
+select * from kern_t !
+fetch!
+select * from ve_schema !
+fetch!
+select * from v_schema !
+fetch!
+select * from elke.ve_schema !
+fetch!
+drop schema elke !
+select current_schema into :a from dual !
+select * from viewdefs where owner = user and 
+   schemaname between 'A' and 'Z' !
+fetch!
+set current_schema = elke !
+rollback release !
+
+
+file connect ( sut sut !
+create user stdrd password stdrd standard !
+create user resrc password resrc resource !
+create user owndba password owndba dba !
+commit release !
+file connect ( stdrd stdrd !
+create schema stdrdschema !
+commit release !
+file connect ( resrc resrc !
+create schema resrcschema !
+commit release !
+file connect ( owndba owndba !
+create schema dbaschema !
+create schema dbaschema_no_priv !
+grant createin on dbaschema to sut, resrc !
+commit release !
+file connect ( sut sut !
+set current_schema = dbaschema !
+create table current_schema.t_curr_schema ( a int, b int)!
+create table t ( a int, b int)!
+insert t values (123, 456)!
+create table dbaschema_no_priv.t_no_priv ( a int, b int)!
+create view dbaschema.v1 as select * from t !
+create view dbaschema_no_priv.v1_no_priv as select * from t !
+create index i1 on t (a)!
+create synonym mysyn1 for t!
+create synonym dbaschema.mysyn2 for t!
+create synonym current_schema.mysyn3 for t!
+ * PTS 1133669 1. !
+create synonym user.mysyn4 for t!
+create synonym sut.mysyn5 for t!
+create synonym dbaschema_no_priv.mysyn6 for t!
+select synonymname from synonyms where synonymname like 'MY%'!
+fetch!
+rename synonym sut.mysyn5 to dbaschema.mynewsyn5 !
+rename synonym sut.mysyn5 to       sut.mynewsyn5 !
+rename synonym sut.mysyn5 to           mynewsyn5 !
+select synonymname from synonyms where synonymname like 'MY%'!
+fetch!
+drop synonym sut.mynewsyn5 !
+create domain    dbaschema.sutdom0 int constraint sutdom0 >= 0 !
+create domain                sutdom1 int constraint sutdom1 >= 0 !
+create domain            sut.sutdom2 int constraint sutdom2 >= 0 !
+ * PTS 1133669 2. !
+create domain           user.sutdom3 int constraint sutdom3 >= 0 !
+create domain current_schema.sutdom4 int constraint sutdom4 >= 0 !
+create domain dbaschema_no_priv.sutdom5 int constraint sutdom5 >= 0!
+select domainname from domains 
+   where owner = 'SUT' and domainname like 'SUT%'!
+fetch!
+drop domain user.sutdom2 !
+
+rename table dbaschema.t to newtabname !
+select schemaname, owner, tablename 
+   from tables where tablename = 'NEWTABNAME'!
+fetch!
+rename table newtabname to t !
+select schemaname, owner, tablename 
+   from tables where tablename = 'T'!
+fetch!
+
+exists table t !
+exists table dbaschema.t !
+
+set current_schema = sut !
+create synonym current_schema.mysyn7 for t!
+create index i2 on dbaschema.t (b) !
+create view dbaschema.v2 as select * from dbaschema.t !
+create view             v3 as select * from dbaschema.t !
+
+select synonymname from synonyms where synonymname like 'MY%'!
+fetch!
+select substr(schemaname, 1, 12), 
+       substr(owner, 1, 12), 
+       substr(viewname, 1, 12)
+   from views where viewname like 'V_'!
+fetch!
+select * from viewdefs where viewname like 'V_'!
+fetch!
+select substr (SCHEMANAME, 1, 9) schem,
+       substr (OWNER, 1, 9) owner,
+       substr (VIEWNAME, 1, 2) vn,
+       substr (VIEWCOLUMNNAME, 1, 1) vcn,
+       substr (TABLESCHEMANAME, 1, 9) tschem,
+       substr (TABLEOWNER, 1, 9) towner,
+       substr (TABLENAME, 1, 2) tn,
+       substr (COLUMNNAME, 1, 1) cn
+   from viewcolumns where viewname like 'V_'!
+fetch!
+select substr (SCHEMANAME, 1, 9) schem, 
+       substr (OWNER, 1, 9) owner, 
+       substr (TABLENAME, 1, 2) tn, 
+       substr (INDEXNAME, 1, 2) in
+   from indexes where tablename = 'T'!
+fetch!
+select owner, domainname from domains where domainname like 'SUT%'!
+fetch!
+
+exists table t !
+exists table dbaschema.t !
+
+rename table dbaschema.t to newtabname !
+select schemaname, owner, tablename 
+   from tables where tablename = 'NEWTABNAME'!
+fetch!
+select * from viewdefs where viewname like 'V_'!
+fetch!
+
+* does implicit re-creation of view handles schema correctly ?!
+alter table dbaschema.newtabname add c int!
+select * from v3 !
+fetch!
+select * from dbaschema.v1 !
+fetch!
+select substr(schemaname, 1, 12), 
+       substr(owner, 1, 12), 
+       substr(viewname, 1, 12)
+   from views where viewname like 'V_'!
+fetch!
+select * from viewdefs where viewname like 'V_'!
+fetch!
+
+commit release !
+* trigger on a table (owner not owner of schema), owner is dropped !
+file connect ( resrc resrc !
+create table dbaschema.resrctab ( a int, b int)!
+noscript !
+create trigger t for dbaschema.resrctab after insert execute (
+    select * from sysdba.dual where :a = :b;
+    if $rc <> 0 
+    then
+        stop($rc);
+) !
+script !
+insert dbaschema.resrctab values (1,2)!
+commit release !
+file connect ( sut sut !
+drop user resrc !
+commit release !
+file connect ( owndba owndba !
+insert dbaschema.resrctab values (1,2)!
+commit release !
+
+file connect ( sut sut !
+drop user stdrd  !
+drop user owndba !
+drop schema dbaschema !
+commit release !
+
+file shutdwnk!
+
+dbmcli superdba,colduser !
+param_directput _SERVERDB_FOR_SAP YES !
+param_startsession !
+param_checkall !
+param_commitsession !
+db_restart !
+db_admin !
+bye ! 
+vdnexit!   
+   

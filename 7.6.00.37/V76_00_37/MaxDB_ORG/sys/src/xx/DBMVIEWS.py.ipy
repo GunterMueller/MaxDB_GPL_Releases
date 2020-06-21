@@ -1,0 +1,638 @@
+#
+# To be run as SYSDBA
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import * 
+
+def install (session,options):
+    """Installing Database Manager tables
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+# ======================
+# <<<<< INFO_INFOS >>>>>
+# ======================
+#
+    switchToSchema (session, 'SYSDBM')
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE INFO_INFOS')
+
+    stopIfSqlNotOK (session, 
+    """CREATE TABLE INFO_INFOS
+        (  
+        "Name" CHAR(32) ASCII NOT NULL,
+        "Short Name" CHAR(32),
+        "View Name" CHAR(32)
+        )
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_INFOS TO PUBLIC WITH GRANT OPTION")
+
+    dataLoad (session, """
+      DATALOAD TABLE INFO_INFOS
+      "Name" 1
+      "Short Name" 2
+      "View Name" 3
+      INFILE *
+      COMPRESSED
+      SEPARATOR ','
+      DELIMITER ''""","""
+State,STATE,INFO_STATE
+I/O,IO,INFO_IO_STATISTICS
+Caches,CACHES,INFO_CACHE_STATISTICS
+Devspaces,DEVSPACES,INFO_DEVSPACES
+Bad Devspaces,BADDEVSPACES,INFO_BAD_DEVSPACES
+Data,DATA,INFO_DATADEV_STATE
+Log,LOG,INFO_LOG_STATE
+Locks,LOCKS,INFO_LOCKS
+Users,USERS,INFO_CONNECTED_USERS
+Versions,VERSIONS,INFO_VERSIONS
+Tables,TABLES,INFO_TABLES
+Columns,COLUMNS,INFO_COLUMNS
+Update Statistics,UPDSTAT,INFO_UPDSTAT
+UpdStat Wanted,UPDSTATW,INFO_UPDSTAT_WANTED
+Indexes,INDEXES,INFO_INDEXES
+Bad Indexes,BADIDX,INFO_BAD_INDEXES
+Unused Indexes,UNUSEDIDX,INFO_UNUSED_INDEXES
+Disabled Indexes,DISABLEDIDX,INFO_DISABLED_INDEXES
+Parameter,PARAMS,INFO_PARAMETERS
+OMS Caches,OMSCACHES,INFO_OMS_CACHES
+OMS Monitor,OMSMON,INFO_OMS_MONITOR
+Class Containers,CLSCON,INFO_CLASSCONTAINERS
+SYSDD ServerDB State,SYSDDSRVDB,INFO_SYSDD_SERVERDBSTATE
+SYSDD Configuration,SYSDDCONFIG,INFO_SYSDD_CONFIG
+SYSDD Monitor,SYSDDMONITOR,INFO_SYSDD_MONITOR
+""")
+
+    createReplaceView (session, 'INFO_STATE',""" 
+    (
+        "Data           (KB)",
+        "Perm Data      (KB)",
+        "Temp Data      (KB)",
+        "Data        (Pages)",
+        "Perm Data   (Pages)",
+        "Temp Data   (Pages)",
+        "Data            (%)",
+        "Perm Data       (%)",
+        "Temp Data       (%)",
+        "Log            (KB)",
+        "Log         (Pages)",
+        "Log             (%)",
+        "Sessions",
+        "Sessions        (%)",
+        "Data Cache      (%)",
+        "Converter Cache (%)",
+        "Data Max       (KB)",
+        "Log Max        (KB)",
+        "Data Max    (Pages)",
+        "Log Max     (Pages)",
+        "Sessions Max",
+        "Database Full",      
+        "Connect Possible",
+        "Command Monitoring", 
+        "Database Monitoring",
+        "Kernel Trace",       
+        "Autosave",           
+        "Bad Indexes",       
+        "Log Full",          
+        "Bad Devspaces",
+        "Data Cache OMS      (%)",
+        "Data Cache OMS Log  (%)"
+    )
+
+    AS SELECT 
+        A.USEDSIZE,
+        A.USEDSIZE - A.USEDTEMPORARYSIZE,
+        A.USEDTEMPORARYSIZE,
+        FIXED(A.USEDSIZE/D.PAGESIZE_IN_KB),
+        FIXED((A.USEDSIZE - A.USEDTEMPORARYSIZE)/D.PAGESIZE_IN_KB),
+        FIXED(A.USEDTEMPORARYSIZE/D.PAGESIZE_IN_KB),
+        FIXED(A.USEDSIZE/A.USABLESIZE*100, 3),
+        FIXED((A.USEDSIZE - A.USEDTEMPORARYSIZE)/A.USABLESIZE*100, 3),
+        FIXED(A.USEDTEMPORARYSIZE/A.USABLESIZE*100, 3),
+        S.USED_LOG_PAGES*D.PAGESIZE_IN_KB,
+        S.USED_LOG_PAGES,
+        S.PCT_LOGUSED,
+        D.ACTIVE_SESSIONS,
+        FIXED(D.ACTIVE_SESSIONS/D.MAXUSERS*100, 3),
+        D.DATACACHE_HITRATE,
+        0,
+        A.USABLESIZE,
+        S.LOG_PAGES*D.PAGESIZE_IN_KB,
+        FIXED(A.USABLESIZE/D.PAGESIZE_IN_KB),
+        S.LOG_PAGES,
+        D.MAXUSERS,
+        D.DATABASEFULL,
+        D.CONNECTPOSSIBLE,
+        D.DIAGMONITOR,
+        D.MONITOR,
+        D.KNLTRACE,
+        D.AUTOSAVESTANDBY,
+        D.BADINDEXES,
+        D.LOGFULL,
+        D.BADVOLUMES,
+        D.DATA_OMS_HITRATE,
+        D.LOG_OMS_HITRATE
+    FROM 
+		SYSDD.DATASTATISTICS A,
+        SYSDD.SERVERDB_STATS S,
+        SYSDD.DBM_STATE D
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_STATE TO PUBLIC WITH GRANT OPTION")
+
+# ==============================
+# <<<<< INFO_IO_STATISTICS >>>>>
+# ==============================
+
+    createReplaceView (session, 'INFO_IO_STATISTICS',""" 
+          ( "Name",
+            "Logical Reads",
+            "Logical Writes",
+            "Physical Reads",
+            "Physical Writes" )
+          AS SELECT
+            OBJECTNAME,
+            "LOGICAL READ",
+            "LOGICAL WRITE",
+            "PHYSICAL READ",
+            "PHYSICAL WRITE"
+          FROM SYSDD.CTRL_IO_STATISTICS
+          INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_IO_STATISTICS TO PUBLIC WITH GRANT OPTION")
+
+# =================================
+# <<<<< INFO_CACHE_STATISTICS >>>>>
+# =================================
+
+    createReplaceView (session, 'INFO_CACHE_STATISTICS',""" 
+          ( "Type",
+            "Accesses",
+            "Successful",
+            "Unsuccessful",
+            "Hit Rate (%)")
+        AS SELECT
+            NAME,
+            ACCESSCOUNT,
+            SUCCESSFULACCESSCOUNT,
+            UNSUCCESSFULACCESSCOUNT,
+            HITRATE
+        FROM SYSDD.CACHESTATISTICS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_CACHE_STATISTICS TO PUBLIC WITH GRANT OPTION")
+
+# ==========================
+# <<<<< INFO_DEVSPACES >>>>>
+# ==========================
+
+    createReplaceView (session, 'INFO_DEVSPACES',""" 
+          ( "Type",
+            "Internal ID",
+            "Name",
+            "Size (KB)",
+            "Mirrored"
+        )
+        AS SELECT
+            VOLUMEKIND,
+            VOLUMENO,
+            VOLUMENAME,
+            VOLUMESIZE,
+            DECODE(VOLUMESTATE,'NotMirrored','No','Yes')
+        FROM SYSDD.CTRL_VOLUMES
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_DEVSPACES TO PUBLIC WITH GRANT OPTION")
+
+# ==============================
+# <<<<< INFO_BAD_DEVSPACES >>>>>
+# ==============================
+
+    createReplaceView (session, 'INFO_BAD_DEVSPACES ',""" 
+          ( "Name",
+            "Status" )
+        AS SELECT
+            "VALUE",
+            DECODE(UPPER(DESCRIPTION),'BAD VOLUME','BAD','REINTEGRATION')
+        FROM SYSDD.SERVER_DB_STATE
+        WHERE UPPER(DESCRIPTION)='BAD VOLUME'
+        OR UPPER(DESCRIPTION)='VOLUME IN REINTEGRATION'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_BAD_DEVSPACES TO PUBLIC WITH GRANT OPTION")
+
+# ==============================
+# <<<<< INFO_DATADEV_STATE >>>>>
+# ==============================
+
+    createReplaceView (session, 'INFO_DATADEV_STATE',""" 
+        (   "Devspace Name",
+            "   Total Space (KB)",
+            "   Used Space (KB)",
+            "   Used Space (%)",
+            "   Free Space (KB)",
+            "   Free Space (%)"
+        ) AS SELECT 
+            PATH,
+            CONFIGUREDSIZE,
+            USEDSIZE,
+            USEDSIZEPERCENTAGE,
+            CONFIGUREDSIZE - USEDSIZE,
+            100 - USEDSIZEPERCENTAGE
+        FROM 
+            SYSDD.DATAVOLUMES,
+            SYSDD.ACTIVECONFIGURATION
+        WHERE PARAMETERNAME ='_PAGE_SIZE'
+        INTERNAL""")
+    
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_DATADEV_STATE TO PUBLIC WITH GRANT OPTION")
+
+# ==============================
+# <<<<< INFO_LOG_STATE >>>>>
+# ==============================
+
+    createReplaceView (session, 'INFO_LOG_STATE',""" 
+      (  "Log Mirrored",
+         "Log Writing",
+			       "Log Automatic Overwrite",
+         "Max. Size (KB)",  
+         "Backup Segment Size (KB)",    
+         "Used Size (KB)","Used Size (%)",  
+         "Not Saved (KB)","Not Saved (%)",  
+         "Log Since Last Data Backup (KB)", 
+         "Savepoints","Checkpoints",    
+         "Physical Reads","Physical Writes",    
+         "Queue Size (KB)","Queue Overflows",   
+         "Group Commits","Waits for Logwriter", 
+         "Max. Waits","Average Waits",
+         "OMS Log Used Pages","OMS Min. Free Pages"
+         )
+      AS SELECT 
+         S3.VALUE,
+			       UPPER(S1.VALUE),
+			       UPPER(S2.VALUE),
+         SIZE,
+         SAVE_SEGM_SIZE,
+         USED_SIZE,USED_SIZE_PERCENT,
+         NOT_SAVED_SIZE,NOT_SAVED_PERCENT,
+         LAST_DATA_BACKUP,
+         SAVEPOINTS,CHECKPOINTS,
+         PHYSICAL_READS,PHYSICAL_WRITES,
+         QUEUE_SIZE,QUEUE_OVERFLOWS,
+         GROUP_COMMITS,WAIT_FOR_LOGWRITER,
+         MAX_WAITS,AVG_WAITS,
+         OMS_LOG_USED_PAGES,OMS_LOG_MIN_FREE
+      FROM SYSDD.CTRL_LOG_STATS,SYSDD.SERVER_DB_STATE S1,SYSDD.SERVER_DB_STATE S2,
+           SYSDBA.DBPARAMETERS S3
+      WHERE S1.DESCRIPTION = 'Log writing' 
+      AND S2.DESCRIPTION = 'Log automatic overwrite' 
+      AND S3.DESCRIPTION = 'LOG_MIRRORED'
+      INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_LOG_STATE TO PUBLIC WITH GRANT OPTION")
+
+# ======================
+# <<<<< INFO_LOCKS >>>>>
+# ======================
+
+    createReplaceView (session, 'INFO_LOCKS',""" 
+          ( "Max. Entries",
+        "Average Used Entries",
+        "Collisions",
+        "Escalations",
+        "Row Locks",
+        "Table Locks",
+        "Request Timeout"
+    )
+    AS SELECT
+        MAXENTRIES,
+        AVGENTRIES,
+        COLLISIONS,
+        ESCALATIONS,
+        ROWLOCKS,
+        TABLELOCKS,
+        REQ_TIMEOUT
+    FROM SYSDD.CTRL_LOCKS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_LOCKS TO PUBLIC WITH GRANT OPTION")
+
+# ================================
+# <<<<< INFO_CONNECTED_USERS >>>>>
+# ================================
+
+    createReplaceView (session, 'INFO_CONNECTED_USERS',""" 
+          ( "Name",
+        "Terminal ID",
+        "Task ID",
+        "Session ID",
+        "Node",
+        "Catalog Cache Size"
+    )
+    AS SELECT
+        C.USERNAME,
+        C.TERMID,
+        T.PROCESS,
+        C.SESSION,
+        T.APPL_NODEID,
+        C.CATALOG_CACHE_SIZE
+    FROM SYSDD.CONNECTED_USERS C, SYSDD.TRANSACTIONS T
+    WHERE C.SESSION = T.SESSION
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_CONNECTED_USERS TO PUBLIC WITH GRANT OPTION")
+
+# =========================
+# <<<<< INFO_VERSIONS >>>>>
+# =========================
+
+    createReplaceView (session, 'INFO_VERSIONS',""" 
+          ( "Kernel",
+        "Runtime Environment"
+    )
+    AS SELECT
+        KERNEL,
+        RUNTIMEENVIRONMENT
+    FROM SYSDD.VERSION
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_VERSIONS TO PUBLIC WITH GRANT OPTION")
+
+# =======================
+# <<<<< INFO_TABLES >>>>>
+# =======================
+ 
+    createReplaceView (session, 'INFO_TABLES',""" 
+          ( "Schema Name",  
+        "Table Name",
+        "Table Type",
+        "Create Date",
+        "Create Time"
+    )
+    AS SELECT
+        SCHEMANAME,
+        TABLENAME,
+        TABLETYPE,
+        "DATE",
+        "TIME"
+    FROM SYSDD.TABLES
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_TABLES TO PUBLIC WITH GRANT OPTION")
+ 
+# ========================
+# <<<<< INFO_COLUMNS >>>>>
+# ========================
+
+#    DECODE(LEN,NULL,DATATYPE,DATATYPE & '(' & TRIM(CHR(LEN)) & DECODE("DEC",NULL, ')',',' & TRIM(CHR("DEC")) & ')')),
+
+
+    createReplaceView (session, 'INFO_COLUMNS',""" 
+          ( "Schema Name",  
+        "Table Name",
+        "Column Name",
+        "Data Type",
+        "Primary Key"
+    )
+    AS SELECT
+        SCHEMANAME,
+        TABLENAME,
+        COLUMNNAME,
+        DATATYPE,
+        DECODE(MOD,'KEY','YES','NO')
+    FROM SYSDD.COLUMNS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_COLUMNS TO PUBLIC WITH GRANT OPTION")
+
+# ========================
+# <<<<< INFO_UPDSTAT >>>>>
+# ========================
+ 
+    createReplaceView (session, 'INFO_UPDSTAT',""" 
+          ( "Schema Name",
+        "Table Name",
+        "UpdStat Date",
+        "UpdStat Time"
+    )
+    AS SELECT
+        SCHEMANAME,
+        TABLENAME,
+        UPDSTATDATE,
+        UPDSTATTIME
+    FROM SYSDD.TABLES
+    WHERE TABLETYPE='TABLE' 
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_UPDSTAT TO PUBLIC WITH GRANT OPTION")
+
+# ===============================
+# <<<<< INFO_UPDSTAT_WANTED >>>>>
+# ===============================
+ 
+    createReplaceView (session, 'INFO_UPDSTAT_WANTED',""" 
+          ( "Schema Name",
+        "Table Name",
+        "Column Name"
+    )
+    AS SELECT
+        SCHEMANAME,
+        TABLENAME,
+        COLUMNNAME
+    FROM SYSDBA.SYSUPDSTATWANTED
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_UPDSTAT_WANTED TO PUBLIC WITH GRANT OPTION")
+
+# ============================
+# >>>>> INFO_BAD_INDEXES <<<<<
+# ============================
+ 
+                      
+    createReplaceView (session, 'INFO_BAD_INDEXES',""" 
+          ( "Schema Name",
+            "Table Name",
+            "Index Name")
+            AS SELECT
+            SCHEMANAME,
+            TABLENAME,
+            INDEXNAME
+    FROM SYSDD.BAD_INDEXES
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_BAD_INDEXES TO PUBLIC WITH GRANT OPTION")
+
+
+# ===============================
+# >>>>> INFO_UNUSED_INDEXES <<<<<
+# ===============================
+
+    createReplaceView (session, 'INFO_UNUSED_INDEXES',""" 
+          ( "Schema Name",
+        "Table Name",
+        "Index Name"
+    )
+    AS SELECT
+        SCHEMANAME,
+        TABLENAME,
+        INDEXNAME
+    FROM SYSDD.INDEXES
+    WHERE COLUMNNO=1 AND INDEX_USED=0
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_UNUSED_INDEXES TO PUBLIC WITH GRANT OPTION")
+
+# =================================
+# >>>>> INFO_DISABLED_INDEXES <<<<<
+# =================================
+
+
+    createReplaceView (session, 'INFO_DISABLED_INDEXES',""" 
+          ( "Schema Name",
+            "Table Name",
+            "Index Name")
+        AS SELECT
+            SCHEMANAME,
+            TABLENAME,
+            INDEXNAME
+        FROM SYSDD.INDEXES
+        WHERE COLUMNNO=1 AND DISABLED='YES'
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_DISABLED_INDEXES TO PUBLIC WITH GRANT OPTION")
+
+# ========================
+# >>>>> INFO_INDEXES <<<<<
+# ========================
+
+    createReplaceView (session, 'INFO_INDEXES',""" 
+          ( "Schema Name",
+            "Table Name",
+            "Index Name",
+            "Type",
+            "Date",
+            "Time",
+            "Used",
+            "Disabled",
+            "Bad"
+        )
+        AS SELECT
+            I.SCHEMANAME,
+            I.TABLENAME,
+            I.INDEXNAME,
+            I.TYPE,
+            I.DATE,
+            I.TIME,
+            DECODE(I.INDEX_USED,0,'NO','YES'),
+            I.DISABLED,
+            DECODE(B."Schema Name",NULL,'NO','YES')
+        FROM SYSDD.INDEXES I, INFO_BAD_INDEXES B
+        WHERE I.COLUMNNO=1 
+        AND I.SCHEMANAME = B."Schema Name" (+)
+        AND I.TABLENAME  = B."Table Name" (+)
+        AND I.INDEXNAME  = B."Index Name" (+)
+        INTERNAL""")
+    
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_INDEXES TO PUBLIC WITH GRANT OPTION")
+ 
+# ===========================
+# >>>>> INFO_PARAMETERS <<<<<
+# ===========================
+
+    createReplaceView (session, 'INFO_PARAMETERS',""" 
+          ( "Description",
+            "Value" )
+        AS SELECT
+            PARAMETERNAME,
+            "VALUE"
+        FROM SYSDD.ACTIVECONFIGURATION
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON  INFO_PARAMETERS TO PUBLIC WITH GRANT OPTION")
+
+# ===========================
+# >>>>> INFO_OMS_CACHES <<<<<
+# ===========================
+
+    createReplaceView (session, 'INFO_OMS_CACHES',""" 
+          AS SELECT * FROM SYSDBA.MONITOR_CACHES
+    WHERE DESCRIPTION LIKE 'Data%' OR
+          DESCRIPTION LIKE 'Rollback%'
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_OMS_CACHES TO PUBLIC WITH GRANT OPTION")
+ 
+# ============================
+# >>>>> INFO_OMS_MONITOR <<<<<
+# ============================
+
+    createReplaceView (session, 'INFO_OMS_MONITOR',""" 
+          AS SELECT * FROM SYSDBA.MONITOR_OMS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_OMS_MONITOR TO PUBLIC WITH GRANT OPTION")
+
+# ====================================
+# >>>>> INFO_SYSDD_SERVERDBSTATE <<<<<
+# ====================================
+ 
+    createReplaceView (session, 'INFO_SYSDD_SERVERDBSTATE',""" 
+          AS SELECT * FROM SYSDD.SERVERDB_STATS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_SYSDD_SERVERDBSTATE TO PUBLIC WITH GRANT OPTION")
+
+# =============================
+# >>>>> INFO_SYSDD_CONFIG <<<<<
+# =============================
+ 
+    createReplaceView (session, 'INFO_SYSDD_CONFIG',""" 
+          AS SELECT * FROM SYSDD.CONFIGURATION
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_SYSDD_CONFIG TO PUBLIC WITH GRANT OPTION")
+
+# ==============================
+# >>>>> INFO_SYSDD_MONITOR <<<<<
+# ==============================
+ 
+    createReplaceView (session, 'INFO_SYSDD_MONITOR',""" 
+          AS SELECT * FROM SYSDD.MONITOR
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON INFO_SYSDD_MONITOR TO PUBLIC WITH GRANT OPTION")
+
+# End of this file
+#
+
+    loaderCmd (session, 'COMMIT WORK')
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

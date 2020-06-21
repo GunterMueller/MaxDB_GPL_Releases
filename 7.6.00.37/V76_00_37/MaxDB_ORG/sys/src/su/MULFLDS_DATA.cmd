@@ -1,0 +1,332 @@
+insert &1 values('aaaaaaaaaa', '               ', '               ')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000000', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000001', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000002', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000003', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000004', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000005', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000006', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000007', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000008', '000000000000009')!
+*
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000000')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000001')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000002')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000003')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000004')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000005')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000006')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000007')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000008')!
+insert &1 values('bbbbbbbbbb', '000000000000009', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000000', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000000', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000001', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000001', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000002', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000002', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000003', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000003', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000004', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000004', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000005', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000005', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000006', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000006', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000007', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000007', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000008', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000008', '000000000000009')!
+*
+insert &1 values('cccccccccc', '000000000000009', '000000000000000')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000001')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000002')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000003')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000004')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000005')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000006')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000007')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000008')!
+insert &1 values('cccccccccc', '000000000000009', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000000', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000000', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000001', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000001', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000002', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000002', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000003', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000003', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000004', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000004', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000005', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000005', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000006', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000006', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000007', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000007', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000008', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000008', '000000000000009')!
+*
+insert &1 values('dddddddddd', '000000000000009', '000000000000000')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000001')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000002')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000003')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000004')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000005')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000006')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000007')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000008')!
+insert &1 values('dddddddddd', '000000000000009', '000000000000009')!
+*

@@ -1,0 +1,178 @@
+connect hu identified by hu sqlmode ansi !
+pars_then_ex !
+* Test0045 !
+  SELECT PNUM
+     INTO   :PNO1
+     FROM   PROJ
+     WHERE  BUDGET BETWEEN 40000 AND 60000  !
+  SELECT PNUM
+     INTO   :PNO2
+     FROM   PROJ
+     WHERE BUDGET >= 40000 AND BUDGET <= 60000 !
+  COMMIT WORK!
+* Test0046 !
+  SELECT CITY
+     INTO   :CITY1
+     FROM   STAFF
+     WHERE  GRADE NOT BETWEEN 12 AND 13!
+  SELECT CITY
+     INTO   :CITY2
+     FROM   STAFF
+     WHERE  NOT( GRADE BETWEEN 12 AND 13 )!
+  COMMIT WORK!
+* Test0047 !
+  SELECT STAFF.EMPNAME
+     INTO   :EMPNA1
+     FROM   STAFF
+     WHERE  STAFF.EMPNUM IN
+          (  SELECT WORKS.EMPNUM
+      FROM   WORKS
+      WHERE  WORKS.PNUM IN
+           (  SELECT PROJ.PNUM
+        FROM   PROJ
+        WHERE  PROJ.CITY='Tampa' ))!
+  SELECT STAFF.EMPNAME
+     INTO   :EMPNA2
+     FROM   STAFF
+     WHERE  STAFF.EMPNUM = ANY
+          (  SELECT WORKS.EMPNUM
+      FROM   WORKS
+      WHERE  WORKS.PNUM IN
+           (  SELECT PROJ.PNUM
+        FROM   PROJ
+        WHERE  PROJ.CITY='Tampa' ))!
+  COMMIT WORK!
+* Test0048 !
+  SELECT WORKS.HOURS
+     INTO   :HOURS1
+     FROM   WORKS
+     WHERE  WORKS.PNUM NOT IN 
+          (  SELECT PROJ.PNUM
+      FROM   PROJ
+      WHERE  PROJ.BUDGET  BETWEEN 5000 AND 40000 )!
+  SELECT WORKS.HOURS
+     INTO   :HOURS2
+     FROM   WORKS
+     WHERE  NOT ( WORKS.PNUM IN 
+          (  SELECT PROJ.PNUM
+      FROM   PROJ
+      WHERE  PROJ.BUDGET  BETWEEN 5000 AND 40000 ))!
+  COMMIT WORK!
+* Test0049 !
+  SELECT HOURS
+     INTO   :HOURS1
+     FROM   WORKS
+     WHERE  PNUM NOT IN 
+          ( SELECT PNUM
+      FROM   WORKS
+      WHERE PNUM IN ('P1','P2','P4','P5','P6'))!
+  SELECT HOURS
+     INTO   :HOURS2
+     FROM   WORKS
+     WHERE  NOT ( PNUM IN 
+          ( SELECT PNUM
+      FROM   WORKS
+      WHERE PNUM IN ('P1','P2','P4','P5','P6')))!
+  COMMIT WORK!
+* Test0050 !
+data !
+  SELECT EMPNAME
+     INTO   :EMPNA1
+     FROM   STAFF
+     WHERE  EMPNAME LIKE :PNO1!
+c 256 'Al%'
+
+nodata !
+  COMMIT WORK!
+* Test0051 !
+  SELECT CITY
+      INTO   :CITY1
+     FROM   STAFF
+     WHERE  EMPNAME LIKE 'B__t%'!
+  COMMIT WORK!
+* Test0052 !
+  INSERT INTO STAFF
+    VALUES('E36','Huyan',36,'Xi_an%')!
+  SELECT CITY
+     INTO   :CITY2
+     FROM   STAFF
+     WHERE  CITY LIKE 'XiS___S%%'
+     ESCAPE 'S'!
+  ROLLBACK WORK!
+* Test0053 !
+  INSERT INTO STAFF
+    VALUES('E36','Huyan',36,'Xi_an%')!
+  SELECT COUNT(*)
+     INTO :i
+     FROM   STAFF
+     WHERE  EMPNUM  NOT LIKE '_36'!
+  SELECT COUNT(*)
+     INTO :ii
+     FROM   STAFF
+     WHERE  NOT(EMPNUM  LIKE '_36')!
+  ROLLBACK WORK!
+* Test0054 !
+  INSERT INTO STAFF
+    VALUES('E36','Huyan',36,NULL)!
+  SELECT EMPNAME
+     INTO :EMPNA1
+     FROM STAFF
+     WHERE CITY IS NULL!
+  ROLLBACK WORK!
+* Test0055 !
+  INSERT INTO STAFF
+    VALUES('E36','Huyan',36,NULL)!
+  SELECT COUNT(*)
+     INTO :i
+     FROM STAFF!
+  SELECT COUNT(*)
+     INTO :HOURS1
+     FROM STAFF
+     WHERE CITY IS NOT NULL!
+  SELECT COUNT(*)
+     INTO :HOURS2
+     FROM STAFF
+     WHERE NOT (CITY IS NULL)!
+  ROLLBACK WORK!
+* Test0056 !
+  SELECT STAFF.EMPNAME
+     INTO   :EMPNA1
+     FROM   STAFF
+     WHERE  NOT EXISTS
+     (  SELECT *
+      FROM   PROJ
+      WHERE  NOT EXISTS
+        ( SELECT *
+          FROM   WORKS
+          WHERE  STAFF.EMPNUM=WORKS.EMPNUM
+          AND    WORKS.PNUM=PROJ.PNUM ))!
+  COMMIT WORK!
+* Test0057 !
+  SELECT CITY
+     INTO   :CITY1
+     FROM   PROJ
+     WHERE  BUDGET > ALL
+          (  SELECT BUDGET
+      FROM   PROJ
+      WHERE  CITY='Vienna' )!
+  COMMIT WORK!
+* Test0058 !
+  SELECT EMPNAME
+     INTO   :EMPNA1
+     FROM   STAFF
+     WHERE  GRADE < SOME
+          (  SELECT BUDGET/1000 - 39 
+      FROM   PROJ
+      WHERE  CITY='Deale' )!
+  COMMIT WORK!
+* Test0059 !
+  SELECT EMPNAME
+     INTO   :EMPNA1
+     FROM   STAFF
+     WHERE  GRADE < ANY
+          (  SELECT BUDGET/1000 - 39 
+      FROM   PROJ
+      WHERE  CITY='Deale' )!
+  COMMIT WORK!
+pars_execute !
+commit work release !

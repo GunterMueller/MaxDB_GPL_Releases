@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Carp;
+use File::Basename;
+use File::Copy;
+
+
+sub is_localdevice {
+	if ( $_[0] =~ m!^(\w:|[^:]+$)! ) { return 1 }
+	else { return 0 }
+}
+
+
+sub f_icp {
+	
+	local($slev, $path1, $path2) = @_;
+
+	local($spath, $own, $rpath);
+	if ( ! defined($REMCL) or $REMCL eq "" ) { croak "Error _icp: missing \$REMCL\n"}
+	local($REMCL) = "$REMCL -suv cp ";
+
+	if ( ! defined($slev) || ! defined($path1) || ! defined($path2) ) { 
+		die "Fehler bei Argumentuebergabe"; }
+	
+	if ( ! defined($VMAKE_PATH) ) {
+		if (! defined($OWN) || ! defined($GRP) || ! defined($ALL) || ! defined($REL) ) {
+			croak "Error _icp: environment missing\n";
+		}
+		else { 
+			$spath = "$OWN,$GRP,$REL,$ALL";
+		}
+	} else { $spath = $VMAKE_PATH }
+
+	$spath =~ tr!\\!/!; $path1 =~ tr!\\!/!; $path2 =~ tr!\\!/!;
+
+	@spath = split(/,/,$spath);
+	$own = $spath[0];
+
+	if ( $path1 =~ /^$own/i )  {
+		$rpath = substr($path1, length($own));
+		$rpath = $1 if $rpath=~m!^/(.+)!;
+	}
+	else {
+		printf STDERR "Error _icp: \$OWN not in %s\n", $path1;
+		exit 1;
+	}
+	
+	if ( -d $path1 ) { 
+		printf STDERR "Error _icp: %s is a directory\n", $path1;
+		exit 1;
+	}
+
+	($dir) = $path2 =~ m!(.+)/! ? $1 : ".";
+	if ( ! -d $dir ) { 
+		printf STDERR "Error _icp: %s does not exist\n", $dir;
+		exit 1;
+	}
+
+	($file) = $rpath =~ m!.+/(.+)! ? $1 : "";
+	if ( $file eq "" ) {
+		printf STDERR "Error _icp: last character of %s is '/'\n", $rpath;
+		exit 1;
+	}
+
+	$n = 0;
+
+	foreach $pth (@spath) {
+	
+		$n++;
+		if ( $slev < $n ) { last }
+		else {
+			if ( $slev == $n ) {
+				my $path1 = "$pth/$rpath";
+				if ( is_localdevice($pth) ) { 
+					# lokaler Pfad
+					 if ($path2 =~ m!.+/$! or $path2 eq "." ) { 
+						$path2 .= "/$file"; }
+					if ( -f $path1 ) {
+						($path1 =~ /^$path2$/i ) || copy($path1, $path2) or 
+							croak "Can't copy $path1 to $path2: $!\n";;
+						$s1 = $pth;
+					}
+					else {
+						$list .= "\n$pth\t\t-->  $!"; 
+						$slev++ ;
+					}
+					
+				} 
+				else {
+					local($cmd) = "$REMCL";
+					$cmd .= "$path1 $path2";
+					open(PIPE_IN, "$cmd 2>&1 |");
+	    				while (<PIPE_IN>) {
+						chop;
+						$err = $_ 
+					}
+					close PIPE_IN;
+
+					if ( $? == 0 ) { $s1 = $pth }
+					else { 
+						$err =~ s/.*://g;
+						$list .= "\n$pth\t\t--> $err"; 
+						$slev++ 
+					}
+				}
+
+			} # $slev = $n
+		}
+
+	} #foreach
+
+	if ( $slev > $n ) {
+		printf STDERR "%s not found in:%s\n", $rpath, $list;
+		return "";
+	} else { return $s1 }
+
+
+} #sub
+1;

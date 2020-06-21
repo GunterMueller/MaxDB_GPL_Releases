@@ -1,0 +1,1485 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP AG$ADABAS FOR R/3$VTT08X$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : Josef Hasenberger
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+
+// ilock.cpp
+//
+// PROTOTYP fuer file locking der Tools iput/iget Statusfileverwaltung
+// Autor:	Josef Hasenberger
+// Date:	31.07.97
+// Version: 2.0
+
+// Changes:
+// ++++++++
+//		Josef, 9.10.97 (Start Version 2.0)
+//			Im Falle von MGET wird dieser besondere Status vermerkt und
+//			jedem Benutzer erlaubt das Modul zu hohlen bzw. jedem wird 
+//			erlaubt  ein Module zurueckzuschreiben, wobei der erste 
+//			Schreiber gewinnt.
+//			Dazu muss fuer die aktuelle Version eines Modules eine Referenzkette
+//			mit lockenden Benutzern angelegt werden, damit kein neueres Modul 
+//			ueberschrieben wird. Es koennen maximal INITIAL_VERSION_USER_REF_LIST_ENTRIES
+//			Referenzen eingetragen werden.
+
+
+// Die Beschreibung ist erst mal noch in Deutsch 
+
+/* Datenstrukturen für die Verwaltung des Modulstatus-Files
+
+   Grober Aufbau des Status-Files:
+  ===============================
+
+				+--------------------------------+
+				|        TFileInfo (1)           |
+				+--------------------------------+
+				|                                |
+				|        TStateData (n)          |
+				|                                |
+				.                                .
+				.                                .
+				|                                |
+				+--------------------------------+
+				|       TStateIndex (n)          |
+				+--------------------------------+
+
+
+  TFileInfo enthaelt die Informationen ueber groesse und Organisation des StatusFiles.
+  TStateData enthaelt die eigentlichen Statusdaten und TStateIndex enthaelt den Index
+  (Offset) fuer performanten Zugriff auf TStateData. 
+  Die dahinterstehende Philosophie soll den performanten Zugriff auf TStateData 
+  ermoeglichen ohne viele Schreiboperationen auf Platte bzw. ueber das Netzwerk 
+  durchzufuehren. TStateDaten werden einmal geschrieben und veraendern ihre Position
+  auf der Platte nicht. Neue Bloecke werden ans Ende des Datenbereichs gehaengt und
+  der Index wird aktualisiert entspr. verschoben (Der Index muss sowieso sortiert
+  werden und wird dazu vollstaendig gelesen. Ausserdem ist mit n < 500 dies ohne 
+  weiteres performant durchzufuehren. Fuer dieses gringe Datenaufkommen reicht auch
+  die binaere Suche)
+  Die Verwaltungsinfo mit fester Groesse wird immer zuerst gelesen (abhaengig 
+  von der Versionsnummer).
+
+  In TStateData ist eine Referenzliste mit allen Benutzern, die eine Module
+  im Modus MLOCKED gesperrt haben. In diesem Modus wird die Versionsnummer nicht 
+  hoechgezaehlt und es erfolgt kein echtes Sperren der Module. Eine echte Sperre (LOCKED) 
+  ist trotzdem noch moeglich, und kann dann nur vom Besitzer wieder geloescht werden!
+
+  
+
+  Definition der Datentypen:
+  ==========================
+
+  TFileInfo:
+				Versionsnummer		: fuer zukuenftige Nutzung)
+				Offset-StateDaten	: Absolute Position der StatusDaten
+				Offset-StateIndex   : Absolute Position des StatusIndex
+				No of Data Elements : Anzahl der Datenelemente im File
+				                      wird fuer das Lesen des Index benoetigt
+
+  TStateData:
+				Name		: Name des zu verwaltenden Elements (Modul)
+				State		: Status (locked, unlocked)
+					Node	: If locked, von welchem Recher ?
+					User	: If locked, von welchem Benutzer
+					Date	: If locked, wann?
+				Version		: aktuelle Versionsnummer (Pre-Incrementel)
+				CountMax	: Maximale Anzahl von User-ID Eintraegen verfuegbar in diesem Block
+				CountUsed	: Anzahl der aktuell belegten User-IDs in diesem Block
+				User[CountMax]: Array mit CountMax User-ID Eintragen
+
+  TStateIndex:
+				Name		: Name des zu verwaltenden Elements (Modul) (Sotierkrit.)
+				Pos			: Position des zugehoerigen Datenblocks
+
+
+*/
+
+
+// Still to improve: 
+//  - cache Index instead of read/write it every time public object member
+//    functions are called (Different design in the very beginning lead to 
+//    the current approach)
+
+
+// Changes:
+// 1997-12-01	Josef
+//		Locking is case-insensitive, but protocol file is still case-sensitive
+//
+
+// If DEBUG is defined, additional information will be written to stderr
+//#define DEBUG
+
+
+#define STRICT
+#include <windows.h>
+#include <stdio.h>
+#include <string.h>
+//#include "ilock.h"
+
+
+const char *STATFILEEXT = ".PROT";		// Extension for protocol file
+
+// Constructor
+TILock::TILock( const char *statfile)
+{
+
+    if (statfile!=NULL)
+    {
+		Statfile = new char [strlen(statfile)+1];
+		StatProtfile = new char[strlen(statfile) + strlen(STATFILEEXT) + 1];
+		if ((Statfile != NULL) && (StatProtfile != NULL))
+		{
+			strcpy(Statfile,statfile);
+			strcpy(StatProtfile,statfile);
+			strcat(StatProtfile,STATFILEEXT);
+			ObjectReady=TRUE;
+		}
+		else
+			ObjectReady=FALSE;
+    }
+    else
+		ObjectReady=FALSE;
+    
+    /* pMyStateIndex=NULL; */
+
+	try
+    {
+		if (MyOpenStatfileExclusive()!= TRUE)	// Open STATFILE for read/write exclusive
+				throw "open on statfile failed";
+		if (MyReadFileInfo() != ILOCK_OK)
+			throw "read statfile description failed!";
+		if ( MyFileInfo.Version != CURRENT_VERSION )
+		{
+			throw "wrong statfile version";
+		}
+		if (MyReadStateIndex () != ILOCK_OK)
+			throw "read statfile indexstructure failed";
+	}
+    catch (const char * errString)
+    {
+		/*
+			DBGOUT("Constructor: Cannot create object with Statfile %s \n(%s)\n", 
+					   Statfile, errString );	
+			ObjectReady=FALSE;
+			*/
+		char err[512];
+		sprintf (err, "Cannot create object for statfile %s \n(%s)\n", statfile, errString);
+		ILockError("TILock-Constuctor:", err );
+		MyCloseFile(hStatfile);
+		ExitThread(1);
+	}
+	/* close Filehandle */
+	MyCloseFile(hStatfile);
+}
+
+// Destructor
+TILock::~TILock()
+{
+	if (pMyStateIndex) delete [] pMyStateIndex;
+    if (Statfile) delete [] Statfile;
+	if (StatProtfile) delete [] StatProtfile;
+}
+
+// Copy Constructor
+TILock::TILock(const TILock& i)
+{
+    pMyStateIndex=NULL;
+    if (i.Statfile != NULL)
+    {
+		Statfile = new char [strlen(i.Statfile)+1];
+		StatProtfile = new char[strlen(i.Statfile) + strlen(STATFILEEXT) + 1];
+		if ((Statfile != NULL) && (StatProtfile != NULL))
+		{
+			strcpy(Statfile, i.Statfile);
+			strcpy(StatProtfile, i.Statfile);
+			strcat(StatProtfile, STATFILEEXT);
+		}
+		else
+			ObjectReady=FALSE;
+
+		if (i.pMyStateIndex && MyFileInfo.NoOfDataElements != 0)
+		{
+			pMyStateIndex = new TStateIndex [MyFileInfo.NoOfDataElements];
+			if (pMyStateIndex)
+				memcpy(pMyStateIndex, i.pMyStateIndex, MyFileInfo.NoOfDataElements * sizeof (TStateIndex));
+			else
+				ObjectReady=FALSE;
+		}
+		else
+			ObjectReady=FALSE;
+    }
+    else
+		ObjectReady=FALSE;
+
+}
+
+
+// Lock module Module for user User on node Node, MGET is default FALSE
+int TILock::Lock( const char * Module, const char *User, const char *Node, const int Mget)
+{
+    int ret = ILOCK_NOTOK;
+	BOOLEAN ModuleLocked = FALSE;	// In case of failure, a locked module has to be
+									// unlocked
+	char module[MAX_MODULE_LENGTH]; // lower-case module name
+    try
+    {
+		strncpy(module, Module, MAX_MODULENAME_LENGTH);
+		module[MAX_MODULENAME_LENGTH] = '\0';
+		strlwr(module);							// Search is done with lower-case module names
+
+		if (MyOpenStatfileExclusive()!= TRUE)	// Open STATFILE for read/write exclusive
+			throw "open on statfile failed!";
+
+		/*
+		if (MyReadFileInfo() != ILOCK_OK)
+			throw "read statfile description failed!";
+		if (MyReadStateIndex () != ILOCK_OK)
+			throw "read statfile indexstructure failed!";
+		*/
+		if (MySearchModuleInIndex (module) == FALSE)
+		{
+			// create new entry for module
+			if (MyEnterNewModule (module, User, Node) != ILOCK_OK)
+				throw "enter new module failed!";
+			if (MyLockModule(module, User, Node, Mget) != ILOCK_OK)
+				throw "cannot lock module!";
+			ModuleLocked = TRUE;
+			if (MyWriteStateProtocol(Module) != ILOCK_OK)
+				throw "writing protocol file failed!";
+			DBGOUT("ILOCK: module %s for user %s, node %s sucessfully added and locked\n", 
+				   module, User, Node);
+			ret = ILOCK_OK;
+		}
+		else
+		{
+			DBGOUT("ILOCK: module %s for user %s, node %s already in list\n", 
+				   module, User, Node);
+			if (MyModuleNotLocked(module) || MyModuleMLocked(module))
+			{
+				int iret = MyLockModule(module, User, Node, Mget);
+				if ((iret != ILOCK_OK) && (iret != ILOCK_MAX_USERS_REACHED))
+					throw "cannot lock module!";
+
+				if (iret == ILOCK_OK)
+				{
+					ModuleLocked = TRUE;
+					if (MyWriteStateProtocol(Module) != ILOCK_OK)
+						throw "writing protocol file failed!";
+					DBGOUT("ILOCK: module %s for user %s, node %s sucessfully locked\n", 
+						   module, User, Node);
+				}
+				ret = iret;
+			}
+			else 
+			{
+				DBGOUT("ILOCK: module %s for user %s, node %s allready locked\n", 
+					   module, User, Node);
+
+				// module is locked, if Mget is specifed, add the user to the queue for MLOCKED
+				if (Mget)
+				{
+					// Add the user to the queue 
+					ret = MyMLockModuleAnyway(module, Module, User, Node);	// writes also Protocol
+				}
+				else
+					ret = ILOCK_ALREADY_LOCKED;
+			}
+		}
+    }
+    catch (const char * errString)
+    {
+		int dummy1, dummy2;
+		ILockError("Lock", errString);
+		if (ModuleLocked && (Mget==FALSE))	// try to unlock a already locked module (recover)
+			if (MyUnlockModule(module, User, Node, &dummy1, &dummy2, TRUE ) != ILOCK_OK)
+			{
+				// Unlock failed
+				char buf[512];
+				sprintf(buf, "cannot recover, module %s locked but not copied by client (%s:%s)!",
+					module, Node, User);
+				ILockError("Lock", buf);
+			}
+		ret = ILOCK_NOTOK;
+    }
+	MyCloseFile(hStatfile);
+    return ret;
+}
+
+// Unlock module Module locked by user User on node Node
+int TILock::Unlock( const char * Module, const char * User, const char * Node, BOOL bDel)
+{
+	int ret = ILOCK_NOTOK;
+	BOOLEAN ModuleUnlocked = FALSE;	// In case of failure, a unlocked module has to be
+									// locked again
+	int Mget = FALSE;
+	int CountUsed = 0;
+	char module[MAX_MODULE_LENGTH];
+
+    try
+    {
+		strncpy(module, Module, MAX_MODULENAME_LENGTH);
+		module[MAX_MODULENAME_LENGTH] = '\0';
+		strlwr(module);							// Search is done with lower-case module names
+
+		if (MyOpenStatfileExclusive()!= TRUE)	// Open STATFILE for read/write exclusive
+			throw "open on statfile failed!";
+		/*
+		if (MyReadFileInfo() != ILOCK_OK)
+			throw "read statfile description failed!";
+		if (MyReadStateIndex () != ILOCK_OK)
+			throw "read statfile indexstructure failed!";
+			*/
+		if (MySearchModuleInIndex (module) == FALSE)
+		{
+			// module not locked
+			ret = ILOCK_NOT_LOCKED;
+
+			DBGOUT("IUNLOCK: module %s (not in statfile) for user %s, node %s tried to unlock but not locked\n", 
+				   module, MyStateData.User, MyStateData.Node);
+		}
+		else
+		{
+			if (MyModuleNotLocked(module))
+			{
+				// module not locked
+				ret = ILOCK_NOT_LOCKED;
+				DBGOUT("IUNLOCK: module %s (not in statfile) for user %s, node %s tried to unlock but not locked\n", 
+					   module, MyStateData.User, MyStateData.Node);
+			}
+			else
+			{
+				if (MyUnlockModule(module, User, Node, &Mget, &CountUsed, bDel) != ILOCK_OK)
+					throw "cannot unlock module!";
+				
+				ModuleUnlocked = TRUE;	// remember for recovery
+				
+				if (MyWriteStateProtocol(module, Module, User, Node, bDel) != ILOCK_OK)
+					throw "writing protocol file failed!";
+				DBGOUT("IUNLOCK: module %s sucessfully unlocked\n", module);
+				ret = ILOCK_OK;
+			}
+		}
+    }
+    catch (const char * errString)
+    {
+		ILockError("Unlock", errString);
+		if (ModuleUnlocked)	// try to lock a already unlocked module (recover)
+			if (MyLockModule(module, MyStateData.User, MyStateData.Node, Mget, CountUsed) != ILOCK_OK)
+			{
+				// lock failed
+				char buf[512];
+				sprintf(buf, "cannot recover, module %s unlocked but not copied by \n client (%s:%s)!",
+					module, MyStateData.Node, MyStateData.User);
+				ILockError("Unlock", buf);
+			}
+		ret = ILOCK_NOTOK;
+	}
+	MyCloseFile(hStatfile);
+	return ret;
+}
+
+
+// Unlock module Module locked by user User on node Node
+int TILock::LockExcl( const char * Module, const char * User, const char * Node)
+{
+	int ret = ILOCK_NOTOK;
+	BOOLEAN ModuleLocked = FALSE;	// In case of failure, a unlocked module has to be
+									// locked again
+	int Mget = FALSE;
+	int CountUsed = 0;
+	char module[MAX_MODULE_LENGTH];
+
+    try
+    {
+		strncpy(module, Module, MAX_MODULENAME_LENGTH);
+		module[MAX_MODULENAME_LENGTH] = '\0';
+		strlwr(module);							// Search is done with lower-case module names
+
+		if (MyOpenStatfileExclusive()!= TRUE)	// Open STATFILE for read/write exclusive
+			throw "open on statfile failed!";
+		/*
+		if (MyReadFileInfo() != ILOCK_OK)
+			throw "read statfile description failed!";
+		if (MyReadStateIndex () != ILOCK_OK)
+			throw "read statfile indexstructure failed!";
+			*/
+		if (MySearchModuleInIndex (module) == FALSE)
+		{
+			// module not locked
+			ret = ILOCK_NOT_LOCKED;
+			DBGOUT("IEXCLLOCK: module %s (not in statfile) for user %s, node %s tried to excl lock but not locked\n", 
+				   module, MyStateData.User, MyStateData.Node);
+		}
+		else
+		{
+			if (MyModuleNotLocked(module))
+			{
+				// module not locked
+				ret = ILOCK_NOT_LOCKED;
+				DBGOUT("IEXCLLOCK: module %s not locked for user %s, node %s tried to excl lock but not locked\n", 
+				   module, MyStateData.User, MyStateData.Node);
+			}
+			else
+			{
+				if (MyModuleMLocked(module))
+				{
+					ret = MySearchUserInVerRefList(User);
+					if ( ret == ILOCK_NOTOK)
+					{
+						// user in userlist not found 
+						ret = ILOCK_NOT_LOCKED;
+						DBGOUT("IEXCLLOCK: module %s not locked from user %s, node %s tried to excl lock but not locked\n", 
+									module, MyStateData.User, MyStateData.Node);
+					}
+					else
+					{
+						ret = MyLockModule(module, User, Node, FALSE);
+						if ((ret != ILOCK_OK) && (ret != ILOCK_MAX_USERS_REACHED))
+						throw "cannot lock module!";
+						if (ret == ILOCK_OK)
+						{
+							ModuleLocked = TRUE;
+							if (MyWriteStateProtocol(Module) != ILOCK_OK)
+								throw "writing protocol file failed!";
+							DBGOUT("ILOCK: module %s for user %s, node %s sucessfully exclusive locked\n", 
+								   module, User, Node);
+						}
+					}
+				}
+				else
+				{
+					DBGOUT("ILOCK: module %s for user %s, node %s allready locked\n", 
+					   module, User, Node);
+					ret = ILOCK_ALREADY_LOCKED;
+				}
+			}
+		}
+    }
+    catch (const char * errString)
+    {
+		int dummy1, dummy2;
+		ILockError("Lock", errString);
+		if (ModuleLocked)	// try to unlock a already locked module (recover)
+			if (MyUnlockModule(module, User, Node, &dummy1, &dummy2, TRUE ) != ILOCK_OK)
+			{
+				// Unlock failed
+				char buf[512];
+				sprintf(buf, "cannot recover, module %s locked but not copied by client (%s:%s)!",
+					module, Node, User);
+				ILockError("Lock", buf);
+			}
+		ret = ILOCK_NOTOK;
+    }
+	MyCloseFile(hStatfile);
+    return ret;
+}
+
+
+// Open Statfile for read/write exclusive				   
+BOOLEAN TILock::MyOpenStatfileExclusive()
+{
+	hStatfile = CreateFile(
+		Statfile,				// Name der Datei
+		GENERIC_READ | GENERIC_WRITE,	// Lesen und Schreiben
+		0,						// File nicht geshared
+		NULL,					// No inheritance
+		OPEN_EXISTING ,			// File must exist
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH ,
+		NULL);
+	
+	if (hStatfile == INVALID_HANDLE_VALUE)
+	{
+		char err[512];
+		sprintf(err, "cannot open statfile %s", Statfile);
+		ILockError("MyOpenFileExlusive", err, GetLastError());
+		return FALSE;
+	}
+	else
+		return TRUE;
+}
+
+BOOLEAN TILock::MyCloseFile(HANDLE hObject)
+{
+	// File is dismissed, all dynamically allocated memory is also freed
+	/* CTS 1104231 */
+	/*
+	if (pMyStateIndex) delete [] pMyStateIndex;
+	pMyStateIndex=NULL;
+	*/
+	return CloseHandle (hObject);
+}
+
+
+int TILock::MySetFilePointer (HANDLE hFile, DWORD Pos)
+{
+	if (SetFilePointer (hFile, Pos, NULL, FILE_BEGIN) == 0xFFFFFFFF)
+	{
+		char err[512];
+		sprintf(err, "cannot set FilePointer to %li!\n", Pos);
+		ILockError("MySetFilePointer", err, GetLastError());
+		ExitThread(1);	// no sense to continue
+	}
+	return ILOCK_OK;
+}
+
+// Read Info for structure TFileInfo from STATFILE
+int TILock::MyReadFileInfo (void)
+{
+	DWORD dwBytesRead=0;
+	BOOLEAN bResult;
+	int ret = ILOCK_NOTOK;
+	
+	try
+	{
+		// SetFilePointer to the beginning of the file
+		if (MySetFilePointer (hStatfile, (DWORD)0) != ILOCK_OK)
+			throw "cannot set file pointer for statfile!";
+
+		bResult= ReadFile (
+			hStatfile,
+			(LPVOID) &MyFileInfo,
+			(DWORD) sizeof(MyFileInfo),
+			&dwBytesRead,
+			NULL);
+
+		if (bResult == FALSE)
+		{
+			ILockError("MyReadFileInfo", "cannot read from statfile", GetLastError());
+			ret = ILOCK_NOTOK;		
+		}
+		else
+		{
+			if (dwBytesRead == 0)	// Handle the case when file is emtpy (EOF occured)
+			{
+				MyFileInfo.Version			= CURRENT_VERSION;
+				MyFileInfo.OffsetStateData	= sizeof (TFileInfo);
+				MyFileInfo.OffsetStateIndex = sizeof (TFileInfo);
+				MyFileInfo.NoOfDataElements = 0;
+			}
+			else // Otherwise check correct size or perform version check
+			{
+				// nothing to do now
+			}
+			ret = ILOCK_OK;
+		}
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyReadFileInfo", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+int TILock::MyReadStateIndex (void)
+{
+	int ret = ILOCK_NOTOK;
+
+	if (MyFileInfo.NoOfDataElements != 0)
+	{
+		pMyStateIndex = new TStateIndex [MyFileInfo.NoOfDataElements];
+		if (pMyStateIndex == NULL)
+		{
+			char err[512];
+			sprintf(err, "malloc for %u index entries failed!\n", 
+							MyFileInfo.NoOfDataElements);
+			ILockError("MyReadStateIndex", err, GetLastError());
+			ret = ILOCK_NOTOK;
+		}
+		else
+		{
+			// Begin Reading of Index
+			BOOLEAN bResult;
+			DWORD	dwBytesRead;
+			if (MySetFilePointer (hStatfile, MyFileInfo.OffsetStateIndex) != ILOCK_OK)
+			{
+				ILockError("MyReadStateIndex", "cannot set file pointer");
+				ret = ILOCK_NOTOK;
+			}
+			else
+			{
+				bResult = ReadFile (
+					hStatfile,
+					(LPVOID) pMyStateIndex,
+					(DWORD) (sizeof (TStateIndex) * MyFileInfo.NoOfDataElements),
+					&dwBytesRead,
+					NULL);
+				if (bResult == FALSE)
+				{
+					ILockError("MyReadStateIndex","cannot read from statfile",
+						GetLastError());
+					ret = ILOCK_NOTOK;
+				}
+				else
+					if (dwBytesRead != (DWORD) (sizeof (TStateIndex) * MyFileInfo.NoOfDataElements))
+					{
+						ILockError("MyReadStateIndex", "index on statfile currupted",
+							GetLastError());
+						ret = ILOCK_NOTOK;
+					}
+					else
+						ret = ILOCK_OK;
+			}
+		}
+	}
+	else
+		ret = ILOCK_OK;
+	return ret;
+}
+
+
+BOOLEAN TILock::MySearchModuleInIndex (const char * Module)
+{
+	if (MyFileInfo.NoOfDataElements == 0)
+		return FALSE;
+	else 
+	{
+		int  i, j, k, iResult; 
+		// Use binary search (number of elements is expected to be below 500)
+		i = 0;
+		j = MyFileInfo.NoOfDataElements - 1;
+		do
+		{
+			k = (int) ((i+j) / 2);		// devide the interval by two
+			if ((iResult = strcmp(pMyStateIndex[k].Name, Module)) < 0 )
+				i=k+1;
+			else
+				j=k-1;
+		} while ((iResult != 0) && ( i <= j ));
+
+		if (iResult == 0) // Module found
+		{
+			IndexStateIndex = k;
+			return TRUE;
+		}
+		else
+			return FALSE;
+	}
+}
+
+int TILock::MyStateIndexInsertNewElement (TStateIndex * Index)
+{
+	int ret = ILOCK_NOTOK;
+	// Algorithm for insertion: direkt insertion with binary search for the place to insert
+	if (MyFileInfo.NoOfDataElements == 0) // special case
+	{
+		if (pMyStateIndex) delete pMyStateIndex;
+		pMyStateIndex = new TStateIndex;
+		if (pMyStateIndex == NULL)
+		{
+			ILockError("MyStateIndexInsertNewElement",
+				"cannot allocate memory for first index entry",
+				GetLastError());
+			ret = ILOCK_NOTOK;
+		}
+		else
+		{
+			memcpy (pMyStateIndex, Index, sizeof(TStateIndex));
+			IndexStateIndex = 0;
+			ret = ILOCK_OK;
+		}
+	}
+	else
+	{
+		int  i, j, k;
+		// Use binary search (number of elements is expected to be below 5000)
+		i = 0;
+		j = MyFileInfo.NoOfDataElements - 1;
+		do
+		{
+			k = (int) ((i+j) / 2);		// devide the interval by two
+			if ( strcmp(pMyStateIndex[k].Name, Index->Name) < 0 )
+				i=k+1;
+			else
+				j=k-1;
+		} while ( i <= j );		
+		
+		if (i<0) // Never expect index to be that big, but who knows
+		{
+			ILockError("MyStateIndexInsertNewElement",
+				"panic panic panic, index to big, underflow!!!");
+			ExitThread(1);
+		}
+
+		DWORD ipos = (DWORD) i;	// i is now the position to insert
+
+		// Allocate new memory
+		TStateIndex *p;
+		p = (TStateIndex *) new char [(MyFileInfo.NoOfDataElements+1) * sizeof (TStateIndex)];
+		if (p == NULL)
+		{
+			char err[512];
+			sprintf(err, "malloc for %u index entries failed!", 
+							MyFileInfo.NoOfDataElements+1);
+			ILockError("MyStateIndexInsertNewElement", err, GetLastError());
+			ret = ILOCK_NOTOK;
+		}
+		else
+		{
+			// Copy entries to new Index
+			memcpy (&p[0], &pMyStateIndex[0], ipos*sizeof(TStateIndex));
+			memcpy (&p[ipos], Index, sizeof(TStateIndex));
+
+			// Be carefull at the end of the array!
+			if (ipos < MyFileInfo.NoOfDataElements) 
+				memcpy (&p[ipos+1], &pMyStateIndex[ipos], 
+						(MyFileInfo.NoOfDataElements - ipos)*sizeof(TStateIndex)); 
+			
+			delete [] pMyStateIndex;  // free memory for old index
+			pMyStateIndex = p;	  // set new index	
+			IndexStateIndex = ipos;
+			ret = ILOCK_OK;
+		}
+	}
+	return ret;
+}
+
+
+int TILock::MyEnterNewModule (const char * Name, const char * User, const char * Node)
+{
+	int ret = ILOCK_NOTOK;
+	
+	try
+	{
+		// Module is not in the Index, so create a new entry 
+		static TStateIndex Index;
+
+		strncpy (Index.Name, Name, MAX_MODULENAME_LENGTH);
+		Index.Name[MAX_MODULENAME_LENGTH] = '\0';
+		Index.Pos = MyFileInfo.OffsetStateData + 
+			MyFileInfo.NoOfDataElements * sizeof (TStateData);
+		if (MyStateIndexInsertNewElement(&Index) != ILOCK_OK)
+			throw "cannot insert new index element into state index";
+
+		// Enter new values in MyStateData variable
+		strncpy(MyStateData.Name, Name, MAX_MODULENAME_LENGTH);
+		MyStateData.Name[MAX_MODULENAME_LENGTH] = '\0';
+		
+		MyStateData.State = UNLOCKED;
+		strncpy(MyStateData.Node, Node, MAX_NODENAME_LENGTH);
+		MyStateData.Node[MAX_NODENAME_LENGTH] = '\0';
+		strncpy(MyStateData.User, User, MAX_USERNAME_LENGTH);
+		MyStateData.User[MAX_USERNAME_LENGTH] = '\0';
+		GetSystemTime(&MyStateData.date);
+		MyStateData.Version = 0;			// Starts with 0 here (pre-incremental)
+		MyStateData.CountMax = INITIAL_VERSION_USER_REF_LIST_ENTRIES;
+		MyStateData.CountUsed = 0;
+		MyStateData.UserList[0] = '\0';
+
+		// Write new StateData structure
+		if (MySetFilePointer (hStatfile, (DWORD)(MyFileInfo.OffsetStateData + 
+			MyFileInfo.NoOfDataElements * sizeof (TStateData)))
+			!= ILOCK_OK)
+			throw "cannot set file pointer for writing SateData structure";
+		if (MyWriteFile (hStatfile, &MyStateData, sizeof(TStateData)) != ILOCK_OK)
+			throw "cannot write StateData structure to statefile";
+
+		// Update MyFileInfo
+		MyFileInfo.NoOfDataElements++;
+		MyFileInfo.OffsetStateIndex += sizeof (TStateData);
+
+		// Write FileInfo 
+		if (MySetFilePointer (hStatfile, (DWORD)0) != ILOCK_OK)
+			throw "cannot set file pointer for writing FileInfo to statefile";
+		if (MyWriteFile (hStatfile, &MyFileInfo, sizeof (TFileInfo)) != ILOCK_OK)
+			throw "cannot write FileInfo to statefile";
+
+		// Write updated index
+		if (MySetFilePointer (hStatfile, MyFileInfo.OffsetStateIndex)!= ILOCK_OK)
+			throw "cannot set file pointer for writing new StateIndex to statfile";
+		if (MyWriteFile (hStatfile, pMyStateIndex, 
+			MyFileInfo.NoOfDataElements * sizeof (TStateIndex))
+			!= ILOCK_OK)
+			throw "cannot write new StateIndex to statfile";
+		ret = ILOCK_OK;
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyEnterNewModule", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+
+int TILock::MyWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD n)
+{
+	DWORD dwBytesWritten;
+	BOOL bResult;
+	int ret = ILOCK_NOTOK;
+
+	bResult = WriteFile (hFile, lpBuffer, n, &dwBytesWritten, NULL);
+	if (bResult != TRUE)
+	{
+		char err[512];
+		sprintf(err,"cannot write %li bytes to statfile!", n);
+		ILockError("MyWriteFile", err, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	else
+		ret = ILOCK_OK;
+
+	return ret;
+}
+
+int TILock::MyReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD n)
+{
+	DWORD dwBytesRead;
+	BOOL bResult;
+	int ret = ILOCK_NOTOK;
+	
+	bResult = ReadFile (hFile, lpBuffer, n, &dwBytesRead, NULL);
+	if ((bResult != TRUE) || (dwBytesRead != n))
+	{
+		char err[512];
+		sprintf (err, "cannot read %li bytes from statfile!", n);
+		ILockError("MyReadFile", err, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	else
+		ret = ILOCK_OK;
+
+	return ret;
+}
+
+BOOLEAN TILock::MyModuleNotLocked (const char * Module)
+{
+	// Lese zu bearbeitenden Info-Block
+	BOOLEAN ret=FALSE;
+	try
+	{
+		if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+			throw "cannot set file pointer for reading InfoBlock from statfile";
+		if (MyReadFile (hStatfile, &MyStateData, sizeof (TStateData)) != ILOCK_OK)
+			throw "cannot read InfoBlock from statfile";
+		ret = ((MyStateData.State == UNLOCKED) || (MyStateData.CountUsed <= 0));
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyModuleNotLocked", errString, GetLastError());
+		ret = FALSE;
+	}
+	return ret;
+}
+
+BOOLEAN TILock::MyModuleMLocked (const char * Module)
+{
+	// Lese zu bearbeitenden Info-Block
+	BOOLEAN ret=FALSE;
+	try
+	{
+		if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+			throw "cannot set file pointer for reading InfoBlock from statfile";
+		if (MyReadFile (hStatfile, &MyStateData, sizeof (TStateData)) != ILOCK_OK)
+			throw "cannot read InfoBlock from statfile";
+		ret = ((MyStateData.State == MLOCKED) && (MyStateData.CountUsed > 0));
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyModuleMLocked", errString, GetLastError());
+		ret = FALSE;
+	}
+	return ret;
+}
+
+int TILock::MyLockModule (const char * Module, const char * User, const char * Node, const int Mget, const int CountUsed)
+{
+	int ret = ILOCK_NOTOK;
+	try
+	{
+		int iret = ILOCK_OK;
+		
+		// Check for proper StateData block
+		if (strcmp(MyStateData.Name, Module) != 0)
+			throw "module name does not match with current StateData block";
+
+		strncpy(MyStateData.User, User, MAX_USERNAME_LENGTH);	// Enter new user
+		MyStateData.User[MAX_USERNAME_LENGTH] = '\0';
+		strncpy(MyStateData.Node, Node, MAX_NODENAME_LENGTH);	// Enter new node
+		MyStateData.User[MAX_USERNAME_LENGTH] = '\0';
+		GetLocalTime(&MyStateData.date);	// Enter lock time/date
+
+		// If Mget is specified, the status of the Module will be set to MLOCKED
+		// and the User locking the Module will be added to the VersionUserRef-List
+		// The version is inly beeing increased if the previous status is not LOCKED or MLOCKED
+		// if CountUsed > 0  this is a recover operation, the UserRefList will be available again
+
+		if (MyStateData.State == UNLOCKED)
+			MyStateData.Version++;
+
+		iret = MyAddUserToVerRefList(User);				
+
+		// Add the user to the VersionUserRef-List
+		if ((iret != ILOCK_OK) && (iret != ILOCK_MAX_USERS_REACHED))
+			throw "cannot add user to version reference list";		
+
+		if (Mget == TRUE)
+		{
+			MyStateData.State = MLOCKED;					// MLock Module
+			if (CountUsed > 0)
+				MyStateData.CountUsed = CountUsed;
+		}
+		else
+		{
+			MyStateData.State = LOCKED;		// Lock Module
+		}
+
+		// Write state data to the file again
+		if (iret == ILOCK_OK)
+		{
+			if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+				throw "cannot set file pointer for writing StateData";
+			if (MyWriteFile (hStatfile, &MyStateData, sizeof (TStateData)) != ILOCK_OK)
+				throw "cannot write updated StateData to statfile";
+		}
+		ret = iret;
+	}
+	catch (const char* errString)
+	{
+		ILockError("MyLockModule", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+// MLock a module by adding the current user to the VerRefList
+// The status of the module has to be LOCKED, otherwise the function MyLockModule should be
+// used with Mget set to 1
+int TILock::MyMLockModuleAnyway (const char * Module, const char * Module_CS, 
+								 const char * User, const char * Node)
+{
+	int ret = ILOCK_NOTOK;
+	try
+	{
+		int iret = ILOCK_OK;
+		
+		// Check for proper StateData block
+		if ( MyStateData.State != LOCKED)
+			throw "function only allowed when module is in state LOCKED";
+
+		// add the user to the UserRefList
+		iret = MyAddUserToVerRefList(User);				// Add the user to the VersionUserRef-List
+		if ((iret != ILOCK_OK) && (iret != ILOCK_MAX_USERS_REACHED))
+			throw "cannot add user to version reference list";		
+
+
+		// Save old StateDate and add temporarily the new user and module 
+		// (makes writing the protocol file easier)
+		
+		TStateData OrgStateData;
+		memcpy(&OrgStateData, &MyStateData, sizeof (TStateData));
+
+		strncpy(MyStateData.User, User, MAX_USERNAME_LENGTH);	// Enter new user
+		MyStateData.User[MAX_USERNAME_LENGTH] = '\0';
+		strncpy(MyStateData.Node, Node, MAX_NODENAME_LENGTH);	// Enter new node
+		MyStateData.User[MAX_USERNAME_LENGTH] = '\0';
+		GetLocalTime(&MyStateData.date);						// Enter lock time/date
+		MyStateData.State = MLOCKED;							// MLock Module
+
+		// Write the protocol file
+		MyWriteStateProtocol(Module_CS);
+		
+		// Restore original state 
+		memcpy(&MyStateData, &OrgStateData, sizeof (TStateData));
+
+		// Write state data to the file again
+		if (iret == ILOCK_OK)
+		{
+			if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+				throw "cannot set file pointer for writing StateData";
+			if (MyWriteFile (hStatfile, &MyStateData, sizeof (TStateData)) != ILOCK_OK)
+				throw "cannot write updated StateData to statfile";
+		}
+		ret = iret;
+	}
+	catch (const char* errString)
+	{
+		ILockError("MyMLockModuleAnyway", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+
+
+
+// Unlock Module in current MyStateData structure
+// The user of the object is responsible for checking correct User and Node.
+// This is also true for MGET-Mechanism used
+// MyUnlockModule returns TRUE in Mget when the module was locked in the state MLOCKED
+// and also the counter for the previous entries in the reference list
+int TILock::MyUnlockModule (const char * Module, const char * User, const char * Node, int * Mget, int * CountUsed, BOOL bDel)
+{
+	int ret = ILOCK_NOTOK;
+	try
+	{
+		// Check for proper StateData block
+		if (strcmp(MyStateData.Name, Module) != 0)
+			throw "module name does not match with current StateData block";
+
+		if ((MyStateData.State == MLOCKED) || (MyStateData.CountUsed > 1))
+		{
+			*Mget = TRUE;
+			*CountUsed = MyStateData.CountUsed;
+		}
+		else
+		{
+			*Mget = FALSE;
+			*CountUsed = 0;
+		}
+
+		if (bDel)
+		{
+			// if UserRefList > 1, check if current user is holding the LOCK or not
+			// depending on it new status is MLOCKED or LOCKED
+			// Delete user from RefList
+			if (MyStateData.CountUsed > 1)
+			{
+				if (MyStateData.State == LOCKED)
+				{
+					if (strcmp(MyStateData.User, User) == 0)
+					{
+						// current LOCK-Holder request delete, status is changed
+						MyStateData.State = MLOCKED;
+					}
+					else
+					{
+						// delete request not from LOCK-Holder, status will remain LOCKED
+					}
+				}
+				else
+				{
+					MyStateData.State = MLOCKED;
+				}
+				MyDelUserFromVerRefList(User);
+				// set the first user from reflist to user PTS 1103772
+				strncpy(MyStateData.User, &MyStateData.UserList[0] , MAX_USERNAME_LENGTH+1);
+				MyStateData.User[MAX_USERNAME_LENGTH]='\0';
+				MyStateData.Node[0]='\0';
+			}
+			else
+			{
+				// else status is MLOCKED
+				MyStateData.State = MLOCKED;
+				MyStateData.CountUsed = 0;
+			}
+		}
+		else
+		{
+			// Unlock module without new status is UNLOCKED
+			MyStateData.State = UNLOCKED;
+			MyStateData.CountUsed = 0;
+		}
+
+		// enter time and date of modification
+		GetLocalTime(&MyStateData.date);	// Enter lock time/date
+
+		if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+			throw "cannot set file pointer for writing StateData";
+		if (MyWriteFile (hStatfile, &MyStateData, sizeof (TStateData)) != ILOCK_OK)
+			throw "cannot write updated StateData to statfile";
+
+		ret = ILOCK_OK;
+	}
+	catch (const char* errString)
+	{
+		ILockError("MyUnlockModule", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+
+int TILock::MyWriteStateProtocol(const char * Module_CS, BOOL bDel)
+{
+	// Write the Info of the Current MyStateData structure to StatProtfile
+	int ret = ILOCK_NOTOK;
+	try
+	{
+		HANDLE hStatProtfile;
+		hStatProtfile = CreateFile(
+			StatProtfile,
+			GENERIC_WRITE,			// Open for writing
+			FILE_SHARE_READ,		// Other processes can read the file
+			NULL,					// No inheritance
+			OPEN_ALWAYS,			// Open existing or create new file	
+			FILE_ATTRIBUTE_NORMAL,   
+			NULL);
+		if (hStatProtfile == INVALID_HANDLE_VALUE)
+		{
+			char err[512];
+			sprintf(err, "cannot open protocol file %s!", StatProtfile);
+			throw err;
+		}
+		
+		// Set file pointer to the end of the file
+		if (SetFilePointer(hStatProtfile, 0, NULL, FILE_END) == 0xFFFFFFFF)
+			throw "cannot set file pointer to the end of protocol file!";
+
+		// Write the protocol information
+		char buff[1024];
+		sprintf(buff,"%4i-%02i-%02i %02i:%02i:%02i  %s %s (%s:%s) V %li.\r\n",
+			MyStateData.date.wYear,
+			MyStateData.date.wMonth,
+			MyStateData.date.wDay,
+			MyStateData.date.wHour,
+			MyStateData.date.wMinute,
+			MyStateData.date.wSecond,
+			/*MyStateData.Name*/ Module_CS,	// case sensitive name
+			(MyStateData.State==LOCKED)?"LOCKED":
+				(((MyStateData.State==MLOCKED) && !bDel)?"M_LOCKED":
+				 ((MyStateData.State==MLOCKED) && bDel)?"DEL_LOCK":
+				 ((MyStateData.State==LOCKED) && bDel)?"DEL_LOCK":
+				 "UNLOCKED"),
+			MyStateData.Node,
+			MyStateData.User,
+			MyStateData.Version);
+
+		DWORD dwBytesWritten;
+		if (WriteFile(hStatProtfile, buff, strlen(buff), &dwBytesWritten, NULL) != TRUE)
+			throw "cannot write to protocol file!";
+		if (dwBytesWritten != strlen(buff))
+			throw "writing to protocol file truncated!";
+		
+		// Close file again
+		CloseHandle(hStatProtfile);
+		ret = ILOCK_OK;
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyWriteStateProtocol", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+int TILock::MyWriteStateProtocol(const char * Module, const char * Module_CS, 
+								 const char * User, const char * Node, BOOL bDel)
+{
+	// Write the Info of the Current MyStateData structure to StatProtfile
+	int ret = ILOCK_NOTOK;
+	try
+	{
+		HANDLE hStatProtfile;
+		hStatProtfile = CreateFile(
+			StatProtfile,
+			GENERIC_WRITE,			// Open for writing
+			FILE_SHARE_READ,		// Other processes can read the file
+			NULL,					// No inheritance
+			OPEN_ALWAYS,			// Open existing or create new file	
+			FILE_ATTRIBUTE_NORMAL,   
+			NULL);
+		if (hStatProtfile == INVALID_HANDLE_VALUE)
+		{
+			char err[512];
+			sprintf(err, "cannot open protocol file %s!", StatProtfile);
+			throw err;
+		}
+		
+		// Set file pointer to the end of the file
+		if (SetFilePointer(hStatProtfile, 0, NULL, FILE_END) == 0xFFFFFFFF)
+			throw "cannot set file pointer to the end of protocol file!";
+
+		// Write the protocol information
+		char buff[1024];
+		sprintf(buff,"%4i-%02i-%02i %02i:%02i:%02i  %s %s (%s:%s) V %li.\r\n",
+			MyStateData.date.wYear,
+			MyStateData.date.wMonth,
+			MyStateData.date.wDay,
+			MyStateData.date.wHour,
+			MyStateData.date.wMinute,
+			MyStateData.date.wSecond,
+			Module_CS,						// case sensitive name
+			((MyStateData.State==LOCKED) && !bDel)?"LOCKED":
+				(((MyStateData.State==MLOCKED) && !bDel)?"M_LOCKED":
+				 ((MyStateData.State==MLOCKED) && bDel)?"DEL_LOCK":
+				 ((MyStateData.State==LOCKED) && bDel)?"DEL_LOCK":
+				 "UNLOCKED"),
+			Node,
+			User,
+			MyStateData.Version);
+
+		DWORD dwBytesWritten;
+		if (WriteFile(hStatProtfile, buff, strlen(buff), &dwBytesWritten, NULL) != TRUE)
+			throw "cannot write to protocol file!";
+		if (dwBytesWritten != strlen(buff))
+			throw "writing to protocol file truncated!";
+		
+		// Close file again
+		CloseHandle(hStatProtfile);
+		ret = ILOCK_OK;
+	}
+	catch (const char * errString)
+	{
+		ILockError("MyWriteStateProtocol", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+
+int TILock::MyFlushStateFile(void)
+{
+	if (FlushFileBuffers(hStatfile) != TRUE)
+	{
+		ILockError("MyFlushStateFile", 
+			"cannot flush StateFile buffers",
+			GetLastError());
+		return ILOCK_NOTOK;
+	}
+	else
+		return ILOCK_OK;
+}
+
+
+int  TILock::GetLockStateData(const char * Module, TStateData *stateData)
+{
+    int ret = ILOCK_NOTOK;
+	char module[MAX_MODULE_LENGTH];
+
+    try
+    {
+		strncpy(module, Module, MAX_MODULENAME_LENGTH);
+		module[MAX_MODULENAME_LENGTH] = '\0';
+		strlwr(module);							// Search is done with lower-case module names
+
+	    if (MyOpenStatfileExclusive()!=ILOCK_OK)	// Open STATFILE for read/write exclusive
+			throw "open on statfile failed!";
+/*
+		if (MyReadFileInfo() != ILOCK_OK)
+			throw "cannot read FileInfo from statfile";
+		if (MyReadStateIndex () != ILOCK_OK)
+			throw "cannot read StateIndex from statfile";
+*/
+		if (MySearchModuleInIndex (module) == FALSE)
+			ret = ILOCK_NOT_LOCKED;
+		else
+		{
+			// Lese zu bearbeitenden Info-Block
+			if (MySetFilePointer (hStatfile, pMyStateIndex[IndexStateIndex].Pos) != ILOCK_OK)
+				throw "cannot set file pointer for reading StateData";
+			if (MyReadFile (hStatfile, stateData, sizeof (TStateData)) != ILOCK_OK)
+				throw "cannot read StateData";	
+			ret = ILOCK_OK;
+		}
+	}
+	catch (const char * errString)
+	{
+		ILockError("GetLockStateData", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+    }
+	MyCloseFile(hStatfile);
+    return ret;
+}
+	
+int TILock::MyDelUserFromVerRefList(const char * User)
+{
+	int ret = ILOCK_NOTOK;
+	char OldUser[MAX_USERNAME_LENGTH+1];	// copy old user to the end of the list (for recovery)
+
+	// search the user
+	for (UINT i=0; i< MyStateData.CountUsed; i++)
+		if (strncmp(&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*i],
+					User, MAX_USERNAME_LENGTH) == 0)
+		{
+			strncpy (OldUser,&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*i], MAX_USERNAME_LENGTH+1);
+			OldUser[MAX_USERNAME_LENGTH]='\0';
+			for (UINT j=i; j < (MyStateData.CountUsed-1); j++)	// close gap
+				strncpy (&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*j],
+						 &MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*(j+1)],
+						 MAX_USERNAME_LENGTH+1);
+			// the last locker after the actual locker
+			strncpy (&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*(MyStateData.CountUsed-1)],
+					 OldUser, MAX_USERNAME_LENGTH+1);
+			MyStateData.CountUsed--;
+			break;
+		}
+	ret = ILOCK_OK;
+	return ret;
+}
+
+int TILock::MyAddUserToVerRefList(const char * User)
+{
+	int ret = ILOCK_NOTOK;
+	try
+	{
+
+		if (MySearchUserInVerRefList(User) == ILOCK_OK)
+			ret = ILOCK_OK;					// User already in list
+		else
+			if ( MyStateData.CountUsed < MyStateData.CountMax )
+			{
+				// CTS 1103773 copy last unlocker 
+				if ( MyStateData.CountUsed +1 < MyStateData.CountMax )
+				{
+					strncpy (&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*(MyStateData.CountUsed+1)],
+						 &MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*MyStateData.CountUsed],
+						 MAX_USERNAME_LENGTH+1);
+				}
+				strncpy(&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*MyStateData.CountUsed],
+						User, MAX_USERNAME_LENGTH);	// Enter new user
+				MyStateData.UserList[((MAX_USERNAME_LENGTH+1)*MyStateData.CountUsed)
+										+ MAX_USERNAME_LENGTH] = '\0';
+				MyStateData.CountUsed++;	// Increase Counter
+				ret = ILOCK_OK;
+			}
+			else
+				ret = ILOCK_MAX_USERS_REACHED;
+	}
+	catch (const char* errString)
+	{
+		ILockError("MyLockModule", errString, GetLastError());
+		ret = ILOCK_NOTOK;
+	}
+	return ret;
+}
+
+int TILock::MySearchUserInVerRefList(const char * User)
+{
+	for (UINT i=0; i< MyStateData.CountUsed; i++)
+		if (strncmp(&MyStateData.UserList[(MAX_USERNAME_LENGTH+1)*i],
+					User, MAX_USERNAME_LENGTH) == 0)
+			return ILOCK_OK;	// User found in list
+
+	return ILOCK_NOTOK;
+}
+
+
+
+extern VOID AddToMessageLog(LPTSTR,WORD);
+void TILock::ILockError (const char * function, const char *errString, DWORD dwError)
+{
+	TCHAR errmsg[1024], buf1[512]="", buf2[512]="";
+
+	sprintf(buf1, "ILockError in %s: %s ", function, errString);
+	if (dwError != NO_ERROR)
+	{
+		// print message 
+		LPVOID lpMsgBuf;
+		FormatMessage( 
+			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+			NULL,
+			dwError,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+			(LPTSTR) &lpMsgBuf,
+			0,
+			NULL);
+
+		sprintf(buf2, "  API code: %li\n  API-Message: %s", dwError, lpMsgBuf);
+
+		// Free the buffer.
+		LocalFree (lpMsgBuf);
+	}
+	sprintf(errmsg,"%s; %s", buf1, buf2);
+	AddToMessageLog(errmsg, EVENTLOG_ERROR_TYPE);
+	DBGOUT(errmsg);
+}
+
+
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

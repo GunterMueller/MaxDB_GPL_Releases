@@ -1,0 +1,400 @@
+&IF $OSSPEC = LINUX
+#!/bin/bash
+&ELIF $OSSPEC == SOLARIS
+#!/devtool/local/bin/bash
+&else
+#!/usr/local/bin/bash
+&endif
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+Usage()
+{
+  echo "Syntax:nachtCompilation normal|weekend Release [BIT64]"
+  echo "Complete compilation normal or at weekend (clears worktree)"
+  exit 0
+}
+
+if [ $# -lt 1 ]; then
+ Usage
+fi
+
+User=cron
+Mode=$1
+shift
+Release=$1
+shift
+Want64=$1
+shift
+
+#---------------------------------------------------
+if [ "x$Mode" = "xday" ]; then
+    echo Update of remuser tool area
+    /rel/TOOL/tool/bin/updateRemuserTools.bash
+fi
+
+#---------------------------------------------------
+. /rel/TOOL/tool/bin/SetupMachineEnv.bash ${Release}
+
+#---------------------------------------------------
+#
+# Prepare special release handling....
+#   instead of having 'release features' distributed around the script
+#   please decide here on release specific stuff...
+#
+#
+# Special igme version handling
+#
+if [ "x$Release" = "x73" ]; then
+    IgmeVersion="7.3.00.develop"
+else
+    IgmeVersion=""
+fi
+#
+#---------------------------------------------------
+#
+# OWN depends on 32/64 support and actual release
+#
+# RR (i.e. 72,73,74,80) leads to
+#   /rel/RR i.e. /rel/73
+#      32Bit if 64Bit is not supported (DEC)
+#      64Bit if 32Bit is not supported (LINUX)
+#   /rel/RR_32
+#      32Bit if 64Bit is supported too
+#   /rel/RR_64
+#      64Bit if 32Bit is supported too
+#
+
+if [ ! -d $TOOL/currentLogin/ ]; then
+    mkdir $TOOL/currentLogin
+fi
+
+if [ "$BIT32Supported" = "NO" -o "$BIT64Supported" = "NO" ]; then
+        OWN=/rel/${Release}
+        LOG=$TOOL/currentLogin/${Release}.rel
+else
+        if [ "x$Want64" = "xBIT64" ]; then
+            OWN=/rel/${Release}_64
+            LOG=$TOOL/currentLogin/${Release}_64.rel
+        else
+            OWN=/rel/${Release}_32
+            LOG=$TOOL/currentLogin/${Release}_32.rel
+        fi
+fi
+
+#
+# Coding reacts on BIT64 Environment variable set (even if value is 0...)
+# So for 32Bit compilation unset BIT64 is needed
+#
+if [ "x$Want64" = "xBIT64" ]; then
+     BIT64=1
+     export BIT64
+     shift
+else
+     unset BIT64
+fi
+
+Pid=$$
+LoginTime=`date`
+
+TERM=vt100
+export TERM
+
+giveup()
+{
+	exit 0;
+}
+
+trap "giveup" HUP INT QUIT TERM PIPE
+
+TST=
+echo OWN = $OWN
+
+if [ -f $LOG ]; then
+ echo "remuser on `hostname` busy."
+ cat $LOG
+ giveup
+fi
+
+cleanup()
+{
+        rm $LOG
+        exit 0
+}
+
+/bin/echo "Current User=${User} Pid=${Pid} logged in at ${LoginTime}" >$LOG
+trap "cleanup" HUP INT QUIT TERM PIPE
+#
+# Keep only last 80 latest entries
+#
+( cd /rel/nachtlauf; rm -rf xxx `ls -t1 | tail +80` )
+
+/bin/echo "Command:$0" >>$LOG
+
+DBROOT=$OWN/usr
+DEV_STUDIO=$Release
+PYTHONPATH=$TOOL/lib/Python
+PERL5LIB=$TOOL/bin:$TOOL/lib/perl5:$OWN/usr/misc
+
+export OWN DBROOT PYTHONPATH DEV_STUDIO PERL5LIB
+
+#-----------------------------------------------------------------
+#
+# Update IgmeVersion dependend on release if not already set release specific
+#
+if [ "x$IgmeVersion" = "x" ]; then
+    IgmeRelease="`echo $Release | cut -c1`.`echo $Release | cut -c2`"
+    IgmeBuild="`echo $Release | cut -c3-`"
+    if [ "x$IgmeBuild" = "x" ]; then
+#
+# Create the most actual develop iprofile for this release
+#
+        IgmeVersion="`$TOOL/bin/igme -l | cut -c1-15 | grep develop | grep "^$IgmeRelease" | sort -n | tail -1`"
+    else
+        if [ $IgmeBuild -lt 10 ]; then
+            IgmeVersion="$IgmeRelease.0$IgmeBuild.develop"
+        else
+            IgmeVersion="$IgmeRelease.$IgmeBuild.develop"
+        fi
+    fi
+fi
+
+#---------------------------------------------------
+#
+# Perforce usage checked using igme. If depot is found perforce is used
+#
+UsePerforce="`$TOOL/bin/igme -c $IgmeVersion | grep "depot:"`"
+#
+if [ "x$UsePerforce" = "x" ]; then
+    echo "Using igme $IgmeVersion"
+    $TOOL/bin/igme -s /rel/Skeleton $IgmeVersion
+else
+#
+# Sync release if using Perforce...
+# igme -x suppresses 'source server' path and sets BUILDPRAEFIX and CORRECTIONLEVEL only
+#
+    P4USER=remuser
+    export P4USER
+    P4CLIENT=remuser_`hostname`
+    export P4CLIENT
+    p4 info
+    echo ----------------------------------------
+    echo Most recent 20 changelists for /rel/${Release}SRC/...
+    p4 -s changes -m 20 /rel/${Release}SRC/...
+    echo ----------------------------------------
+    echo Syncing P4CLIENT="$P4CLIENT" using p4 sync
+    p4 sync /rel/${Release}SRC/...
+    echo "Using igme -p /rel/${Release}SRC// -x $IgmeVersion"
+    $TOOL/bin/igme -s /rel/Skeleton -p /rel/${Release}SRC// -x $IgmeVersion
+fi
+#-----------------------------------------------------------------
+
+if [ -d $TOOL ]
+then
+    if [ -r $OWN/.iprofile ]
+    then
+      . $OWN/.iprofile
+      # . setlcenv
+      echo ----------------------------------------
+      echo Creating $OWN/syncinfo.dat using DEPOT=${DEPOT}
+      
+      $TOOL/bin/syncinfo
+      cat $OWN/syncinfo.dat
+
+      if [ -f $HOME/.vdnvars ]
+      then
+          . $HOME/.vdnvars
+      else
+          echo "can't find .vdnvars "
+      fi
+
+      TOOLVARS=$TOOL/bin/toolvars.pl export TOOLVARS
+
+      DBTERM=vt100_hp
+      export DBTERM
+
+      umask 0002
+
+      cd $OWN
+      echo
+      echo "==================================================================="
+      echo ---  `uname -a`  ---
+      echo "==================================================================="
+
+    else
+        echo "can't read .iprofile"
+    fi
+else
+    echo "can't find $TOOL"
+fi
+
+if [ -d $OWN/sys/wrk/fast ]
+then
+    echo "--------------"
+    echo "Doing iclear to clear tmp directories"
+    iclear -p
+fi
+
+echo "--------------"
+echo "Looking for local source"
+mysrc
+
+CompileAll()
+{
+    echo "--------------"
+    echo "Doing imf dcom.mac"
+    imf dcom.mac
+    PROTLIST="$WRK/fast/prot/dcom.mac.e0"
+#python $TOOL/bin/qaccMake.py -f dcom
+    echo " ---------------"
+    echo "Doing ims allknl.mac"
+    rm -f $OWN/usr/pgm/slowknl
+    ims allknl.mac
+    PROTLIST="$PROTLIST $WRK/slow/prot/allknl.mac.e0"
+#python $TOOL/bin/qaccMake.py -s allknl
+    echo  "----------------"
+    echo "Doing imf all.mac"
+    rm -f $OWN/usr/pgm/kernel
+    imf all.mac
+    PROTLIST="$PROTLIST $WRK/fast/prot/all.mac.e0"
+#python $TOOL/bin/qaccMake.py -f all
+
+    if [ "$BIT64" = "1" -a "$BIT32Supported" = "YES" ]
+    then
+        echo  "----------------"
+        echo "Doing imf -32 all32.mac"
+        imf -32 all32.mac
+        PROTLIST="$PROTLIST $OWN/sys/wrk32/fast/prot/all32.mac.e0"
+#    python $TOOL/bin/qaccMake.py -f all32
+    fi
+
+    if [ "x$Mode" = "xweekend" -o "${Release}" = "74" ]; then
+# needed for 74 package build...
+        echo "--------------"
+        echo "Doing imq quickknl.shm"
+        rm -f $OWN/usr/pgm/quickknl
+        imq quickknl.shm
+        PROTLIST="$PROTLIST $WRK/quick/prot/quickknl.shm.e0"
+#    python $TOOL/bin/qaccMake.py -q quickknl
+    fi
+
+    echo "--------------"
+    echo "Doing imf alltest.mac"
+    imf alltest.mac
+    PROTLIST="$PROTLIST $WRK/fast/prot/alltest.mac.e0"
+
+}
+
+echo "--------------"
+echo "First try to compile sources to actual change list"
+
+if [ "${Release}" = "731" ]; then
+
+
+    echo "--------------"
+    echo "Doing imf allpc.mac"
+    imf allpc.mac
+
+
+    echo "--------------"
+    echo "Doing imf allpctest.mac"
+    imf allpctest.mac
+
+else
+if [ "${Release}" = "80" ]; then
+    imf ::SAPDBInterfaces.mac
+    checkmake.pl "$WRK/fast/prot/SAPDBInterfaces.mac.e0"
+else
+    CompileAll
+fi
+fi
+#--------------------------------------------------------------------------------------
+# Prepare build of sar Package for lcapps development
+#
+if [ "${Release}" -ge "74" ]; then
+
+#--------------------------------------------------------------------------------------
+# Check make protocols. Package created only if all make protocols without error
+#
+    if checkmake.pl $PROTLIST;
+    then
+        DoCreatePackage="YES";
+    else
+        DoCreatePackage="NO";
+    fi
+
+    if [ "$DoCreatePackage" = "YES" ];
+    then
+        echo "--------------"
+        echo "Creating new package `date`"
+
+        buildpackage -profile Server -format sar
+
+        echo "------------------------------"
+        cp $TOOL/pgm/idl2xml    $OWN/usr/pgm
+        cp $TOOL/pgm/xml2ispc   $OWN/usr/pgm
+
+        imf :tt/makeCARLIST
+
+        if [ -x $OWN/usr/etc/makeCARLIST ]; then
+            $OWN/usr/etc/makeCARLIST
+            echo Created $OWN/usr/etc/CAR.LISTE.PRE
+            echo "------------------------------"
+            if [ -f $OWN/usr/etc/CAR.LISTE.PRE ]; then
+                cd $OWN/usr
+
+                find sdk/ -type f -print | grep -v "\.f$" >>$OWN/usr/etc/CAR.LISTE.PRE
+                echo Appended sdk to $OWN/usr/etc/CAR.LISTE.PRE, calling SAPCAR
+
+                SAPCAR -cvf $OWN/lastPackage/SAPDBPRE.SAR -A $OWN/usr/etc/CAR.LISTE.PRE
+            else
+                echo Failed to append sdk to $OWN/usr/etc/CAR.LISTE.PRE
+            fi
+
+        else
+            echo Failed to create $OWN/usr/etc/CAR.LISTE.PRE
+        fi
+
+        if [ -f $OWN/lastPackage/SAPDBPRE.SAR ]; then
+            echo "------------------------------"
+            echo "Precompiler Package $OWN/lastPackage/SAPDBPRE.CAR created"
+            echo "------------------------------"
+        else
+            echo "------------------------------"
+            echo "Precompiler Package creation failed.... "
+            echo "------------------------------"
+        fi
+
+    else
+
+        echo "------------------------------"
+        echo "Compilation failed... No Package creation.... "
+        echo "------------------------------"
+
+    fi
+else
+	checkmake.pl $PROTLIST;
+fi
+
+echo "------------------------------"
+echo Compilation $OWN $Mode finished `date`
+echo "------------------------------"
+
+cleanup

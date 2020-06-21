@@ -1,0 +1,16 @@
+*   *ID* N25SEL5  DBCMD    changed on 1992-09-28-13.25.47 by ADMIN     *
+ *** <single select statement> mit joins wird getestet. !
+file connect ( kern test !
+CREATE TABLE APPL_TABLE
+  ( NAME  CHAR(18) KEY,
+    TYPE CHAR(5) NOT NULL,
+    LEN FIXED(3) NOT NULL ) !
+INSERT INTO APPL_TABLE VALUES ('A1','CHAR',20) !
+INSERT INTO APPL_TABLE VALUES ('A2','CHAR',20) !
+SELECT A1.TYPE, A1.LEN, A1.NAME
+  INTO :A1, :A2, :A3
+  FROM APPL_TABLE A1, APPL_TABLE A2
+  WHERE A1.TYPE = A2.TYPE
+    AND A1.LEN  = A2.LEN
+    AND A1.NAME <> a2.NAME !
+COMMIT WORK RELEASE !

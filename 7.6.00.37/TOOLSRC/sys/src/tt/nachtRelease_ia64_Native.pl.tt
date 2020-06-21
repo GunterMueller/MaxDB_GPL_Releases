@@ -1,0 +1,142 @@
+#!/usr/bin/perl
+#
+# @(#) nachtRelease_ia64_Native   19-10-2001   S. Paeck
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+#
+# complete night run test script to run a single release
+# 
+#
+
+use Env;
+
+use Win32;
+use Win32::IPC;
+use Win32::Process;
+
+$Releases= shift @ARGV;
+
+$Release=shift @ARGV;
+
+$Rel = $Release;
+$Rel =~ s/\.//g;
+
+
+# Preserve only the 20 youngest nigth run protocols
+system("%TOOL%/Posix/find d:/SAPDevelop/Nachtlauf -mtime +20 -exec %TOOL%/Posix/rm -f {} ;");
+
+#------------------ Determing the name of the protocol, e.g. 06Nov2001_741.out --------------
+$day = (localtime)[3];
+if ($day < 10)
+{
+    $day = "0".$day;
+}
+
+$month = (Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec)[(localtime)[4]];
+$year = (localtime)[5] + 1900;
+
+$Prot = "d:/SAPDevelop/Nachtlauf/".$day.$month.$year."_".$Rel."_Native.out";
+#--------------------------------------------------------------------------------------------
+
+open (SAVEOUT, ">&STDOUT") or die "Can not redirect STDOUT";
+open (SAVERR, ">&STDERR") or die "Can not redirect STDERR";
+
+open (STDOUT, ">$Prot") or die "Can not redirect STDOUT";
+open (STDERR, ">&STDOUT") or die "Can not redirect STDERR";
+
+$|=1;
+
+#Lästige RSH-Protokolle auf C: entfernen
+unlink <C:/rsh*>;
+print "=====================================================================\n";
+print "Complete Itanium night run of Release $Release\n";
+print "=====================================================================\n";
+
+# ermitteln ob Wochenende ist
+$WOCHENENDE = ("true","false","false","false","false","true","true")[(localtime)[6]];
+print "Weekend: $WOCHENENDE \n";
+
+if ( $WOCHENENDE eq "true" ) 
+{
+    $Mode="weekend";
+}
+else
+{
+    $Mode="normal";
+}
+
+
+
+#---------------------------------- c l e a r --------------------------
+print "\n... clearing in $TMP :\n";
+system("$TOOL/Posix/find $TMP -mtime +4 -exec $TOOL/Posix/rm -rf {} ;");
+print;
+
+#print "\n... clearing in $WRK\n";
+#unlink <d:/SAPDevelop/$Release/sys/wrk/slow/tmp/*>;
+#unlink <d:/SAPDevelop/$Release/sys/wrk/quick/tmp/*>;
+#unlink <d:/SAPDevelop/$Release/sys/wrk/fast/tmp/*>;
+
+print "\n... clearing of protocols:\n";
+system("$TOOL/Posix/find ".$Releases."/".$Release."/sys/wrk/slow/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+system("$TOOL/Posix/find ".$Releases."/".$Release."/sys/wrk/quick/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+system("$TOOL/Posix/find ".$Releases."/".$Release."/sys/wrk/fast/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+print;
+
+if ( $Mode eq "weekend" ) 
+{
+    print "\nWeekend, therefore d:/SAPDevelop/$Release/sys/wrk is deleted!\n";
+    system("$TOOL/Posix/find ".$Releases."/".$Release."/sys/wrk -exec $TOOL/Posix/rm -rf {} ;");
+}
+print;
+
+if ($Rel == "741" || $Rel == "742" || $Rel == "74")
+{
+
+    #------------------------------    XCompilation for Itanium ------------------
+
+    Win32::Process::Create($XCompProc,
+                           "$SYSTEMROOT\\system32\\cmd.exe",
+                           "/c %TOOL%\\Perl\\bin\\perl.exe D:\\SAPDevelop\\nachtCompilation_ia64_Native.pl $Mode $Releases $Release",
+                           1,
+                           CREATE_DEFAULT_ERROR_MODE,".") || die Win32::FormatMessage(Win32::GetLastError());
+    $XCompProc->SetPriorityClass(NORMAL_PRIORITY_CLASS);
+
+    Win32::IPC::WaitForMultipleObjects([ $XCompProc ], 1, INFINITE);
+ 
+    print "=====================================================================\n";
+    print " End of compilation jobs ", scalar localtime(),"\n";
+    print "=====================================================================\n";
+
+    #Starte Testläufe
+    @ARGV = ($Mode,$Releases,$Release);
+    do "D:\\SAPDevelop\\nachtTest_ia64_Native.pl" || die "Can't execute 'nachtTest_ia64_Native.pl $Mode $Releases $Release'\n";	
+}
+else
+{
+    @ARGV = ($Mode,$Releases,$Release);
+    do "D:\\SAPDevelop\\nachtCompilation_ia64_Native.pl"; # || die "Can't execute 'nachtCompilation_ia64_Native.pl'\n";
+}
+
+close STDOUT;
+close STDERR;
+
+open STDOUT, ">&SAVEOUT";
+open STDERR, ">&SAVEERR";

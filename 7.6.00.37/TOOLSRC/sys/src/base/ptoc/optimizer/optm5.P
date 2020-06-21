@@ -1,0 +1,535 @@
+(* @(#)optimizer/optm5.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm5.p *)
+
+   (* evaluate the conditions for the optimizing transformations *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../optimizer/more_csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+#include "../optimizer/optm2.h"
+#include "../optimizer/optm3.h"
+#include "../optimizer/set_util.h"
+
+
+(* export *)
+
+#include "../optimizer/optm5.h"
+
+
+(* privates *)
+(* initial *)
+(* routines *)
+
+
+function IdenticalTypes
+   (type1,
+    type2: SymbolTableRange)
+   : boolean;
+
+var
+   stype1,
+   stype2: SymbolTableRange;
+
+begin
+   if type1 = type2 then begin
+      IdenticalTypes := true;
+   end
+   else if STab [type1].SKind = STab [type2].SKind then begin
+      stype1 := STab [type1].SType;
+      stype2 := STab [type2].SType;
+      if (stype1 < 0) and (stype1 = stype2) then begin
+         (* primative type *)
+         case stype1 of
+	    ShortType, UshortType,
+            IntegerType, UnsignedType, BooleanType,
+	    CharType, UcharType, EnumerativeType: begin
+               IdenticalTypes :=
+                  (STab [type1].SLowRange = STab [type2].SLowRange) and
+                  (STab [type1].SHighRange = STab [type2].SHighRange);
+            end;
+            LongType, UlongType,
+            FloatType, DoubleType: begin
+               IdenticalTypes := true;
+            end;
+            ArrayType: begin
+               IdenticalTypes :=
+                  IdenticalTypes (STab [type1].SIndex, STab [type2].SIndex) and
+                  IdenticalTypes (STab [type1].SElement, STab [type2].SElement);
+            end;
+            RecordType,
+            UnionType: begin
+               IdenticalTypes := false;
+            end;
+            FileType: begin
+               IdenticalTypes :=
+                  IdenticalTypes (STab [type1].SComponent, STab [type2].SComponent);
+            end;
+            SetType: begin
+               IdenticalTypes :=
+                  IdenticalTypes (STab [type1].SBase, STab [type2].SBase);
+            end;
+            PointerType: begin
+               IdenticalTypes := true;  (* pointer conversions are nop's' *)
+            end;
+            FunctionType,
+            ProcedureType: begin
+               IdenticalTypes := false;
+            end;
+            StringType: begin
+               IdenticalTypes :=
+                  (STab [type1].SLength = STab [type2].SLength) and
+                  IdenticalTypes (STab [type1].SElem, STab [type2].SElem);
+            end;
+            BlockType: begin
+               IdenticalTypes :=
+                  (STab [type1].SLength = STab [type2].SBlockLen) and
+                  (STab [type1].SElemAlign = STab [type2].SElemAlign);
+            end;
+            otherwise begin
+               PasCerror ('missing case - IdenticalTypes');
+            end;
+         end;
+      end
+      else if (stype1 > 0) and (stype2 > 0) then begin
+         (* subrange or TypeNameDcl *)
+         if STab [type1].SKind = TypeDcl then begin
+            (* subrange *)
+            IdenticalTypes :=
+               (STab [type1].SLowRange = STab [type2].SLowRange) and
+               (STab [type1].SHighRange = STab [type2].SHighRange) and
+               IdenticalTypes (stype1, stype2);
+         end
+         else begin
+            (* TypeNameDcl *)
+            IdenticalTypes := IdenticalTypes (stype1, stype2);
+         end;
+      end
+      else begin
+         IdenticalTypes := false;
+      end;
+   end
+   else begin
+      IdenticalTypes := false;
+   end;
+end;
+
+
+   function IdenticalTraverse
+      (NodeIndex,
+       CnodeIndex: HdgRange)
+      : boolean;
+
+   var
+      StillIdentical: boolean;
+
+   begin
+      StillIdentical := true;
+      while StillIdentical and (NodeIndex <> -1) and (CnodeIndex <> -1) do begin
+         StillIdentical := StillIdentical and identical (NodeIndex, CnodeIndex);
+         NodeIndex := NextLink;
+         CnodeIndex := CnextLink;
+      end;
+      IdenticalTraverse := StillIdentical and identical (NodeIndex, CnodeIndex);
+   end  (* IdenticalTraverse *);
+
+
+   function identical
+      (NodeIndex,
+       CnodeIndex: HdgRange)
+      : boolean;
+
+      (* this function returns true if two csg's' are equal. *)
+
+   var
+      ReturnValue: boolean;
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output, 'identical, ', NodeIndex:1, ', ', CnodeIndex:1);
+      end;
+
+      if (NodeIndex = -1) or (CnodeIndex = -1) then begin
+         ReturnValue := NodeIndex = CnodeIndex;
+      end
+      else if (Node1field = Cnode1field) and IdenticalTypes (TypeField, CtypeField) then begin
+         (* major and minor operators are equal *)
+         case MajorOperator of
+
+            node: begin
+               if Node1parameter = Cnode1parameter then begin
+                  ReturnValue := Node2parameter = Cnode2parameter;
+               end
+               else begin
+                  ReturnValue := false;
+               end;
+            end;
+
+            spec: begin
+               ReturnValue := Spec1parameter = Cspec1parameter;
+            end;
+
+            ShortStmnt: begin
+               ReturnValue := identical (Ss1operand, Css1operand);
+            end;
+
+            UnaryExp: begin
+               if
+                  (Unary1parameter = Cunary1parameter) and
+                  (Unary2parameter = Cunary2parameter)
+               then begin
+                  ReturnValue := identical (Unary1operand, Cunary1operand);
+               end
+               else begin
+                  ReturnValue := false;
+               end  (* if *);
+            end;
+
+            BinaryExp: begin
+               if
+                  (Bin1parameter = Cbin1parameter) and
+                  (Bin2parameter = Cbin2parameter) and
+                  identical (Bin1operand, Cbin1operand)
+               then begin
+                  ReturnValue := identical (Bin2operand, Cbin2operand);
+               end
+               else begin
+                  ReturnValue := false;
+               end  (* if *);
+            end;
+
+            ExpList: begin
+               ReturnValue := IdenticalTraverse (ListHeadField, ClistHeadField);
+            end;
+
+            LongStmnt: begin
+               if
+                  (Ls1parameter = Cls1parameter) and
+                  (Ls2parameter = Cls2parameter) and
+                  (identical (Ls2operand, Cls2operand))
+               then begin
+                  ReturnValue := identical (Ls1operand, Cls1operand);
+               end
+               else begin
+                  ReturnValue := false;
+               end  (* if *);
+            end;
+
+            ifthenelse: begin
+               ReturnValue :=
+                  identical (IfCondField, CifCondField) and
+                  identical (IfTrueField, CifTrueField) and
+                  identical (IfFalseField, CifFalseField);
+            end;
+
+            otherwise begin
+               ReturnValue := false;
+            end;
+         end  (* case *);
+      end
+      else begin
+         ReturnValue := false;
+      end  (* if *);
+
+      if control ['V'] then begin
+         writeln (output, '   ReturnValue = ', ord (ReturnValue):1);
+      end;
+
+      identical := ReturnValue;
+
+   end  (* identical *);
+
+
+   function ConditionsSatisfied
+      (transformation: TransformType;
+       NodeIndex,
+       FirstStmnt: HdgRange;
+       var BuiltEntry: boolean)
+      : boolean;
+
+      (* this function returns true if the conditions for the specified *)
+      (* transformation are satisfied, else it returns false.           *)
+
+   var
+      DescPtr,
+      DescPtr2: DescriptorRange;
+      DescPtr3: DescriptorRange;                 (* 17.10.86 *)
+#ifdef FLEX
+      intersection: PSet;
+      intersect : Set;
+      set1, set2, set3, set4 : Set;
+#else
+      intersection: Set;
+#endif
+      ExitDesc,
+      EntryDesc: NodeDescriptorType;
+      SaveNodeIndex: HdgRange;
+      ReturnValue: boolean;
+
+
+      procedure MoveBackwards;
+         (* evaluate conditions to move statement backwards *)
+         (* to the begining of a statement list             *)
+
+      begin
+
+         if control ['V'] then begin
+            write (output, 'MoveBackwards: ');
+            write (output, 'NodeIndex = ', NodeIndex:1, ', ');
+            writeln (output, 'essential = ', ord (DescPtr^.essential):1);
+         end  (* if *);
+
+         if DescPtr^.essential then begin
+
+	    (* will not be moving past end;          *)
+            (* will not be moving past selector node *)
+
+            if not BuiltEntry then begin
+               ClearEntryDescriptors;
+               EntryTraverse(FirstStmnt,-1);(* build entry descriptors *)
+               BuiltEntry := true;
+            end  (* if *);
+
+            if control ['V'] then begin
+               PrintDescriptor (-1, 'entry', DescPtr^.EntryDescriptor);
+               PrintDescriptor (-1, 'exit', DescPtr^.ExitDescriptor);
+            end;
+
+	    Intersect_Sets (
+               intersection,
+               DescPtr^.EntryDescriptor.def,
+               DescPtr^.ExitDescriptor.ref);
+
+	    if Empty_check_Set (intersection) then begin
+
+	       Intersect_Sets (
+                  intersection,
+                  DescPtr^.EntryDescriptor.def,
+                  DescPtr^.ExitDescriptor.def);
+
+	       if Empty_check_Set(intersection) then begin
+
+		  Intersect_Sets (
+                     intersection,
+                     DescPtr^.EntryDescriptor.ref,
+                     DescPtr^.ExitDescriptor.def);
+
+		  ReturnValue := Empty_check_Set (intersection);
+
+               end  (* if *);
+            end  (* if *);
+         end  (* if *);
+
+      end  (* MoveBackwards *);
+
+
+      procedure MoveOutsideLoop;
+
+         (* evlauate conditions to move a statement backwards *)
+         (* outside loop                                      *)
+
+      begin
+
+         if control ['V'] then begin
+            writeln (output, 'MoveStmntOutsideLoop:');
+         end  (* if *);
+
+	 if DescPtr^.essential and DescPtr3^.essential then begin
+						(* 17.10.86 *)
+            (* not self modifing *)
+
+	    Intersect_Sets (
+               intersection,
+               DescPtr^.ExitDescriptor.def,
+               DescPtr^.ExitDescriptor.ref);
+
+	    if Empty_check_Set (intersection) then begin
+
+               SaveNodeIndex := NodeIndex;
+               NodeIndex := FirstStmnt;
+               DescPtr2 := ptr (DescriptorField);
+
+               (* defsp(n0,nj) is the node exit descriptor on the *)
+               (* loop                                            *)
+
+               if control ['V'] then begin
+                  writeln (output,'defsp(n0,nj) * ref(nj) = 0');
+                  PrintDescriptor (
+                     SaveNodeIndex,
+                     'defsp',
+                     DescPtr2^.ExitDescriptor);
+                  PrintDescriptor(SaveNodeIndex,'exit',DescPtr^.ExitDescriptor);
+               end  (* if *);
+
+               (*  defsp(n0,nj) * ref(nj) = 0  *)
+
+	       Intersect_Sets (
+                  intersection,
+                  DescPtr2^.ExitDescriptor.def,
+                  DescPtr^.ExitDescriptor.ref);
+
+	       if Empty_check_Set(intersection) then begin
+
+                  (* entry descriptor for a node within a loop is equal to *)
+                  (* exit descriptor of the loop excluding the node itself *)
+
+                  ExcludedNode := SaveNodeIndex;
+                  if not BuiltEntry then begin
+                     ExitTraverse(WhileBodyField,-1,StmntTraversal,EntryDesc);
+                     ExitTraverse(WhileTestField,-1,ExprTraversal,ExitDesc);
+                     BuiltEntry := true;
+                  end  (* if *);
+                  UnionDescriptors (EntryDesc, EntryDesc, ExitDesc);
+                  ExcludedNode := -1;
+
+                  if control ['V'] then begin
+                     writeln (output,'defex(n0,nj:nj) * def(nj) = 0');
+                     PrintDescriptor(SaveNodeIndex,'defex',EntryDesc);
+                  end  (* if *);
+
+                  (*  defex(n0,nj:nj) * def(nj) = 0  *)
+
+		  Intersect_Sets (
+                     intersection,
+                     EntryDesc.def,
+                     DescPtr^.ExitDescriptor.def);
+
+		  if Empty_check_Set(intersection) then begin
+
+                     (* since we are simply moving a statement   *)
+                     (* out of a statement list contained within *)
+                     (* the loop we can calculate refinc(n0,nj)  *)
+                     (* by                                       *)
+                     (*    refinc(n0,nj) = refsp(nk,nj)          *)
+                     (* where nk is the first statement in the   *)
+                     (* statement list.                          *)
+                     (*                                          *)
+                     (*  def(nj) * refinc(n0,nj) = 0             *)
+
+                     ClearEntryDescriptors;
+                     EntryTraverse (WhileBodyField, -1);
+
+                     if control ['V'] then begin
+                        writeln (output,'def(nj) * refinc(n0,nj) = 0');
+                        PrintDescriptor (
+                           SaveNodeIndex,
+                           'refinc',
+                           DescPtr^.EntryDescriptor);
+                     end  (* if *);
+
+		     Intersect_Sets (
+                        intersection,
+                        DescPtr^.ExitDescriptor.def,
+                        DescPtr^.EntryDescriptor.ref);
+
+		     if Empty_check_Set(intersection) then begin
+                        ReturnValue := true;
+                     end  (* if *);
+
+                  end  (* if *);
+               end  (* if *);
+            end  (* if *);
+         end  (* if *);
+
+      end  (* MoveOutsideLoop *);
+
+
+      procedure NonModify;
+         (* evaluate conditions to remove redundant statements *)
+         (* assuming the second can be moved to the first      *)
+
+      begin
+
+         if control ['V'] then begin
+            write (output, 'NonModify: ');
+            writeln (output, 'NodeIndex = ', NodeIndex:1, ', ');
+            writeln (output, 'essential = ', ord (DescPtr^.essential):1);
+         end  (* if *);
+
+
+	 Intersect_Sets (
+            intersection,
+            DescPtr^.ExitDescriptor.def,
+            DescPtr^.ExitDescriptor.ref);
+
+	 ReturnValue := Empty_check_Set (intersection);
+
+      end  (* NonModify *);
+
+
+   begin
+#ifdef FLEX
+      intersection := @intersect;
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+      set_Ref ( EntryDesc, set3 );
+      set_Def ( EntryDesc, set4 );
+#endif
+      if control ['V'] then begin
+         writeln (output);
+         writeln (
+            output, 'ConditionsSatisified, ', NodeIndex:1,', ', FirstStmnt:1);
+      end;
+
+      Clear_this_Set(intersection);
+      DescPtr := ptr (DescriptorField);
+      DescPtr3 := ptr (field[FirstStmnt + 2 ]);
+						(* 17.10.86 *)
+      ReturnValue := false;
+
+      case transformation of
+
+         MOVEBACKWARDS: begin
+            MoveBackwards;
+         end;
+
+         MOVEOUTSIDELOOP: begin
+            MoveOutsideLoop;
+         end;
+
+         NONMODIFY: begin
+            NonModify;
+         end;
+
+      end  (* case *);
+
+      if control ['V'] then begin
+         writeln (output, '   ReturnValue = ', ord (ReturnValue):1);
+      end;
+
+      ConditionsSatisfied := ReturnValue;
+
+   end  (* ConditionsSatisfied *);

@@ -1,0 +1,248 @@
+#!/usr/bin/perl
+#
+# @(#) nachtCompilation_ia64_Native.pl   15-01-2001   S. Paeck
+#
+# Das Shellscript aktiviert den Nachtlauf für die IA64 Cross-Compilation. Dies umfasst
+# das 64 Bit-Uebersetzung aller Sourcen, die am heutigen Tage auf den Kernserver 
+# hochgeschrieben wurden.
+#
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+BEGIN
+{
+	$PERL5LIB="$ENV{TOOL}/lib/Perl";
+	push @INC, $PERL5LIB;
+	push @INC, "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+#	use lib "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+}
+
+use Env;
+use igme;
+
+$Mode=shift @ARGV;
+$Releases=shift @ARGV;
+$Release=shift @ARGV;
+
+$Rel = $Release;
+$Rel =~ s/\.//g;
+
+
+$|=1;
+
+print "=====================================================================\n";
+print " Native Compilation 64 Bit of release $Release", scalar localtime(),"\n";
+print "=====================================================================\n";
+
+do "D:\\SAPDevelop\\Remuser\\remuserEnv_ia64.pl" || die "Can't execute local Env 'remuserEnv_ia64.pl'\n";
+
+#-----------------------------    Prepare OWN ---------------------------------
+$OWN=$Releases."\\".$Release;
+$ENV{OWN}=$OWN;
+
+
+#------------------------------    Update IgmeVersion dependend on release ----
+my  $IgmeAPI = igme::api::new();
+if ( ! defined $IgmeAPI ) 
+{
+    print "Parsing profile information failed... Giving up\n";
+    exit;
+}
+
+
+$IgmeVersion="";
+$IgmeRelease = $Rel;
+$IgmeRelease =~s/(.)(.).*/$1\.$2/;   #e.g.  74 -> 7.4, 741 -> 7.4
+
+if (length ($Rel) <= 2)
+{
+    # Create the most actual develop iprofile for this release
+    foreach ( $IgmeAPI->list() ) 
+    {
+        $currentEntry = substr($_, 0, 14);
+        if ( $currentEntry =~ /develop/ ) 
+        {
+            if ( $currentEntry =~ /^$IgmeRelease/ ) 
+            {
+                if ( $currentEntry gt $IgmeVersion ) 
+                {
+                    $IgmeVersion = $currentEntry;
+                }
+            }
+        }
+    }
+	
+}
+else
+{
+    $IgmeBuild = $Rel;
+    $IgmeBuild =~s/[0-9]{2}(.*)/$1/;        #e.g.  74 ->    , 741 -> 1
+
+    if ( $IgmeBuild < 10 )
+    {
+        $IgmeVersion=$IgmeRelease.".0".$IgmeBuild.".develop";
+    }
+    else
+    {
+        $IgmeVersion=$IgmeRelease.".".$IgmeBuild.".develop";
+    }
+}
+
+#------------------------------ Using Perforce? and setting the Development Enviroment ----
+
+$UsePerforce=undef;
+foreach my $line ( $IgmeAPI->cat($IgmeVersion) ) 
+{
+    if ( $line =~ /^depot:/ ) 
+    {
+        $UsePerforce="depot:";
+        last;
+    }
+}
+
+
+
+if ( "$UsePerforce" eq "depot:" ) 
+{
+    @GMEARG = ( "-p", "$OWN"."//", "-x" );
+    print "\n... Sync Perforce depot : \n";
+    if ("$Release" eq "7.4.2")
+    {
+        system ("p4 -c PINTEL64_04_Nachtlauf_F -u d032964 sync $OWN"."/...");
+    }
+    else
+    {
+        system ("p4 -c pintel64_04 -u d032964 sync $OWN"."/...");
+    }
+
+} 
+else 
+{
+    @GMEARG = ();
+}
+
+
+push @GMEARG, $IgmeVersion, "-noobjcopy", "-o", $^O;
+%GME = $IgmeAPI->igme (@GMEARG);
+while (($key, $value) = each %GME) 
+{
+  if ($key eq "VMAKE_PATH") 
+  {
+    $OWN = $ENV{"OWN"};
+    $value =~ s/\$OWN/$OWN/;
+
+  }
+  $ENV{$key} = $value; 
+}
+
+require $Skeleton;
+#----------------------------------------------------------------------------------------
+
+if ($Rel == "741" || $Rel == "742" || $Rel == "74")
+{
+    print "Doing imf -E dcom\n";
+    print "--------------\n";
+    local @ARGV = ("-E","dcom");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing ims -E allknl\n";
+    print "----------------\n";
+    local @ARGV = ("-E","allknl");
+    do $ENV{'TOOL'}."/bin/ims".$ENV{'TOOLEXT'}; # || die "Can't execute 'ims'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing ims$TOOLEXT: $@ \n";
+    }
+}
+
+print "Doing imf -E all\n";
+print "-------------\n";
+local @ARGV = ("-E","all");
+do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+if ( $@ ) 
+{ 
+    warn "Error while executing imf$TOOLEXT: $@ \n";
+}
+
+
+if ($Rel == "741" || $Rel == "742" || $Rel == "74")
+{
+
+    if ($Mode eq "weekend")
+    {
+        print "Doing imq -E quickknl\n";
+        print "----------------\n";
+        local @ARGV = ("-E","quickknl");
+        do $ENV{'TOOL'}."/bin/imq".$ENV{'TOOLEXT'}; # || die "Can't execute 'imq'\n";
+        if ( $@ ) 
+        { 
+            warn "Error while executing imq$TOOLEXT: $@ \n";
+        }
+    }
+
+    print "Doing imf sut\n";
+    print "-------------\n";
+    local @ARGV = ("sut");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing imf jdbc\n";
+    print "-------------\n";
+    local @ARGV = ("jdbc");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing imf alltest\n";
+    print "-------------\n";
+    local @ARGV = ("alltest");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+
+    print "Doing imf lvcbench\n";
+    print "-------------\n";
+    local @ARGV = ("lvcbench");
+    do $ENV{'TOOL'}."/bin/imf".$ENV{'TOOLEXT'}; # || die "Can't execute 'imf'\n";
+    if ( $@ ) 
+    { 
+        warn "Error while executing imf$TOOLEXT: $@ \n";
+    }
+}
+
+print "=====================================================================\n";
+print " end-of-job ", scalar localtime(),"\n";
+print "=====================================================================\n";
+
+
+
+

@@ -1,0 +1,269 @@
+(* @(#)optimizer/optm9.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm9.p *)
+
+   (* this module contains the procedures that traverse the hdg before *)
+   (* performing optimizing transformations.                           *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../optimizer/more_csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/fold.h"
+#include "../common/_shifts.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+#include "../optimizer/optm2.h"
+#include "../optimizer/optm6.h"
+#include "../optimizer/optm7.h"
+#include "../optimizer/optm8.h"
+#include "../optimizer/optm11.h"
+#include "../optimizer/optm12.h"
+#include "../optimizer/optm15.h"
+#include "../optimizer/temp_util.h"
+
+
+(* export *)
+
+#include "../optimizer/optm9.h"
+
+
+(* privates *)
+(* initial *)
+(* routines *)
+
+   procedure OTraverse
+      (NodeIndex,
+       LinkNode: HdgRange;
+       traversal: TraversalType);
+   forward;
+
+
+   procedure SelectForOptimization
+      (NodeIndex,
+       LinkNode: HdgRange;
+       traversal: TraversalType);
+
+   var
+      DescPtr: DescriptorRange;
+#ifdef FLEX
+      set1   : PSet;
+#endif
+   begin
+      case MajorOperator of
+
+         node: begin
+            (* nodes not traversable *)
+         end;
+
+         spec: begin
+            (* don't' have to traverse *)
+         end;
+
+         ShortStmnt: begin
+            OTraverse (Ss1operand, Ss1operandLink, StmntTraversal);
+         end;
+
+         UnaryExp: begin
+            OTraverse (Unary1operand, Unary1operandLink, ExprTraversal);
+         end;
+
+         BinaryExp: begin
+            if MinorOperator = SubscriptOp then begin
+               if control ['P'] then begin
+                  FoldSubscript (NodeIndex);
+               end;
+            end;
+            OTraverse (Bin1operand, Bin1operandLink, ExprTraversal);
+            OTraverse (Bin2operand, Bin2operandLink, ExprTraversal);
+         end;
+
+         ExpList: begin
+            OTraverse (ListHeadField, ListHeadFieldLink, ExprTraversal);
+         end;
+
+         LongStmnt: begin
+            if MinorOperator = StoreOp then begin
+               if control ['P'] then begin
+                  OptLongStmnt (NodeIndex);
+               end  (* if *);
+            end
+            else if MinorOperator = CallOp then begin
+               if control ['I'] then begin
+                  IntegrateProcedure (Ls1parameter,NodeIndex);
+               end  (* if *);
+            end  (* if *);
+            OTraverse (Ls2operand, Ls2operandLink, ExprTraversal);
+            OTraverse (Ls1operand, Ls1operandLink, ExprTraversal);
+         end;
+
+         ifthenelse: begin
+            if traversal = StmntTraversal then begin
+               gl_PushNestLevel;
+               OTraverse (IfCondField, IfCondLink, ExprTraversal);
+               OTraverse (IfTrueField, IfTrueLink, traversal);
+               if IfFalseField <> -1  then begin
+                  OTraverse (IfFalseField, IfFalseLink, traversal);
+               end  (* if *);
+               if control ['B'] then begin
+                  OptIfthenelse (NodeIndex, LinkNode, traversal);
+               end  (* if *);
+               DescPtr := ptr (DscField);
+               gl_PopNestLevel (DescPtr^.ExitDescriptor.def);
+            end
+            else begin
+               OTraverse (IfCondField, IfCondLink, ExprTraversal);
+               OTraverse (IfTrueField, IfTrueLink, traversal);
+               if IfFalseField <> -1  then begin
+                  OTraverse (IfFalseField, IfFalseLink, traversal);
+               end  (* if *);
+            end;
+         end;
+
+         loop: begin
+            gl_PushNestLevel;
+            OTraverse (WhileTestField, WhileTestLink, ExprTraversal);
+            OTraverse (WhileBodyField, WhileBodyLink, StmntTraversal);
+            if control ['S'] then begin
+               StrengthReduce (NodeIndex, LinkNode);
+            end  (* if *);
+            if control ['A'] then begin
+               TransformLoop (NodeIndex, LinkNode);
+            end  (* if *);
+            NodeIndex := PrevNodeLink;  (* point to loop or ifthenelse *)
+	    while MajorOperator = LongStmnt do
+	       begin
+	       LinkNode := NextLinkLink;
+	       NodeIndex := NextLink;
+	       end;
+            if MajorOperator = ifthenelse then begin
+               if control ['B'] then begin
+                  OptIfthenelse (NodeIndex, LinkNode, StmntTraversal);
+               end  (* if *);
+            end  (* if *);
+            DescPtr := ptr (DscField);
+            gl_PopNestLevel (DescPtr^.ExitDescriptor.def);
+         end;
+
+         Switch: begin
+            OTraverse (SwitchTest, SwitchTestLink, ExprTraversal);
+            OTraverse (SwitchBody, SwitchBodyLink, StmntTraversal);
+         end;
+
+         Case: begin
+         end;
+
+         RepeatUntil: begin
+            gl_PushNestLevel;
+            OTraverse (RepeatBody, RepeatBodyLink, StmntTraversal);
+            OTraverse (RepeatTest, RepeatTestLink, ExprTraversal);
+            if control ['S'] then begin
+               StrengthReduce (NodeIndex, LinkNode);
+            end  (* if *);
+            if control ['A'] then begin
+               TransformLoop(NodeIndex,LinkNode);
+            end  (* if *);
+            DescPtr := ptr (DscField);
+            gl_PopNestLevel (DescPtr^.ExitDescriptor.def);
+         end;
+
+         Proc: begin
+            gl_PushNestLevel;
+            OTraverse (ProcBody, ProcBodyLink, StmntTraversal);
+            if control ['C'] then begin
+               TransformProc (NodeIndex, ProcBodyLink);
+            end  (* if *);
+            DescPtr := ptr (DscField);
+            gl_PopNestLevel (DescPtr^.ExitDescriptor.def);
+            if control ['C'] then begin
+#ifdef FLEX
+	       new (set1, 64 * sizeof ( integer ) );
+	       ProcTable [NoProc].ProcExitDescr.ref := set1;
+	       new (set1, 64 * sizeof ( integer ) );
+	       ProcTable [NoProc].ProcExitDescr.def := set1;
+	/*
+	 *     X_NEW (set1, NewWordsPlus * sizeof ( integer ) );
+	 *     ProcTable [NoProc].ProcExitDescr.ref := set1;
+	 *     X_NEW (set1, NewWordsPlus * sizeof ( integer ) );
+	 *     ProcTable [NoProc].ProcExitDescr.def := set1;
+	 */
+#endif
+               ClearDescriptorFull (
+		  ProcTable [NoProc].ProcExitDescr);
+               AssignDescriptors (
+		  ProcTable [NoProc].ProcExitDescr,
+                  DescPtr^.ExitDescriptor);
+            end  (* if *);
+         end;
+
+         OpenProc: begin
+            OTraverse (ProcBody, ProcBodyLink, StmntTraversal);
+         end;
+      end  (* case *);
+   end  (*SelectForOptimization*);
+
+
+   procedure OTraverse
+      (NodeIndex,
+       LinkNode: HdgRange;
+       traversal: TraversalType);
+
+      (* this  procedure traverses through a node in the hdg and calls  *)
+      (* "SelectForOptimization".                                     *)
+
+   var
+      SaveNextLink: HdgRange;
+
+   begin
+      while NodeIndex <> -1 do begin
+         InitialSize := InitialSize + 1;
+         SaveNextLink := NextLink;
+         SelectForOptimization (NodeIndex, LinkNode, traversal);
+         NodeIndex := PrevNodeLink;
+         repeat
+            LinkNode := NextLinkLink;
+            NodeIndex := NextLink;
+         until NodeIndex = SaveNextLink;
+      end  (* while *);
+   end  (*OTraverse*);
+
+
+procedure OptimizeProg;
+
+begin
+   gl_InitTemps;
+   SelectForOptimization (NodeIndex, -1, StmntTraversal);
+   if control ['G'] then begin
+      ConstantPropagation (NodeIndex, -1);
+   end  (* if *);
+   if control ['F'] then begin
+      ConstantFolding (NodeIndex, -1);
+   end  (* if *);
+end  (*OptimizeProg*);

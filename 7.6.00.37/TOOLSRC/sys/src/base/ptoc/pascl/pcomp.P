@@ -1,0 +1,330 @@
+(* @(#)pascl/pcomp.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* test.p *)
+
+program test (output);
+
+#include "../common/csg.def"
+
+#include "../common/globals.i"
+#include "../common/opcode.i"
+#include "../common/_common_i.h"
+#include "../common/stab.h"
+#include "../common/utilities.h"
+#include "../common/dumpsym.h"
+#include "../common/dumptree.h"
+#include "../pascl/globals1.i"
+#include "../pascl/_pascl_i.h"
+#include "../pascl/scanner.h"
+#include "../pascl/yyparse.h"
+#include "../pascl/symtab.h"
+#include "../pascl/decls.h"
+#include "../pascl/p1m2.h"
+#include "../pascl/pcexit.h"
+#ifdef OPTIMIZING
+#include "../optimizer/_optimizer_i.h"
+#include "../optimizer/optdriver.h"
+#endif OPTIMIZING
+
+#include "../gram/codeservice.h"
+#include "../pcomp/tokens.i"
+#include "../common/machdep.h"
+
+
+var
+   datafile     : ^integer;
+   datacnt      : integer;
+   yflag        : integer;
+   preprocessed : integer;
+   first_time   : boolean;
+   OldSymPtr    : integer;
+   argstring    : STRING;
+
+procedure ProcessFillOpt(opt: STRING);
+external;
+
+procedure ProcessFillForVar(opt: STRING);
+external;
+
+function atoi(var ch: char): integer;
+external;
+
+procedure InitSemantics;
+external;
+
+#ifndef PYRAMID_DOUBTFUL
+procedure ResetHdgArray;
+external;
+#endif
+
+function ToSymtabIdx(pointer:integer):integer;
+external;
+
+procedure InitGenC;
+external;
+
+procedure GenC(hdg:HdgRange; sfrom,sto:SymbolTableRange; enc:integer;
+	    DFlag,MaxPos :integer;StatLink:boolean);
+external;
+
+procedure XformAll ( enclosing_block: integer; end_func: boolean);
+var
+   SaveSymPtr: SymbolTableRange;
+   NodeIndex: HdgRange;
+   i: integer;
+#ifndef PYRAMID_DOUBTFUL
+   b : integer;
+#endif
+begin
+
+#ifdef RAS  /*RASE err.11 */
+   if (ErrorCount = 0) and (end_func) and (HdgHead <> -1) then begin
+#else
+   if (ErrorCount = 0) and (end_func) then begin
+#endif
+
+      SaveSymPtr := SymPtr;	
+
+#ifdef OPTIMIZING
+      if control ['O'] then begin
+	 if asm_esc then
+	    werror('File contains asms - Optimizer not called\0')
+	 else
+            optimize;
+      end;
+#endif
+
+      first_time := false;
+	
+      if control ['T'] then begin
+         DumpSymbolTable (2);
+      end;
+
+      if control['H'] then begin
+	ListHdg(HdgHead);
+      end;
+
+      GenC(HdgHead,OldSymPtr,SaveSymPtr,ToSymtabIdx(enclosing_block),0,0,
+           control['x']);
+      OldSymPtr := STab [SymPtr].SNext;
+     	
+      HdgHead := -1;
+#ifndef PYRAMID_DOUBTFUL
+      ResetHdgArray;
+#endif
+
+   end;
+end;
+
+
+procedure ParseProgram;
+
+var
+   i: integer;
+   c: char;
+   ObjFileName: STRING;
+   argno,
+   argcount: integer;
+   SaveSymPtr: SymbolTableRange;
+   NodeIndex: HdgRange;
+
+begin
+   for c := minchar to maxchar do begin
+      control [c] := false;
+#ifdef RAS /*RAS00 init. own glob.vars*/
+      RAS_control [c] := false;
+#endif
+   end;
+#ifdef RASX /*RAS06 init. own glob.vars*/
+   MacNames := ' ';
+#endif
+   control ['m'] := true;
+   first_time := true;
+   OldSymPtr := 0;
+   HdgHead := -1;
+   CaseRoot := -1;
+   argcount := argc;
+   argno := 1;
+   while argno < argcount do begin
+      argv (argno, argstring);
+      if argstring [0] = '-' then begin
+         case argstring [1] of
+            'o': begin
+               control ['o'] := true;
+               argno := argno + 1;
+               argv (argno, ObjFileName);
+               i := -1;
+               repeat
+                  i := i + 1;
+               until ObjFileName [i] = ' ';
+               ObjFileName [i] := chr (0);
+               OpenObjFile (ObjFileName);
+               if ObjFile = NULL then begin
+                  FatalErrorMsg (132, -1);
+               end;
+            end;
+            'q': begin
+               control [argstring [1]] := true;
+               if argstring [2] <> ' ' then begin
+                  control [argstring [2]] := true;
+               end;
+            end;
+            'X': begin
+               i := 2;
+               while argstring [i] <> ' ' do begin
+                  control [argstring [i]] := true;
+                  i := i + 1;
+               end;
+            end;
+            'K': begin
+               i := 2;
+               while argstring [i] <> ' ' do begin
+                  control2 [argstring [i]] := true;
+                  i := i + 1;
+               end;
+            end;
+#ifdef RAS /*RAS00 get -R options*/
+            'R': begin
+	       control ['R'] := true;
+               i := 2;
+#ifdef RASN /*RASN1 -Rc (symb.const) incl. -Xc -Kt -Kv */
+               if argstring [ 2 ] = 'c' then begin
+                  control  [ 'c' ] := true;
+                  control2 [ 't' ] := true;
+                  control2 [ 'v' ] := true;
+               end;
+               if argstring [ 2 ] = 'a' then begin
+                  control  [ 'a' ] := true;
+               end;
+#endif
+#ifdef RASX /*RAS06 get MacNames from opts.*/
+               if argstring [ 2 ] = 'H' then begin
+.                 MacNames := argstring;
+               end;
+#endif
+               while argstring [i] <> ' ' do begin
+                  RAS_control [argstring [i]] := true;
+                  i := i + 1;
+               end;
+            end;
+#endif
+	    'y': begin
+	       if (argstring [2] = 'p') and (argstring [3] = 'c') then
+		  control ['y'] := true;
+	    end;
+	    'f': begin
+	       ProcessFillOpt(argstring);
+	       control ['f'] := true;
+	    end;
+            'g': begin
+	       ProcessFillForVar(argstring);
+	       control ['g'] := true;
+	    end;
+            'W': begin
+	       WOptSize := atoi(argstring [2]);
+	       control ['W'] := true;
+	    end;
+            otherwise begin
+               control [argstring [1]] := true;
+            end;
+         end;
+      end
+      else begin
+         i := -1;
+         repeat
+            i := i + 1;
+         until argstring [i] = ' ';
+         argstring [i] := chr (0);
+         OpenInput (argstring [0]);
+      end  (* if *);
+      argno := argno + 1;
+   end  (* while *);
+   if (control ['s'] and control ['y']) then
+       control ['s'] := false;
+
+   if control['Q'] then
+     begin
+     write ( 'Options :  "' );
+     for c := minchar to maxchar do
+	if ( control [c] ) then write ( c ) ;
+     writeln ( '"' );
+     write ( 'Options2 : "' );
+     for c := minchar to maxchar do
+	if ( control2 [c] ) then write ( c ) ;
+     writeln ( '"' );
+#ifdef RAS /*RAS00 dump options*/
+     write ( 'RAS_Options : "' );
+     for c := minchar to maxchar do
+	if ( RAS_control [c] ) then write ( c ) ;
+     writeln ( '"' );
+#endif
+     end;
+
+   initialize;	  	(* scanner *)
+   InitSystem;  	(* symbol table *)
+   asm_esc := false;	(* No assembler statement *)
+
+#ifdef PYRAMID_DOUBTFUL
+#else
+   InitSemantics;
+#endif
+
+   InitGenC;
+
+   i := yyparse;
+
+   if (ErrorCount = 0) then begin
+      XformAll(0, true);
+(* This close will be done in 'sql__exit'. If it is done here,
+   a core dump is produced on LINUX during sql__exit.... jrg 25.2.1999 *)
+(*
+      if control ['o'] then begin
+         CloseObjFile;
+      end;
+ *)
+   end
+   else begin
+      if control ['T'] then begin
+         DumpSymbolTable (1);
+      end;
+      if control ['H'] then begin
+#ifdef RAS  /*RASE err.5: Acc.Viol. in Dump */
+         ListHdg (HdgHead);
+#else
+         ListHdg (NodeIndex);
+#endif
+      end;
+      sql__exit (1);
+   end  (* if *);
+end  (* ParseProgram *);
+
+
+begin
+   CommonInitial;
+   PasclInitial;
+
+#ifdef OPTIMIZING
+   OptimizerInitial;
+#endif
+   ParseProgram;
+end.

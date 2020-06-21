@@ -1,0 +1,4041 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP AG$ADABAS FOR R/3$VTT12X$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : Josef Hasenberger
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+
+// iclient.cpp
+//
+// IClient for handling iput/iget 
+// 1997-07-23	    Josef Hasenberger
+// 
+// Description:
+//
+//	The client connects to the iserver via named pipes and handles
+//	either iput or iget. For a description of iput/iget see below.
+//	The client connects to the iserver situated on the GRP-Node
+//  by analyzing the VMAKEPATH for the GRP-Variable,
+//	which can bei either a share following UNC-conventions or a 
+//	network drive (mounted drive).
+//	!!! A convention like NODE:DRIVE:DIRECTORY is not supported!!!
+
+// Functional Description of iput/iget:
+
+/*	iget [-d dpath] [-e editor] [-m]  [parameter...]
+	Looks if the file "$path" exists and, if not, tries to copy it from
+	one of the files "$GRP/$rpath", "$ALL/$rpath" or "$REL/$rpath" to
+	"$path". If "$VMAKE_PATH" is not empty, the nodes and path names
+	(separated by ",") are taken from this variable. If "parameter" is an
+	absolute pathname, then "$path" is "parameter", else if -d is
+	specified, then "$path" is "dpath/parameter", else if -d is not
+	specified and L=`expr "parameter" : "v\(..\)"` is not "", then "$path"
+	is "$SRC/$L/parameter" , else "$path" is "$LAY/parameter". Then
+	"$rpath" is determined as `expr "$path" : "$OWN/\(.*\)"`.
+	The existence of a lock entry for this file is tested. If a lock is
+	present, the access is denied, otherwise the file is copied and a new
+	lock entry generated. If -m (multiple access) is specified or "$MGET"
+	is not "", no test is performed and no lock entry generated.
+	The current file version is assigned to the calling user on the
+	current node.
+	If "editor" is found in $PATH, the command "cd $OWN; editor $rpath..."
+	is executed. (With -e0 you can specify "no edit".)
+	Default for editor is "$EDITOR".
+*/
+
+/*	iput [-d dpath]  parameter
+	iput layer...
+	Copies the specified files from the "$OWN"-tree to the "$GRP"-tree.
+	In the first form, each file "$path" is copied to "$GRP/$rpath". If
+	"parameter" is an absolute pathname, then "$path" is "parameter", else
+	if -d is specified, then "$path" is "dpath/parameter", else if -d is
+	not specified and L=`expr "parameter" : "v\(..\)"` is not "", then
+	"$path" is "$SRC/$L/parameter" , else "$path" is "$LAY/parameter".
+	Then "$rpath" is determined as `expr "$path" : "$OWN/\(.*\)"`.
+	In the second form, all files in directories "$SRC/layer" are copied
+	to "$GRP/sys/src/layer".
+	Parameters of the first and second form can also be mixed. Each
+	Parameter is first interpreted as a file name in the corresponding
+	directory, then, if it doesn't exist, as a directory name in the
+	"$SRC"-directory.
+	Each file to be copied must have a version entry assigned to the
+	calling user on the current node, which is equal to the current file
+	version on the "$GRP"-tree. The file must not be locked by another
+	user. If successfull, the version assignment and the file lock are
+	released.
+*/
+
+
+// Installation:
+//		The iserver must be installed on the GRP-Node and in the 
+//		environment VMAKE_PATH or GRP-Share must be defined.
+
+
+// Changes:
+// ++++++++
+//
+// Josef, 9.10.97
+//		MGET does not lock but generates an entry into the locklist and therefor
+//		the user gets a version number of the module assigned.
+//		Later on, everyone who ownes the Module can put the module when the 
+//		version number assigned to him is greater or equal the current file version
+//		number.
+
+// Josef, 17.10.97
+//		Add administrative component to unlock a locked module and to reset version 
+//		entries.
+//		The iclient is only authorized to do so if he has got write access to the
+//		file where the lockentries are stored (statfile).
+//		The options are:
+//			-@d modulename(s):		Unlock the specified modules
+//
+// Josef, 17.11.97
+//		Use Perl-Script GetFilePath.pl to determine the full name of a module if
+//      it does not satisfy standard naming convention
+//
+// Josef 24.11.97
+//		To determine the GRP-Area, %GRP% from the environment is used, if not set, the
+//      second entry in VMAKE_PATH is used (just the other way arround as it used to be)
+//
+// Josef 25.11.97
+//		INEW works only on modules following the vXXNN (XX=LAYER, NN = number) convention 
+//      or when an absolute path was specified
+//
+// &gar 04.06.99 ( PTS 1102967 )
+//      cut the path from the command (iget,iput...) 
+//
+// h.b 06.01.2000 ( PTS ? )
+//      file scratch only if NOIPUTSCRATCH is not set in the environment
+//      and  fight against compile warnings
+
+
+#include <windows.h>
+
+#include <io.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <direct.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <process.h>
+#include <signal.h>
+
+//#include "iconstants.h"
+//#include "iserver.h"
+
+#define MY_NOTOK_ALLREADY_LOCKED			900
+#define MY_NOTOK_NOT_LOCKED					901
+#define MY_NOTOK_LOCKED_DIFFERENT_USER	    902
+#define MY_NOTOK_MAX_USERS_MGET_REACHED		903
+#define MY_NOTOK_NOT_LOCKED_BY_USER			904
+#define MY_NOTOK_LOCKED_DIFFERENT_NODE      905  
+
+/* CTS 1107012 */
+#define MY_RET_ERROR         -1
+#define MY_RET_NO_LOCKED     0
+#define MY_RET_SELF_LOCKED   1
+#define MY_RET_SELF_MLOCKED  2
+#define MY_RET_OTHER_LOCKED  4
+#define MY_RET_OTHER_MLOCKED 8
+
+
+
+/* CTS 1105072 */
+#define LOCAL_SAVE_VERSIONS 3
+
+
+// Name of executable
+
+const char IGET[]="IGET";
+const char IPUT[]="IPUT";
+const char IDEL[]="IDEL";
+const char INEW[]="INEW";
+
+/* CTS 1103611 */
+const char ISTAT[]="ISTATUS";
+
+
+extern int ksystem( const char *);
+extern int is_device(const char *);
+
+
+
+// Function prototypes
+int Usage(const char *);
+int getopt(int, char **, char *, char **, int *);
+int IGet(int, char **, const BOOL bINEW=FALSE);
+int DoIGet(const char *, const char *, BOOL, BOOL, const char *, const BOOL, const BOOL);
+int IStat (int, char **);
+int DoIStat (const char *, const char *, const char *);
+int IPut(int, char **, const BOOL bIDEL=FALSE);
+int DoIPut(const char *, const char *, const char *, const int, const char *,const BOOL);
+int DoIPutForLayerObjects (const char *, const char *, const char * Grp);
+char * GetIServerPipeName(const char *);
+HANDLE MyOpenServerPipe(const char *);
+int FillIMSSG (P_IMSSG, const char *, T_IREQUEST);
+int MySendMessage (HANDLE, P_IMSSG);
+int MyGetAckIMSSG (HANDLE, P_IMSSG);
+int MySendModule (HANDLE, const char *, const BOOL=FALSE, const BOOL=FALSE);
+int MyScratchOrDeleteModule (const char *, const BOOL);
+int MyCopyRemoteModule(const char *, const BOOL bINEW=FALSE);
+int GetModuleListFromLayer(const char *, int *, char ***);
+BOOL ProperModuleName(const char *, const char *);
+BOOL SplitUNCName(const char*, char **, char **);
+void BSlash2Slash(char *);
+int MySendModuleDependents (HANDLE, const char *, FILETIME *);
+int MySendLayerDependentObjects (HANDLE, const char *);
+BOOL IsStatfileWriteable(const char *);
+int my_starteditor(const char *,const char *, const char *);
+int my_closeeditor(const char *,const char*);
+int My_System(const char *);
+char * MyGetFilePath(const char *, const char *);
+
+/* &gar PTS 1105004 -> */
+int my_checkModulePath (const char * );
+int my_mkdir ( const char * );
+
+
+// Inline Functions
+
+// Check for a standard module 
+// (starts with v, g or h, at least 5 characters and pos 3,4 are digits)
+inline	BOOL IsStandardModule (const char * f)
+{
+	BOOL ret = FALSE;
+	if (strlen(f)>=5)
+		if (   (f[0] == 'v' || f[0] == 'g' || f[0] == 'h')
+			&& (isalpha((int)f[1]) && isalpha((int)f[2]))
+			&& (isdigit((int)f[3]) && isdigit((int)f[4])))
+				ret = TRUE;
+	return ret;
+}
+
+
+
+// Main Function
+int main (int argc, char *argv[])
+{
+	// Depending on the name of the program call the appropriate function
+
+	int ret=0;
+	char *icmd;
+	char *icmd1; 
+	int cmd_pos;
+	_strupr(argv[0]);
+	
+	signal (SIGINT, SIG_IGN);		// Do not allow CTRL+C
+
+
+#ifdef DEBUG
+	cmd_pos=1;
+#else
+	cmd_pos=0;
+#endif
+
+	_strupr(argv[cmd_pos]);
+	icmd = strrchr( argv[cmd_pos] , '\\' );
+	icmd1 = strrchr( argv[cmd_pos] , '/' ); // if / for \ (from perlcall with full path)
+	if ( icmd1 > icmd )  /* last / or \ */
+		icmd = icmd1;
+	if ( icmd == NULL )
+		icmd= argv[cmd_pos];
+	else
+		icmd++;
+
+	if (strncmp(icmd,IGET, strlen(IGET))==0)
+		ret=IGet(argc-cmd_pos-1, &argv[cmd_pos+1]);
+	else
+		if (strncmp(icmd,IPUT, strlen(IPUT))==0)
+			ret=IPut(argc-cmd_pos-1, &argv[cmd_pos+1], FALSE);
+		else
+			if (strncmp(icmd, IDEL, strlen(IDEL))==0)
+				ret=IPut(argc-cmd_pos-1, &argv[cmd_pos+1], TRUE);
+			else
+				if (strncmp(icmd, INEW, strlen(INEW))==0)
+					ret=IGet(argc-cmd_pos-1, &argv[cmd_pos+1], TRUE);
+				else
+					/* CTS 1103611 */
+					if (strncmp(icmd, ISTAT, strlen(ISTAT))==0)
+					{
+						return IStat(argc-cmd_pos-1, &argv[cmd_pos+1]);	
+					}
+					else
+						ret=Usage(icmd);
+   		
+	// DEBUG only!
+	//ret=IGet(argc-1, &argv[1]);
+	//ret=IPut(argc-1, &argv[1]);
+	
+	if (ret != MY_OK)
+		return 1;
+	else
+		return 0;
+}
+
+// Print Usage
+int Usage(const char * progname)
+{
+	if (strcmp(progname, IGET) == 0)
+		fprintf (stderr,
+			"Usage: %s [-d path] [-e editor] [-m] [-x] parameter|parameterlist\n", IGET);
+	else
+		if (strcmp(progname, IPUT) == 0)
+			fprintf (stderr,
+				"Usage: %s [-d path] [-s] parameter|parameterlist|layer\n", IPUT);
+		else
+			if (strcmp(progname, IDEL) ==0)
+				fprintf (stderr,
+					"Usage: %s [-d path] [-@u] parameter\n", IDEL);
+			else
+				if (strcmp(progname, INEW) == 0)
+					fprintf (stderr,
+						"Usage: %s [-d path] [-e editor] [-m] [-n] parameter|parameterlist\n", INEW);
+				else if (strcmp(progname, ISTAT) == 0)
+					fprintf (stderr, 
+					    "Usage: %s [-d path] parameter|parameterlist\n", ISTAT);	
+				else
+					fprintf (stderr, "%s\n%s\n%s\n%s\n%s\n",
+						"Usage: IGET    [-d path] [-e editor] [-m] [-x] parameter|parameterlist",
+				   		"Usage: IPUT    [-d path] parameter|parameterlist|layer",
+						"Usage: INEW    [-d path] [-e editor] [-m] [-n] parameter|parameterlist",
+						"Usage: IDEL    [-d path] [-@u] parameter",
+						"Usage: ISTATUS [-d path] parameter|parameterlist\n" );
+	return MY_NOTOK;
+}
+
+
+// IGet (built up the path for the module and then perform actual DoIGet
+// Also handles INEW when bINEW = TRUE
+// (analog to icp.c by Peter Schultz)
+int IGet (int argc, char *argv[], const BOOL bINEW)
+{
+	char *path = NULL, *editor = NULL;
+	BOOL mget = FALSE;
+	int ret=MY_NOTOK;
+	BOOL bNoCheck=FALSE;
+	/* CTS 1103612 */
+	BOOL excl = FALSE;
+	char *layer = NULL;  /* gar */
+
+	if (argc < 1)
+	{
+		return (bINEW?Usage(INEW):Usage(IGET));
+	}
+
+	// Parse arguments
+	char *optstr = "d:e:m?hxn"; char * optarg; int optind = 0; int err=0, o;
+	while ((o = getopt (argc, argv, optstr, &optarg, &optind)) != -1)
+		switch (o)
+		{
+			case 'd':
+				path = optarg;
+				BSlash2Slash(path);
+				break;
+			case 'e':
+				editor = optarg;
+				break;
+			case 'm':
+				mget = TRUE;
+				break;
+			case 'x':
+				if (bINEW)
+					err = 1;
+				else
+					excl = TRUE;
+				break;
+			case 'n':
+				if (bINEW)
+					bNoCheck = TRUE;
+				else
+					err = 1;
+				break;
+			case '?':
+			default:
+				err = 1;
+		}
+
+	if (err)
+	{
+		return (bINEW?Usage(INEW):Usage(IGET));
+	}
+
+// Find the Modulepath to use!
+// BOOL GetIModulePath(argc, argv.....) or a similar function later on!
+
+//---------- Code from original IGET.C (by Peter Schulz) ---------
+	int  len, ownl, tooll, dbrootl;
+	char *lay=NULL, *own=NULL, *grp=NULL,*LAY=NULL, *OWN=NULL, *GRP=NULL, 
+		 *VMAKE_PATH=NULL, *tool=NULL, *dbroot=NULL,
+		 *TOOL=NULL, *DBROOT=NULL, *rpath=NULL, *epar=NULL, *p=NULL,
+		 *d=NULL, *f=NULL, *s1=NULL, *s2=NULL, *s=NULL;
+
+	OWN = getenv("OWN");
+	GRP = getenv("GRP");
+	VMAKE_PATH = getenv("VMAKE_PATH");
+	
+
+	if (OWN && GRP) 
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH && OWN)
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + strcspn (VMAKE_PATH, ",");
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+
+	}
+	else if (VMAKE_PATH && GRP)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + ownl;
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+	}
+	else
+	{
+		fprintf(stderr,"Error-%s: Neither OWN, GRP nor VMAKE_PATH is defined\n",
+				bINEW?INEW:IGET);
+		exit (1);
+	}
+
+
+	if (strcmp (own, grp)==0)
+	{
+		fprintf(stderr,
+			"Error-%s: not allowed in GRP-Area\n",bINEW?INEW:IGET);
+		exit(1);
+	}
+
+	TOOL = getenv ("TOOL");
+	tooll = strlen (TOOL);
+	tool = (char*) malloc (tooll + 1);
+	strncpy (tool, TOOL, tooll);
+	tool [tooll] = '\0';
+	BSlash2Slash(tool);
+	DBROOT = getenv ("INSTROOT");
+	dbrootl = strlen (DBROOT);
+	dbroot = (char*) malloc (dbrootl + 1);
+	strncpy (dbroot, DBROOT, dbrootl);
+	dbroot [dbrootl] = '\0';
+	BSlash2Slash(dbroot);
+
+	if (path != NULL)	// Is path specified as an argument?
+		lay = path;		
+	else
+	{
+		char * LAY = getenv("LAY");
+		if (LAY)
+		{
+			int layl = strlen(LAY);
+			lay = (char*) malloc (layl + 1);
+			strncpy (lay, LAY, layl);
+			lay[layl] = '\0';
+			BSlash2Slash(lay);
+		}
+		else
+		{
+			lay=NULL;
+			//fprintf(stderr, "Warning: LAY not set!\n");
+		}
+	}
+	if (editor == NULL)			// Editor specifiead as an argument 
+		editor = getenv ("EDITOR");
+	if (mget == FALSE)
+	    if ((s = getenv("MGET")) != NULL)
+			if (strlen(s) > 0)
+				mget = TRUE;	// multiple get is specified
+			else
+				mget = FALSE;
+	    else
+		mget = FALSE;
+		
+
+	// Only options as arguments?
+	if (optind >= argc)
+		return (bINEW?Usage(INEW):Usage(IGET));
+
+	// for each module perform iget
+	for (; optind < argc; optind++)	   
+	{
+		BOOL bToolGeneratedPathUsed=FALSE, bModuleExists=FALSE;
+		p = argv [optind];
+		BSlash2Slash(p);
+		if (strpbrk (p, "[]*?!"))	// check for valid module name
+		{
+			fprintf (stderr,
+				 "Error-%s: expression %s not allowed\n", bINEW?INEW:IGET, p);
+			ret = MY_NOTOK;
+			continue;
+		}
+		if (s1 = strrchr (p, '/'))	 // search last '/' in the string (of path is specified)
+		{
+			len = s1 - p;
+			if (len == 0) len = 1;
+			d = (char*) malloc (len + 1);
+			strncpy (d, p, len);
+			d [len] = '\0';			// d is the path for module
+			f = s1 + 1;				// f is the module name
+/* -> &gar: iget with layer in form: :<layer>/<name> */
+			if (d[0]==':')
+			{
+				layer = (char*) malloc (len+1);
+				strcpy(layer,d);
+			}
+/* <- &gar */
+
+		}
+		else
+		{
+			d = (char*) malloc (1);
+			*d = '\0';					// no path specified
+			f = p;						// f is the module name
+		}
+
+		if (strlen (f) > MAX_MODULENAME_LENGTH)			// check size of the module
+		{
+			fprintf (stderr,
+		       "Error-%s: file name %s longer than %d characters not allowed\n", bINEW?INEW:IGET,
+				f, MAX_MODULENAME_LENGTH);
+			free (d);
+			ret = MY_NOTOK;
+			continue;
+		}
+
+
+		if (! is_device(d))	            // Test whether relative or absolute path is specified!
+		{								// relative path might be specified
+			if (strcmp (d, "") == 0)	// no path specified
+			{
+				if (path == NULL)
+					if (IsStandardModule(f))	
+					{
+						len = strlen (own) + 11 + MAX_MODULENAME_LENGTH;	 
+						s1 = (char*) malloc (len + 1);		// Build name ot the target directory
+						strcpy (s1, own);
+						strcat (s1, "/sys/src/");			// !!! Define constant!!!
+						strncat (s1, &f [1], 2);
+						strcat (s1, "/");
+						strncat (s1, f, MAX_MODULENAME_LENGTH);
+						s1[len] = '\0';				// s1 is now the name of the module
+					}
+					else
+					{
+						if (bINEW)
+						{
+							/* Josef, 25.11.97, INEW works only on absolute path or v.. convention
+							//
+							if (lay != NULL)		// get path of the argument or from the $LAY in the environment
+							{
+								len = strlen (lay) + 1 + MAX_MODULENAME_LENGTH;
+								s1 = (char*) malloc (len + 1);
+								strcpy (s1, lay);
+								strcat (s1, "/");
+								strncat (s1, f, MAX_MODULENAME_LENGTH);
+								s1[len] = '\0';
+							}
+							else
+							{
+								s1 = (char*) malloc (MAX_MODULENAME_LENGTH + 1);
+								strncpy (s1, f, MAX_MODULENAME_LENGTH);
+								s1[MAX_MODULENAME_LENGTH] = '\0';
+							}
+							*/
+							fprintf (stderr, "Sorry, INEW requires absolute path for this module name (%s)\n",f);
+							exit(1);
+						}
+						else
+						{
+							// Try to find out the file path by using GetFilePath
+							s1 = MyGetFilePath(f, "-l0x"); // search first level
+							if (s1)
+								bModuleExists=TRUE;
+							else
+							{
+								s1 = MyGetFilePath(f,"");
+								if (!s1)
+								{
+									fprintf(stderr, "Error-%s: cannot get absolute filename\n", bINEW?INEW:IGET);
+									ret = MY_NOTOK;
+									continue;
+								}
+								else
+								{
+									// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+									char * s = strrchr (s1, '/');
+									if (s)
+									{
+										while (*s == '/') s++;
+										if (strncmp( s, f, strlen(f)) == 0)
+											f = s;
+									}
+								}
+							}
+							bToolGeneratedPathUsed = TRUE;
+						}
+					}
+				else
+				{		// path != NULL
+					len = strlen (path) + 1 + MAX_MODULENAME_LENGTH;
+					s1 = (char*) malloc (len +1);
+					strcpy (s1, path);
+					strcat (s1, "/");
+					strncat (s1, f, MAX_MODULENAME_LENGTH);
+					s1[len]='\0';
+				}		
+			}
+			else	// relative path is specified in the module argument
+			{
+				if (bINEW)
+				{
+					fprintf (stderr, "Sorry, INEW requires absolute path for this module name (%s)\n",f);
+					exit(1);
+				}
+
+				// Try to find out the file path by using GetFilePath
+				s1 = MyGetFilePath(p, "-l0x"); // search first level
+				if (s1)
+					bModuleExists=TRUE;
+				else
+				{
+					s1 = MyGetFilePath(p,"");
+					if (!s1)
+					{
+						fprintf(stderr, "Error-%s: cannot get absolute filename\n", bINEW?INEW:IGET);
+						ret = MY_NOTOK;
+						continue;
+					}
+					else
+					{
+						// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+						char * s = strrchr (s1, '/');
+						if (s)
+						{
+							while (*s == '/') s++;
+							if (strncmp( s, f, strlen(f)) == 0)
+								f = s;
+						}
+					}
+				}
+				bToolGeneratedPathUsed = TRUE;
+			}
+		}
+		else
+		{
+			// absolute path is specified in the module argument
+			len = strlen (d) + 1 + MAX_MODULENAME_LENGTH;
+			s1 = (char*) malloc (len + 1);
+			strcpy (s1, d);
+			strcat (s1, "/");
+			strcat (s1, f);
+		}
+
+		free(d);
+
+		rpath = s1 + ownl;
+		if (*rpath == '/') rpath++;
+		s = strrchr (s1, '/');
+		char *dir = (char *) malloc (s-s1+1);
+		strncpy (dir,s1, s-s1);
+		dir[s-s1] = '\0';
+		// Check if absolute path was specified for propper path
+		if (!bToolGeneratedPathUsed )
+		{
+			if (strncmp (tool, s1, tooll) == 0 ||
+				strncmp (dbroot, s1, dbrootl) == 0)
+			{
+				fprintf (stderr,
+				"Error-%s: not permitted for directory $TOOL or $DBROOT!\n", bINEW?INEW:IGET);
+				free (s1);
+				ret = MY_NOTOK;
+				continue;
+			}
+			char tmp1[MAX_PATH], tmp2[MAX_PATH];
+			strcpy(tmp1, own);
+			strcpy(tmp2, s1);
+			strupr(tmp1);
+			strupr(tmp2);
+			BSlash2Slash(tmp1);
+			BSlash2Slash(tmp2);
+			if (strncmp (tmp1, tmp2, ownl))
+			{
+				fprintf (stderr,
+					"Error-%s: OWN not in %s\n",bINEW?INEW:IGET, s1);
+				free (s1);
+				ret = MY_NOTOK;
+				continue;
+			}
+			/* &gar PTS 1105004 */
+			if ( (my_checkModulePath (dir) != 0 ) &&
+			     (_chdir (dir) != 0) )
+			{
+				fprintf (stderr,
+					"Error-%s: cannot change directory to %s\n", bINEW?INEW:IGET, dir);
+				free (dir);
+				free (s1);
+				ret = MY_NOTOK;
+				continue;
+			}
+		}
+		
+		// Check whether file already exists (if so, error), not if bNoCheck == TRUE
+		// (Tool generated path is not allowed since it specifies also files in the 
+		//  complete hirarchy)
+		struct _stat buf;
+	    if (!bModuleExists && !bToolGeneratedPathUsed)
+			if ((_stat( s1, &buf )==0))
+				bModuleExists=TRUE;
+		/* CTS 1103612 */
+		if ( ( ! bModuleExists) && excl )
+		{
+			/* CTS 1104688 -> */
+			fprintf (stderr,"Warning-%s: module not localy exists\n", bINEW?INEW:IGET);
+			fprintf (stderr,"! Checkout exclusive from source tree !\n", bINEW?INEW:IGET, s1);
+			/* if not local found get exclusive */
+			mget = FALSE;
+			excl = FALSE;
+			/*<- CTS 1104688 */
+		}
+		
+		if ( (bModuleExists) && ( ! excl ) )
+		{
+				
+			if (bNoCheck)
+			{
+				fprintf (stderr, "Warning-%s: module %s already exists\n", bINEW?INEW:IGET, s1);
+				fprintf (stderr, "      !!! Using local copy and generating new lock entry !!!\n");
+			}
+			else
+			{
+				fprintf (stderr, "Error-%s: module %s already exists\n", bINEW?INEW:IGET, s1);
+				fprintf (stderr, "      !!! No new lock entry generated !!!\n");
+
+				// Start editor for module f (path s1) 
+				if (strcmp(editor,"0") != 0)
+					my_starteditor(tool, s1, editor);
+		
+				free (s1);
+				ret = MY_OK;
+				continue;
+			}
+		}
+			
+
+		char ExtModuleName[MAX_MODULENAME_LENGTH+1];
+		// If Module is description, also encode versin (fast/slow/quick in the ModuleName)
+		// in "f" is the Modulename, in "dir" the directory path
+		if (!(f [0] == 'v' && strlen (f) > 2))		// if f is not a valid module name ?
+		{
+			const char * DESC_FAST = "/desc/fast";
+			const char * DESC_QUICK = "/desc/quick";
+			const char * DESC_SLOW = "/desc/slow";
+			const char * FAST = "fast/";
+			const char * QUICK = "quick/";
+			const char * SLOW = "slow/";
+			char *p = NULL;
+
+			// Perform check of module name length
+			if (strlen(f) > (MAX_MODULENAME_LENGTH - strlen(QUICK)))
+			{
+				fprintf (stderr,
+				   "Error-%s: file name %s longer than %d characters\n", bINEW?INEW:IGET,
+					f, (MAX_MODULENAME_LENGTH - strlen(QUICK)));
+				ret = MY_NOTOK;
+				continue;
+			}
+
+			// search for the propper vmake-version (fast, slow or quick) (final position in the  string)
+			// and add the propper sign to the ExtModuleName
+			if ((p=strstr(dir, DESC_FAST)) != NULL) 
+			{
+				// fast version specified
+				strcpy(ExtModuleName, FAST);
+				strcat(ExtModuleName, f);
+			}
+			else
+				if ((p=strstr(dir, DESC_QUICK)) != NULL)
+				{
+					// quick version specified
+					strcpy(ExtModuleName, QUICK);
+					strcat(ExtModuleName, f);
+				}
+				else
+					if (strstr(dir, DESC_SLOW) != NULL)
+					{
+						// slow version specified
+						strcpy(ExtModuleName, SLOW);
+						strcat(ExtModuleName, f);
+					}
+					else
+						// no version information obtained
+						strcpy(ExtModuleName, f);
+		}
+		else
+		{
+			strncpy(ExtModuleName, f, MAX_MODULENAME_LENGTH);
+			ExtModuleName[MAX_MODULENAME_LENGTH] = '\0';
+		}
+
+		
+		free(dir);
+		ret = DoIGet (s1, ExtModuleName, mget, excl, grp, bINEW, bModuleExists);		// Finally try to copy module
+/* -> &gar: iget with layer in form: :<layer>/<name> */
+
+		char *pLocModulName;  
+        if (layer)         // wenn Layer gesetzt worden ist
+		{
+			pLocModulName=(char *)	malloc (strlen(layer)+strlen(ExtModuleName)+2);
+			strcpy(pLocModulName,layer);
+			strcat(pLocModulName,"/");
+			strcat(pLocModulName,ExtModuleName);
+		}
+		else
+			pLocModulName = ExtModuleName;
+/* <- &gar */
+		// Start editor for module f (path s1) 
+		if ((ret == MY_OK) && (strcmp(editor,"0") != 0))
+			my_starteditor(tool, MyGetFilePath(pLocModulName,"-l0x"), editor);
+/* &gar     my_starteditor(tool, MyGetFilePath(ExtModuleName,"-l0x"), editor); */
+
+		free (s1);
+	}  // for
+	if (own) free (own);
+	if (grp) free (grp);
+	return ret;
+}
+
+
+// Perform actual IGet
+int DoIGet (const char * ModulePath, const char * Module, BOOL mget, BOOL excl, const char *Grp, 
+			BOOL bINEW, BOOL bModuleExists)
+{
+	const char * ServerPipeName = NULL;
+	HANDLE hServerPipe=INVALID_HANDLE_VALUE;
+	T_IMSSG IMSSG;
+	int ret = MY_NOTOK;
+
+	try
+	{
+		// Connect to the named pipe of the iserver
+		//  get the pipename
+		ServerPipeName = GetIServerPipeName(Grp);
+		if (ServerPipeName == NULL)
+			throw "cannot get iserver pipe name";
+
+		//  try to open the pipe
+		hServerPipe = MyOpenServerPipe(ServerPipeName); 
+		if (hServerPipe == INVALID_HANDLE_VALUE)
+			throw "cannot get iserver pipe";
+
+		//  send lock-request for the specified file and user
+		/* CTS 1103612 */
+		/* if (FillIMSSG(&IMSSG, Module, mget?eMGET:eGET) != MY_OK) */
+		if (FillIMSSG(&IMSSG, Module, excl?eEXCL:mget?eMGET:eGET) != MY_OK)
+			throw "cannot build message block";
+		if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+			throw "cannot send message";
+		
+		ret = MyGetAckIMSSG(hServerPipe, &IMSSG);
+		if ( ret == MY_OK)
+		{	
+			/* CTS 1103612 */
+			if ( excl )
+			{
+				if ( IMSSG.RequestType == eACK_OK )
+				{
+					fprintf(stdout,"%s: %s now locked exclusive !\n",IGET, ModulePath);					
+				}
+			}
+			else
+			{
+				if (!bModuleExists)		// Module does not exist
+					if ((ret=MyCopyRemoteModule(ModulePath, bINEW)) != MY_OK)
+					{
+						// copy of module failed, do unlock on the specified module
+						// !!! But only if mget was not specified
+						if (mget)
+							ret = MY_NOTOK;
+						else
+						{	// Recover
+							// First get ServerPipe again because it was already dismissed by the server
+							CloseHandle(hServerPipe);
+							hServerPipe = MyOpenServerPipe(ServerPipeName); 
+							if (hServerPipe == INVALID_HANDLE_VALUE)
+								throw "cannot get pipe during recovery from failed copy operation";
+							if (FillIMSSG(&IMSSG, Module, ePUT) != MY_OK)
+								throw "copying of module failed, unlock of the temporary locked module failed!" ;
+							if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+								throw "copying of module failed, sending unlock to IServer also failed!";
+							if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+								throw "copying of module failed, unlock of module not acknowledged by IServer!" ;
+
+							if (ret != MY_RECOVER)	// this operation was not inteded for doing recovery
+								throw "copy of remote module failed";
+							else
+								ret = MY_NOTOK;
+						}
+					}
+			}
+		}
+		else
+			if (ret == MY_NOTOK)
+				throw "cannot get proper acknowledgment for sent message block";
+	}
+	catch(const char * message)
+	{
+		// simple error handling (no need to evaluate API-Error)
+		fprintf(stderr, "Error-%s: %s (affected: %s)\n", IGET, message, Module);
+		ret=MY_NOTOK;
+	}
+	if (hServerPipe != INVALID_HANDLE_VALUE) 
+		CloseHandle (hServerPipe);
+	return ret;
+}
+
+
+// IPut
+// Objects or headers are copied, therefor option -s is valid
+// Also specifying whether a backup file is created or not is subject to  
+// the iserver.
+// Also a valid Option is -d dpath!
+// Handling of layers not implemented yet
+// If IDEL = TRUE, then idel is called, ie the module is unlinked but not copied
+// to the GRP-Tree (Module is scratched)
+
+int IPut (int argc, char *argv[], const BOOL bIDEL)
+{
+	int ret = MY_NOTOK;
+
+	if (argc < 1)
+	{
+		return (bIDEL?Usage(IDEL):Usage(IPUT));
+	}
+
+
+// ----- Copy of original iput-Code (by Peter Schulz)
+	int o, err = 0, len, ownl, tooll, dbrootl, srcl, 
+	    suppr = 0, i;
+	char *optstr = "d:b:s?h:@:", *path = NULL, *editor = NULL, 
+	     *lay = NULL, *own=NULL, *grp=NULL, *OWN=NULL, *GRP=NULL, 
+		 *VMAKE_PATH=NULL, *SRC=NULL, *TOOL=NULL, *dbroot=NULL, *tool=NULL, *src=NULL,
+	     *DBROOT=NULL,  *p=NULL, *d=NULL, *f=NULL, *s1=NULL;
+	char * AdmCommand = NULL;
+
+	char * optarg; int optind = 0;
+	while ((o = getopt (argc, argv, optstr, &optarg, &optind)) != EOF)
+		switch (o)
+		{
+			case 'd':
+				path = optarg;
+				BSlash2Slash(path);
+				break;
+			case 'b': fprintf(stderr, "Error-%s: Sorry, option -b not supported any more (automatic backup)\n",
+						  (bIDEL?IDEL:IPUT));
+					  exit(1);
+					  break;
+			case 's': 
+				if (!bIDEL)
+					suppr = TRUE;
+				else
+					err = 1;
+				break;
+			case '@': 
+				if (bIDEL && (strlen(optarg) > 0))
+					AdmCommand  = optarg;
+				else
+					err = 1;
+				break;
+			case '?':
+			default:
+				err = 1;
+		}
+	if (err)
+	{
+	    return Usage((bIDEL?IDEL:IPUT));
+	}
+
+	OWN = getenv("OWN");
+	GRP = getenv("GRP");
+	VMAKE_PATH = getenv("VMAKE_PATH");
+	
+
+	if (OWN && GRP) 
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH && OWN)
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + strcspn (VMAKE_PATH, ",");
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+
+	}
+	else if (VMAKE_PATH && GRP)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + ownl;
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+	}
+	else
+	{
+		fprintf(stderr,"Error-%s: Neither OWN, GRP nor VMAKE_PATH is defined\n",
+				bIDEL?IDEL:IPUT);
+		exit (1);
+	}
+
+
+/* Auf der Gruppensitzung vom 6.11.97 wurde beschlossen, das Loeschen von Modulen fuer alle zu
+   erlauben.
+	if (AdmCommand)		// If administrative command was specified check the propper rights
+	{
+		// Test whether the right to write statfile exists
+		if (!IsStatfileWriteable(grp))
+		{
+			fprintf(stderr, "Error-%s: command not allowed, missing priviliges\n", IDEL);
+			exit (1);
+		}
+	}
+*/
+
+	SRC = getenv ("SRC");
+	TOOL = getenv ("TOOL");
+	DBROOT = getenv ("INSTROOT");
+	if (TOOL)	
+	{
+		tooll = strlen (TOOL);
+		tool = (char*) malloc (tooll + 1);
+		strncpy (tool, TOOL, tooll);
+		tool [tooll] = '\0';
+		BSlash2Slash(tool);
+
+	}
+	if (DBROOT) 
+	{
+		dbrootl = strlen (DBROOT);
+		dbroot = (char*) malloc (dbrootl + 1);
+		strncpy (dbroot, DBROOT, dbrootl);
+		dbroot [dbrootl] = '\0';
+		BSlash2Slash(dbroot);
+	}
+	if (SRC)	
+	{
+		srcl = strlen (SRC);
+		src = (char*) malloc (srcl + 1);
+		strncpy (src, SRC, srcl);
+		src [srcl] = '\0';
+		BSlash2Slash(src);
+
+	}
+
+	if (!TOOL || !DBROOT  || !SRC || tooll<1 || dbrootl <1 || srcl < 1)
+	{
+		fprintf (stderr,
+	    		"Error-%s: missing environment (TOOL, DBROOT, SRC)\n",(bIDEL?IDEL:IPUT));
+		exit (1);
+	}
+	if (path != NULL)
+		lay = path;
+	else
+	{
+		char * LAY;
+		if ((LAY = getenv ("LAY")) == 0)
+		{
+			lay = NULL;
+			//fprintf(stderr, "Warning: LAY not set!\n");
+		}
+		else
+			if (strlen(LAY) == 0)
+				lay = NULL;
+			else
+			{
+				int layl = strlen(LAY);
+				lay = (char*) malloc (layl + 1);
+				strncpy (lay, LAY, layl);
+				lay[layl] = '\0';
+				BSlash2Slash(lay);
+			}
+	}
+
+
+	// Only options as arguments?
+	if (optind >= argc)
+	    return Usage((bIDEL?IDEL:IPUT));
+
+	// for each module|layer perform iput
+	for (; optind < argc; optind++)
+	{
+		BOOL bToolGeneratedPathUsed=FALSE;
+		p = argv [optind];
+		BSlash2Slash(p);
+		if (strpbrk (p, "[]*?!"))
+		{
+			fprintf (stderr,
+				 "Error-%s: expression %s not allowed\n", (bIDEL?IDEL:IPUT),
+				 p);
+			ret = MY_NOTOK;
+			continue;
+		}
+		if (s1 = strrchr (p, '/'))
+		{
+			len = s1 - p;
+			if (len == 0) len = 1;
+			d = (char*) malloc (len + 1);
+			strncpy (d, p, len);
+			d [len] = '\0';
+			f = s1 + 1;
+		}
+		else
+		{
+			d = (char*) malloc (1);
+			*d = '\0';
+			f = p;
+		}
+		if (strlen (f) > MAX_MODULENAME_LENGTH)
+		{
+			fprintf (stderr,
+		       "Error-%s: file name %s longer than %d characters\n", (bIDEL?IDEL:IPUT),
+				f, MAX_MODULENAME_LENGTH);
+			free (d);
+			ret = MY_NOTOK;
+			continue;
+		}
+
+
+		// Test whether relative or absolute path is specified!
+		if (!is_device(d))  
+			if (strcmp (d, "") == 0)	// no path specified
+			{
+				if (path == NULL)
+				{
+					if (IsStandardModule(f))
+					{
+						len = strlen (own) + 11;
+						s1 = (char*) malloc (len + 1);
+						strcpy (s1, own);
+						strcat (s1, "/sys/src/");
+						strncat (s1, &f [1], 2);
+						s1[len] = '\0';
+						if (_chdir (s1) == 0)
+						{
+							free (d);
+							d = s1;
+						}
+						else
+						{
+							/* PTS 1107468 */
+							fprintf (stderr,"Error-%s: %s not existent\n", (bIDEL?IDEL:IPUT),s1);
+							free (s1);
+							free (d);
+							ret = MY_NOTOK;
+							continue;
+						}
+					}
+					else
+					{
+						// Try to find out the file path by using GetFilePath
+						s1 = MyGetFilePath(f, "-l0x"); // search first level
+						if (s1)
+						{
+							// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+							char * s = strrchr (s1, '/');
+							if (s)
+							{
+								*s++='\0';
+								free(d);
+								d = (char*) malloc (strlen(s1) + 1);
+								strcpy(d,s1);
+								while (*s == '/') s++;
+								if (strncmp( s, f, strlen(f)) == 0)
+									f = s;
+							}
+						}
+						bToolGeneratedPathUsed = TRUE;
+					}
+				}  // path != NULL
+				else
+				{
+					free (d);
+					d = (char*)malloc (strlen(path) + 1);
+					strcpy (d, path);
+				}
+
+			}
+			else // relative path specified
+			{
+				// Try to find out the file path by using GetFilePath
+				s1 = MyGetFilePath(p, "-l0x"); // search first level
+				if (s1)
+				{
+					// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+					char * s = strrchr (s1, '/');
+					if (s)
+					{
+						*s++='\0';
+						free(d);
+						d = (char*) malloc (strlen(s1) + 1);
+						strcpy(d,s1);
+						while (*s == '/') s++;
+						if (strncmp( s, f, strlen(f)) == 0)
+							f = s;
+					}
+				}
+				bToolGeneratedPathUsed = TRUE;
+			}
+
+
+		// d is the path to the module to copy
+		// f is the module to copy
+
+		// Check if absolute path was specified for propper path
+		if (!bToolGeneratedPathUsed )
+		{
+			if (strncmp (tool, d, tooll) == 0 ||
+				strncmp (dbroot, d, dbrootl) == 0)
+			{
+				fprintf (stderr,
+				"Error-%s: not permitted for directory %s\n",(bIDEL?IDEL:IPUT), d);
+				free (d);
+				ret = MY_NOTOK;
+				continue;
+			}
+			char tmp1[MAX_PATH], tmp2[MAX_PATH];
+			strcpy(tmp1, own);
+			strcpy(tmp2, d);
+			strupr(tmp1);
+			strupr(tmp2);
+			BSlash2Slash(tmp1);
+			BSlash2Slash(tmp2);
+			if (strncmp (tmp1, tmp2, ownl))
+			{
+				fprintf (stderr,
+					"Error-%s: OWN not in %s\n", (bIDEL?IDEL:IPUT), d);
+				free (d);
+				ret = MY_NOTOK;
+				continue;
+			}
+			if (_chdir (d) != 0)
+			{
+				fprintf (stderr,
+					"Error-%s: cannot change directory to %s\n", (bIDEL?IDEL:IPUT), d);
+				free (d);
+				ret = MY_NOTOK;
+				continue;
+			}
+		}
+	
+
+		char ExtModuleName[MAX_MODULENAME_LENGTH+1];
+		// If Module is description, also encode versin (fast/slow/quick in the ModuleName)
+		// in "f" is the Modulename, in "dir" the directory path
+		if (!(f [0] == 'v' && strlen (f) > 2))		// if f is not a valid module name ?
+		{
+			const char * DESC_FAST = "/desc/fast";
+			const char * DESC_QUICK = "/desc/quick";
+			const char * DESC_SLOW = "/desc/slow";
+			const char * FAST = "fast/";
+			const char * QUICK = "quick/";
+			const char * SLOW = "slow/";
+			char *p = NULL;
+
+			// Perform check of module name length
+			if (strlen(f) > (MAX_MODULENAME_LENGTH - strlen(QUICK)))
+			{
+				fprintf (stderr,
+				   "Error-%s: file name %s longer than %d characters\n", (bIDEL?IDEL:IPUT),
+					f, (MAX_MODULENAME_LENGTH - strlen(QUICK)));
+				ret = MY_NOTOK;
+				continue;
+			}
+
+			// search for the propper vmake-version (fast, slow or quick) (final position in the  string)
+			// and add the propper sign to the ExtModuleName
+			if ((p=strstr(d, DESC_FAST)) != NULL) 
+			{
+				// fast version specified
+				strcpy(ExtModuleName, FAST);
+				strcat(ExtModuleName, f);
+			}
+			else
+				if ((p=strstr(d, DESC_QUICK)) != NULL)
+				{
+					// quick version specified
+					strcpy(ExtModuleName, QUICK);
+					strcat(ExtModuleName, f);
+				}
+				else
+					if (strstr(d, DESC_SLOW) != NULL)
+					{
+						// slow version specified
+						strcpy(ExtModuleName, SLOW);
+						strcat(ExtModuleName, f);
+					}
+					else
+						// no version information obtained
+						strcpy(ExtModuleName, f);
+		}
+		else
+		{
+			strncpy(ExtModuleName, f, MAX_MODULENAME_LENGTH);
+			ExtModuleName[MAX_MODULENAME_LENGTH] = '\0';
+		}
+
+
+		char * ModulePath = (char*)malloc (strlen(d) + strlen(f) + 2);
+		if (strlen(d) > 0) 
+		{
+			strcpy(ModulePath,d);
+			strcat(ModulePath,"/");
+			strcat(ModulePath,f);
+		}
+		else
+			strcpy(ModulePath,f);
+
+		// Check whether the module exists (if not, f might be a layer)
+	    struct _stat buf;
+	    if (_stat( ModulePath, &buf )!=0)
+	    {
+			// Module does not exist, check for layer
+			if (strlen(f) == 2)
+			{							// argument might be a layer
+				int Entries;
+				char ** ModuleList;		// List of modules in layer (full path)
+				int iRet = GetModuleListFromLayer(f, &Entries, &ModuleList);
+				if ( iRet != MY_OK)
+				{
+					if (bIDEL)
+						fprintf(stderr, "Error-%s: layers not allowed!\n", IDEL);
+					else
+						fprintf (stderr, "Error-%s: cannot get modules for layer %s!\n", 
+							IPUT,f);
+					ret = MY_NOTOK;
+				}
+				else
+					if (bIDEL)
+					{
+						fprintf(stderr, "Error-%s: layers not allowed!\n", IDEL);
+						ret = MY_NOTOK;
+					}
+					else
+					{
+						// if there do not exist any entries for a layer and suppress is not set
+						// then copy all objects of a layer to the server
+						if ((Entries <= 0) && (!suppr))
+						{
+							// Copy all objects of a layer
+							ret = DoIPutForLayerObjects(ModulePath, f, grp);
+						}
+						else
+							if (Entries <= 0)
+								fprintf(stdout, "%s: no modules for layer %s found\n", IPUT, f);
+							else
+								for (i=0; i<Entries; i++)
+								{
+									char *module;
+									if (module = strrchr (ModuleList[i], '/'))	 // search last '/' in the string (path is specified)
+									{
+										module++;
+										// Close document in the editor
+										if (my_closeeditor(tool, ModuleList[i]) != 0)
+										{
+											fprintf(stderr, "Error: cannot close editor for module %s\n", ModulePath);
+											continue;
+										}
+										ret = DoIPut(ModuleList[i],module, grp, suppr, NULL, FALSE);
+									}
+									else
+										fprintf(stderr, "Error-%s: cannot put module %s\n",
+											IPUT, ModuleList[i]);
+								}
+
+						// free ModuleList
+						for (i=0; i<Entries; i++)
+							if (ModuleList[i])	
+								free (ModuleList[i]);
+						free (ModuleList);
+					}
+			}
+			else // single module(s), not a layer
+			{
+				if (bIDEL)	// no check for existence if IDel is called
+					ret = DoIPut(ModulePath, ExtModuleName, grp, suppr, AdmCommand, bIDEL);
+				else
+				{
+					fprintf (stderr, "Error-%s: module %s does not exist!\n", IPUT,
+						ModulePath);
+					ret = MY_NOTOK;
+				}
+			}
+	    }
+		else
+		{
+			// Close document in the editor
+			if (my_closeeditor(tool, ModulePath) != 0)
+			{
+				fprintf(stderr, "Error: cannot close editor for module %s\n", ModulePath);
+				continue;
+			}
+
+			/* &gar test for right case */
+			struct _finddata_t found_file;  
+			char * PathPos, * ModulePos;
+
+
+			if( _findfirst(ModulePath, &found_file) != -1L ) 
+			{
+				if ((ModulePos = strrchr(ExtModuleName,'/')) == NULL )
+					ModulePos =  ExtModuleName;
+				else
+					ModulePos ++;
+
+				if ( strcmp (ModulePos, found_file.name) != 0 )
+				{
+
+					if ( ( PathPos = strrchr(ModulePath,'/')) == NULL ) 
+						PathPos =  ModulePath;
+					else
+						PathPos++;
+								
+					strcpy(PathPos, found_file.name);
+					fprintf(stdout, "'%s' changed to ",ExtModuleName );
+					strcpy(ModulePos, found_file.name);
+					fprintf(stdout, "'%s'\n",ExtModuleName );
+				}
+			}
+			/* &gar */
+
+			ret = DoIPut(ModulePath, ExtModuleName, grp, suppr, AdmCommand, bIDEL);
+		}
+		
+		free (ModulePath);
+		free (d);
+	}
+	if (own) free (own);
+	if (grp) free (grp);
+	return ret;
+}
+
+
+// Do actual IPUT (or IDEL when bIDEL = TRUE)
+int DoIPut (const char * ModulePath, const char *Module, const char * Grp, 
+			const int suppr, const char * AdmCommand, const BOOL bIDEL)
+{
+	const char * ServerPipeName = NULL;
+	HANDLE hServerPipe=INVALID_HANDLE_VALUE;
+	T_IMSSG IMSSG;
+	int ret=MY_NOTOK;
+
+ /* printf ("ModulePath:'%s' Module: '%s'\n", ModulePath, Module);   */
+
+	try
+	{
+		//  get the pipename
+		ServerPipeName = GetIServerPipeName(Grp);
+		if (ServerPipeName == NULL)
+			throw "cannot get iserver pipe name";
+		// try to open the pipe
+		hServerPipe = MyOpenServerPipe(ServerPipeName); 
+		if (hServerPipe == INVALID_HANDLE_VALUE)
+			throw "cannot open server pipe";
+
+		// Check if administrator command is requested in idel
+		if (bIDEL && AdmCommand)
+		{
+			// Do administration depending on the command
+			if (strcmp(AdmCommand,"u")==0)	// "u" specifies unlock
+			{
+				if (FillIMSSG(&IMSSG, Module, ePUT) != MY_OK)
+					throw "";
+				if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+					throw "";
+				if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+					throw "";
+				fprintf(stdout,"%s: module %s successfully unlocked\n",IDEL, ModulePath);
+
+			}
+			else // check for other commands or print syntax error
+			{
+				throw "administrator commands: -@u module (Unlocks module)\n";
+			}
+		}
+		else
+		{
+		
+			// check whether unlock-request will be successfull 
+			// for the specified file and user
+			if (FillIMSSG(&IMSSG, Module, (bIDEL?eDEL:ePREPARE_PUT)) != MY_OK)
+				throw "";
+			if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+				throw "";
+			if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+				throw "";
+
+			if (!bIDEL)	// if not IDEL, send the file to the server
+			{
+				// get the module date
+				
+				HANDLE hTmpHandle =  CreateFile ( 
+					ModulePath, GENERIC_READ, FILE_SHARE_READ, NULL, 
+					OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+				FILETIME mtime, *pmtime=NULL; 
+				if (hTmpHandle != INVALID_HANDLE_VALUE)
+				{
+					if (GetFileTime(hTmpHandle,NULL,NULL,&mtime)!=NULL)
+						pmtime=&mtime;
+					CloseHandle(hTmpHandle);
+				}
+				if (MySendModule(hServerPipe, ModulePath, TRUE, FALSE) != MY_OK)
+					throw "";
+				if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+					throw "";
+				if (!suppr)
+					/* PTS 1107807 */
+					if ( strcmp (Grp + (strlen(Grp) - 2) ,"//") == 0)
+						fprintf(stdout, "Ignore dependencies\n", Grp);
+					else
+						if (MySendModuleDependents(hServerPipe, ModulePath, pmtime) != MY_OK)
+							throw "";
+			}
+
+			if (FillIMSSG(&IMSSG, Module, ePUT) != MY_OK)
+				throw "";
+			if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+				throw "";
+			if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+				throw "";
+
+			// Confirm the action
+			if (bIDEL)
+				fprintf(stdout,"\n%s: module %s unlocked\n",IDEL, ModulePath);
+			else
+				fprintf(stdout,"%s: module %s %s copied to %s\n",
+				        IPUT, ModulePath, suppr?"":"and dependents", Grp);
+
+			// Now everything is ok, it is save to delete the module 
+		    MyScratchOrDeleteModule(ModulePath, bIDEL); 
+
+		}
+		ret = MY_OK;
+	}
+	catch(const char * message)
+	{
+		if (strlen(message)>0)
+			fprintf(stderr, "\nError-%s: %s (affected: %s)\n", (bIDEL?IDEL:IPUT), message, Module);
+		ret=MY_NOTOK;
+	}
+	
+	if (hServerPipe != INVALID_HANDLE_VALUE) 
+		CloseHandle (hServerPipe);
+	return ret;
+}
+
+
+// Put all objects of one layer to the server
+int DoIPutForLayerObjects (const char * LayerPath, const char *Layer, const char * Grp)
+{
+
+	const char * ServerPipeName = NULL;
+	HANDLE hServerPipe=INVALID_HANDLE_VALUE;
+	T_IMSSG IMSSG;
+	int ret=MY_NOTOK;
+
+	try
+	{
+		//  get the pipename
+		ServerPipeName = GetIServerPipeName(Grp);
+		if (ServerPipeName == NULL)
+			throw "cannot get iserver pipe name";
+		// try to open the pipe
+		hServerPipe = MyOpenServerPipe(ServerPipeName); 
+		if (hServerPipe == INVALID_HANDLE_VALUE)
+			throw "cannot open server pipe";
+
+		// tell IServer to perform put of layer objects 
+		if (FillIMSSG(&IMSSG, Layer, eSTARTPUT_OBJECTS) != MY_OK)
+			throw "";
+		if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+			throw "";
+		if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+			throw "";
+		if (MySendLayerDependentObjects(hServerPipe, Layer) != MY_OK)
+			throw "";
+		if (FillIMSSG(&IMSSG, Layer, eENDPUT_OBJECTS) != MY_OK)
+			throw "";
+		if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+			throw "";
+		if (MyGetAckIMSSG(hServerPipe, &IMSSG) != MY_OK)
+			throw "";
+
+		fprintf(stdout,"%s: objects for layer %s copied to %s\n",
+			IPUT, LayerPath, Grp);
+
+		ret = MY_OK;
+	}
+	catch(const char * message)
+	{
+		if (strlen(message)>0)
+			fprintf(stderr, "Error-%s: %s (affected: %s)\n", IPUT, message, Layer);
+		ret=MY_NOTOK;
+	}
+	
+	if (hServerPipe != INVALID_HANDLE_VALUE) 
+		CloseHandle (hServerPipe);
+	return ret;
+}
+
+
+/* CTS 1103611 -> */
+
+// IStat (et the actual status of a file )
+// (analog to icp.c by Peter Schultz)
+int IStat (int argc, char *argv[] )
+{
+	char *path = NULL, *editor = NULL;
+	BOOL mget = FALSE;
+	int ret=MY_NOTOK;
+	BOOL bNoCheck=FALSE;
+	char *layer = NULL;  /* gar */
+	
+/*	BOOL ExpandReturn = FALSE; /* CTS 1107012 */
+
+	if (argc < 1)
+	{
+		return (Usage(ISTAT));
+	}
+
+	// Parse arguments
+	char *optstr = "d:?h"; char * optarg; int optind = 0; int err=0, o;
+	while ((o = getopt (argc, argv, optstr, &optarg, &optind)) != -1)
+		switch (o)
+		{
+			case 'd':
+				path = optarg;
+				BSlash2Slash(path);
+				break;
+			/*case 'r':
+				ExpandReturn = TRUE;      /* CTS 1107012 
+				break;
+			*/
+			case '?':
+			default:
+				err = 1;
+		}
+
+	if (err)
+	{
+		return (Usage(ISTAT));
+	}
+
+// Find the Modulepath to use!
+// BOOL GetIModulePath(argc, argv.....) or a similar function later on!
+
+//---------- Code from original IGET.C (by Peter Schulz) ---------
+	int  len, ownl, tooll, dbrootl;
+	char *lay=NULL, *own=NULL, *grp=NULL,*LAY=NULL, *OWN=NULL, *GRP=NULL, 
+		 *VMAKE_PATH=NULL, *tool=NULL, *dbroot=NULL,
+		 *TOOL=NULL, *DBROOT=NULL, *rpath=NULL, *epar=NULL, *p=NULL,
+		 *d=NULL, *f=NULL, *s1=NULL, *s2=NULL, *s=NULL;
+
+	OWN = getenv("OWN");
+	GRP = getenv("GRP");
+	VMAKE_PATH = getenv("VMAKE_PATH");
+	
+
+	if (OWN && GRP) 
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH && OWN)
+	{
+		ownl = strlen (OWN);
+		own = (char*) malloc (ownl + 1);
+		strcpy (own, OWN);
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + strcspn (VMAKE_PATH, ",");
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+
+	}
+	else if (VMAKE_PATH && GRP)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		grp = (char*) malloc (strlen (GRP) + 1);
+		strcpy (grp, GRP);
+		BSlash2Slash(grp);
+	}
+	else if (VMAKE_PATH)
+	{
+		ownl = strcspn (VMAKE_PATH, ",");
+		own = (char*) malloc (ownl + 1);
+		strncpy (own, VMAKE_PATH, ownl);
+		own [ownl] = '\0';
+		BSlash2Slash(own);
+		s1 = VMAKE_PATH + ownl;
+		if (*s1) s1++;
+		len = strcspn (s1, ",");
+		grp = (char*) malloc (len + 1);
+		strncpy (grp, s1, len);
+		grp [len] = '\0';
+		BSlash2Slash(grp);
+	}
+	else
+	{
+		fprintf(stderr,"Error-%s: Neither OWN, GRP nor VMAKE_PATH is defined\n",
+				ISTAT);
+		exit (1);
+	}
+
+
+	if (strcmp (own, grp)==0)
+	{
+		fprintf(stderr,
+			"Error-%s: not allowed in GRP-Area\n",ISTAT);
+		exit(1);
+	}
+
+	TOOL = getenv ("TOOL");
+	tooll = strlen (TOOL);
+	tool = (char*) malloc (tooll + 1);
+	strncpy (tool, TOOL, tooll);
+	tool [tooll] = '\0';
+	BSlash2Slash(tool);
+	DBROOT = getenv ("INSTROOT");
+	dbrootl = strlen (DBROOT);
+	dbroot = (char*) malloc (dbrootl + 1);
+	strncpy (dbroot, DBROOT, dbrootl);
+	dbroot [dbrootl] = '\0';
+	BSlash2Slash(dbroot);
+
+	if (path != NULL)	// Is path specified as an argument?
+		lay = path;		
+	else
+	{
+		char * LAY = getenv("LAY");
+		if (LAY)
+		{
+			int layl = strlen(LAY);
+			lay = (char*) malloc (layl + 1);
+			strncpy (lay, LAY, layl);
+			lay[layl] = '\0';
+			BSlash2Slash(lay);
+		}
+		else
+		{
+			lay=NULL;
+			//fprintf(stderr, "Warning: LAY not set!\n");
+		}
+	}
+	// Only options as arguments?
+	if (optind >= argc)
+		return (Usage(ISTAT));
+
+	// for each module perform iget
+	for (; optind < argc; optind++)	   
+	{
+		BOOL bToolGeneratedPathUsed=FALSE, bModuleExists=FALSE;
+		p = argv [optind];
+		BSlash2Slash(p);
+		if (strpbrk (p, "[]*?!"))	// check for valid module name
+		{
+			fprintf (stderr,
+				 "Error-%s: expression %s not allowed\n", ISTAT, p);
+			ret = MY_RET_ERROR;
+			continue;
+		}
+		if (s1 = strrchr (p, '/'))	 // search last '/' in the string (of path is specified)
+		{
+			len = s1 - p;
+			if (len == 0) len = 1;
+			d = (char*) malloc (len + 1);
+			strncpy (d, p, len);
+			d [len] = '\0';			// d is the path for module
+			f = s1 + 1;				// f is the module name
+/* -> &gar: iget with layer in form: :<layer>/<name> */
+			if (d[0]==':')
+			{
+				layer = (char*) malloc (len+1);
+				strcpy(layer,d);
+			}
+/* <- &gar */
+
+		}
+		else
+		{
+			d = (char*) malloc (1);
+			*d = '\0';					// no path specified
+			f = p;						// f is the module name
+		}
+
+		if (strlen (f) > MAX_MODULENAME_LENGTH)			// check size of the module
+		{
+			fprintf (stderr,
+		       "Error-%s: file name %s longer than %d characters not allowed\n", ISTAT,
+				f, MAX_MODULENAME_LENGTH);
+			free (d);
+			ret = MY_RET_ERROR;
+			continue;
+		}
+
+
+		if (! is_device(d))	            // Test whether relative or absolute path is specified!
+		{								// relative path might be specified
+			if (strcmp (d, "") == 0)	// no path specified
+			{
+				if (path == NULL)
+					if (IsStandardModule(f))	
+					{
+						len = strlen (own) + 11 + MAX_MODULENAME_LENGTH;	 
+						s1 = (char*) malloc (len + 1);		// Build name ot the target directory
+						strcpy (s1, own);
+						strcat (s1, "/sys/src/");			// !!! Define constant!!!
+						strncat (s1, &f [1], 2);
+						strcat (s1, "/");
+						strncat (s1, f, MAX_MODULENAME_LENGTH);
+						s1[len] = '\0';				// s1 is now the name of the module
+					}
+					else
+					{	
+						// Try to find out the file path by using GetFilePath
+						s1 = MyGetFilePath(f, "-l0x"); // search first level
+						if (s1)
+							bModuleExists=TRUE;
+						else
+						{
+							s1 = MyGetFilePath(f,"");
+							if (!s1)
+							{
+								fprintf(stderr, "Error-%s: cannot get absolute filename\n", ISTAT);
+								ret = MY_RET_ERROR;
+								continue;
+							}
+							else
+							{
+								// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+								char * s = strrchr (s1, '/');
+								if (s)
+								{
+									while (*s == '/') s++;
+									if (strncmp( s, f, strlen(f)) == 0)
+										f = s;
+								}
+							}
+						}
+						bToolGeneratedPathUsed = TRUE;
+					
+					}
+				else
+				{		// path != NULL
+					len = strlen (path) + 1 + MAX_MODULENAME_LENGTH;
+					s1 = (char*) malloc (len +1);
+					strcpy (s1, path);
+					strcat (s1, "/");
+					strncat (s1, f, MAX_MODULENAME_LENGTH);
+					s1[len]='\0';
+				}		
+			}
+			else	// relative path is specified in the module argument
+			{
+				// Try to find out the file path by using GetFilePath
+				s1 = MyGetFilePath(p, "-l0x"); // search first level
+				if (s1)
+					bModuleExists=TRUE;
+				else
+				{
+					s1 = MyGetFilePath(p,"");
+					if (!s1)
+					{
+						fprintf(stderr, "Error-%s: cannot get absolute filename\n", ISTAT);
+						ret = MY_RET_ERROR;
+						continue;
+					}
+					else
+					{
+						// re-assign f to get extensions of modules (e.g. .mac .lnk ...)
+						char * s = strrchr (s1, '/');
+						if (s)
+						{
+							while (*s == '/') s++;
+							if (strncmp( s, f, strlen(f)) == 0)
+								f = s;
+						}
+					}
+				}
+				bToolGeneratedPathUsed = TRUE;
+			}
+		}
+		else
+		{
+			// absolute path is specified in the module argument
+			len = strlen (d) + 1 + MAX_MODULENAME_LENGTH;
+			s1 = (char*) malloc (len + 1);
+			strcpy (s1, d);
+			strcat (s1, "/");
+			strcat (s1, f);
+		}
+
+		free(d);
+
+		rpath = s1 + ownl;
+		if (*rpath == '/') rpath++;
+		s = strrchr (s1, '/');
+		char *dir = (char *) malloc (s-s1+1);
+		strncpy (dir,s1, s-s1);
+		dir[s-s1] = '\0';
+		// Check if absolute path was specified for propper path
+		if (!bToolGeneratedPathUsed )
+		{
+			if (strncmp (tool, s1, tooll) == 0 ||
+				strncmp (dbroot, s1, dbrootl) == 0)
+			{
+				fprintf (stderr,
+				"Error-%s: not permitted for directory $TOOL or $DBROOT!\n", ISTAT);
+				free (s1);
+				ret = MY_RET_ERROR;
+				continue;
+			}
+			char tmp1[MAX_PATH], tmp2[MAX_PATH];
+			strcpy(tmp1, own);
+			strcpy(tmp2, s1);
+			strupr(tmp1);
+			strupr(tmp2);
+			BSlash2Slash(tmp1);
+			BSlash2Slash(tmp2);
+			if (strncmp (tmp1, tmp2, ownl))
+			{
+				fprintf (stderr,
+					"Error-%s: OWN not in %s\n",ISTAT, s1);
+				free (s1);
+				ret = MY_RET_ERROR;
+				continue;
+			}
+			/* PTS 1105004 
+			if (_chdir (dir) != 0)
+			{
+				fprintf (stderr,
+					"Error-%s: cannot change directory to %s\n", ISTAT, dir);
+				free (dir);
+				free (s1);
+				ret = MY_NOTOK;
+				continue;
+			}
+			*/
+		}
+		
+		// Check whether file already exists (if so, error), not if bNoCheck == TRUE
+		// (Tool generated path is not allowed since it specifies also files in the 
+		//  complete hirarchy)
+		struct _stat buf;
+	    if (!bModuleExists && !bToolGeneratedPathUsed)
+			if ((_stat( s1, &buf )==0))
+				bModuleExists=TRUE;
+
+		if (bModuleExists)
+	    {
+			fprintf (stdout, "Module %s local exists\n", s1);
+		}
+		
+
+		char ExtModuleName[MAX_MODULENAME_LENGTH+1];
+		// If Module is description, also encode versin (fast/slow/quick in the ModuleName)
+		// in "f" is the Modulename, in "dir" the directory path
+		if (!(f [0] == 'v' && strlen (f) > 2))		// if f is not a valid module name ?
+		{
+			const char * DESC_FAST = "/desc/fast";
+			const char * DESC_QUICK = "/desc/quick";
+			const char * DESC_SLOW = "/desc/slow";
+			const char * FAST = "fast/";
+			const char * QUICK = "quick/";
+			const char * SLOW = "slow/";
+			char *p = NULL;
+
+			// Perform check of module name length
+			if (strlen(f) > (MAX_MODULENAME_LENGTH - strlen(QUICK)))
+			{
+				fprintf (stderr,
+				   "Error-%s: file name %s longer than %d characters\n", ISTAT,
+					f, (MAX_MODULENAME_LENGTH - strlen(QUICK)));
+				ret = MY_RET_ERROR;
+				continue;
+			}
+
+			// search for the propper vmake-version (fast, slow or quick) (final position in the  string)
+			// and add the propper sign to the ExtModuleName
+			if ((p=strstr(dir, DESC_FAST)) != NULL) 
+			{
+				// fast version specified
+				strcpy(ExtModuleName, FAST);
+				strcat(ExtModuleName, f);
+			}
+			else
+				if ((p=strstr(dir, DESC_QUICK)) != NULL)
+				{
+					// quick version specified
+					strcpy(ExtModuleName, QUICK);
+					strcat(ExtModuleName, f);
+				}
+				else
+					if (strstr(dir, DESC_SLOW) != NULL)
+					{
+						// slow version specified
+						strcpy(ExtModuleName, SLOW);
+						strcat(ExtModuleName, f);
+					}
+					else
+						// no version information obtained
+						strcpy(ExtModuleName, f);
+		}
+		else
+		{
+			strncpy(ExtModuleName, f, MAX_MODULENAME_LENGTH);
+			ExtModuleName[MAX_MODULENAME_LENGTH] = '\0';
+		}
+
+		
+		free(dir);
+		
+		ret = DoIStat (s1, ExtModuleName, grp);		// Finally try to stat module
+		free (s1);
+	}  // for
+	if (own) free (own);
+	if (grp) free (grp);
+	
+	/* CTS 1107012 
+	if (! ExpandReturn)
+		ret = (ret < MY_RET_NO_LOCKED) ? 1 :0;
+*/	
+	return ret;
+}
+/* <- CTS 1103611 */
+
+
+// Perform actual IStat
+int DoIStat (const char * ModulePath, const char * Module, const char *Grp)
+{
+	const char * ServerPipeName = NULL;
+	HANDLE hServerPipe=INVALID_HANDLE_VALUE;
+	T_IMSSG IMSSG;
+	int ret = MY_NOTOK;
+	DWORD bytesRead;
+	BOOL bResult;
+	char CurrentUser[MAX_USER_LENGTH];/* CTS 1107012 */
+	int newRet = MY_RET_NO_LOCKED;
+
+	try
+	{
+		// Connect to the named pipe of the iserver
+		//  get the pipename
+		ServerPipeName = GetIServerPipeName(Grp);
+		if (ServerPipeName == NULL)
+			throw "cannot get iserver pipe name";
+
+		//  try to open the pipe
+		hServerPipe = MyOpenServerPipe(ServerPipeName); 
+		if (hServerPipe == INVALID_HANDLE_VALUE)
+			throw "cannot get iserver pipe";
+
+		//  send lock-request for the specified file and user
+		if (FillIMSSG(&IMSSG, Module, eSTAT) != MY_OK)
+			throw "cannot build message block";
+		
+		strcpy(CurrentUser,IMSSG.User); /* CTS 1107012 */
+
+		if (MySendMessage(hServerPipe, &IMSSG) != MY_OK)
+			throw "cannot send message";
+		
+		bResult = ReadFile (hServerPipe, &IMSSG, sizeof(T_IMSSG), &bytesRead, NULL);
+
+		if (!bResult)
+		{
+			fprintf(stderr, "Error DoIStat: ReadFile returns %li.\n",
+			GetLastError());
+			ret = MY_NOTOK;
+		}
+		else
+			if (IMSSG.RequestType == eACK_NOT_LOCKED)		// Module does not exist
+			{
+				fprintf(stdout, "Module %s is not locked \n", IMSSG.Module );
+		        if ( strlen( IMSSG.User ) > 0 )
+				{
+					fprintf(stdout, "Last lock of %s by ", IMSSG.Module );
+					// lookup d-user and print full name
+					{
+						char cmd[80];
+						sprintf(cmd, "ulookup.pl %s", IMSSG.User);
+						ksystem(cmd);
+					}
+					fprintf(stdout, " (%s)\n       on node %s", IMSSG.User, IMSSG.Node);
+					fprintf(stdout, " (Unlockdate: %4i-%02i-%02i %02i:%02i)\n",
+					IMSSG.date.wYear,
+					IMSSG.date.wMonth,
+					IMSSG.date.wDay,
+					IMSSG.date.wHour,
+					IMSSG.date.wMinute);
+				}
+				ret= MY_OK;
+			}
+			else
+				if (( IMSSG.RequestType == eACK_ALLREADY_LOCKED ) ||
+					( IMSSG.RequestType == eACK_MLOCKED ) )
+				{
+					fprintf(stdout, "Module %s is ", IMSSG.Module);
+					if ( IMSSG.RequestType == eACK_MLOCKED )
+					{
+						fprintf(stdout, "shared ");
+					}
+					fprintf(stdout, "locked by ");
+					// lookup d-user and print full name
+					{
+						char cmd[80];
+						sprintf(cmd, "ulookup.pl %s", IMSSG.User);
+						ksystem(cmd);
+					}
+					fprintf(stdout, " (%s)\n", IMSSG.User);
+					if ( *(IMSSG.Node) != '\0')
+					{
+						fprintf(stdout, "       on node %s", IMSSG.Node);
+						fprintf(stdout, " (Lockdate: %4i-%02i-%02i %02i:%02i)\n",
+						IMSSG.date.wYear,
+						IMSSG.date.wMonth,
+						IMSSG.date.wDay,
+						IMSSG.date.wHour,
+						IMSSG.date.wMinute);
+					}
+
+					/* CTS 1107012 */
+					if (strcmp (IMSSG.User, CurrentUser) == 0 ) /* self */
+						newRet |= (IMSSG.RequestType == eACK_MLOCKED ? MY_RET_SELF_MLOCKED : MY_RET_SELF_LOCKED);
+					else
+						newRet |= (IMSSG.RequestType == eACK_MLOCKED ? MY_RET_OTHER_MLOCKED : MY_RET_OTHER_LOCKED);
+					/* <- CTS 1107012 */
+
+					// all other shared users and the last unlocker ( CTS 1103773 )
+					ret= MY_OK;
+					do 
+					{
+						bResult = ReadFile (hServerPipe, &IMSSG, sizeof(T_IMSSG), &bytesRead, NULL);
+						if (!bResult)
+						{
+							fprintf(stderr, "Error DoIStat: ReadFile returns %li.\n",
+							GetLastError());
+							ret = MY_NOTOK;
+						}
+						else
+						{
+							if ( IMSSG.RequestType == eACK_MLOCKED ) 
+							{
+								fprintf(stdout, "Module is also shared locked by ");
+								{
+									char cmd[80];
+									sprintf(cmd, "ulookup.pl %s", IMSSG.User);
+									ksystem(cmd);
+								}
+								fprintf(stdout, " (%s)\n", IMSSG.User);
+
+								/* CTS 1107012 */
+								newRet |= strcmp(IMSSG.User, CurrentUser) == 0 ? MY_RET_SELF_MLOCKED : MY_RET_OTHER_MLOCKED; 
+							}
+							else
+								if ( IMSSG.RequestType == eACK_NOT_LOCKED ) 
+								{
+									if ( *(IMSSG.User) == '\0')
+									{
+										fprintf(stdout,"No unlock infomation\n"); 
+									}
+									else
+									{
+										fprintf(stdout, "Last unlock by ");
+										{
+											char cmd[80];
+											sprintf(cmd, "ulookup.pl %s", IMSSG.User);
+											ksystem(cmd);
+										}
+										fprintf(stdout, " (%s)\n", IMSSG.User);
+									}
+								}
+								else
+								{
+									fprintf(stderr, "User who locked the module not found \n");
+								}
+						}
+					}
+					while ( (IMSSG.RequestType == eACK_MLOCKED ) && ( ret == MY_OK ));
+
+				}
+				else
+				{
+					ret = MY_NOTOK;
+					fprintf(stderr, "DoIStat: Error in Communication \n");
+				}
+	}		
+	catch(const char * message)
+	{
+		// simple error handling (no need to evaluate API-Error)
+		fprintf(stderr, "Error-%s: %s (affected: %s)\n", ISTAT, message, Module);
+		ret=MY_NOTOK;
+	}
+	if (hServerPipe != INVALID_HANDLE_VALUE) 
+		CloseHandle (hServerPipe);
+	/* CTS 1107012 */
+	if (ret == MY_NOTOK)
+		newRet = MY_RET_ERROR;
+	return newRet;
+}
+
+
+
+// Get the PipeName
+// Convention: PipeName = "SHARENAME" of the GRP-Share on the Group-Node
+char * GetIServerPipeName(const char *Grp)
+{
+	if (Grp == NULL) return NULL;
+	if (strlen(Grp)<2) return NULL;
+
+	// Before doing anything with Grp, remove trailing double slash, if existent
+	char MyGrp[MAX_PATH];
+	int Grpl = strlen(Grp);
+	if (Grpl >= MAX_PATH) return NULL;
+	strcpy(MyGrp, Grp);
+	if (Grpl > 2)
+		if ( MyGrp[Grpl-1] == '/' && MyGrp[Grpl-2] == '/')
+			MyGrp[Grpl-2] = '\0';
+
+	// GRP Share can also be provided as network drive, then
+	// GetDriveType provides the appropriat share name according to UNC 
+	// convention
+	char * Node = NULL;
+	char * Share = NULL;
+
+
+	// Check for UNC name
+	if (strlen(MyGrp) > 2 && 
+		((MyGrp[0] == '\\' && MyGrp[1] == '\\') || 
+		 (MyGrp[0] == '/' && MyGrp[1] == '/')))
+	{
+		if (SplitUNCName(MyGrp, &Node, &Share) != TRUE)
+			return NULL;
+	}
+	else
+	{
+		// the grp-share has to be a network drive
+		if (!is_device(MyGrp))
+		{
+			fprintf(stderr, "Error: GRP has to be either network drive or UNC name!\n");
+			return NULL;
+		}
+		else
+		{	// grp is a device name (eg z:)
+			char root[3];
+			strncpy(root,MyGrp,2);
+			root[2] = '\0';
+			UINT DriveType = GetDriveType(root);
+			switch (DriveType)
+			{
+			case 0: fprintf(stderr, "Error: cannot detect drive type of GRP %s\n",
+						MyGrp);
+				return NULL;
+				break;
+			case 1: fprintf(stderr, "Error: root directory for GRP %s does not exist\n",
+						MyGrp);
+				return NULL;
+				break;
+			case DRIVE_FIXED:
+					fprintf(stderr, "Error: local directory not yet supported for GRP\n", IPUT);
+					fprintf(stderr, "	    Use share name according to UNC convention \n");
+					fprintf(stderr, "       or network drive instead!\n");
+					return NULL;
+				break;
+			case DRIVE_REMOTE:
+				static char buf[MAX_PATH*2];		// quick and dirty
+				static char UNCAbsPath[MAX_PATH*2];
+				UNIVERSAL_NAME_INFO *UNCInfo;
+				DWORD dwSize;
+				dwSize = MAX_PATH*2;
+				if (WNetGetUniversalName(root,
+						UNIVERSAL_NAME_INFO_LEVEL,
+						buf,
+						&dwSize				
+						) != NO_ERROR)
+				{
+					fprintf(stderr, "Error-%s: cannot get universal name for GRP network drive [%li]\n",
+						IPUT, GetLastError());
+					return NULL;
+				}
+				else
+				{
+					// Build up complete UNC-Name
+					UNCInfo = (UNIVERSAL_NAME_INFO*)buf;
+					strcpy(UNCAbsPath,UNCInfo->lpUniversalName);
+					strcat(UNCAbsPath, "/");
+					strcat(UNCAbsPath, &MyGrp[2]);	// strlen is greater 2, so this operation is save
+					if (SplitUNCName(UNCAbsPath, &Node, &Share) != TRUE)
+						return NULL;
+				}
+				break;
+			default: fprintf(stderr, "Error-%s: drive type for GRP %s not supported\n",
+						 IPUT, MyGrp);
+			}
+		}
+	}
+
+	if (Node && Share)
+	{
+		char * PipeName = new char [strlen(Node) + strlen(Share) + 9];
+		strcpy(PipeName, "\\\\");
+
+		// If Node = local computer name then use "." rather then computer name
+		char LocalNode[MAX_NODE_LENGTH];
+		DWORD dwNodeSize = MAX_NODE_LENGTH;
+		if (GetComputerName(LocalNode, &dwNodeSize)==TRUE)
+			if (strcmp(_strupr(Node),_strupr(LocalNode)) == 0)
+				strcat(PipeName, ".");
+			else
+				strcat(PipeName, Node);
+		else
+			strcat(PipeName, Node);
+
+		strcat(PipeName, "\\pipe\\");
+		strcat(PipeName, Share);
+		delete [] Node;
+		delete [] Share;
+		return PipeName;
+	}
+	else
+		return NULL;
+}
+
+
+HANDLE MyOpenServerPipe(const char *ServerPipeName)
+{
+	HANDLE hPipe=INVALID_HANDLE_VALUE;                     
+	CHAR   inBuf[IN_BUF_SIZE] = "";     // Input buffer for pipe.
+
+	CHAR   errorBuf[ERR_BUF_SIZE] = ""; // Used for error messages.
+	BOOL   ExitLoop = FALSE;            // Boolean Flag to exit loop.
+
+	// 03.03.98 G. Großmann
+	//if (WaitNamedPipe(ServerPipeName, NMPWAIT_USE_DEFAULT_WAIT))
+	if (WaitNamedPipe(ServerPipeName, NMPWAIT_WAIT_FOREVER))
+	{
+		// Open Pipe
+		BOOL bDone; int TryCount=100;
+		int LastError;
+		do
+		{
+			hPipe = CreateFile(ServerPipeName,
+				GENERIC_WRITE 
+				| GENERIC_READ,
+				0,
+				NULL,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL,
+				NULL);
+			if (hPipe == INVALID_HANDLE_VALUE)
+			{
+				LastError=GetLastError();
+  			    if (LastError != ERROR_PIPE_BUSY && LastError != ERROR_SHARING_VIOLATION)
+				{
+					fprintf(stderr, "Error: CreateFile for open IServerPipe returns %li.\n",LastError);
+					bDone=TRUE;
+				}
+				else
+				{
+					TryCount--;
+					if (TryCount==0)
+					{
+						fprintf(stderr, "Error: IServerPipe pipe busy, try again later!\n");
+						bDone=TRUE;
+					}
+					else
+						// Collision
+						bDone=FALSE, Sleep(100);
+				}
+			}
+			else
+				bDone=TRUE;
+			
+		} while (!bDone);
+	}
+	else
+		fprintf(stderr, "Error: WaitNamedPipe returns %li.\n",GetLastError());
+	
+    return hPipe;
+} 
+
+
+// Enter Module, Node and UserName into T_IMSSG structure
+int FillIMSSG( P_IMSSG pIMSSG, const char * Module, T_IREQUEST RequestType )
+{
+	int ret = MY_OK;
+	if (pIMSSG)
+	{
+		try
+		{
+			DWORD nSize;
+			pIMSSG->RequestType = RequestType;
+			strncpy(pIMSSG->Module, Module?Module:"", MAX_MODULE_LENGTH);
+			
+			nSize=MAX_NODE_LENGTH-1;
+			if (GetComputerName(pIMSSG->Node, &nSize) != TRUE)
+			{
+				fprintf(stderr, "Comutername: %s \n", pIMSSG->Node);
+				throw "Error: GetComputerName failed!";
+			}
+			
+			nSize=MAX_USER_LENGTH;
+			
+			if (GetUserName(pIMSSG->User, &nSize) != TRUE)
+				throw "Error: GetUser failed!";
+			 
+			strupr(pIMSSG->Node);
+			strupr(pIMSSG->User);
+
+			ret = MY_OK;
+		}
+		catch(char * ErrorString)
+		{
+			fprintf(stderr,"%s : retCode = %li\n", ErrorString, GetLastError());
+			ret = MY_NOTOK;
+		}
+	}
+	else
+		ret= MY_NOTOK;
+
+	return ret;
+}
+
+
+int MySendMessage (HANDLE hPipe, P_IMSSG pIMSSG)
+{
+	int ret = MY_NOTOK;
+	DWORD dwBytesWritten;
+	BOOL bResult;
+	bResult = WriteFile(hPipe,
+		pIMSSG,
+		sizeof (T_IMSSG),
+		&dwBytesWritten,
+		NULL);
+	if (!bResult)
+	{
+		fprintf(stderr, "Error MySendMessage: WriteFile returns %li.\n",
+			GetLastError());
+		ret = MY_NOTOK;
+	}
+	else
+	{
+		ret = MY_OK;
+	}
+
+	return ret;
+}
+			
+// Get Acknowledge of a previous IMSSG 
+int MyGetAckIMSSG (HANDLE hPipe, P_IMSSG pIMSSG)
+{
+	int ret = MY_NOTOK;
+	DWORD bytesRead;
+	BOOL bResult;
+
+	bResult = ReadFile (hPipe, pIMSSG, sizeof(T_IMSSG), &bytesRead, NULL);
+
+	if (!bResult)
+	{
+		fprintf(stderr, "Error MyGetAckIMSSG: ReadFile returns %li.\n",
+			GetLastError());
+		ret = MY_NOTOK;
+	}
+	else
+	{
+	    // check communication
+	    switch(pIMSSG->RequestType)
+	    {
+	    case eACK_OK: 		// previous message is acknowledged and OK
+			ret = MY_OK;
+			break;
+
+		case eACK_ALLREADY_LOCKED:	// a request to lock a module fails because it is already locked
+									// pIMMSG contains further info
+			fprintf(stderr, "Error: Module %s already locked by ", pIMSSG->Module);
+
+			// lookup d-user and print full name
+			{
+				char cmd[80];
+				sprintf(cmd, "ulookup.pl %s", pIMSSG->User);
+				ksystem(cmd);
+			}
+			fprintf(stderr, " (%s)\n       on node %s", pIMSSG->User, pIMSSG->Node);
+			fprintf(stderr, " (Lockdate: %4i-%02i-%02i %02i:%02i)\n",
+					pIMSSG->date.wYear,
+					pIMSSG->date.wMonth,
+					pIMSSG->date.wDay,
+					pIMSSG->date.wHour,
+					pIMSSG->date.wMinute);
+			ret = MY_NOTOK_ALLREADY_LOCKED;
+			break;
+
+		case eACK_NOT_LOCKED:	// request to unlock module fails because it is not locked
+			fprintf(stderr, "Error: module %s is not locked or new version\n",
+					pIMSSG->Module);
+			ret = MY_NOTOK_NOT_LOCKED;
+			break;
+
+		case eACK_LOCKED_DIFFERENT_USER:	// a request to lock a module fails because it is locked by a different user
+									// pIMMSG contains further info
+			fprintf(stderr, "Error: Module %s locked by different user ", pIMSSG->Module);
+			// lookup d-user and print full name
+			{
+				char cmd[80];
+				sprintf(cmd, "ulookup.pl %s", pIMSSG->User);
+				ksystem(cmd);
+			}
+
+			fprintf(stderr, " (%s)\n       on node %s", pIMSSG->User, pIMSSG->Node);
+			fprintf(stderr, " (Lockdate: %4i-%02i-%02i %02i:%02i)\n",
+					pIMSSG->date.wYear,
+					pIMSSG->date.wMonth,
+					pIMSSG->date.wDay,
+					pIMSSG->date.wHour,
+					pIMSSG->date.wMinute);
+			
+					
+			ret = MY_NOTOK_LOCKED_DIFFERENT_USER;
+			break;
+
+		case eACK_LOCKED_DIFFERENT_NODE:
+			fprintf(stderr, "Error: Module %s locked on a different node (%s)\n",
+					pIMSSG->Module, pIMSSG->Node);
+			fprintf(stderr, "       (Lockdate: %4i-%02i-%02i %02i:%02i)\n",
+					pIMSSG->date.wYear,
+					pIMSSG->date.wMonth,
+					pIMSSG->date.wDay,
+					pIMSSG->date.wHour,
+					pIMSSG->date.wMinute);
+					
+			ret = MY_NOTOK_LOCKED_DIFFERENT_NODE;
+			break;
+
+
+		case eACK_MAX_USERS_MGET_REACHED:	// Maximum number of users reached whow are allowed to concurrently
+											// lock a module, pIMMSG does not contain any further info
+			fprintf(stderr, "Error: Module %s locked by to many users\n",pIMSSG->Module);
+			ret = MY_NOTOK_MAX_USERS_MGET_REACHED;
+			break;
+
+		case eACK_NOT_LOCKED_BY_USER:		// Module was not locked by the current user
+			fprintf(stderr, "Error: Module %s is not locked by the current user or new version\n",pIMSSG->Module);
+			ret = MY_NOTOK_NOT_LOCKED_BY_USER;
+			break;
+			
+		case eACK_TREE_READONLY:
+			fprintf(stderr, "Error: development tree is read only (contact administrator)\n");
+			ret = MY_NOTOK;
+			break;
+
+		case eACK_NOTOK:	// previous messag is acknowledged but not OK (general error)
+			fprintf(stderr, "General error: protocol error (ACK_NOTOK) when communicating with iserver!\n");
+			ret = MY_NOTOK;
+			break;
+		
+		case eACK_MLOCKED:	// previous messag is acknowledged but not OK (general error)
+			fprintf(stderr, "Error: Module %s already shared locked by ", pIMSSG->Module);
+
+			// lookup d-user and print full name
+			{
+				char cmd[80];
+				sprintf(cmd, "ulookup.pl %s", pIMSSG->User);
+				ksystem(cmd);
+			}
+			fprintf(stderr, " (%s)\n       on node %s", pIMSSG->User, pIMSSG->Node);
+			fprintf(stderr, " (Lockdate: %4i-%02i-%02i %02i:%02i)\n",
+					pIMSSG->date.wYear,
+					pIMSSG->date.wMonth,
+					pIMSSG->date.wDay,
+					pIMSSG->date.wHour,
+					pIMSSG->date.wMinute);
+			ret = MY_NOTOK_ALLREADY_LOCKED;
+			break;
+
+		default: 
+			fprintf(stderr, "Protocol error: expected acknowledgment but got %i!\n",
+					 pIMSSG->RequestType);
+			ret = MY_NOTOK;
+		}
+	}
+	return ret;
+}
+
+
+
+
+// Send a module to the IServer
+// (last modification time is also sent to the server and set for the new module on the server)
+// (only newer objects will be written on the server)
+int MySendModule (HANDLE hPipe, const char * ModulePath, const BOOL bBackup, BOOL bIgnoreDate)
+{
+	int ret = MY_NOTOK;
+	DWORD dwBytesWritten, dwBytesRead;
+	BOOL bResult=TRUE;
+	HANDLE hModule;
+	char errBuf[1000];
+	T_IMSGBUF MsgBuf;
+	T_IFileInfo IFileInfo;
+	T_IREQUEST	eAckMsg;
+	
+	try
+	{
+
+		// Open Module for read exclusive (so we make sure no one else has opened the file)
+		hModule = CreateFile(
+			ModulePath,						// Name der Datei
+			GENERIC_READ, 					// Lesen
+			0,								// File nicht geshared
+			NULL,							// No inheritance
+			OPEN_EXISTING ,					// File must exist
+			FILE_ATTRIBUTE_NORMAL,
+			NULL);
+		
+		if (hModule == INVALID_HANDLE_VALUE)
+		{
+			sprintf(errBuf, "opening file %s ", ModulePath);
+			sprintf(errBuf, "returns: %li\n",GetLastError());
+			throw errBuf;
+		}
+		
+		// Get file last modified date
+		FILETIME mtime; 
+		if (GetFileTime(hModule,NULL,NULL,&mtime)==NULL)
+		{
+			sprintf(errBuf, "cannot get file time last modified for module %s (rc = %li)",
+				ModulePath, GetLastError());
+			throw errBuf;
+		}
+
+		IFileInfo.mtime = mtime;	// enter modification time
+		IFileInfo.bBackup = bBackup;
+		
+		// First send the file information to the IServer (relative  path without $OWN)
+		// Try all possibilities due to slash/backslash usage
+		char *sub = strstr(ModulePath,"/sys/");
+		if (!sub)
+			sub = strstr(ModulePath,"\\sys\\");
+		if (!sub)
+			sub = strstr(ModulePath,"\\sys/");
+		if (!sub)
+			sub = strstr(ModulePath,"/sys\\");
+		if (sub) 
+			sub++;
+		else
+			throw "internal error: cannot extract module name";
+
+		strcpy (IFileInfo.Filename, sub);	// Enter file name into structure
+		MsgBuf.Signature = eFileInfo;
+		MsgBuf.len = sizeof (T_IFileInfo);
+		memcpy(MsgBuf.Buf, &IFileInfo, sizeof(T_IFileInfo));
+		
+		// Send the buffer with FileInfo
+		bResult = WriteFile(hPipe,
+			&MsgBuf,
+			sizeof (MsgBuf),
+			&dwBytesWritten,
+			NULL);
+		if (!bResult || (dwBytesWritten != sizeof(MsgBuf)))
+		{
+			sprintf(errBuf, "send module info for %s to iserver returns %li.\n",
+				ModulePath, GetLastError());
+			throw errBuf;
+		}
+
+		// check whether the file is not newer by checking iserver return statement
+		bResult = ReadFile (hPipe, &eAckMsg, sizeof(eAckMsg), &dwBytesRead, NULL);
+		if (!bResult || (dwBytesRead != sizeof(eAckMsg)))
+		{
+			sprintf(errBuf, "cannot get ack for send module info of %s from iserver (rc = %li).\n",
+				ModulePath, GetLastError());
+			throw errBuf;
+		}
+
+		// in loop read file contents into the message buffer and 
+		// send the buffer to the server
+		// send in loop last package of the file is sent
+		// but only if module on the server is not newer then the module on the current node
+
+		if ( eAckMsg != eACK_OK)
+		{
+			if (eAckMsg == eACK_NOT_CASE_SENSITIVE) /* &gar returncode if not casesensitive */
+			{
+				fprintf(stdout, "%s: --> %s must have the same name as on server (case sensitive) \n",IPUT, ModulePath);
+				sprintf(errBuf, "module %s have not the same name (case sensitive) on server, \nput not allowed!", ModulePath);
+				throw errBuf;
+			}
+			else
+			{
+				fprintf(stdout, "%s: --> %s newer or same age on server...\n",IPUT, ModulePath);
+				if (!bIgnoreDate)
+				{
+					sprintf(errBuf, "module %s newer on server, put not allowed!", ModulePath);
+					throw errBuf;
+				}
+			}
+		}
+		else
+		{
+			do 
+			{
+				// read a packet 
+				MsgBuf.Signature = ePacket;
+				bResult=ReadFile (hModule, MsgBuf.Buf, MSG_BUF_SIZE, &MsgBuf.len, NULL);
+				if (!bResult)
+				{	
+					char buf [MAX_PATH + 80];
+					sprintf (buf, "ReadFile for module %s failed [%li]",
+						ModulePath, GetLastError());
+					throw buf;
+				}
+				else
+					if (MsgBuf.len == 0) // End of file reached?
+						MsgBuf.Signature = eLastPacket;
+
+				// send a packet
+				if (WriteFile(hPipe, &MsgBuf, sizeof (T_IMSGBUF), &dwBytesWritten, NULL) != TRUE)
+				{
+					char buf [MAX_PATH + 80];
+					sprintf (buf, "cannot write pipe for module %s! [%li]",
+						ModulePath, GetLastError());
+					throw buf;
+				}
+			} while (MsgBuf.Signature == ePacket);
+			fprintf(stdout,"%s: %s copied...\n",IPUT, ModulePath);
+		}
+
+		CloseHandle(hModule);
+
+		ret = MY_OK;
+	}
+	catch (const char * errstring)
+	{
+		fprintf(stderr, "Error-%s (MySendModule): %s\n", IPUT, errstring);
+		CloseHandle(hModule);
+		ret = MY_NOTOK;
+	}
+	return ret;
+}
+			
+
+int MySendModuleDependents (HANDLE hPipe, const char * ModulePath, FILETIME *preftime)
+{
+	int ret = MY_NOTOK;
+
+	static char *ppSearchPath [] = {
+			"/fast/obj/", "/quick/obj/", "/slow/obj/",
+			"/fast/obj/", "/quick/obj/", "/slow/obj/",
+			"/fast/gsize/", "/quick/gsize/", "/slow/gsize/",
+			"/fast/gsize/", "/quick/gsize/", "/slow/gsize/",
+			"/fast/dates/", "/quick/dates/", "/slow/dates/",
+			"/fast/dates/", "/quick/dates/", "/slow/dates/",
+			"/dates/", 
+			"/dates/", 
+			"/incl/", "/incl/", "/incl/",
+			"/incl/", "/incl/", "/incl/"};
+			
+	static char *ppFileExt [] = {
+			".o", ".o", ".o", 
+			"-*.o", "-*.o", "-*.o",			// for variants 
+			".gsz", ".gsz", ".gsz",
+			"-*.gsz", "-*.gsz", "-*.gsz",	// for variants
+			".dat",".dat",".dat",
+			"-*.dat","-*.dat","-*.dat",		// for variants
+			".dat",
+			"-*.dat",						// for variants
+			".con", ".typ", ".h",
+			"-*.con", "-*.typ", "-*.h"};	// for variants
+
+	const int MAX_FILELIST_LENGTH = sizeof(ppSearchPath)/sizeof(char*);
+    char tmp[MAX_PATH];
+    char * Layer, *p=NULL;
+	char * WRK = getenv("WRK");
+	char FilePath[MAX_PATH];
+	char FilePattern[MAX_PATH];
+	char FileAbsName[MAX_PATH];
+	WIN32_FIND_DATA	FindFileData;
+
+	/* PTS 1107807 */
+	char * SAPDB_NO_DEPCOPY = getenv("SAPDB_NO_DEPCOPY");
+
+	if (SAPDB_NO_DEPCOPY)
+	{
+		fprintf(stdout,"Ignore dependencies (SAPDB_NO_DEPCOPY is set)\n");
+		return MY_OK;
+	}
+			
+	try
+	{
+		T_IMSSG IMSSG;
+
+		if (!WRK)
+			throw "cannot get WRK from environment";
+		if (strlen(WRK)<1)
+			throw "WRK not defined in environment";
+
+		// Extract Modulename from path (either slash or backslash is used as a delimiter)
+		char * p = strrchr(ModulePath, '/');
+		char * q = strrchr(ModulePath, '\\');
+		char * ModuleName = (p>q)?p:q;
+		if (strlen(ModuleName)>0)
+			ModuleName++;
+		else
+			throw "invalid module name";
+
+
+        strcpy(tmp, ModulePath);
+        tmp[ModuleName-ModulePath-1] = '\0';
+		p = strrchr(tmp, '/');
+		q = strrchr(tmp, '\\');
+		Layer = (p>q)?++p:++q;
+
+		// The NT-Time structure is working in 100*10(E-9)s Intervals.
+		// Vmake does not stick to this accuracy, so a tollereance of 2 seconds is added
+		LARGE_INTEGER lTmpTime;
+		memcpy(&lTmpTime, preftime, sizeof (LARGE_INTEGER));
+		lTmpTime.QuadPart -= 20000000L;			// subtract 2 seconds from the reference time
+		memcpy(preftime, &lTmpTime, sizeof (LARGE_INTEGER));
+
+		// Build up module list to copy
+		for (int i=0; i<MAX_FILELIST_LENGTH; i++)
+		{
+			strcpy(FilePath, WRK);
+			strcat(FilePath, ppSearchPath[i]);
+
+            switch ( i )
+            {
+            case 0:  case 1:  case 2:
+            case 3:  case 4:  case 5:
+            case 12: case 13: case 14:
+            case 15: case 16: case 17:
+            case 18:
+            case 19:
+                strcat(FilePath, Layer);
+                strcat(FilePath, "/");
+            }
+
+			strcpy(FilePattern, FilePath);
+			strcat(FilePattern, ModuleName);
+            if ( p = strrchr( FilePattern, '.' ) )
+            {
+                *p = '\0';
+            }
+			strcat(FilePattern, ppFileExt[i]);
+
+			// Try to send file but only if it exists and it is not older then reference module
+			HANDLE hFindFile = FindFirstFile(
+						FilePattern,
+						&FindFileData);
+
+			if (hFindFile != INVALID_HANDLE_VALUE)
+			{
+				do
+				{
+					// get the module date
+					strcpy(FileAbsName, FilePath);
+					strcat(FileAbsName, FindFileData.cFileName);
+
+					HANDLE hTmpHandle =  CreateFile ( 
+						FileAbsName, GENERIC_READ, FILE_SHARE_READ, NULL, 
+						OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+					FILETIME mtime, *pmtime=NULL; 
+
+					if (hTmpHandle != INVALID_HANDLE_VALUE)
+					{
+						if (GetFileTime(hTmpHandle,NULL,NULL,&mtime)!=NULL)
+							pmtime=&mtime;
+						CloseHandle(hTmpHandle);
+					}
+					if (pmtime && preftime)
+					{
+						if (CompareFileTime(preftime, pmtime) > 0)	// dependent module is older
+						{
+							fprintf(stdout, "%s: -> %s older than reference module\n",IPUT, FileAbsName);
+							continue;
+						}
+					}
+					if (FillIMSSG(&IMSSG, NULL, (eRECEIVE)) != MY_OK)
+						throw "";
+					if (MySendMessage(hPipe, &IMSSG) != MY_OK)
+						throw "";
+					if (MyGetAckIMSSG(hPipe, &IMSSG) != MY_OK)
+						throw "";
+					if (MySendModule(hPipe, FileAbsName, FALSE, TRUE) != MY_OK)	// Call send function and send module
+						throw "";
+					if (MyGetAckIMSSG(hPipe, &IMSSG) != MY_OK)
+						throw "";
+				} while (FindNextFile(hFindFile, &FindFileData));  // do
+			} // if
+			FindClose(hFindFile);
+		}
+		ret = MY_OK;
+	} 
+	catch (const char *msg)
+	{
+		if (strlen(msg)>0)
+			fprintf(stderr, "Error-%s: %s!\n", IPUT, msg);
+		ret = MY_NOTOK;
+	}
+		
+	return ret;
+}
+
+
+// send all objects generated for one layer
+int MySendLayerDependentObjects (HANDLE hPipe, const char * Layer)
+{
+	int ret = MY_NOTOK;
+	
+	static char *ppSearchPath [] = {
+		"/fast/obj/", "/quick/obj/", "/slow/obj/",
+		"/fast/gsize/", "/quick/gsize/", "/slow/gsize/",
+        "/incl/", "/incl/", "/incl/" };
+			
+	static char *ppFileExt [] = {
+		".o", ".o", ".o",
+		".gsz", ".gsz", ".gsz",
+        ".con", ".typ", ".h"};
+
+	const int MAX_FILELIST_LENGTH = sizeof(ppSearchPath)/sizeof(char*);
+	char * WRK = getenv("WRK");
+	char FilePattern[MAX_PATH];
+	char FilePath[MAX_PATH];
+	char ObjectPath[MAX_PATH];
+
+	try
+	{
+		T_IMSSG IMSSG;
+		WIN32_FIND_DATA	FindFileData;
+
+		if (!WRK)
+			throw "cannot get WRK from environment";
+		if (strlen(WRK)<1)
+			throw "WRK not defined in environment";
+
+		// Build up object list to copy
+		for (int i=0; i<MAX_FILELIST_LENGTH; i++)
+		{
+			strcpy(FilePath, WRK);
+			strcat(FilePath, ppSearchPath[i]);
+            if ( i <= 2 )
+            {
+                strcat(FilePath, Layer);
+                strcat(FilePath, "/");
+    			strcpy(FilePattern, FilePath);
+                strcat(FilePattern, "*");
+            }
+            else
+            {
+    			strcpy(FilePattern, FilePath);
+			    strcat(FilePattern, "?");
+			    strcat(FilePattern, Layer);
+			    strcat(FilePattern, "*");
+            }
+    	    strcat(FilePattern, ppFileExt[i]);
+
+			HANDLE hFindFile = FindFirstFile(
+				FilePattern,
+				&FindFileData);
+
+			if (hFindFile == INVALID_HANDLE_VALUE)
+				fprintf(stdout, "%s: no objects in %s found\n", IPUT, FilePath);
+			else
+			{
+				do
+				{
+					// send found object to the server
+					if (FillIMSSG(&IMSSG, NULL, (eRECEIVE)) != MY_OK)
+						throw "";
+					if (MySendMessage(hPipe, &IMSSG) != MY_OK)
+						throw "";
+					if (MyGetAckIMSSG(hPipe, &IMSSG) != MY_OK)
+						throw "";
+					strcpy(ObjectPath, FilePath);
+					strcat(ObjectPath, FindFileData.cFileName);
+					if (MySendModule(hPipe, ObjectPath, FALSE, TRUE) != MY_OK)
+						throw "";
+					if (MyGetAckIMSSG(hPipe, &IMSSG) != MY_OK)
+						throw "";
+
+				}while (FindNextFile(hFindFile, &FindFileData));
+				FindClose(hFindFile);
+			}
+		}
+		ret = MY_OK;
+	} 
+	catch (const char *msg)
+	{
+		if (strlen(msg)>0)
+			fprintf(stderr, "Error-%s: %s!\n", IPUT, msg);
+		ret = MY_NOTOK;
+	}
+	return ret;
+}
+
+
+
+int MyScratchOrDeleteModule (const char * ModulePath, const BOOL bIDEL)
+{
+  char * NoIputScratch = getenv("NOIPUTSCRATCH");
+  
+  if ( bIDEL || !NoIputScratch )
+    { 
+      
+      const char SCRATCH_PROG[] = "scratch";
+      const char SCRATCH_PROG_PATH[] = "/bin/scratch";
+      char * TOOLEXT = getenv("TOOLEXT");
+      char * TOOL = getenv("TOOL");
+      char versions [3];
+      
+      if (!ModulePath) return MY_NOTOK;
+      /* CTS 1105072 */
+      sprintf(versions,"%d",LOCAL_SAVE_VERSIONS);
+      
+      char * cmd = new char [strlen(SCRATCH_PROG_PATH)
+			    + strlen (TOOL?TOOL:"")
+			    + strlen (TOOLEXT?TOOLEXT:"")
+			    + strlen (versions) + 3
+			    + strlen (ModulePath) + 4];
+      
+      if (!cmd) return MY_NOTOK;
+      
+      strcpy(cmd, (TOOL!=NULL?TOOL:""));
+      strcat(cmd, (TOOL!=NULL?SCRATCH_PROG_PATH:SCRATCH_PROG));
+      strcat(cmd, (TOOLEXT!=NULL?TOOLEXT:""));
+      /* CTS 1105072 */
+      strcat(cmd, " -v");
+      strcat(cmd, versions);
+      strcat(cmd, " ");
+      strcat(cmd, ModulePath);
+      
+      if (My_System(cmd) != 0) 
+	{
+	  delete [] cmd;
+	  fprintf(stderr, "\nWarning-%s: cannot scratch local module %s\n",
+		  (bIDEL?IDEL:IPUT), ModulePath); 
+	  return MY_NOTOK;
+	}
+      
+      delete [] cmd;
+    }
+  else
+    {
+      if (DeleteFile(ModulePath) != TRUE)
+	{
+	  fprintf(stderr, "Error: cannot delete module %s, return code: %li\n",
+		  ModulePath, GetLastError());
+	  return MY_NOTOK;
+	}
+    }
+  
+  return MY_OK;
+}
+
+
+int MyCopyRemoteModule(const char *ModulePath, const BOOL bINEW)
+{
+	int ret = MY_NOTOK;
+	const char * ICP_CMD_PATH = "/bin/icp";
+	const char * ICP_CMD = "icp";
+	const char * ICP_OPT = " -o ";
+	char * TOOL = getenv("TOOL");
+	char * TOOLEXT = getenv("TOOLEXT");
+
+
+	// Use icp to copy module
+
+	if (!ModulePath) return MY_NOTOK;
+
+	char *cmd = new char [strlen(ICP_CMD_PATH) 
+				+strlen (ICP_OPT)
+				+strlen (ModulePath) 
+				+strlen (TOOL?TOOL:"")
+				+strlen (TOOLEXT?TOOLEXT:"")
+				+ 5];
+
+	if (!cmd) return MY_NOTOK;
+
+	// if INEW was executed, check whether the specified module already exists
+	if (bINEW)
+		fprintf(stdout, "Check for existence of %s ...\n", ModulePath);
+	else
+		fprintf(stdout, "IGET: ");	// output is completed by icp
+
+
+	strcpy(cmd, (TOOL!=NULL?TOOL:""));
+	strcat(cmd, (TOOL!=NULL?ICP_CMD_PATH:ICP_CMD));
+	strcat(cmd, (TOOLEXT!=NULL?TOOLEXT:""));
+	strcat(cmd, ICP_OPT);
+	strcat(cmd, " ");
+	strcat(cmd, ModulePath);
+
+	if (My_System(cmd) != 0)
+		ret = MY_RECOVER;
+	else
+		ret = MY_OK;
+
+	if (bINEW)
+		
+		if (ret == MY_RECOVER)		// file does not exist, so create it
+		{
+			HANDLE hModule = CreateFile(
+				ModulePath,
+				GENERIC_READ | GENERIC_WRITE,
+				0,
+				NULL,
+				CREATE_NEW,
+				FILE_ATTRIBUTE_NORMAL,
+				NULL);
+
+			if (hModule == INVALID_HANDLE_VALUE)
+			{
+				fprintf(stdout, "Error-%s: cannot create new module %s\n", INEW, ModulePath);
+				fprintf(stdout, "          API-Return-Code = %ld\n", GetLastError());
+				ret = MY_RECOVER;
+			}
+			else
+			{
+				fprintf(stdout, "New Module %s created and module locked\n", ModulePath);
+				ret = MY_OK;
+			}
+
+			CloseHandle(hModule);
+		}
+		else						// file already exists
+		{
+			fprintf(stdout, "Specified Module %s already exists!\n", ModulePath);
+			fprintf(stdout, "Module locked and local copy created\n");
+		}
+			
+
+	delete [] cmd;
+	return ret;
+}
+
+
+int getopt(int argc, char **argv, char *ostr, char **optarg, int * optind)
+{
+	/*
+	 * get option letter from argument vector
+	 */
+	int
+		opterr = 1,		// should error messages be printed?
+		optopt;			// character checked for validity
+
+	#define EMSG	""
+	#define BADCH   -2
+
+
+	static char *place = EMSG;	/* option letter processing */
+	register char *oli;			/* option letter list index */
+
+	if (!*place) {
+		// update scanning pointer
+		if (*optind >= argc || *(place = argv[*optind]) != '-' || !*++place) {
+			return EOF; 
+		}
+		if (*place == '-') {
+			// found "--"
+			++(*optind);
+			return EOF;
+		}
+	}
+
+	/* option letter okay? */
+	if ((optopt = (int)*place++) == (int)':'
+		|| !(oli = strchr(ostr, optopt))) {
+		if (!*place) {
+			++(*optind);
+		}
+		fprintf(stderr,"illegal option %c\n",optopt);
+		return BADCH;
+	}
+	if (*++oli != ':') {	
+		/* don't need argument */
+		*optarg = NULL;
+		if (!*place)
+			++(*optind);
+	} else {
+		/* need an argument */
+		if (*place) {
+			*optarg = place;		/* no white space */
+		} else  if (argc <= ++(*optind)) {
+			/* no arg */
+			place = EMSG;
+			fprintf(stderr,"option -%c requires an argument %c\n",optopt);
+			return BADCH;
+		} else {
+			*optarg = argv[*optind];		/* white space */
+		}
+		place = EMSG;
+		++(*optind);
+	}
+	return optopt;			// return option letter
+}
+
+
+// Create a module list with all modules in $SRC/Layer
+int GetModuleListFromLayer(const char * Layer, int *Entries, char ***ModuleList)
+{
+	const int TMP_BUF_SIZE = 512;	// size of temporary buffer for storing 
+									// intermediate search results
+	int ret = MY_NOTOK;
+	char * SRC = getenv("SRC");
+	char * LayerPath = NULL;
+	char * TmpModuleBuffer[TMP_BUF_SIZE];	// temporary module buffer
+											// for collecting results
+
+	*Entries = 0;
+	*ModuleList = NULL;
+
+	try
+	{
+		// Check for propper environment
+		if (!SRC)
+			throw "cannot get SRC from environment";
+		if (strlen(SRC)<1)
+			throw "SRC not defined in environment";
+		
+		// Open the directory $SRC/Layer and read the valid modules
+		// (scratched  Modules starting with _ are not valid)
+		
+		LayerPath = new char [strlen(SRC) + strlen(Layer) + 5];
+		if (LayerPath == NULL) 
+			throw "cannot allocate enough memory";
+		strcpy(LayerPath, SRC);
+		strcat(LayerPath, "/");
+		strcat(LayerPath, Layer);
+		strcat(LayerPath, "/*");		
+
+		WIN32_FIND_DATA	FindFileData;
+		HANDLE hFindFile = FindFirstFile(
+			LayerPath,
+			&FindFileData);
+
+		if (hFindFile == INVALID_HANDLE_VALUE)
+			throw "invalid layer specification";
+		
+		do
+		{
+			// Checkk for proper file name
+			// Josef, 13.10.97: all files in a layer are acceptable
+			if (/*ProperModuleName(FindFileData.cFileName, Layer)*/ 
+				(strlen(FindFileData.cFileName) > 2) 
+				&& (FindFileData.cFileName[0] != ',')
+				&& (FindFileData.cFileName[0] != '_')
+				&& (FindFileData.dwFileAttributes != FILE_ATTRIBUTE_DIRECTORY ))
+			{
+				// Enter file in list
+				char *p = new char [strlen(SRC) + strlen(Layer) + strlen(FindFileData.cFileName) + 3];
+				if (p == NULL) throw "cannot allocate enough memory";
+				
+				// Build absolute module name
+				strcpy(p, SRC);
+				strcat(p, "/");
+				strcat(p, Layer);
+				strcat(p, "/");
+				strcat(p,FindFileData.cFileName);
+
+				// Check space in temporary buffer
+				if (*Entries < TMP_BUF_SIZE)
+				{
+					TmpModuleBuffer[*Entries] = p;	// Enter module in buffer
+					(*Entries)++;					// Increment module counter												
+				}
+				else
+				{	// cannot collect more then TMP_MODULE_BUFFER modules
+					char buf[256];
+					sprintf(buf,"maximum number of modules (=%i) in layer %s exceeded",
+						TMP_BUF_SIZE, Layer);
+					throw buf;
+				}
+			}
+		}while (FindNextFile(hFindFile, &FindFileData));
+		
+		FindClose(hFindFile);
+
+		// Now allocate memory for return ModuleBuffer
+		*ModuleList = new char * [*Entries];
+		if (*ModuleList == NULL) throw "cannot allocate enough memory";
+		for (int i=0; i<*Entries; i++)
+			(*ModuleList)[i] = TmpModuleBuffer[i];
+
+		delete[] LayerPath;
+		ret = MY_OK;
+	}
+	catch (const char *msg)
+	{
+		// free allocated memory
+		if (LayerPath) delete [] LayerPath;
+		for (int i=0; i<*Entries; i++)
+			delete [] TmpModuleBuffer[i];
+
+		// print message
+		if (strlen(msg)>0)
+			fprintf(stderr, "Error-%s: %s!\n", IPUT, msg);
+		ret = MY_NOTOK;
+	}
+	return ret;
+}
+
+// Check module for proper name
+BOOL ProperModuleName(const char * ModuleName, const char *Layer)
+{
+	if (ModuleName == NULL) 		// Name must be defined
+		return FALSE;
+	if (strlen(ModuleName)<=3)  // Name must be longer then 3 characters (e.g. vak00)
+		return FALSE;
+
+	// second and third character must match layer
+	if (strncmp(ModuleName+1, Layer, strlen(Layer)) != 0)
+		return FALSE;
+
+	// Name must contain alpha numerical characters only
+	const char *p = ModuleName;
+	while (*p)
+		if (isalnum((int)*p))
+			p++;
+		else
+			return FALSE;
+
+	return TRUE;
+}
+
+// Split an UNC-name into Nodename and Sharename and check the rest for propper develop-tree
+// Valid delimiter is either \ or /
+BOOL SplitUNCName(const char *Grp, char **Node, char **Share)
+{
+	char * p,*q;
+	int len;
+	const char * Develop = "DEVELOP";
+
+	// find computer name
+	p = strchr (&Grp[2], '\\');		// find delimiter for Sharename
+	if (p==NULL)	
+		p = strchr (&Grp[2], '/');	//try slash
+
+	if (p == NULL)
+		return FALSE;				// Invalid Grp-Share
+	len = p-Grp-2;
+	*Node = new char [len+1];
+	if (*Node == NULL)
+		return FALSE;
+	strncpy (*Node, &Grp[2], len);
+	(*Node)[len] = '\0';
+
+	// find share name
+	while (*p=='/' || *p=='\\') p++;
+	q = strchr(p, '\\');
+	if (q==NULL)
+		q = strchr(p, '/');			// try slash
+	if (q)
+		len = q-p;
+	else
+		len = strlen(p);
+	if (len<1)
+		return FALSE;
+	*Share = new char [len+1];
+	strncpy(*Share, p, len);
+	(*Share)[len] = '\0';
+
+	// GRP-Tree to put must be "develop", otherwise issue error
+	int err=1;
+	if (q)
+	{
+		p=q;
+		while (*p=='/' || *p=='\\') p++;
+		q = strchr(p, '\\');
+		if (q==NULL)
+			q = strchr(p, '/');			// try slash
+		if (q)
+			len = q-p;
+		else
+			len = strlen(p);
+		if (len<1)
+			err=1;
+		else
+			if (strncmp (_strupr(p), Develop, len) != 0)
+				err=1;
+			else
+				err=0;
+	}
+	else
+		err = 1;
+	if (err)
+	{
+		fprintf(stderr,"Error: GRP-Tree %s does not include directory \"develop\"!\n", Grp);
+		return FALSE;
+	}
+	else
+		return TRUE;
+		
+}
+
+
+// Convert all Backslashes in string into slashes
+void BSlash2Slash(char * p)
+{
+	if (p)
+	{
+		int i = strlen(p);
+		for (int j=0; j<i; j++)
+			if (p[j] == '\\')
+/*				if ((j+1)<i)	// except the leading double Backslashes   
+					if (p[j+1] == '\\')
+						j++;				// '\\\\' found, do not change
+					else
+*/
+						p[j] = '/';
+	}
+}
+
+// Checks whether the file GRP/STATFILE is writable for the current user 
+// (prvilige check for administrative component)
+// grp is the GRP-Path
+BOOL IsStatfileWriteable(const char *grp)
+{
+	BOOL ret = FALSE;
+	char StatFilePath[MAX_PATH];
+
+	strcpy (StatFilePath, grp);
+	strcat (StatFilePath, "/../");
+	strcat (StatFilePath, STATFILENAME);
+
+	HANDLE hHandle = CreateFile(
+		StatFilePath,
+		GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		NULL);
+
+	if (hHandle == INVALID_HANDLE_VALUE)
+	{
+		DWORD dwError = GetLastError();
+
+		if ((dwError != NO_ERROR) && (dwError != ERROR_ACCESS_DENIED))
+		{
+			LPVOID lpMsgBuf = NULL;
+			FormatMessage( 
+				FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+				NULL,
+				dwError,
+				MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+				(LPTSTR) &lpMsgBuf,
+				0,
+				NULL);
+			fprintf (stderr, "Error-IDEL: cannot access statfile: %s [%ld]\n", 
+				lpMsgBuf, dwError);
+			LocalFree (lpMsgBuf);
+		}
+		ret = FALSE;
+	}
+	else
+		ret = TRUE;
+
+	CloseHandle (hHandle);
+	return ret;
+}
+
+/* &gar PTS 1105004 -> */
+int my_mkdir ( const char * directory)
+{
+	char temp_dir[_MAX_PATH];
+	struct _stat buf;
+	char * pDir;
+	
+	if ((_stat(directory , &buf )==0))
+	{
+		if ( ! (buf.st_mode & _S_IFDIR) )
+		{
+			fprintf (stderr, "Error: cannot create directory %s (file exists)\n", 
+				directory);
+			return -1;
+		}
+		else
+		/* all ok */
+			return 0;		
+	}
+	strcpy(temp_dir, directory);
+	if ((pDir = strrchr (temp_dir, '/')) != NULL ) 
+	{
+		/* not drive letter with : */
+		if ( * (pDir - (char) 1) != ':' )
+		{
+			*pDir = '\0';
+			if ( my_mkdir (temp_dir) != 0)
+			{
+				fprintf (stderr, "Error while creating directory %s \n", 
+					temp_dir);
+				return -1;
+			}
+		}
+		/* all ok */
+		if (_mkdir (directory) == 0 )
+			return 0;
+	}	
+	return -1;
+}
+
+
+int my_checkModulePath (const char * ModulePath)
+{
+	char checkedPath[_MAX_PATH];
+	char * pDir;
+	
+	strcpy(checkedPath, ModulePath);
+	if ( (pDir = strrchr (checkedPath, '/')) != NULL ) 
+	{
+		*pDir = '\0';
+		return (my_mkdir(checkedPath));
+	}
+	return (0);
+}
+/* <- &gar PTS 1105004 */
+
+int my_starteditor(const char * tool, const char * ModulePath, const char * Editor)
+{
+	char *TOOLEXT = getenv("TOOLEXT");
+	if (TOOLEXT == NULL)
+	{
+		fprintf(stderr, "Error: TOOLEXT not set in the environment\n");
+		exit (1);
+	}
+    char *shell = getenv ("TOOLSHELL");
+    if ( shell == NULL )
+	{
+		fprintf(stderr, "Error: TOOLSHELL not set in the environment\n");
+		exit (1);
+	}
+	int ret = -1;
+	char *arg1, *arg2;
+	
+	int len = strlen(tool);
+	len+= strlen("/bin/");
+	len+= strlen("opendoc");
+	len+= strlen(TOOLEXT);
+	len++;
+	arg1 = (char*) malloc(len);
+	strcpy (arg1, tool);
+	strcat (arg1, "/bin/");
+	strcat (arg1, "opendoc");
+	strcat (arg1, TOOLEXT);
+
+	len= strlen("-e ");
+	len+= strlen(Editor);
+	len++;
+	arg2 = (char*) malloc(len);
+	strcpy (arg2, "-e ");
+	strcat (arg2, Editor);
+	
+    ret = spawnl( _P_WAIT, shell, shell, arg1, arg2, ModulePath, NULL );
+	free (arg1);
+	free (arg2);
+	return ret;
+}
+
+int my_closeeditor(const char * tool, const char* ModulePath)
+{
+
+	char *TOOLEXT = getenv("TOOLEXT");
+	if (TOOLEXT == NULL)
+	{
+		fprintf(stderr, "Error-%s: TOOLEXT not set in the environment\n");
+		exit (1);
+	}
+    char *shell = getenv ("TOOLSHELL");
+    if ( shell == NULL )
+	{
+		fprintf(stderr, "Error: TOOLSHELL not set in the environment\n");
+		exit (1);
+	}
+	int ret = -1;
+	char *arg1;
+	
+	int len = strlen(tool);
+	len+= strlen("/bin/");
+	len+= strlen("closedoc");
+	len+= strlen(TOOLEXT);
+	len++;
+	arg1 = (char*) malloc(len);
+	strcpy (arg1, tool);
+	strcat (arg1, "/bin/");
+	strcat (arg1, "closedoc");
+	strcat (arg1, TOOLEXT);
+
+    ret = spawnl( _P_WAIT, shell, shell, arg1, ModulePath, NULL );
+	free (arg1);
+	return ret;
+}
+
+
+// Execute a system command
+int My_System(const char * my_cmd)
+{
+	int ret = -1;
+
+
+	char *TOOLSHELL = getenv("TOOLSHELL");
+
+	if (!my_cmd) return MY_NOTOK;
+
+	char *cmd = new char [strlen(my_cmd) 
+				+(TOOLSHELL!=NULL?strlen(TOOLSHELL):0) +2];
+
+	if (!cmd) return MY_NOTOK;
+
+	// Find out whether korn shell ("sh" | "sh.exe") is used
+	BOOL bKShellUsed = FALSE;
+	if (TOOLSHELL != NULL)
+	{
+		char *p, *q, *r;
+		p = strrchr(TOOLSHELL, '/');
+		q = strrchr(TOOLSHELL, '\\');
+		r = (p>q?p:q);
+		r++;
+		if ((strcmp(r,"sh") == 0) || (strcmp(r,"sh.exe") == 0))
+			bKShellUsed=TRUE;
+	}
+
+	if (TOOLSHELL == NULL || bKShellUsed)
+	{
+		// if toolshell not defined or Kornshell used as shell use kornshell
+		ret = ksystem(my_cmd);
+	}
+	else
+	{
+		// use Toolshell to execute command
+		strcpy(cmd, TOOLSHELL);
+		strcat(cmd, " ");
+		strcat(cmd, my_cmd);
+		ret = system(cmd);
+	}
+	delete [] cmd;
+	return ret;
+
+}
+
+// Calling externel perl-Script GetFilePath returning the full path of a module
+char * MyGetFilePath(const char * Module, const char * Opts)
+{
+	static char ModulePath[_MAX_PATH];
+	const char  GetFilePath[] = "GetFilePath";
+	const char  PerlOpt[] = " -S ";
+	char * TOOLSHELL = getenv("TOOLSHELL");
+	char * TOOLEXT   = getenv("TOOLEXT");
+	char * cmd		 = NULL;
+
+	if (!Module) return (char*)NULL;
+	if (strlen(Module)<=0) return (char*)NULL;
+	if (!TOOLSHELL || !TOOLEXT )
+	{
+		fprintf(stderr,"Error: TOOLSHELL and/or TOOLEXT not set!\n");
+		return (char*) NULL;
+	}
+	
+	cmd = new char [strlen (TOOLSHELL) + strlen (PerlOpt) + 
+					+ strlen (GetFilePath) + strlen (TOOLEXT) + strlen (Opts) 
+					+ strlen (Module) + 3];
+	if (!cmd)
+	{
+		fprintf (stderr, "Error: cannot allocate sufficient memory!\n");
+		return (char*) NULL;
+	}
+
+	strcpy (cmd, TOOLSHELL);
+	strcat (cmd, " -S ");
+	strcat (cmd, GetFilePath);
+	strcat (cmd, TOOLEXT);
+	strcat (cmd, " ");
+	strcat (cmd, Opts);
+	strcat (cmd, " ");
+	strcat (cmd, Module);
+
+	// Create the process and read the output
+
+    DWORD			dwRead ;
+    HANDLE			hChildStdoutRd ;
+    HANDLE			hChildStdoutWr ;
+    HANDLE			hChildStderrWr ;
+    HANDLE			hSaveStdout ;
+    HANDLE			hSaveStderr ;
+    SECURITY_ATTRIBUTES		saAttr ;
+    PROCESS_INFORMATION		piProcInfo ;
+    STARTUPINFO			siStartInfo ;
+
+
+
+    /*
+     *  Set the bInheritHandle flag so pipe handles are inherited.
+     */
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+
+    /*
+     * The steps for redirecting child's STDOUT:
+     *     1.  Save current STDOUT, to be restored later.
+     *     2.  Create anonymous pipe to be STDOUT for child.
+     *     3.  Set STDOUT of parent to be write handle of pipe, so
+     *         it is inherited by child.
+     */
+
+    /*
+     *  Create a pipe for the child's STDOUT.
+     */
+    if (!CreatePipe(&hChildStdoutRd, &hChildStdoutWr, &saAttr, 0))
+    {
+	   fprintf (stderr, "Error: cannot create pipe in GetFilePath\n");
+	   return (char *) NULL;
+    }
+
+    /*
+     *  Create a duplicated pipe for the child's STDERR (duplicated from child's STDOUT)
+     */
+	if (! DuplicateHandle(
+				GetCurrentProcess(),	// handle to process with handle to duplicate 
+				hChildStdoutWr,	// handle to duplicate 
+				GetCurrentProcess(),	// handle to process to duplicate to 
+				&hChildStderrWr,	// pointer to duplicate handle 
+				DUPLICATE_SAME_ACCESS,	// access for duplicate handle 
+				TRUE,	// handle inheritance flag
+				DUPLICATE_SAME_ACCESS 	// optional actions   
+				) )
+	{
+		fprintf (stderr, "Error: cannot duplicate pipe in GetFilePath\n");
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		return (char *) NULL;
+	}
+
+
+    /*
+     *  Save the handle to the current STDOUT.
+     */
+    hSaveStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    hSaveStderr = GetStdHandle(STD_ERROR_HANDLE);
+
+    /*
+     *  Set a write handle to the pipe to be STDOUT and STDERR.
+     */
+    if (!SetStdHandle(STD_OUTPUT_HANDLE, hChildStdoutWr))
+    {
+		fprintf (stderr, "Error: cannot redirect stdout in GetFilePath\n");
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		(void) CloseHandle(hChildStderrWr);
+		return (char *) NULL;
+	}
+
+    if (!SetStdHandle(STD_ERROR_HANDLE, hChildStderrWr))
+    {
+		fprintf (stderr, "Error: cannot redirect stderr in GetFilePath\n");
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		(void) CloseHandle(hChildStderrWr);
+		return (char *) NULL;
+    }
+
+    /*
+     *  Set up members of STARTUPINFO structure.
+     */
+    
+	GetStartupInfo (&siStartInfo);   /* PTS 1104070 */
+	siStartInfo.cb = sizeof(STARTUPINFO);
+	siStartInfo.lpTitle = cmd;
+	/* PTS 1104070 
+    siStartInfo.lpReserved = NULL;
+    siStartInfo.lpReserved2 = NULL;
+    siStartInfo.cbReserved2 = 0;
+    siStartInfo.lpDesktop = NULL;
+    siStartInfo.dwFlags = 0;
+    */
+    /*
+     *  Now create the child process.
+     */
+    int 
+	rc = CreateProcess( NULL , /* program                            */
+			cmd ,		/* command line                       */
+			NULL ,		/* process security attributes        */
+			NULL ,		/* primary thread security attributes */
+			TRUE ,		/* handles are inherited              */
+			0 ,		/* creation flags                     */
+			NULL ,		/* use parent's environment           */
+			NULL ,		/* use parent's current directory     */
+			&siStartInfo ,	/* STARTUPINFO pointer                */
+			&piProcInfo ); 	/* receives PROCESS_INFORMATION       */
+
+	DWORD LastError = GetLastError();
+    /*
+     *  After process creation, restore the saved STDOUT and STDERR.
+     */
+    if (!SetStdHandle(STD_ERROR_HANDLE, hSaveStderr))
+    {
+		fprintf (stderr, "Error: cannot redirect stderr in GetFilePath\n");
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		(void) CloseHandle(hChildStderrWr);
+		return (char *) NULL;
+    }
+    if (!SetStdHandle(STD_OUTPUT_HANDLE, hSaveStdout))
+    {
+		fprintf (stderr, "Error: cannot redirect stdout in GetFilePath\n");
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		(void) CloseHandle(hChildStderrWr);
+		return (char *) NULL;
+    }
+
+    /*
+     *  If the process creation failed, give an error message
+     *  AFTER stderr has been restored!
+     */
+    if ( ! rc )
+    {
+		fprintf (stderr, "Error: cannot create process to execute GetFilePath [%ld%]\n", LastError);
+		(void) CloseHandle(hChildStdoutWr);
+		(void) CloseHandle(hChildStdoutRd);
+		(void) CloseHandle(hChildStderrWr);
+		return (char *) NULL;
+    }
+
+    /* 
+     *  Close the write end of the pipe before reading from the 
+     *  read end of the pipe. 
+     */
+    (void) CloseHandle(hChildStdoutWr);
+    (void) CloseHandle(hChildStderrWr);
+
+    /*
+     *  Read from pipe that is the standard output for child process.
+     */
+    if (!ReadFile(hChildStdoutRd, ModulePath , _MAX_PATH, &dwRead, NULL))
+	{
+		if (GetLastError() != ERROR_BROKEN_PIPE)
+		{
+			fprintf(stderr, "Error: cannot read from pipe in GetFilePath\n");
+			return (char *) NULL;
+		}
+	}
+	ModulePath[dwRead] = '\0';
+
+
+
+    /* 
+     *  Close the read end of the pipe.
+     */
+    (void) CloseHandle(hChildStdoutRd);
+
+    if ( WaitForSingleObject ( piProcInfo.hProcess , INFINITE ) == WAIT_FAILED )
+    {
+		fprintf(stderr, "Error: cannot wait for process  in GetFilePath\n");
+		return (char *) NULL;
+    }
+
+	DWORD ExitCode;
+    if ( ! GetExitCodeProcess ( piProcInfo.hProcess , &ExitCode ) )
+    {
+		fprintf (stderr, "Error: cannot get process exit code for GetFilePath\n");
+		return (char *) NULL;
+    }
+    CloseHandle ( piProcInfo.hThread );
+    CloseHandle ( piProcInfo.hProcess );
+	delete [] cmd;
+
+	if (ModulePath) BSlash2Slash(ModulePath);
+    if ( ExitCode == 0 && dwRead != 0 ) 
+		return ( ModulePath );
+	else
+		return (char *) NULL;
+
+}
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

@@ -1,0 +1,200 @@
+/*
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+*/
+
+/* Program shall demonstrate failure on select of an empty string
+   from a "long unicode"-type column via ODBC "sqlod32w.dll"
+*/
+
+
+#include "winhead.h"
+
+#define PROGNAME "uniemptystring"
+#define TABLE    PROGNAME
+
+#define MAX_STR_LEN  256
+
+#define ERROR_CHECK(hstmtx)      if (retcode != SQL_SUCCESS) {\
+			   SQLError(henv, hdbc, hstmtx,\
+			      sqlstate, &esq_sql_code, error_txt,\
+				    len_error_txt, &used_error_txt);\
+			   SPRINTF(buffer, " sqlstate: %s"CRLF, sqlstate);\
+			 PRINTF(buffer);\
+		  SPRINTF(buffer, " esq_sql_code: %ld"CRLF, esq_sql_code);\
+			 PRINTF(buffer);\
+		  SPRINTF(buffer, " error_txt: %s"CRLF, error_txt);\
+			 PRINTF(buffer);\
+                  switch (retcode) {\
+		  case(100) :\
+			  break;\
+                  case(SQL_ERROR) : \
+			      { return(16); }\
+		     break;\
+                  case(SQL_SUCCESS_WITH_INFO) : \
+			{ return(16); }\
+		     break;\
+		  default   :\
+			  return(16);\
+			  break; } }
+
+
+int main(int argc, char* argv[])
+{
+  SQLRETURN rc = SQL_SUCCESS;
+  SQLHENV henv = 0;
+  SQLHDBC hdbc = 0;
+  SQLHSTMT hStmtInsert, hStmtSelect;
+  SQLLEN MAX_STR_BUF = (MAX_STR_LEN+1)*sizeof(SQLWCHAR);
+
+  SQLWCHAR sInValue[MAX_STR_LEN+1];
+  SQLWCHAR sOutValue[MAX_STR_LEN+1];
+  SQLLEN nIndIn = SQL_NTS;
+  SQLLEN nIndOut;
+
+  int testOK = TRUE;
+  UCHAR sqlstate  [ 10 ];
+  SDWORD esq_sql_code;
+  UCHAR error_txt  [ 101 ] ;
+  SWORD len_error_txt = 100;
+  SWORD used_error_txt;
+  RETCODE retcode;
+  UCHAR buffer [1024];
+
+
+  retcode = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
+
+  retcode = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (void*)SQL_OV_ODBC3, 0);
+
+  retcode = SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc);
+
+  retcode = SQLSetConnectAttr(hdbc, SQL_ATTR_AUTOCOMMIT, SQL_AUTOCOMMIT_OFF, 0);
+
+  retcode = SQLConnect(hdbc, DBNODE, (SWORD) SQL_NTS, ODBCUSER,
+		       (SWORD) SQL_NTS, ODBCPASSW, (SWORD) SQL_NTS );
+
+  retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hStmtInsert);
+  retcode = SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &hStmtSelect);
+
+  /* Insert empty string into column of type "LONG UNICODE"
+     and select again. sInValue and sOutValue should both
+     be empty strings but sOutValue isn't... Output string
+     sOutValue is not NULL-terminated !!
+   */
+
+  /* Try this, i.e. length of string = 0 and
+     code will fail, i.e. sOutValue will
+     not be NULL terminated ...
+   */
+  sInValue[0] = 0;
+
+  /* Try this, i.e. length of string > 0 and
+     everything works fine, i.e., sOutValue will
+     be NULL terminated ...
+
+    sInValue[0] = 'a';
+    sInValue[1] = 0;
+   */
+
+   sOutValue[0] = 'a';
+
+  retcode = SQLExecDirect (hStmtInsert, "CREATE TABLE "TABLE" (val LONG UNICODE)", SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect (create table): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+
+  retcode = SQLPrepare (hStmtInsert, (SQLCHAR*)"INSERT INTO "TABLE" (val)  VALUES (?)", SQL_NTS);
+  SPRINTF(buffer," SQLPrepare (insert): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtInsert);
+
+  retcode = SQLBindParameter (hStmtInsert,
+                         1,
+                         SQL_PARAM_INPUT,
+                         SQL_C_WCHAR,
+                         SQL_WVARCHAR,
+                         MAX_STR_BUF,
+                         0,
+                         sInValue,
+                         MAX_STR_BUF,
+                         &nIndIn);
+  SPRINTF(buffer," SQLBindParameter: retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtInsert);
+
+  retcode = SQLExecute( hStmtInsert) ;
+  SPRINTF(buffer," SQLExecute (insert): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtInsert);
+
+  retcode = SQLEndTran (SQL_HANDLE_DBC, hdbc, SQL_COMMIT );
+  SPRINTF(buffer," SQLExecute (insert): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+
+  retcode = SQLPrepare (hStmtSelect, (SQLCHAR*)"SELECT val FROM "TABLE, SQL_NTS);
+  SPRINTF(buffer," SQLPrepare (select): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtSelect);
+
+  retcode = SQLExecute (hStmtSelect);
+  SPRINTF(buffer," SQLExecute (select): retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtSelect);
+
+  retcode = SQLBindCol (hStmtSelect,
+                   1,
+                   SQL_C_WCHAR,
+                   sOutValue,
+                   MAX_STR_BUF,
+                   &nIndOut);
+  SPRINTF(buffer," SQLBindCol: retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtSelect);
+
+  retcode = SQLFetch(hStmtSelect);
+  SPRINTF(buffer," SQLFetch: retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hStmtSelect);
+
+  if (sInValue[0] != sOutValue[0]) {
+    SPRINTF(buffer," input and output aren't equal!");
+    PRINTF(buffer);
+    testOK = FALSE;
+  }
+
+
+  retcode = SQLFreeHandle(SQL_HANDLE_STMT, hStmtInsert);
+  retcode = SQLFreeHandle(SQL_HANDLE_STMT, hStmtSelect);
+
+  retcode = SQLDisconnect(hdbc);
+
+  retcode = SQLFreeHandle(SQL_HANDLE_ENV, henv);
+
+  if (testOK)
+    SPRINTF(buffer,"Test: ok"CRLF);
+  else
+    SPRINTF(buffer,"Test: failed");
+
+  PRINTF(buffer);
+
+  return retcode;
+}

@@ -1,0 +1,279 @@
+/*  getbuildnr.cpc  */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
+
+#ifdef DEBUG
+#define DBG(output) output
+#else
+#define DBG(output)
+#endif
+
+#define UNKOWN_SEQUENCE -4020
+#define NOT_OK  -1
+
+#define BUILDFILENAME "Build.dat"
+
+EXEC SQL BEGIN DECLARE SECTION;
+
+int     BuildNumber ;
+VARCHAR BRelease [ 20  ] ;
+int     BCL              ;    
+VARCHAR BTarget  [ 250 ] ;
+VARCHAR BOptions [ 50  ] ;
+VARCHAR BStatus  [ 5   ] ;
+VARCHAR BOSSpec  [ 50  ] ;
+char    Statement1[ 100 ] ;
+char    Statement2[ 50  ] ;
+
+EXEC SQL END DECLARE SECTION;
+
+EXEC SQL INCLUDE SQLCA;
+
+/*==========================================================================*/
+
+void main ( int argc, char *argv[] )
+
+{
+
+    int  movelen;
+    char *target, *options;
+    char *relver, *relstat, *cl;
+    char *osspec;
+    char *sqlopt;
+	
+	char *sapdb_internal, *own;
+	char *filename;
+	int  fh;
+
+	int  handledBytes; 
+	
+	/* CTS 1109250 */
+	/* if opensource use a file for buildnumber */
+	sapdb_internal = getenv("SAPDB_INTERNAL");
+	if ( sapdb_internal == 0 )
+	{
+
+		own=getenv("OWN");
+		if ( own == 0 )
+		{
+			(void) fprintf (stderr, "Error: OWN not set !\n"); 
+			exit ( NOT_OK );
+		}
+
+		filename = malloc (strlen (own) + strlen (BUILDFILENAME) + 2);
+
+		strcpy(filename, own);
+		strcat (filename, "/");
+		strcat (filename, BUILDFILENAME);
+		
+#if defined (UNIX)
+		fh = open( filename, O_RDWR );
+#else
+		fh = open( filename, O_BINARY | O_RDWR );
+#endif		
+		if( fh == -1 )
+		{
+			/* there aren't a buildnumber file */
+			if ( errno == ENOENT )
+#if defined (UNIX)
+				fh = open( filename, O_RDWR | O_CREAT);
+#else
+				fh = open( filename, O_RDWR | O_CREAT | O_BINARY , _S_IREAD | _S_IWRITE );
+#endif
+			if ( fh == -1 )
+			{
+				fprintf (stderr, "Error while opening %s (%d)\n", filename, errno );
+				exit (NOT_OK);
+			}
+		}
+		else
+		{
+			if ( (handledBytes = read (fh, &BuildNumber, sizeof(BuildNumber))) < 0  )
+			{
+				fprintf (stderr, "Error while reading %s (%d)\n", filename, errno);
+				exit (NOT_OK);
+			}
+		}
+		
+		BuildNumber++;
+		
+		if (lseek (fh, 0, SEEK_SET) < 0)
+		{
+			fprintf (stderr, "Error while seeking in %s (%d)\n", filename, errno );
+			exit (NOT_OK);
+		}
+
+		if ( write (fh, &BuildNumber, sizeof(BuildNumber)) < 0)
+		{
+			fprintf (stderr, "Error while writing %s (%d)\n", filename, errno );
+			exit (NOT_OK);
+		}
+		close (fh);
+		BuildNumber+=169000000;
+
+	}
+	else
+	{
+		relver   = getenv("RELVER");  
+		if (relver == 0) 
+		{
+			fprintf(stderr, "missing environment variable 'RELVER'!\n" );
+			exit (NOT_OK);
+		}
+		if ( ! strcmp(relver, "R61") || ! strcmp(relver, "TOOL") )  
+		{
+			DBG( (void) fprintf(stderr, "do nothing on '%s'", relver); )
+			exit (0);
+		}
+    
+		cl  = getenv("CORRECTION_LEVEL"); 
+		if (cl == 0) 
+			BCL = 0;
+		else
+			BCL = atoi(cl);
+
+		relstat  = getenv("RELSTAT"); 
+		if (relstat == 0) relstat = "NONE";
+    
+		if ( argc <= 1 ) options = "UNKNOWN";
+		else             options  = argv[1];
+
+		if ( argc <= 2 ) target =  "UNKNOWN";
+		else             target   = argv[2];
+    
+		osspec   = getenv("OSSPEC");  
+		if (osspec == 0) osspec =  "UNKNOWN";
+
+		DBG ( (void) fprintf (stderr, "relver:  %s\n", relver); )
+		DBG ( (void) fprintf (stderr, "relcl :  %d\n", relcl); )
+		DBG ( (void) fprintf (stderr, "relstat: %s\n", relstat); )
+		DBG ( (void) fprintf (stderr, "option:  %s\n", options); )
+		DBG ( (void) fprintf (stderr, "target:  %s\n", target); )
+		DBG ( (void) fprintf (stderr, "osspec:  %s\n", osspec); )
+    
+		(void) strcpy ( BRelease.arr, relver );
+		(void) strcpy ( BTarget.arr, target );
+		(void) strcpy ( BOptions.arr, options );
+		(void) strcpy ( BStatus.arr, relstat );
+		(void) strcpy ( BOSSpec.arr, osspec );
+
+		BRelease.len= strlen (relver) ;
+		BTarget.len = strlen (target) ;
+		BOptions.len= strlen (options);
+		BStatus.len = strlen (relstat);
+		BOSSpec.len = strlen (osspec) ;
+
+		if (  ( sqlopt = getenv("SQLOPT") ) && !strcmp (sqlopt, "-X") )
+		{
+			if ( putenv( "SQLOPT=-X -u buildadm,buildadm -d BUG62 -n P26326" ) == -1 )
+			{
+				DBG ( (void) fprintf (stderr, "Kann SQLOPT nicht setzen!\n"); )
+				exit ( NOT_OK );
+			}
+		}
+		else
+			if ( putenv( "SQLOPT=-u buildadm,buildadm -d BUG62 -n P26326" ) == -1 )
+			{
+				DBG ( (void) fprintf (stderr, "Kann SQLOPT nicht setzen!\n"); )
+				exit ( NOT_OK );
+			}
+
+		EXEC SQL SET SERVERDB 'BUG62' ON 'P26326' ;
+		EXEC SQL CONNECT buildadm IDENTIFIED BY buildadm ;
+
+		if ( sqlca.sqlcode != 0 )
+		{
+			(void) fprintf (stderr, "connect error %d\n", sqlca.sqlcode);
+			exit ( NOT_OK );
+		}
+
+		(void) strcpy(Statement1, "SELECT buildadm.build");
+		(void) strcat(Statement1, relver);
+		(void) strcat(Statement1, ".nextval INTO ? FROM dual");
+		DBG( (void) fprintf(stderr, "%s\n", Statement1);)
+
+		EXEC SQL PREPARE STAT1 FROM :Statement1;
+		EXEC SQL EXECUTE STAT1 USING :BuildNumber;
+
+		if ( (sqlca.sqlcode != 0) && (sqlca.sqlcode != UNKOWN_SEQUENCE) )
+		{
+			(void) fprintf (stderr,  "select error %d\n", sqlca.sqlcode);
+			exit ( NOT_OK );
+		}
+
+		if ( sqlca.sqlcode == UNKOWN_SEQUENCE )
+		{
+			/* create new sequence for new RELVER */
+
+			(void) strcpy(Statement2, "CREATE SEQUENCE Build");
+			(void) strcat(Statement2, relver);
+			DBG( (void) fprintf(stderr, "%s\n", Statement2);)
+
+			EXEC SQL EXECUTE IMMEDIATE :Statement2;
+			if ( sqlca.sqlcode != 0 )
+			{
+				(void) fprintf (stderr,  "select error %d\n", sqlca.sqlcode);
+				exit ( NOT_OK );
+			}
+        
+			(void) printf( "New sequence created! (Build%s)\n", relver);
+
+			EXEC SQL EXECUTE STAT1 USING :BuildNumber;
+
+			if ( sqlca.sqlcode != 0 )
+			{
+				(void) fprintf (stderr,  "select error %d\n", sqlca.sqlcode);
+				exit ( NOT_OK );
+			}
+		}
+    
+		EXEC SQL
+		  INSERT INTO 
+			builddata (bnr, brelease, bcl, bstatus, bosspec, btarget, boptions)
+		  VALUES 
+		  (:BuildNumber, UPPER(:BRelease), :BCL, UPPER(:BStatus), UPPER(:BOSSpec), 
+			:BTarget, :BOptions); 
+
+		if ( sqlca.sqlcode != 0 )
+		{
+			(void) fprintf (stderr, "insert error %d\n", sqlca.sqlcode);
+			exit ( NOT_OK );
+		}
+
+		EXEC SQL COMMIT WORK RELEASE;
+	}
+ 
+    (void) fprintf ( stdout, "BuildNr: %d", BuildNumber );
+
+    exit ( 0 );
+}
+
+/*==========================================================================*/
+
+/*
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+*/

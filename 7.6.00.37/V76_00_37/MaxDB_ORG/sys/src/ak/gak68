@@ -1,0 +1,470 @@
+.nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-09-11
+*****************************************************
+modname : GAK68
+changed : 2000-09-11
+module  : AK_join_const_type
+ 
+Author  : GertG
+Created : 1999-02-08
+*****************************************************
+ 
+Purpose : Const und Type for ak-layer concering join routines
+ 
+Define  :
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+Use     :
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      (* methods for join sequence search *)
+      cak68_heuristic_search      =         0;
+      cak68_greedy_search         =         1;
+      cak68_permutation_search    =         2;
+      (*  *)
+      cak68_left                  =         1;
+      cak68_right                 =         2;
+      (*  *)
+      cak68_join_value            =         cak00_maxsources + 1; 
+      (* mxak68_joinparsbuf:                                         *)
+      (* csp_maxint2 - length of other parts in tak68_joinparsrecord *)
+      mxak68_joinparsbuf          =     22404;
+      (* mxak68_joinpars_buf:                                         *)
+      (* MAX_RECLEN_GG00 - length of other parts in tak68_joinpars_buf_record *)
+      mxak68_joinpars_buf         =  MAX_RECLEN_GG00 - cak_sysbufferoffset
+            - 4 (* sizeof(jp_filler) *);
+      (* *** vak680, vak681, vak682 const *** *)
+      cak68_contextconstoffset    =        92;
+      cak68_max_real              =   1.0E+38;
+      (* cak_max_real - VM : 1.0E+75, UNIX 1.0E+38     *)
+      cak68_max_valid_real        =   1.0E+18;
+      (* cak_max_valid_real - highest estimation value used  *)
+      cak68_sup_field_factor      =       1.2;
+      cak68_cartesian_product     =       MIN_INT2_SP00;
+      cak68_updstat_minpages      =       200;
+      cak68_updstat_factor        =       1.2;
+      cak68_inv_overhead          =       1.3;
+      (* *)
+      cak68_only_field_multiplier  =    1;
+      cak68_index_field_multiplier =    5;
+      cak68_eq_field_multiplier    =    20;
+      cak68_unknown_multiplier     =    5;
+      (* *** end vak680, vak681,vak682 types *** *)
+      MAX_RESCHEDULE_CNT_AK68     = 1500 (* <= MAX_INT2_SP00 *);
+      cak68_max_eqarr_elems       = 2048 (* <= MAX_INT2_SP00 *);
+      cak68_max_multab_elems      = 2048 (* <= MAX_INT2_SP00 *);
+      (**)
+      MAX_SIZE_GAK68              = MAX_INT2_SP00;
+ 
+TYPE
+      (*---------------- basic types ---------------------*)
+      tak68_mbuf_to_tmpbuf_context = (mtc_search_sequence,
+            mtc_generate_join_info,
+            mtc_generate_join_info_operator_join,
+            mtc_save_context);
+      (*--------------------------------------------------*)
+      tak68_one_jointype =  (
+            to_single_keyfield,
+            to_key,
+            to_unique_field,
+            to_keypart,            (* more than one keyfield  *)
+            to_first_keyfield,
+            to_all_invfields,
+            to_invpart,
+            to_invfield,
+            to_mt_join,            (* more than one jointable *)
+            to_eq_field,
+            to_lt_gt_field,
+            to_ne_field,
+            to_cartesian_prod,
+            to_illegal);
+      (*--------------------------------------------------*)
+      tak68_joinarr_index = tsp00_Int2;     (* index in tak_joinarr *)
+      (*------------- combined types ---------------------*)
+ 
+      tak68_evaluation_rec  =  RECORD
+            ev_strat_value  : tsp00_Longreal;
+            ev_readIO_pages : tsp00_Int4;
+            ev_wholeIO_pages: tsp00_Int4;
+            ev_inv_only     : boolean;
+            ev_fill1        : boolean;
+            ev_fill2        : tsp00_C2;
+      END;
+ 
+      tak68_evalarr  = ARRAY [ 1..cak00_maxsources ] OF tak68_evaluation_rec;
+      tak68_evalarr_ptr = ^tak68_evalarr;
+ 
+      tak68_njinfo  =  RECORD
+            nj_kbjrec                   : tgg07_KbJoinRec;
+            nj_joincols_to_be_shifted   : tsp00_Int2;
+            nj_nxt_klen_filled          : tsp00_Int2;
+            nj_r_len                    : tsp00_Int2;
+            nj_nk_len                   : tsp00_Int2;
+            nj_nxttabno                 : tsp00_Int2;
+            nj_left_side                : tak_joinset;
+            nj_clefill                  : boolean;
+            nj_fill1                    : boolean;
+            nj_fill2                    : tsp00_C2;
+      END;
+ 
+      tak68_joininfos  =  RECORD
+            ji_old_tree          : tgg00_FileId;
+            ji_nxtjinfo          : tak68_njinfo;
+            ji_acttabno          : tsp00_Int2;
+            ji_outpos            : tsp00_Int2;
+            ji_keylen            : tsp00_Int2;
+            ji_act_join          : tsp00_Int2;
+            ji_stack_desc        : tgg00_StackDesc;
+            ji_mb_data_len       : tsp00_Int2;
+            ji_use_operator_join : boolean;
+            ji_set_output_filter : boolean;
+            ji_st_addr           : tgg00_StackListPtr;
+            ji_parskey           : tak_parskey; (* session command ID *)
+            ji_seqsearch_for_exec: boolean;
+      END;
+ 
+      (* eqt_whole :   for quick compare of (tabno1,colno1) = (tabno2,colno2) *)
+      (* eqt_tabno :   index in tak_all_from_tables (dmli.d_tabarr)           *)
+      (* eqt_colno :   record column position                                 *)
+ 
+      tak68_eqfieldid_type = RECORD
+            CASE boolean OF
+                true :
+                    (eqt_whole : tsp00_Int4);
+                false :
+                    (eqt_tabno : tsp00_Int2;
+                    eqt_colno : tsp00_Int2);
+                END;
+            (*ENDCASE*) 
+ 
+      tak68_eqfieldinfo  =  RECORD
+            eqi_fieldid  : tak68_eqfieldid_type;
+            eqi_stackpos : tsp00_Int2;            (* stackpos of column description *)
+            eqi_joinno   : tak68_joinarr_index; (* index in tak_joinarr *)
+            eqi_codetype : tsp00_CodeType;       (* ascii, unicode *)
+            eqi_jrecs    : tsp00_Uint1;         (* left or right column *)
+            eqi_jrfill1  : tsp00_Int2;
+      END;
+      tak68_eqfield = ARRAY [ cak68_left..cak68_right ] OF tak68_eqfieldinfo;
+ 
+      tak68_eq_arr  =  ARRAY [ 1..cak68_max_eqarr_elems ] OF tak68_eqfield;
+      tak68_eq_arr_ptr = ^tak68_eq_arr;
+ 
+      tak68_eq_record  =  RECORD
+            eqr_arr      : tak68_eq_arr_ptr;
+            eqr_cnt      : tsp00_Int2;           (* count of equal conditions *)
+            eqr_capacity : tsp00_Int2
+      END;
+ 
+ 
+      tak68_one_table_stat  =  RECORD
+            ts_pages_searched : tsp00_Longreal;
+            ts_strat_value    : tsp00_Longreal;
+            ts_all_pages      : tsp00_Int4;
+            ts_wholeIO_pages  : tsp00_Int4;
+            ts_recs_per_page  : tsp00_Int2;
+            ts_strategy       : tgg07_StratEnum;
+            ts_inv_only_strat : boolean;
+            ts_filler         : tsp00_C4;
+      END;
+ 
+      tak68_table_stats = ARRAY [ 1..cak00_maxsources ] OF tak68_one_table_stat;
+      tak68_table_stats_ptr = ^tak68_table_stats;
+ 
+      tak68_join_transition    =  RECORD
+            jt_multipl   : tsp00_Int4;
+            jt_joinno    : tak68_joinarr_index;
+            jt_indexno   : tsp00_Int2;
+            jt_jointype  : tak68_one_jointype;
+            jt_filler    : tsp00_C3;
+      END;
+      tak68_join_transition_ptr = ^tak68_join_transition;
+ 
+      tak68_join_transitions = ^tak68_join_transition;(* pointer to 2-dim-array *)
+      (* data structure for join sequence *)
+ 
+      tak68_one_seq_join  =  PACKED RECORD
+            jos_joinstrat                : tgg07_StratEnum;
+            jos_predefined_buf           : boolean;
+            jos_source                   : tsp00_Int2;
+            jos_fieldcnt                 : tsp00_Int2;
+            jos_indexno                  : tsp00_Int2;
+            jos_invlen                   : tsp00_Int4;
+            jos_joinno                   : tak68_joinarr_index;
+            jos_access_mod               : tgg07_StratAccessModSet; (* PTS 1127791 M.Ki. *)
+            jos_filler                   : boolean;
+            jos_table_buffer             : tsp00_Int4;
+            jos_expected_recs            : tsp00_Int4;
+            jos_expected_table_rec_reads : tsp00_Int4;
+            jos_expected_res_recs        : tsp00_Int4;
+            jos_parallel_server          : tsp00_Int4;
+      END;
+ 
+      tak68_sequence  =  ARRAY [ 1..cak00_maxsources ] OF tak68_one_seq_join;
+      tak68_sequence_ptr = ^tak68_sequence;
+      tak68_joinparsbuf = PACKED ARRAY [ 1..mxak68_joinparsbuf ] OF char;
+ 
+      tak68_joinview_rec  =  RECORD
+            jv_tabid     : tgg00_Surrogate;
+            jv_keybuf    : tak_sysbufferaddress;
+            jv_maxkeyl   : tsp00_Int2;
+            jv_checkview : boolean;
+      END;
+ 
+      tak68_joinparsrecord  =  RECORD
+            jp_reclen                 : tsp00_Int2;
+            jp_keylen                 : tsp00_Int2;
+            jp_varcol_offset          : tsp00_Int2;
+            jp_varcol_cnt             : tsp00_Int2;
+            jp_surrogate              : tgg00_Surrogate;
+            jp_entrytype              : tsp00_C2;
+            jp_segno                  : tsp00_Int2;
+            jp_fullen                 : tsp00_Int4;
+            jp_restree                : tgg00_FileId;
+            jp_d_inoutpos             : tsp00_Int2;
+            jp_d_cntfromtab           : tsp00_Int2;
+            jp_d_reclen               : tsp00_Int2;
+            jp_d_keylen               : tsp00_Int2;
+            jp_eq_cnt                 : tsp00_Int2;
+            jp_sr_strategy            : tgg07_StratEnum;
+            jp_sr_use_rowno           : boolean;
+            jp_filler1                : boolean;
+            jp_sr_distinct_bytes      : boolean;
+            jp_d_standard             : boolean;
+            jp_d_single               : boolean;
+            jp_d_distinct             : tgg04_Distinct;
+            jp_d_union                : boolean;
+            jp_search_sequence        : boolean;
+            jp_a_outer_join           : boolean;
+            jp_nextexist              : boolean;
+            jp_d_pseudo_ins_select    : boolean;
+            jp_d_order_cnt            : tsp00_Int2;
+            jp_d_rowno                : tsp00_Int4;
+            jp_d_limit_offset         : tsp00_Int4;
+            jp_d_upper_limit          : tsp00_Int4;
+            jp_d_globstate            : tgg00_HandlingSet;
+            jp_d_session_isolevel     : tsp00_Uint1;
+            jp_d_use_session_isolevel : boolean;
+            jp_d_one_join_phase       : boolean;
+            jp_use_operator_join      : boolean;
+            jp_joincnt                : tsp00_Int2;
+            jp_d_filler2              : tsp00_C4;
+            jp_d_buffer               : tak68_joinparsbuf;
+      END;
+ 
+      tak68_joinpars_buf = PACKED ARRAY [ 1..mxak68_joinpars_buf ] OF char;
+ 
+      tak68_joinpars_buf_record = RECORD
+            jp_reclen         : tsp00_Int2;
+            jp_keylen         : tsp00_Int2;
+            jp_varcol_offset  : tsp00_Int2;
+            jp_varcol_cnt     : tsp00_Int2;
+            jp_surrogate      : tgg00_Surrogate;
+            jp_entrytype      : tsp00_C2;
+            jp_linkage        : tsp00_C2;
+            jp_filler         : tsp00_C4;
+            jp_buf            : tak68_joinpars_buf;
+      END;
+ 
+ 
+      tak68_joinparsrecord_hybrid = RECORD
+            CASE integer OF
+                1:
+                    (jph_uniptr   : tak_sysbufferaddress);
+                2:
+                    (jph_joinpars : ^tak68_joinparsrecord);
+                3:
+                    (jph_joinpars_buf : ^tak68_joinpars_buf_record);
+                END;
+            (*ENDCASE*) 
+            (* data structure for possible join access path *)
+ 
+      tak68_mul_tab_rec  =  RECORD
+            mtr_dst_table: tsp00_Int2;
+            mtr_tablecnt : tsp00_Int2;
+            mtr_multipl  : tsp00_Int4;
+            mtr_tab_seq  : tak_joinset;
+            mtr_joinno   : tak68_joinarr_index;
+            mtr_fieldcnt : tsp00_Int2;
+            mtr_indexno  : tsp00_Int2;
+            mtr_jointype : tak68_one_jointype;
+            mtr_filler   : tsp00_Uint1;
+      END;
+ 
+      tak68_mult_tab_arr    =  ARRAY [ 1..cak68_max_multab_elems ] OF
+            tak68_mul_tab_rec;
+      tak68_mult_tab_arr_ptr = ^tak68_mult_tab_arr;
+ 
+      tak68_mult_tabs  =  RECORD
+            mt_cnt      : tsp00_Int2;
+            mt_pos      : tsp00_Int2;
+            mt_capacity : tsp00_Int2;
+            mt_filler   : tsp00_Int2;
+            mt_arr      : tak68_mult_tab_arr_ptr;
+      END;
+ 
+      tak68_int2_arr = ARRAY [ 1..cak00_maxsources ] OF tsp00_Int2;
+      tak68_int2_arr_ptr = ^tak68_int2_arr;
+ 
+      tak68_result_info  =  RECORD
+            ri_rec_len           : tsp00_Int2;
+            ri_recs_per_page     : tsp00_Int2;
+            ri_old_recs_per_page : tsp00_Int2;
+            ri_filler            : tsp00_Int2;
+            ri_one_tab_len       : tak68_int2_arr_ptr;
+      END;
+ 
+      tak68_succ  =  RECORD
+            s_backup  : tsp00_Int2;
+            s_tableno : tsp00_Int2;
+            s_resrows : tsp00_Int4;
+      END;
+ 
+      tak68_succession =  ARRAY [ 1..cak00_maxsources ] OF tak68_succ;
+      tak68_succession_ptr = ^tak68_succession;
+ 
+      tak68_sequence_info  =  RECORD
+            si_sum      : tsp00_Longreal;
+            si_pages    : tsp00_Longreal;
+            si_sequence : tak68_succession_ptr;
+      END;
+ 
+ 
+      tak68_last_values    = RECORD
+            lv_newsum               : tsp00_Longreal;
+            lv_newpages             : tsp00_Longreal;
+            lv_res_rec_len          : tsp00_Int2;
+            lv_recs_per_respage     : tsp00_Int2;
+            lv_old_recs_per_respage : tsp00_Int2;
+            lv_filler               : tsp00_Int2;
+      END;
+ 
+      tak68_last_values_arr = ARRAY [ 1..cak00_maxsources ] OF tak68_last_values;
+      tak68_last_values_arr_ptr = ^tak68_last_values_arr;
+      
+      tak68_lastsuccession = RECORD
+            ls_values     : tak68_last_values_arr_ptr;
+            ls_sequence   : tak68_succession_ptr;
+      END;
+ 
+ 
+      tak68_best_jstrat = RECORD
+            bj_srctab     : tsp00_Int2;
+            bj_fieldcnt   : tsp00_Int2;
+            bj_multiplier : tsp00_Int4;
+            bj_indexno    : tsp00_Int2;
+            bj_jtype      : tak68_one_jointype;
+            bj_filler     : boolean;
+      END;
+
+      tak68_outcol = RECORD
+            oc_srctab     : tsp00_Int2; (* base table index *)
+            oc_srcpos     : tsp00_Int2; (* pos on rec from base table *)
+            oc_dstpos     : tsp00_Int2; (* pos on result record *)
+            oc_len        : tsp00_Int2; (* output length *)
+      END;
+
+      tak68_outcols = ARRAY [ 0..MAX_SIZE_GAK68 ] OF tak68_outcol;
+      tak68_outcols_ptr = ^tak68_outcols;
+
+      tak68_rowno_pos = tsp00_Int4;
+      tak68_rownos = ARRAY [ 0..MAX_SIZE_GAK68 ] OF tak68_rowno_pos;
+      tak68_rownos_ptr = ^tak68_rownos;
+
+      tak68_field_desc = RECORD
+            fd_epos     : tsp00_Int2;
+            fd_elen_var : tsp00_Int2;
+      END;
+      tak68_field_descs = ARRAY [ 0..MAX_SIZE_GAK68 ] OF tak68_field_desc;
+      tak68_field_descs_ptr = ^tak68_field_descs;
+      tak68_size = tsp00_Int2;
+
+      tak68_output_desc = RECORD
+            od_outcols          : tak68_outcols_ptr; (* cols from base tables *)
+            od_capacity_oc      : tak68_size;
+            od_size_oc          : tak68_size;
+            od_rownumbers       : tak68_rownos_ptr; (* ROWNO position in result record *)
+            od_capacity_rowno   : tak68_size;
+            od_size_rowno       : tak68_size;
+            od_outcols_result   : tak68_field_descs_ptr; (* columns position in result record *)
+            od_capacity_ocr     : tak68_size;
+            od_size_ocr         : tak68_size;
+            od_outreclen        : tsp00_Int4; (* result rec length *)
+            od_one_aggr_group   : boolean;
+            od_aggregation      : boolean; (* result rec contains aggregation *)
+      END;
+      
+      tak68_join = RECORD
+            jn_res_rec_len: tsp00_Int4;
+            jn_rec_len    : tsp00_Int4;
+            jn_res_key_len: tsp00_Int4;
+            jn_key_len    : tsp00_Int4;
+            jn_jarr_cnt   : tsp00_Int2;
+            jn_jarr_path  : tsp00_Int2;
+            jn_leftoj     : boolean;
+            jn_rightoj    : boolean;
+            jn_filler     : tsp00_Int2;
+            jn_jarr       : ARRAY [1..MAX_JOINS_GG04] OF tsp00_Int2;
+      END;
+      tak68_join_ptr = ^tak68_join;
+      
+      tak68_join_context = RECORD
+            jc_act_join             : tsp00_Int2;
+            jc_acttabno             : tsp00_Int2;
+            jc_nxttabno             : tsp00_Int2;
+            jc_mb_data_len          : tsp00_Int2;
+            jc_outpos               : tsp00_Int4;
+            jc_sortkeylen           : tsp00_Int4;
+            jc_left_side            : tak_joinset;
+            jc_st_addr              : tgg00_StackListPtr;
+            jc_stack_desc           : tgg00_StackDesc;
+            jc_parskey              : tak_parskey; (* session command ID *)
+            jc_outdesc              : tak68_output_desc;
+            jc_joininfo             : tak68_join;
+            jc_tempresult           : boolean;
+            jc_seqsearch_for_exec   : boolean;
+      END;
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

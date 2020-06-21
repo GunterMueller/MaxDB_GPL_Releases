@@ -1,0 +1,152 @@
+#!/usr/bin/perl
+# cindent <filename>
+#
+# C++ Beautifier
+# a backup file is written to "$WRK/fast/tmp/$fname.cindent".
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Std;
+use ICopy;
+use File::Basename;
+
+
+my ($option, $opt_h, $AstyleOptions);
+while (@ARGV > 1) {
+    $option = shift;
+    if ( $option =~ /^\s*-h|-?\s*$/ ) {
+        $opt_h = 1;
+        break;
+    }
+    $AstyleOptions .= " $option";
+}
+
+if ( $opt_h or (@ARGV < 1) or ($ARGV[0] =~ /^-/) ) {
+
+  print <DATA>;
+  exit 1;
+
+}
+
+my $Source = ICopy::GetFilePath($ARGV[0], 0, 1, 0);
+die "unknown source: $ARGV[0]\n" unless ( $Source );
+
+my ($SourceName, $SourcePath) = fileparse($Source);
+die "can't open file $SourcePath/$SourceName\n" if (! -w "$SourcePath/$SourceName");
+
+# get astyle options from source or contents.txt
+$AstyleOptions = GetAstyleOpts($SourcePath,$SourceName) unless ($AstyleOptions);
+
+# removes silly options like -v ...
+if ($AstyleOptions) { 
+    my @OptionList = split ' ', $AstyleOptions;
+    $AstyleOptions = "";
+    foreach $option (@OptionList) {
+        next if ( $option =~ /(-v)|(--version)/ );
+
+        next if ( $option =~ /(-X)|(--errors-to-standard-output)/ );
+        
+        next if ( $option =~ /(-h)|(-\?)|(--help)/ );
+        
+        next if ( $option =~ /-suffix=/ );
+
+        $AstyleOptions .= " $option";
+    }
+}
+
+
+if ( -f "$WRK/fast/tmp/$SourceName.cindent" ) {
+    
+    local(@ARGV) = ( "-v5", "-q", "$WRK/fast/tmp/$SourceName.cindent" );
+    do "$TOOL/bin/scratch$TOOLEXT";
+    if ( $@ ) { die "Error while executing scratch$TOOLEXT: $@"}
+}
+
+rename ("$SourcePath/$SourceName", "$WRK/fast/tmp/$SourceName.cindent") ||
+     die "can't move $SourceName to $WRK/fast/tmp/$SourceName.cindent: $!\n"; 
+     
+$cmd = "$TOOL/pgm/astyle.exe  $AstyleOptions < $WRK/fast/tmp/$SourceName.cindent > $SourcePath/$SourceName";
+#print "Asytle Call: $cmd\n";
+system ($cmd);
+
+#########################################
+sub GetAstyleOpts ()
+{
+    my ($spath, $sname) = @_;
+    my $i = 0;
+
+    open (INFILE, "<$spath/$sname") || die "can't open source\n";
+    while ( <INFILE> ) {
+        if ( /^(\/\/)?\s*cindent\s*:\s*(.*)/ ) {
+            print "use formating options from source\n";
+            return $1;
+        }
+        last if ($i++ >= 50); 
+    }
+    close (INFILE);
+    if (-f "$spath/Contents.txt" ) {
+        open (INFILE, "<$spath/contents.txt") || die "can't open contents.txt\n";
+        while (<INFILE>) {
+            if ( /^\s*cindent\s*:\s*(.*)/ ) {
+                print "use formating options from contents.txt\n";
+                return $1;
+            }
+        }
+        close (INFILE);
+    }
+
+    return;
+}
+
+
+
+__DATA__
+
+
+  USAGE: cindent [-h] [<formating options>] <filename>
+   
+         reformat C/C++ files
+ 
+         a backup of the original file is written to 
+         $WRK/fast/tmp/<filename>.cindent
+
+         for a description of formating options see 
+         astyle documentation (astyle -h)
+
+         if no <formating options> are specified on the 
+         command line the first 50 lines of the source 
+         will be scaned for a tag like '^(/)*\s*cindent\s*:' 
+         to get the <formating options> for this source
+
+         if neither on command line nor in the source 
+         any <formating options> are specified cindent 
+         will scaned the conents.txt file in the source 
+         directory for the options
+         
+
+  options:
+
+        -h         :   this help information
+
+
+

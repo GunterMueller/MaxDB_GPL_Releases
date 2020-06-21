@@ -1,0 +1,162 @@
+*   *ID* BURRYSEL DBCMD    changed on 1992-09-28-13.22.54 by ADMIN     *
+*
+* BASE VIEWS
+*
+SELECT * FROM kern.B_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.C_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.GROUP_BV    !
+*
+FETCH !
+*
+SELECT * FROM kern.I_BV  !
+*
+FETCH !
+*
+SELECT * FROM kern.IV_BV  !
+*
+FETCH !
+*
+SELECT * FROM kern.M_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.ML_BV  !
+*
+FETCH !
+*
+SELECT * FROM kern.PO_BV       !
+*
+FETCH !
+*
+SELECT * FROM kern.PL_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.PR_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.R_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.REGION_BV   !
+*
+FETCH !
+*
+SELECT * FROM kern.ST_BV    !
+*
+FETCH !
+*
+SELECT * FROM kern.STR_BV !
+*
+FETCH !
+*
+SELECT * FROM kern.SU_BV  !
+*
+FETCH !
+*
+SELECT * FROM kern.VSN_BV     !
+*
+* DERIVED VIEWS
+*
+SELECT * FROM kern.PUR_ASSM_STRUCTURE !
+*
+FETCH !
+*
+SELECT * FROM kern.PUR_PO_HISTORY !
+*
+FETCH !
+*
+SELECT * FROM kern.PUR_PO_VALIDATE !
+*
+FETCH !
+*
+SELECT * FROM kern.PUR_PROD_MAINT !
+*
+FETCH !
+*
+SELECT * FROM kern.PUR_ST_MAINT !
+*
+FETCH !
+*
+SELECT * FROM kern.P_S_MAINT ORDER BY su_no!
+*
+FETCH !
+*
+SELECT * FROM kern.P_S_PROD !
+*
+FETCH !
+*
+SELECT * FROM kern.pur_where_used ORDER BY pr_c_comp, pr_c_assm !
+*
+FETCH !
+*
+SELECT * FROM kern.DMBRANCH !
+*
+FETCH !
+*
+SELECT * FROM kern.DMRECVG !
+*
+FETCH !
+*
+SELECT * FROM kern.DMSHIP !
+*
+FETCH !
+*
+SELECT * FROM kern.DIS_REQ_HISTORY !
+*
+FETCH !
+*
+SELECT * FROM kern.DIS_ST_RECPT !
+*
+FETCH !
+*
+SELECT * FROM kern.DIS_WH_PROD !
+*
+FETCH !
+*
+SELECT * FROM kern.SAL_CREDIT_MAINT !
+*
+FETCH !
+*
+SELECT * FROM kern.SLC_MAINT !
+*
+FETCH !
+*
+SELECT * FROM kern.SLC_VALID !
+*
+FETCH !
+*
+SELECT * FROM kern.SAL_DELINQ_INVC !
+*
+FETCH !
+*
+SELECT * FROM kern.S_I_HIST !
+*
+FETCH !
+*
+SELECT * FROM kern.S_I_VALID !
+*
+FETCH !
+*
+SELECT * FROM kern.SAL_INVENT !
+*
+FETCH !
+*
+SELECT * FROM kern.SAL_PROD !
+*
+FETCH !
+*
+SELECT * FROM kern.SAL_ST_MAINT !
+*
+FETCH !
+*
+COMMIT WORK !
+*

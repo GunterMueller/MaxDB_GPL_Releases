@@ -1,0 +1,238 @@
+/*
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+
+*/
+#define PROGNAME "xcancel"
+#include "winhead.h"
+extern unsigned sleep(unsigned);
+#ifndef DEFAULTS
+#define USERNAME "SUPERDBA"
+#define PASSWORD "ADMIN"
+#define DBNODE   "SAPDB"
+#endif
+
+#define USER1  "TOUT"
+#define PASSW1  "TOUT"
+
+#define SQL_CANCELPROC SQL_CONNECT_OPT_DRVR_START+4
+DWORD CancelProc(DWORD reference);
+
+#define ERROR_CHECK(hstmtx)	 if (retcode != SQL_SUCCESS) {\
+			   SQLError(henv,\
+				    hdbc,\
+				    hstmtx,\
+				    sqlstate,\
+				    &esq_sql_code,\
+				    error_txt,\
+				    len_error_txt,\
+				    &used_error_txt);\
+			   SPRINTF(buffer, " sqlstate: %s"CRLF, sqlstate);\
+			   PRINTF(buffer);\
+		  SPRINTF(buffer, " esq_sql_code: %ld"CRLF, esq_sql_code);\
+		  PRINTF(buffer);\
+                  switch (retcode) {\
+		  case(SQL_NO_DATA_FOUND) :\
+			  break;\
+		  case(SQL_SUCCESS_WITH_INFO) :\
+			  break;\
+		  case (SQL_ERROR):\
+		     if (esq_sql_code != -4008 &&\
+		        esq_sql_code != -711 &&\
+		        esq_sql_code != -715 &&\
+		        esq_sql_code != -102)\
+			return(16);\
+			   else\
+			      break;\
+		  default   :\
+			  return(16);\
+			  break; } }
+
+void sqlacancel ( DWORD reference );
+
+UCHAR driverver [ 11 ];
+UCHAR buffer [1024];
+SWORD iscancel=-1;
+UCHAR FAR szDSN[256];
+
+int MAIN(int argc, char **argv)
+{
+  HENV henv;
+  HDBC hdbc;
+  HSTMT hstmt;
+  UCHAR sqlstate  [ 10 ];
+  SDWORD esq_sql_code;
+  UCHAR error_txt  [ ERROR_TEXT_LEN + 1 ] ;
+  SWORD len_error_txt = ERROR_TEXT_LEN;
+  SWORD used_error_txt;
+  int ws;
+  RETCODE retcode;
+
+  SPRINTF(buffer, " %s running."CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  retcode = SQLAllocEnv(&henv);
+  SPRINTF(buffer, " SQLAllocEnv retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocConnect(henv, &hdbc);
+  SPRINTF(buffer, " SQLAllocConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+#ifdef WIN
+   {
+      UCHAR szConnStrOut[256]; SWORD cbConnStrOut;
+      szConnStrOut[0] = '\0';
+      retcode = SQLDriverConnect (hdbc, hWnd, szConnStrOut, SQL_NTS,
+         szConnStrOut, sizeof(szConnStrOut), &cbConnStrOut, SQL_DRIVER_COMPLETE);
+      SPRINTF(buffer," SQLDriverConnect retcode: %d"CRLF, retcode);
+   }
+#else
+  retcode = SQLConnect(hdbc, DBNODE, (SWORD) SQL_NTS, ODBCUSER, (SWORD) SQL_NTS,
+                       ODBCPASSW, (SWORD) SQL_NTS );
+  SPRINTF(buffer," SQLConnect retcode: %d"CRLF, retcode);
+#endif
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLGetInfo( hdbc, SQL_DATA_SOURCE_NAME, (PTR) szDSN, sizeof(szDSN), NULL);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocStmt (hdbc, &hstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+
+  retcode = SQLExecDirect (hstmt, "CREATE USER "USER1" PASSWORD "PASSW1" TIMEOUT 60", SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLConnect(hdbc, szDSN, SQL_NTS, USER1, (SWORD) SQL_NTS,
+     PASSW1, (SWORD) SQL_NTS );
+  SPRINTF(buffer," SQLConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocStmt (hdbc, &hstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLSetStmtOption (hstmt, SQL_CANCELPROC, (DWORD)&CancelProc);
+  SPRINTF(buffer," SQLSetStmtOption SQL_CANCELPROC retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLPrepare (hstmt, "SELECT * FROM TABLES", SQL_NTS);
+  SPRINTF(buffer," SQLPrepare retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  iscancel=1;
+
+  retcode = SQLExecute (hstmt);
+  SPRINTF(buffer," SQLExecute retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  ws = 65;
+  SPRINTF(buffer," sleep %ds"CRLF, ws);
+  PRINTF(buffer);
+#ifdef WIN32
+  Sleep(ws*1000);
+#else
+  sleep(ws);
+#endif
+  SPRINTF(buffer," continue"CRLF);
+  PRINTF(buffer);
+
+  iscancel=-1;
+
+  retcode = SQLExecDirect (hstmt, "SELECT * FROM TABLES", SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+  
+  iscancel=4;
+  
+  retcode = SQLExecDirect (hstmt, "SELECT * FROM TABLES", SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLSetStmtOption (hstmt, SQL_CANCELPROC, (DWORD)NULL);
+  SPRINTF(buffer," SQLSetStmtOption SQL_CANCELPROC retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  iscancel=4;
+  
+  retcode = SQLExecDirect (hstmt, "SELECT * FROM TABLES", SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeConnect(hdbc);
+  SPRINTF(buffer, " SQLFreeConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeEnv(henv);
+  SPRINTF(buffer, " SQLFreeEnv retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  SPRINTF(buffer, " %s ending"CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  return(0);
+}
+
+DWORD CancelProc(DWORD reference)
+{
+  DWORD ret;
+  SPRINTF(buffer, "CancelProc %d"CRLF, iscancel);
+  PRINTF(buffer);  
+  if(!iscancel) {
+    sqlacancel(reference);
+    ret = TRUE;
+  }
+  else {
+    ret = FALSE;
+  }
+  iscancel--;
+  return(ret);  
+}

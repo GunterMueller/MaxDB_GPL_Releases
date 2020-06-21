@@ -1,0 +1,570 @@
+.CM *ID* VCT03    VDN      changed on 1992-08-12-15.26.42 by CARSTEN   *
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1994$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VCT03$
+.tt 2 $$$
+.tt 3 $N. Zimmer$CT_Cross_reference$1994-01-21$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : CT_cross_reference
+=========
+.sp
+Purpose : Subprograms for Cross_reference.
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        VAR
+              c03namlist : ARRAY  [ 1..cct_maxlistelement ]  OF tsp_name;
+              c03found   : ARRAY  [ 1..cct_maxlistelement ]  OF tsp_name;
+ 
+        PROCEDURE
+              c03cross_ref;
+ 
+        PROCEDURE
+              c03process_cross_tree;
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              VDNCALL              : VCT21;
+ 
+        VAR
+              c21count_list : integer;
+              c21res : tct_result;
+              c21maxcode : integer;
+              c21codetab : tct_tablepointer;
+ 
+        PROCEDURE
+              c21print_res;
+ 
+        PROCEDURE
+              c21getcall_rout (l_nb : integer);
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : N. Zimmer
+.sp
+.cp 3
+Created : 1988-07-22
+.sp
+.cp 3
+Version : 1994-01-21
+.sp
+.cp 3
+Release :  3.1.3 	 Date : 1994-01-21
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+PROCEDURE  CROSS_REF:
+.sp
+Initialisation of the global vars letter, digits, special, signs,
+and call of procedure buidtree to build the cross_ref_tree
+.sp
+.sp 3
+PROCEDURE  PROCESS_CROSS_TREE:
+.sp
+The cross_tree is processed, sortet by wordvalue := e_artn.
+The global var res becomes : e_artn := wordvalue; e_nam and e_vdn
+will be bound in procedure get_call_rout; and in procedure c21print_res
+the record parts e_art and e_artv are bound, the result is written to the
+files CALL OUT A and IS_CALL OUT A.
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+FUNCTION  SPECIALWORD:
+.sp
+Checks wether the current word (from current line of c21_code_tab)
+in global var c03_namlist exists. In this case the function becomes
+false.
+.sp 4
+PROCEDURE  BUILDTREE:
+.sp
+From the global var c21codetab the current word is fetched and,
+in case of not specialword, inserted in cross_tree.
+.sp 4
+PROCEDURE  GETWORD:
+.sp
+Fetches a word, with length maxnamelength 18; is the current line a
+commentline, this line is ignore upto end of line. Is the found word
+the last (of this line), then the line counter is incremented.
+.sp 4
+PROCEDURE  GETCHAR:
+.sp
+Reads a char from current line and counts the line, which are read.
+.sp 4
+PROCEDURE  ENTERTREE:
+.sp
+Inserts a word, sorted alphabetically, in the global var cross_tree
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      maxwordnumber=4000;
+ 
+TYPE
+      counter      = 1..cct_maxlinesofcode;
+      queuepointer = ^queueitem;
+ 
+      queueitem    = RECORD
+            linenumber   : counter;
+            nextinqueue  : queuepointer
+      END;
+ 
+ 
+      entrytype    = RECORD
+            wordvalue    : tsp_name;
+            efill        : tsp_int2;
+            firstinqueue : queuepointer;
+            lastinqueue  : queuepointer
+      END;
+ 
+      treepointer  = ^node;
+ 
+      node         = RECORD
+            entry : entrytype;
+            left  : treepointer;
+            right : treepointer
+      END;
+ 
+      reftable     = ARRAY [ 1..maxwordnumber, 1..2 ]  OF treepointer;
+ 
+      c03_tp_glob  = RECORD
+            cross_tree : treepointer;
+            (*             heap       : treepointer; *)
+            count_n    : tsp_int4;
+            letters    : SET OF char;
+            digits     : SET OF char;
+            specials   : SET OF char;
+            signs      : SET OF char;
+            com        : boolean;
+            eof_code   : boolean;
+            eoln_code  : boolean;
+            c03fill    : boolean;
+            ln         : tct_line;
+            cpos       : tsp_int4;
+      END;
+ 
+ 
+VAR
+      c03glob : c03_tp_glob;
+ 
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      specialword (VAR word : tsp_name) : boolean;
+ 
+VAR
+      ok : boolean;
+      i  : integer;
+ 
+BEGIN
+&ifdef debug
+writeln ('ct03_specialword : ', word);
+&endif
+WITH c03glob DO
+    BEGIN
+    ok := true;
+    IF  word <> bsp_name
+    THEN
+        BEGIN
+        i  := 1;
+        WHILE (ok) AND ( i <= count_n ) DO
+            BEGIN
+            IF  ( c03namlist [ i ] = word )
+            THEN
+                BEGIN
+                c03found [ i ] := 'yes               ';
+                ok             := false;
+                END;
+            (*ENDIF*) 
+            i := i + 1
+            END
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    specialword := ok
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      buildtree (VAR tree : treepointer);
+ 
+VAR
+      currentword : tsp_name;
+      currentline : counter;
+      inpline     : counter;
+ 
+BEGIN
+&ifdef debug
+writeln ('ct03_buildtree   : ', ord(tree));
+&endif
+WITH c03glob DO
+    BEGIN
+    currentline := 1;
+    WHILE NOT eof_code DO
+        BEGIN
+        getword (currentword, currentline);
+        IF  cpos = 1
+        THEN
+            inpline := currentline - 1
+        ELSE
+            inpline := currentline;
+        (*ENDIF*) 
+        IF  (NOT eof_code ) AND (NOT specialword(currentword))
+        THEN
+            entertree (tree, currentword, inpline)
+        (*ENDIF*) 
+        END
+    (*ENDWHILE*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      getword (VAR word : tsp_name;
+            VAR line : counter);
+ 
+VAR
+      currentchar : char;
+      index : 0..mxsp_name;
+ 
+BEGIN
+&ifdef debug
+writeln ('ct03_getword     : ', word, line );
+&endif
+WITH c03glob DO
+    BEGIN
+    currentchar := bsp_c1;
+    REPEAT
+        com := false;
+        WHILE NOT (eof_code OR (currentchar in signs) OR
+              (currentchar = '(')) DO
+            getchar (currentchar, line);
+        (*ENDWHILE*) 
+        IF  currentchar = '('
+        THEN
+            BEGIN
+            getchar (currentchar, line);
+            IF  currentchar = '*'
+            THEN
+                BEGIN
+                eoln_code := true;
+                com := true
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+    UNTIL
+        NOT com;
+    (*ENDREPEAT*) 
+    IF  NOT eof_code
+    THEN
+        BEGIN
+        index := 0;
+        word  := bsp_name;
+        WHILE currentchar in signs DO
+            BEGIN
+            IF  index <  mxsp_name
+            THEN
+                BEGIN
+                index := succ (index);
+                word [ index ]  := currentchar
+                END;
+            (*ENDIF*) 
+            IF  eof_code
+            THEN
+                currentchar := bsp_c1
+            ELSE
+                getchar (currentchar, line)
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      getchar (VAR ch : char;
+            VAR lin : counter);
+ 
+BEGIN
+WITH c03glob DO
+    BEGIN
+    IF  eof_code
+    THEN
+        ch := bsp_c1
+    ELSE
+        IF  eoln_code
+        THEN
+            BEGIN
+            ch        := bsp_c1;
+            ln        := c21codetab^ [ lin ];
+            cpos      := 1;
+            lin       := lin + 1;
+            eoln_code := false;
+            IF  lin > c21maxcode
+            THEN
+                eof_code := true;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            ch   := ln.l [ cpos ];
+            cpos := cpos + 1;
+            IF  cpos > ln.len
+            THEN
+                eoln_code := true;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      entertree (VAR subtree : treepointer;
+            VAR   word : tsp_name;
+            line : counter);
+ 
+VAR
+      nextitem : queuepointer;
+ 
+BEGIN
+&ifdef debug
+writeln ('ct03_entertree   : ', ord(subtree), word, line);
+&endif
+WITH c03glob DO
+    BEGIN
+    IF  subtree = NIL
+    THEN
+        BEGIN
+        new (subtree);
+        WITH subtree^ DO
+            BEGIN
+            left  := NIL;
+            right := NIL;
+            WITH entry DO
+                BEGIN
+                wordvalue := word;
+                new (firstinqueue);
+                lastinqueue := firstinqueue;
+                WITH firstinqueue^ DO
+                    BEGIN
+                    linenumber  := line;
+                    nextinqueue := NIL
+                    END
+                (*ENDWITH*) 
+                END
+            (*ENDWITH*) 
+            END
+        (*ENDWITH*) 
+        END
+    ELSE
+        WITH subtree^, entry DO
+            IF  word = wordvalue
+            THEN
+                BEGIN
+                IF  lastinqueue^.linenumber <> line
+                THEN
+                    BEGIN
+                    new (nextitem);
+                    WITH nextitem^ DO
+                        BEGIN
+                        linenumber  := line;
+                        nextinqueue := NIL
+                        END;
+                    (*ENDWITH*) 
+                    lastinqueue^.nextinqueue := nextitem;
+                    lastinqueue := nextitem
+                    END
+                (*ENDIF*) 
+                END
+            ELSE
+                IF  word < wordvalue
+                THEN
+                    entertree (left, word, line)
+                ELSE
+                    entertree (right, word, line)
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c03cross_ref;
+ 
+BEGIN
+&ifdef debug
+writeln ('c03cross_ref ==============================');
+&endif
+WITH c03glob DO
+    BEGIN
+    letters    :=  [ 'a'..'z', 'A'..'Z' ] ;
+    digits     :=  [ '0'..'9' ] ;
+    specials   :=  [ '_', '''' ] ;
+    signs      := letters + digits + specials;
+    count_n    := c21count_list;
+    (*     mark (heap); *)
+    cross_tree := NIL;
+    eof_code   := false;
+    eoln_code  := true;
+    buildtree (cross_tree)
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c03process_cross_tree;
+ 
+VAR
+      i      : integer;
+      tree_p : treepointer;
+      line_p : queuepointer;
+      line_nb: integer;
+      ref_pos: integer;
+      references : reftable;
+ 
+BEGIN
+&ifdef debug
+writeln ('c03process_cross_tree =====================');
+&endif
+WITH c03glob DO
+    BEGIN
+    tree_p := cross_tree;
+    IF  tree_p <> NIL
+    THEN
+        BEGIN
+        ref_pos := 0;
+        REPEAT
+            WHILE  (tree_p <> NIL) DO
+                BEGIN
+                ref_pos := ref_pos + 1;
+                references [ ref_pos, 1 ] := tree_p;
+                references [ ref_pos, 2 ] := tree_p^.right;
+                tree_p := tree_p^.left
+                END;
+            (*ENDWHILE*) 
+            WITH references [ ref_pos, 1 ] ^.entry DO
+                BEGIN
+                WITH c21res DO
+                    BEGIN
+                    e_artn := bsp_name;
+                    FOR i := 1 TO mxsp_name DO
+                        e_artn [ i ]  := wordvalue [ i ] ;
+                    (*ENDFOR*) 
+                    END;
+                (*ENDWITH*) 
+                line_p := firstinqueue;
+                WHILE (line_p <> NIL) DO
+                    BEGIN
+                    line_nb := line_p^.linenumber;
+                    c21getcall_rout (line_nb);
+                    c21print_res;
+                    line_p := line_p^.nextinqueue
+                    END
+                (*ENDWHILE*) 
+                END;
+            (*ENDWITH*) 
+            tree_p := references [ ref_pos, 2 ] ;
+            ref_pos := ref_pos - 1
+        UNTIL
+            (ref_pos = 0) AND (tree_p = NIL)
+        (*ENDREPEAT*) 
+        END;
+    (*     release (heap); *)
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :        119
+*-PRETTY-*  lines of code :        390        PRETTY  3.09 
+*-PRETTY-*  lines in file :        548         1992-11-23 
+.PA 

@@ -1,0 +1,262 @@
+#
+#       @(#)copy-upd628 Version:6.2.8           17-10-1997
+#		AdminTool!
+#
+#       kopiert den Inhalt des  D:/Share/V62/upd   - Baumes in den
+#                               D:/Share/V62/basis - Baum.
+#
+#       Gert Groﬂmann, SAP AG
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Cwd;
+use File::Basename;
+use File::Find;
+use File::Path;
+
+$Root = "D:\\Share\\V62";
+
+if ( @ARGV < 2 ) {
+   die "USAGE:   copy-upd628 CLNUMBER [CL DIRECTORY]\n";
+}
+
+$CL_number = shift;
+$CL_dir    = shift;
+
+local($patch_lvl);
+($patch_lvl) = $CL_number =~ /\d\.(\d)/;
+$patch_lvl = "0$patch_lvl" if length($patch_lvl) < 2;
+while(<$OWN/sys/man/6208*>) {
+	open(FILE_IN, $_) || die "Can't open $_ (input): $!\n";
+	open(FILE_OUT, "$OWN/sys/man/6208-$patch_lvl.all") || die "Can't open $OWN/sys/man/6208-$patch_lvl.all (output): $!\n";
+	print FILE_OUT <FILE_IN>;
+	close(FILE_IN); close(FILE_OUT);
+}
+
+$SOURCE		= "$Root\\upd";
+$TARGETTEST = "$Root\\basis";
+$TARGET		= $CL_dir ? $CL_dir : $TARGETTEST;
+
+print "\n----------------------------------------------\n";
+print scalar localtime(), "\n";
+print "\n----------------------------------------------\n";
+print "\nKopieren von \"$SOURCE\" nach \"$TARGET\"\n";
+print "\n----------------------------------------------\n\n";
+
+print "... unlink $SOURCE/tmp\n";
+unlink <$SOURCE/tmp/*>;
+print "... unlink $SOURCE/sys/wrk/slow/tmp\n";
+unlink <$SOURCE/sys/wrk/slow/tmp/*>;
+print "... unlink $SOURCE/sys/wrk/slow/obj/*.a\n";
+unlink <$SOURCE/sys/wrk/slow/obj/*.a>;
+print "... unlink $SOURCE/sys/wrk/quick/tmp\n";
+unlink <$SOURCE/sys/wrk/quick/tmp/*>;
+print "... unlink $SOURCE/sys/wrk/quick/obj/*.a\n";
+unlink <$SOURCE/sys/wrk/quick/obj/*.a>;
+print "... unlink $SOURCE/sys/wrk/fast/tmp\n";
+unlink <$SOURCE/sys/wrk/fast/tmp/*>;
+print "... unlink $SOURCE/sys/wrk/fast/obj/*.a\n";
+unlink <$SOURCE/sys/wrk/fast/obj/*.a>;
+print "... unlink $SOURCE/sys/wrk/fast/prot\n";
+unlink <$SOURCE/sys/wrk/fast/prot/*>;
+print "... unlink $SOURCE/sys/wrk/quick/prot\n";
+unlink <$SOURCE/sys/wrk/quick/prot/*>;
+print "... unlink $SOURCE/sys/wrk/slow/prot\n";
+unlink <$SOURCE/sys/wrk/slow/prot/*>;
+print "... unlink $TARGET/tmp\n";
+unlink <$TARGET/tmp/*>;
+
+#-----------------------------------------------------------------------
+#	Die Reihenfolge ist wichtig - bitte NICHT veraendern !
+#-----------------------------------------------------------------------
+
+@ALL1 = ( "sys/desc", "sys/src", "sys/wrk/incl", "sys/wrk/size", "sys/wrk/dates" );
+@ALL2 = ( "sys/wrk/fast" );
+@ALL3 = ( "sys/wrk/quick", "sys/wrk/slow", "sys/man", "usr", "tool" );
+@ALL4 = ( "test/pc/old", "windows" );
+
+foreach $dir ( @ALL1, @ALL2, @ALL3, @ALL4 ) {
+	find(\&copy_with_date_to_target, $dir) if -d "$SOURCE/$dir";
+}
+
+
+#-----------------------------------------------------------------------
+#       Erzeugen des neuen gelinkenten CL-Baumes
+#-----------------------------------------------------------------------
+
+open(FILE_OUT, ">>$TARGETTEST/.clnumber") || die "Can't open (append): $!\n";
+print FILE_OUT "$CL_number\n";
+close(FILE_OUT);
+
+{
+	fileparse_set_fstype('MSDOS');
+	local($TARGET) = dirname($OWN)."c_$patch_lvl";
+
+	foreach $dir ( "sys/desc", "sys/src", "windows/src" ) {
+		find(\&copy_with_date_to_cxx, $dir) if -d "$SOURCE/$dir";
+	}
+}
+
+#-----------------------------------------------------------------------
+#       Erzeugen der Install- und Resultliste aus der "distriblist" (SCO)
+#-----------------------------------------------------------------------
+
+$DBROOT = "$TARGET/usr";
+chdir($DBROOT) || die "Can't change to directory $DBROOT: $!\n";
+$ENV{'DBROOT'} = $DBROOT;
+print "...", $DBROOT, "\n";
+print "...", cwd(), "\n";
+system("$TARGET/tool/src/vdistrib/vdistrib -b -m -c -s ncr -i total") == 0
+	or warn "Error while executing $TARGET/tool/src/vdistrib/vdistrib -b -m -c -s ncr -i total: $!\n";
+
+print "... Kopieren beendet: ", localtime(), "\n";
+
+
+# ---------------------------------------------------------------------
+# kopiert von $SOURCE nach $TARGET (inkl. aller Unterverz.) mit Erhalt der orig. atime, mtime
+sub copy_with_date_to_target {
+	mkpath("$TARGET/$File::Find::dir", 1, 0777) unless -d "$TARGET/$File::Find::dir";
+	if ( -f "$SOURCE/$File::Find::name" ) {
+		@statdat = stat( "$SOURCE/$File::Find::name" );
+		my $newfilename = "$File::Find::name".".$CL_number";
+		if ( -f "$TARGET/$File::Find::name" ) {
+			# Datei umbenennen
+			unlink "$TARGET/$newfilename";
+			rename("$TARGET/$File::Find::name", "$TARGET/$newfilename") ||
+				die "Can't rename $TARGET/$File::Find::name to $TARGET/$newfilename: $!\n"
+		} 
+		else {
+			# auf Basis das File kopieren
+			if ( -f "$TARGETTEST/$File::Find::name" ) {
+				copy("$TARGETTEST/$File::Find::name", "$TARGETTEST/$newfilename") ||
+					warn "Can't copy $TARGETTEST/$File::Find::name to $TARGETTEST/$newfilename: $!\n";
+			}
+		}
+		copy("$SOURCE/$File::Find::name", "$TARGET/$File::Find::name") ||
+			warn "Can't copy $SOURCE/$File::Find::name to $TARGET/$File::Find::name: $!\n";
+		utime($statdat[8], $statdat[9], "$TARGET/$File::Find::name") ||
+			warn "Can't utime $TARGET/$File::Find::name: $!\n";
+	}
+}
+
+sub copy_with_date_to_cxx {
+	mkpath("$TARGET/$File::Find::dir", 1, 0777) unless -d "$TARGET/$File::Find::dir";
+	if ( -f "$SOURCE/$File::Find::name" ) {
+		@statdat = stat( "$SOURCE/$File::Find::name" );
+		copy("$SOURCE/$File::Find::name", "$TARGET/$File::Find::name") ||
+			warn "Can't copy $SOURCE/$File::Find::name to $TARGET/$File::Find::name: $!\n";
+		utime($statdat[8], $statdat[9], "$TARGET/$File::Find::name") ||
+			warn "Can't utime $TARGET/$File::Find::name: $!\n";
+	}
+}
+
+__END__
+
+cat sys/man/6208* > sys/man/6208-`expr "$VERCL" : ".*\.\(.*\)"`.all
+SOURCE=/u/upd628
+TARGETTEST=/u/rel628
+TARGET=${CORDIR:-$TARGETTEST}
+
+echo 
+echo '----------------------------------------------'
+date
+echo '----------------------------------------------'
+echo 'Kopieren von ' $SOURCE ' nach ' $TARGET
+echo '----------------------------------------------'
+echo
+
+echo "... rm $SOURCE/tmp"
+rm -f $SOURCE/tmp/*
+echo "... rm $SOURCE/sys/wrk/slow/tmp"
+rm -f $SOURCE/sys/wrk/slow/tmp/*
+echo "... rm $SOURCE/sys/wrk/slow/obj/*.a"
+rm -f $SOURCE/sys/wrk/slow/obj/*.a
+echo "... rm $SOURCE/sys/wrk/quick/tmp"
+rm -f $SOURCE/sys/wrk/quick/tmp/*
+echo "... rm $SOURCE/sys/wrk/quick/obj/*.a"
+rm -f $SOURCE/sys/wrk/quick/obj/*.a
+echo "... rm $SOURCE/sys/wrk/fast/tmp"
+rm -f $SOURCE/sys/wrk/fast/tmp/*
+echo "... rm $SOURCE/sys/wrk/fast/obj/*.a"
+rm -f $SOURCE/sys/wrk/fast/obj/*.a
+echo "... rm $SOURCE/sys/wrk/fast/prot"
+rm -f $SOURCE/sys/wrk/fast/prot/*
+echo "... rm $SOURCE/sys/wrk/quick/prot"
+rm -f $SOURCE/sys/wrk/quick/prot/*
+echo "... rm $SOURCE/sys/wrk/slow/prot"
+rm -f $SOURCE/sys/wrk/slow/prot/*
+echo "... rm $TARGET/tmp"
+rm -f $TARGET/tmp/*
+
+#-----------------------------------------------------------------------
+#	Die Reihenfolge ist wichtig - bitte NICHT veraendern !
+#-----------------------------------------------------------------------
+
+ALL1='sys/desc      sys/src       sys/wrk/incl  sys/wrk/size  sys/wrk/dates'
+ALL2='sys/wrk/fast'
+ALL3='sys/wrk/quick sys/wrk/slow  sys/man       usr           tool         '
+ALL4='test/pc/old   windows'
+
+for DIR in $ALL1 $ALL2 $ALL3 $ALL4
+do  {
+    cd $SOURCE/$DIR
+    echo 
+    echo '...' `pwd`
+    echo '    find . -print | sort | cpio -pvumd' $TARGET/$DIR
+    find . -print | sort | cpio -pvumd $TARGET/$DIR
+    }
+done
+
+
+
+
+#-----------------------------------------------------------------------
+#       Erzeugen des neuen gelinkenten CL-Baumes
+#-----------------------------------------------------------------------
+
+cd $SOURCE
+echo $VERCL >> $TARGETTEST/.clnumber
+
+CLOWN=r`expr "$OWN" : ".*\(...\)"`
+DISK=`dirname $OWN`
+mkdir "$DISK"/"$CLOWN"."$VERCL"
+for j in `find sys -type d -print`
+do
+   mkdir ${DISK}/${CLOWN}.${VERCL}/${j}
+done
+
+for i in `find sys/desc sys/src windows/src -type f -print`
+do
+   ln ${TARGET}/${i} ${DISK}/${CLOWN}.${VERCL}/${i}
+done
+
+#-----------------------------------------------------------------------
+#       Erzeugen der Install- und Resultliste aus der "distriblist" (SCO)
+#-----------------------------------------------------------------------
+
+DBROOT=${TARGET}/usr
+cd $DBROOT
+export DBROOT
+echo '...' $DBROOT
+echo '...' `pwd`
+$TARGET/tool/src/vdistrib/vdistrib -b -m -c -s ncr -i total
+
+echo '... Kopieren beendet: ' `date`

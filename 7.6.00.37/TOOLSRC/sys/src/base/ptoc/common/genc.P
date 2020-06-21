@@ -1,0 +1,5043 @@
+(* @(#)common/genc.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* Changes :                                                            *)
+(* RAS Nov.97 RASN1 generate / use symbolic & 'c' consts                *)
+(* RAS Nov.97 RASN2 use anonym. variant recs (unions)                   *)
+(* RAS Nov.97 RASN3 generate ANSI prototypes only                       *)
+(* RAS Nov.97 RASN4 generate enums, consts, types only                  *)
+(* RAS Aug.97 RASE little patches                                       *)
+(* RAS Jun.97 RAS07 offer EmbedC('...') instead of inline-ASM           *)
+(* RAS Jun.97 RAS06 generate macros instead of procs / funcs            *)
+(* RAS Jun.97 RAS05 ignore canceled stores of WITH expr. (-Rw)          *)
+(* RAS Jun.97 RAS04 make LitSizeOp num.const wg. SQLMOVC (-Rs)          *)
+(* RAS Mai.97 RAS03 chars as hex for ebcdic cross-comp. (-RE)           *)
+(* RAS Mai.97 RAS02 Inline-Auloesung fuer Sets <= 4 Bytes (-RS)         *)
+(* RAS Mai.97 RAST2 Tests(!) f. Inline-Auloesung fuer Sets              *)
+(* RAS Apr.97 RAS01 (bessere) inline-Auloesung fuer: (Option:)          *)
+(*                  MEMCMP bis 4 Byte (-RC)                             *)
+(*                  Array Assign bis 4 Byte (-RA)                       *)
+(*                  Array Value Parms bis 4 Byte (-RV)                  *)
+(*                  viele _ptoc_MOVE (-RM)                              *)
+(* GR 1997-May-12  store LongType, UlongType as longs, not as doubles   *)
+(* JB 1992-Dec-02  Cleanup: SPRACHE == PASCAL, PTOC only !              *)
+(* JB 1992-Nov-25  Cleanup: Eliminate unused local variables ('level')  *)
+(* JB 1992-Sep-15  Added version output to (indirectly) force inclusion *)
+(*                 of 'Version.c' even on IBM-AIX ('what'-string !)     *)
+(* JB 1992-Sep-07  Integrated trace in INITIALIZER, suppressed trailing *)
+(*                 comma in value list (done by JH in HP 9000 version)  *)
+(* JB 1992-Jul-09  Code in INITIALIZER: Bedingung uebernommen aus Ab-   *)
+(*                 gleich des generierten C-Codes bei Vereinheitlichung *)
+(* JH   10.07.91   Option -XW : Create a warning on large Value-        *)
+(* JH              Parameters (> 4 Byte) in Procedures/Functions        *)
+(* JH   18.06.91   Put the if-Part of if-then-else always in BLOCK      *)
+(* JH              ( for program 'cstruct4' on T/35 )                   *)
+(* JH   14.06.91   Option -Y : Change variable names of pascal globals  *)
+(* JH              to global pointers : var -> ( *var )                 *)
+(* JH   10.06.91   Debug output with -XQ Option                         *)
+(* JH   04.06.91   DefineEnum : enums are only created with -Xc Option  *)
+
+#define INTTYPE_INDEX 1
+#define CHARTYPE_INDEX 15
+#define ANYPTRTYPE_INDEX 41
+
+#define T_NULL 0
+#define T_CONSTANT 1
+#define T_IDENTIFIER 2
+#define T_TERM 3
+#define T_EXPRESSION 4
+#define T_BLOCK 5
+#define T_STATEMENT 6
+
+#define C         1
+#define PASCAL    2
+#define FORTRAN   3
+
+#define ANYSIDE  0
+#define LEFT     1
+#define RIGHT    2
+
+#define IfthenelseOp (LastOp+1)
+
+
+#define StringField  NodeIndex + 3
+#define SpecOperator  MinorOperator
+#define LsOperator  MinorOperator
+#define SsOperator MajorOperator
+
+#include "csg.def"
+#include "hdg.def"
+#include "globals.i"
+#include "csg.i"
+#include "opcode.i"
+#include "strtab.h"
+#include "utilities.h"
+#include "_shifts.h"
+#include "dumptree.h"
+
+procedure version_writing ; external ; (* 1992-Sep-15 J.Bruehe *)
+
+procedure rediroutput(var f:text); external;
+procedure GenTyp(Node:integer); external;
+procedure GenIfTyp(Node:integer); external;
+procedure double_to_string(p1, p2:integer; var s:STRING; var l:integer); external;
+procedure long_to_string(p1, p2:integer; var s:STRING; var l:integer); external;
+function  GenName(Idx:integer):integer; external;
+(*JH*) function  GenPName(Idx:integer):integer; external;
+function  BuildUnique(Idx, Suffix:integer):integer; external;
+function  BuildTypeName(Idx:integer):integer; external;
+function  BuildL0Name(Idx:integer):integer; external;
+procedure Ref_STab_datafile; external;
+function DataNode(entry:integer):integer;  external;
+procedure TypeSize( x:integer); external;
+procedure BumpSymPtr; external;
+function UnCKeyword(index:integer):integer; external;
+function SpecFunction(index:integer):integer; external;
+function NoSideEffects(Node:integer):boolean; external;
+function IsOrdinal(t:integer):boolean; external;
+function PrimType(t:integer):integer; external;
+procedure exit(v:integer); external;
+
+procedure setbit(var v:integer; f:integer); external;
+procedure clearbit(var v:integer; f:integer); external;
+function testbit(v:integer; f:integer): boolean; external;
+
+function PAR(Oop, Side, Iop:integer): boolean; external;
+function UnmarkedType(Idx:integer): boolean; external;
+function UnmarkedVar(Idx:integer): boolean; external;
+procedure HdgMark(Node:integer); external;
+function IsMarked(Idx: integer) : boolean; external;
+procedure markT(Idx : integer); external;
+function TypeOfVar(Idx : integer) : integer; external;
+
+function DeleteUnusedVar : boolean; external;
+function DeleteUnusedType : boolean; external;
+function DeleteUnusedEnumElement : boolean; external;
+function DeleteUnusedConst : boolean; external;
+function BreakPointerType : boolean; external;
+function DelayedParCopy : boolean; external;
+function UseSymbolicConst : boolean; external;
+function IsEnumDcl(Idx:integer):boolean; external;
+function IsConstDcl(Idx:integer):boolean; external;
+
+#ifdef RASX /*RAS06*/
+function NameInNames ( NamIdx: integer; var Names: STRING ):boolean; external;
+#endif
+
+
+#define LPAR(par) if (par) then write(outfile, '(')
+#define RPAR(par) if (par) then write(outfile, ')')
+
+#ifdef RAS /*RAS00 make type String20 global */
+type
+   String20 = packed array [0..19] of char;
+#endif
+
+var
+   DumpFlag: integer;
+   IDX_PTR : integer;
+   IDX_DATA: integer;
+   nummer  : integer;
+   CurrentLevel : integer;
+   CurrentProc : integer;
+   outfile: text;
+   BlankString : integer;
+#ifdef RAS /*RAS00 define hexes*/
+   hexes: String20;
+#endif
+#ifdef RASN /*RASN4 control 00-paper-output */
+   RAS_first_const,
+   RAS_last_const,
+   RAS_first_type,
+   RAS_last_type: SymbolTableRange;
+#endif
+
+procedure GenC(Node:integer; from_stab, to_stab:integer; enc_block:integer;
+	    DFlag, MaxPos :integer; StatLink:boolean);
+
+
+const
+
+(* some flag values for SFeld4 *)
+
+  StaticLinkRef = 1;	(* set by frontend when a symbol is accessed from higher static level   *)
+  SelfRefPointer= 2;    (* used to avoid looping when defining self referencing pointers        *)
+  TypeDeclared  = 4;    (* mark  a type, struct/union/enum and so on as declared		*)
+
+#ifdef RASX /*RAS05 bits used */
+  WithTmpVar = 16;
+  WithAktiv = 32;
+#endif
+
+#ifndef RAS /*RAS00 make type String20 global */
+type
+   String20 = packed array [0..19] of char;
+#endif
+
+var
+   NestLevel    : integer;
+   Idx_name     : integer;
+   Idx_typespec : integer;
+   save1, save2  : integer;
+
+
+function TYPE_SPECIFIER(ObjIdx, TypIdx:integer; DontUseBackRef:boolean; inc:integer):integer; forward;
+procedure DECLARATOR(Idx:integer;namedtype:integer); forward;
+procedure ABSTRACT_DECLARATOR(Idx:integer; namedtype:integer); forward;
+procedure EXPRESSION(Node:HdgRange; Oop, Side: integer); forward;
+procedure BLOCK(Node:HdgRange; inc:integer; last:integer); forward;
+procedure STATEMENT(Node:HdgRange; inc:integer); forward;
+procedure FUNCTION_DEFINITION(Node:HdgRange; inc:integer); forward;
+function ComplexType(Idx:integer):boolean; forward;
+procedure CaseEmptyStatement(Node, inc:integer); forward;
+function EmptyStatement(Node:integer):boolean; forward;
+function IsInFrameParam(Idx:integer):boolean; forward;
+function IsInFrame(Idx:integer):boolean; forward;
+function Typ(Node:integer):integer; forward;
+procedure DefineConstant(Idx:integer); forward;
+procedure Single_Definition(Idx, inc: integer; pulloutside, ismodul:boolean); forward;
+procedure ANSIDeklFormPar(Idx1:integer); forward;
+
+
+procedure Space;
+begin
+writeln(outfile);
+end;
+
+procedure Abbruch;
+begin
+writeln(outfile, '--- Abbruch ---');
+Space;
+exit(1);
+end;
+
+procedure indent(kennz, index, inc:integer);
+var i:integer;
+begin
+if inc >= 0
+then
+    begin
+#ifdef RASX /*RAS06*/
+    if RAS_control ['H'] then
+	  write(outfile, ' \\');
+#endif
+    writeln(outfile);
+    if DumpFlag=1
+    then
+      case kennz of
+        1: write(outfile, '[', index:6, ']    ');
+        2: write(outfile, '(', index:6, ')    ');
+      end;
+    for i:=1 to inc do
+      write(outfile, ' ');
+    end;
+end;
+
+procedure Mistake(Idx:integer);
+begin
+write(outfile, '*** Mistake:', Idx, ' *** ');
+end;
+
+procedure Missing(Idx:integer);
+begin
+write(outfile, '*** Missing:', Idx, ' *** ');
+end;
+
+procedure Fehler(Node:integer);
+begin
+write(outfile, ' *** Fehler:', Node, ' *** ');
+end;
+
+procedure Error(inc, Node:integer);
+begin
+indent(2, Node, inc);
+write(outfile, '======  Fehler:', Node, '  ======');
+end;
+
+procedure DumpPutString(index, anf : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+GetString (index, s[0]);
+len := GetStringLength (index);
+for i:=anf to len-1 do
+  case s[i] of
+  '#', '.', '$': write('_');
+  otherwise  : write(s[i]);
+  end;
+end;
+
+procedure PutString(index, anf : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+
+if control['Q'] then
+  begin
+  write ('PutString : ' : 30 ) ;
+  DumpPutString ( index , anf ) ;
+  writeln ;
+  end;
+
+GetString (index, s[0]);
+len := GetStringLength (index);
+for i:=anf to len-1 do
+  case s[i] of
+  '#', '.', '$': write(outfile, '_');
+  otherwise  : write(outfile, s[i]);
+  end;
+end;
+
+procedure DumpAsmString(index : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+   GetString (index, s[0]);
+   len := GetStringLength (index);
+   for i:=0 to len-2 do     (* ACHTUNG: len-2(!) => '\n' wird geloescht! *)
+     write(outfile, s[i]);
+end;
+
+#ifdef RASX /*RAS07*/
+
+procedure DumpEmbedCString(index : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+   GetString (index, s[0]);
+   len := GetStringLength (index);
+   for i:=0 to len-1 do
+     write(outfile, s[i]);
+end;
+
+#endif
+
+#ifdef RASX /*RAS03 DumpDumpChar() -> hex output */
+
+procedure DumpDumpChar_old(c:char); forward;
+
+procedure DumpDumpChar(c:char);
+begin
+   if ( not RAS_control ['E'] ) then
+      DumpDumpChar_old(c)
+   else
+      write( '\\x', hexes [ ord(c) div 16 ], hexes [ ord(c) mod 16 ]);
+end;
+
+procedure DumpDumpChar_old(c:char);
+#else
+(*JH*)
+procedure DumpDumpChar(c:char);
+#endif
+begin
+     case ord(c) of
+      0: write('\\0');
+     10: write('\\n');
+      9: write('\\t');
+      8: write('\\b');
+     13: write('\\r');
+     12: write('\\f');
+     92: write('\\\\');
+     39: write('\\\'');
+     34: write('\\\"');
+     otherwise:
+       if (c < ' ') or (c > '~')
+       then
+	 write('\\', ord(c) div 64:1, (ord(c) div 8) mod 8:1, ord(c) mod 8:1)
+       else	
+	 write(c);
+     end;
+end;
+
+(*JH*)
+procedure DumpDumpString(index : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+   GetString (index, s[0]);
+   len := GetStringLength (index);
+   for i:=0 to len-1 do
+     DumpDumpChar(s[i]);
+end;
+
+#ifdef RASX /*RAS03 DumpChar() -> hex output*/
+
+procedure DumpChar_old(c:char); forward;
+
+procedure DumpChar(c:char);
+begin
+   if ( not RAS_control ['E'] ) then
+      DumpChar_old(c)
+   else
+      write( outfile, '\\x', hexes [ ord(c) div 16 ], hexes [ ord(c) mod 16 ]);
+end;
+
+procedure DumpChar_old(c:char);
+#else
+procedure DumpChar(c:char);
+#endif
+begin
+     case ord(c) of
+      0: write(outfile, '\\0');
+     10: write(outfile, '\\n');
+      9: write(outfile, '\\t');
+      8: write(outfile, '\\b');
+     13: write(outfile, '\\r');
+     12: write(outfile, '\\f');
+     92: write(outfile, '\\\\');
+     39: write(outfile, '\\\'');
+     34: write(outfile, '\\\"');
+     otherwise:
+       if (c < ' ') or (c > '~')
+       then
+	 write(outfile, '\\', ord(c) div 64:1, (ord(c) div 8) mod 8:1, ord(c) mod 8:1)
+       else	
+	 write(outfile, c);
+     end;
+end;
+
+procedure DumpString(index : integer);    (* StrTable-Index  *)
+var
+   len, i: integer;
+   s: STRING;
+begin
+   GetString (index, s[0]);
+   len := GetStringLength (index);
+   for i:=0 to len-1 do
+     DumpChar(s[i]);
+end;
+
+procedure PrintString(Idx:integer);
+begin
+with STab[Idx] do
+begin
+  if SName = 0
+  then
+    SName := - GenName(Idx)
+  else if SName > 0
+  then
+    begin
+    SName := UnCKeyword(SName);
+    if (SKind = TypeNameDcl) or (SKind = TagNameDcl)
+    then SName := -BuildTypeName(Idx);
+    if (SLevel = 0) and (SKind = ConDcl)
+    then SName := -BuildL0Name(Idx);
+    end;
+  PutString(abs(SName), 0);
+end;
+end;
+
+(*JH*)
+procedure DumpPrintString(Idx:integer);
+begin
+with STab[Idx] do
+begin
+  if SName = 0
+  then
+    SName := - GenName(Idx)
+  else if SName > 0
+  then
+    begin
+    SName := UnCKeyword(SName);
+    if (SKind = TypeNameDcl) or (SKind = TagNameDcl)
+    then SName := -BuildTypeName(Idx);
+    if (SLevel = 0) and (SKind = ConDcl)
+    then SName := -BuildL0Name(Idx);
+    end;
+  DumpPutString(abs(SName), 0);
+end;
+end;
+
+(*
+  Build a unique name from Idx and suffix.
+  Suffix is a function name, concatenate it whith all its static predecesors .
+  Idx is a tag name, a type name, an enum name or a function name
+  If it is zero, or self made it is unique per definition, so leave it alone
+*)
+
+
+procedure MakeUnique(Idx, Suffix:integer);
+begin
+if (STab[Idx].SName > 0)	/* not a generated name */
+then
+  if Suffix > 0
+  then
+    STab[Idx].SName := - BuildUnique(Idx, Suffix)	(* in genc_util.c *)
+  else
+    STab[Idx].SName := - UnCKeyword(STab[Idx].SName);
+(* else der Name ist schon mal unique gemacht worden *)
+end;
+
+procedure STAT_params(Idx:integer);
+(* STab[Idx].SKind = ProcDcl/FuncDcl/Forward... *)
+var i: integer;
+    MoreParams:boolean;
+begin
+if STab[Idx].SLevel > 1 then
+  begin
+  write(outfile, '_ptoc_LINK');
+  if STab[STab[Idx].SType].SParmCnt > 0
+  then write(outfile, ', ');
+  end;
+end;
+
+procedure print_TypeName(Idx, inc : integer);
+begin
+indent(1, Idx, inc);
+PrintString(Idx);
+write(outfile, ' ');
+end;
+
+function IsTagName(Idx: integer):boolean;
+var idx1 : integer;
+begin
+  IsTagName := STab[Idx].SKind = TagNameDcl;
+end;
+
+function IsBitfeld(Idx:integer):boolean;
+begin
+IsBitfeld:= STab[Idx].SKind = PackedTypeDcl;
+end;
+
+function IsValueArray(Idx:integer):boolean;
+begin
+with STab[Idx] do
+IsValueArray := (SKind = ParmDcl) and
+		(SSubClass = ByValueParm) and
+	        (STab[SType].SType = ArrayType);
+end;
+
+function IsArray(Idx:integer):boolean;
+var t: integer;
+begin
+  t:= STab[STab[Idx].SType].SType;
+  IsArray := (t = ArrayType) or (t = FileType) or
+  		(t= SetType) or (t = StringType);
+end;
+
+(* print function name as concatenation of the names of all then static chain *)
+
+procedure PrintProcName (Idx: integer);
+begin
+MakeUnique(Idx, STab[Idx].SParent);
+PrintString(Idx);
+end;
+
+procedure STAT_PrintString(Idx:integer; Oop, Side:integer);
+var VarLevel, index:integer;
+    par:boolean;
+begin
+VarLevel:= STab[Idx].SLevel;
+par := false;
+if VarLevel > 1     (* globale Variable *)
+then
+  begin
+  index:= CurrentLevel - VarLevel + 1;
+  if IsInFrame(Idx) or IsInFrameParam(Idx)
+  then                       (* z.b. static-Variable sind NICHT in LOCAL  *)
+    begin
+    par := PAR(Oop, Side, ElementOp);
+    LPAR(par);
+    write(outfile, '_ptoc_LOCAL.');
+    while (index > 0) do
+      begin	
+      write(outfile, '_ptoc_LINK->');
+      index := index - 1;
+      end;	
+    end;
+  end;
+PrintString(Idx);
+RPAR(par);
+end;
+
+procedure STAT_Identifier(Idx:integer;Oop, Side:integer);    (* 'Kopie' von procedure Identifier *)
+var par:boolean;
+begin
+case STab[Idx].SKind of
+VarDcl:
+  STAT_PrintString(Idx, Oop, Side);
+ParmDcl:
+  begin
+  if (STab[Idx].SSubClass = ByRefParm)   (* entspricht PointerType  *)
+  then
+    if IsArray(Idx) then
+      STAT_PrintString(Idx, Oop, Side)
+    else
+      begin
+      par := PAR(Oop, Side, DerefOp);
+      LPAR(par);
+      write(outfile, '*'); STAT_PrintString(Idx, DerefOp, RIGHT);
+      RPAR(par);
+      end
+  else if (IsValueArray(Idx) and not DelayedParCopy)	(* Pascal ist *)
+  then
+    begin
+    par := PAR(Oop, Side, ElementOp);
+    LPAR(par);
+    STAT_PrintString(Idx, ElementOp, LEFT); write(outfile, '.data');
+    RPAR(par);
+    end
+  else
+    STAT_PrintString(Idx, Oop, Side);
+  end;
+ProcDcl,
+FuncDcl,
+ForwardProcDcl,
+ForwardFuncDcl:
+  PrintProcName(Idx);
+otherwise:
+  PrintString(Idx);
+end;
+end;
+
+procedure Identifier(Idx:integer; Oop, Side:integer);
+var par:boolean;
+begin
+case STab[Idx].SKind of
+VarDcl:
+  begin
+#ifdef RASX /*RAS06*/
+    if RAS_control ['H'] then
+	  write(outfile, 'ptoc_var_');
+#endif
+  PrintString(Idx);
+  end;
+ParmDcl:
+  begin
+  if (STab[Idx].SSubClass = ByRefParm)   (* entspricht PointerType  *)
+  then
+    if IsArray(Idx) then
+      PrintString(Idx)
+    else
+      begin
+      par := PAR(Oop, Side, DerefOp);
+      LPAR(par);
+      write(outfile, '*'); PrintString(Idx);
+      RPAR(par);
+      end
+  else if (IsValueArray(Idx) and not DelayedParCopy)
+                                        (* nur in PASCAL moeglich! *)
+  then
+    begin
+    par := PAR(Oop, Side, ElementOp);
+    LPAR(par);
+    PrintString(Idx); write(outfile, '.data');
+    RPAR(par);
+    end
+  else
+    PrintString(Idx);
+  end;
+ProcDcl,
+FuncDcl,
+ForwardProcDcl,
+ForwardFuncDcl:
+  PrintProcName(Idx);
+otherwise:
+#ifdef RASX /*RAS06*/
+    if RAS_control ['H'] then
+	  write(outfile, 'ptoc_var?_');
+#endif
+  PrintString(Idx);
+end;
+end;
+
+(*------------------------------------------------------------*)
+
+procedure FUNC_HEAD(Idx1:integer);
+var
+  Idx2 : integer;
+  FunctionName : integer;
+  ParAnz : integer;
+  ParIdx : integer;
+  i: integer;
+begin
+Idx2 := STab[Idx1].SType;
+FunctionName := STab[Idx1].SName;   (*  = StrTable-Index   *)
+ParAnz := STab[Idx2].SParmCnt;
+Identifier(Idx1, CallOp, LEFT);
+write(outfile, '(');
+if StatLink
+then
+  STAT_params(Idx1);
+ParIdx:=Idx2;
+for i:=1 to ParAnz do
+  begin
+  ParIdx:=STab[ParIdx].SNext;
+  if IsValueArray(ParIdx) and DelayedParCopy
+#ifdef RASX /*RAS06*/
+     and ( not RAS_control ['H'] )
+#endif
+  then
+     write(outfile, 'ptoc_ptr_');
+  PrintString(ParIdx);
+  if i<>ParAnz
+#ifdef RASX /*RAS06*/
+  then write(outfile, ',');
+#else
+  then write(outfile, ', ');
+#endif
+  end;
+write(outfile, ')');
+end;
+
+
+procedure ANSI_FUNC_HEAD(Idx1:integer);
+var
+  Idx2 : integer;
+  FunctionName : integer;
+  ParAnz : integer;
+  ParIdx : integer;
+  i: integer;
+begin
+Identifier(Idx1, CallOp, LEFT);
+write(outfile, '(');
+ANSIDeklFormPar(Idx1);
+write(outfile, ')');
+end;
+
+(*------------------------------------------------------------*)
+
+procedure STRUCT_DEC(Idx, inc: integer);
+var tn:integer;
+begin
+tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc);
+
+#ifdef RASN /*RASN2 skip unnecc. union tag */
+if not (
+        ( RAS_control ['v'] )
+    and ( STab [ STab[Idx].SType ].SType = UnionType ) )
+  then DECLARATOR(Idx, tn);
+#else
+DECLARATOR(Idx, tn);
+#endif
+
+if IsBitfeld(STab[Idx].SType)
+then
+  begin
+  TypeSize(Idx);
+  write(outfile, ' : ');
+  write(outfile, STab[Idx].ElementInfo.SSize : 1);
+  end;
+end;
+
+procedure AppendUnionElement(var x: integer; Idx: integer);
+begin
+if x = -1
+then
+  x:= Idx
+else
+  AppendUnionElement(STab[x].SNextField, Idx);
+end;
+
+
+function GenStructElement(Idx: integer):integer;
+  (*  Zusicherung: Idx <> -1  *)
+var el:integer;
+begin
+if Idx = -1
+then
+  GenStructElement:= -1
+else
+  begin
+  BumpSymPtr;         (*  Neues STab-Element erzeugen!  *)
+  el:= SymPtr;
+  STab[el].SName:= STab[Idx].STname;
+  STab[el].SType:= Idx;
+  STab[el].SKind:= RecordElementDcl;
+  STab[el].SNextField:= GenStructElement(STab[Idx].SNextVariant);
+  GenStructElement:=el;
+  end;
+end;
+
+
+procedure InitSRecVar(Idx, vorg:integer);
+var el:integer;
+begin
+if STab[Idx].SType < 0
+then
+  case STab[Idx].SType of
+  RecordType,
+  UnionType:
+    begin
+    el:= STab[Idx].SFirstField;
+    while el <> -1 do
+      begin
+      InitSRecVar(el, vorg);
+      el:= STab[el].SNextField;
+      end;
+    end;
+  otherwise:
+    begin
+    end;
+  end
+else
+  begin
+  STab[Idx].SRecVar:= vorg;
+  InitSRecVar(STab[Idx].SType, Idx);
+  end;
+end;
+
+procedure CompleteVariantRecord(Idx: integer; var erg:integer);
+var first, el1, el2: integer;
+begin
+first:= GenStructElement(STab[Idx].SFirstVariant);
+BumpSymPtr;         (*  Neues STab-Element erzeugen!  *)
+el1:= SymPtr;
+STab[el1].SName:= BlankString;
+STab[el1].SType:= UnionType;
+STab[el1].SFirstField:= first;
+STab[el1].SFirstVariant:= -1;   (*  das wird ja abgefragt! *)
+BumpSymPtr;         (*  Neues STab-Element erzeugen!  *)
+el2:= SymPtr;
+STab[el2].SName:= STab[Idx].STname;
+STab[el2].SType:= el1;
+STab[el2].SKind:= RecordElementDcl;
+STab[el2].SNextField:= -1;
+AppendUnionElement(STab[Idx].SFirstField, el2);
+erg:=el2;
+end;
+
+
+procedure DummyStructDec(inc:integer);
+begin
+indent(1, 0, inc);
+write(outfile, 'char dummy;');
+end;
+
+procedure STRUCT_SPEC(Idx, inc : integer);
+var Idx1: integer;
+    erg:integer;
+begin
+indent(1, Idx, inc);
+case STab[Idx].SType of
+  RecordType: write(outfile, 'struct');
+  UnionType:  write(outfile, 'union');
+  end;
+write(outfile, ' ');
+if STab[Idx].STmyname <> 0
+then
+  if IsTagName(STab[Idx].STmyname)     (*  = Half-TypeName  *)
+  then
+    begin
+    MakeUnique(STab[Idx].STmyname, CurrentProc);
+    PrintString(STab[Idx].STmyname);
+    end
+  else
+    PrintString(Idx)		(* 12.09.89: neuer Name generiert *)
+ else
+   PrintString(Idx);		(* 12.09.89: neuer Name generiert *)	
+
+if not testbit(STab[Idx].SFeld4, TypeDeclared)    (*  d.h. Half-Type soll ausgegeben werden!  *)
+then
+  begin
+  setbit(STab[Idx].SFeld4, TypeDeclared);    (*  d.h. Half-Type soll nicht meher ausgegeben werden!  *)
+  if (STab[Idx].SFirstVariant <> -1)
+  then
+    CompleteVariantRecord(Idx, erg);
+  indent(1, Idx, inc+2);
+  write(outfile, '{');
+  if (STab[Idx].SFirstField = -1)
+  then      (*  in PASCAL und C moeglich!  *)
+    DummyStructDec(inc+2);
+  Idx1:=STab[Idx].SFirstField;
+  while Idx1 <> -1 do
+    begin
+    STRUCT_DEC(Idx1, inc+2);
+    Idx1:=STab[Idx1].SNextField;
+    write(outfile, ';');
+    end;
+  indent(1, Idx, inc+2);
+  write(outfile, '} ');
+  if (STab[Idx].SFirstVariant <> -1)
+  then
+    InitSRecVar(STab[erg].SType, erg);
+  end
+else
+  write(outfile, ' ')
+end;
+
+#ifdef NO_ENUM
+
+/*
+ * don't' produce C enum, declaration,
+ * instead produce the same as for subrange type
+ * and a series of #defines
+ */
+
+
+function NumberOfMarkedEnumElements(Idx : integer) : integer;
+var Idx1:integer;
+    anz:integer;
+begin
+anz := 0;
+Idx1:=STab[Idx].SFirstEnum;
+while Idx1 <> -1 do
+  begin
+  if IsMarked(Idx1)
+  then
+    anz := anz+1;
+  Idx1:=STab[Idx1].SNextEnum;
+  end;
+NumberOfMarkedEnumElements := anz;
+end;
+
+
+procedure DefineEnum(Idx, inc: integer);
+var Idx1:integer;
+    suppress : boolean;
+begin
+if DeleteUnusedEnumElement and (NumberOfMarkedEnumElements(Idx) = 0)
+then
+  begin
+  /* keine Ausgabe */
+  end
+else
+(*JH*) if UseSymbolicConst then
+(*JH*) begin
+	   indent(1, Idx, inc);
+	   if not testbit(STab[Idx].SFeld4, TypeDeclared)    (*  d.h. Half-Type soll ausgegeben werden!  *)
+	   then
+	     begin
+	     setbit(STab[Idx].SFeld4, TypeDeclared);    (*  d.h. Half-Type soll nicht mehr ausgegeben werden!  *)
+	     write(outfile, 'enum {');
+	     Idx1:=STab[Idx].SFirstEnum;
+	     while Idx1 <> -1 do
+	       begin
+               suppress := false;   /* Vorbesetzung */
+               if DeleteUnusedEnumElement
+               then
+                 if not IsMarked(Idx1)
+                 then
+                   suppress := true;
+               if not suppress
+               then
+                 begin
+	         MakeUnique(Idx1, CurrentProc);
+	         indent(1, Idx, inc+2);
+	         PrintString(Idx1);
+	         write(outfile, '=', STab[Idx1].SCon1val:1, ', ');
+                 end;
+	       Idx1:=STab[Idx1].SNextEnum;
+	       end;  /* while */
+	     indent(1, Idx, inc);
+	     write(outfile, '};');
+	     end;
+(*JH*) end ;
+end;
+
+procedure ENUM_SPEC(Idx, inc: integer);
+var Idx1:integer;
+begin
+indent(1, Idx, inc);
+TypeSize(Idx);
+if (STab[Idx].TypeInfo.SSize = CharSize)
+then write(outfile, 'unsigned char ')
+else if (STab[Idx].TypeInfo.SSize = ShortSize)
+then write(outfile, 'unsigned short ')		
+else write(outfile, 'unsigned ');
+end;
+
+#else
+
+/*
+ * Produce C enum declaration
+ */
+
+procedure ENUM_SPEC(Idx, inc: integer);
+var Idx1:integer;
+begin
+indent(1, Idx, inc);
+write(outfile, 'enum ');
+if STab[Idx].STmyname <> 0
+then
+  if IsTagName(STab[Idx].STmyname)     (*  = Half-TypeName  *)
+  then
+    begin
+    MakeUnique(STab[Idx].STmyname, CurrentProc);
+    PrintString(STab[Idx].STmyname)
+    end
+  else
+    PrintString(Idx)		(* 12.09.89: neuer Name generiert *)
+ else
+   PrintString(Idx);		(* 12.09.89: neuer Name generiert *)	
+
+if not testbit(STab[Idx].SFeld4, TypeDeclared)    (*  d.h. Half-Type soll ausgegeben werden!  *)
+then
+  begin
+  setbit(STab[Idx].SFeld4, TypeDeclared);    (*  d.h. Half-Type soll nicht mehr ausgegeben werden!  *)
+  indent(1, Idx, inc+2);
+  write(outfile, '{');
+  Idx1:=STab[Idx].SFirstEnum;
+  while Idx1 <> -1 do
+    begin
+    MakeUnique(Idx1, CurrentProc);
+    indent(1, Idx, inc);
+    PrintString(Idx1);
+    Idx1:=STab[Idx1].SNextEnum;
+    if Idx1 <> -1
+    then write(outfile, ', ');
+    end;
+  indent(1, Idx, inc+2);
+  write(outfile, '} ');
+  end
+else
+  write(outfile, ' ')
+end;
+#endif	/* NO_ENUM */
+
+procedure Unlink(Idx:integer; var save:boolean);
+begin
+if IsTagName(Idx)
+then               (* Erzwingen eines verkuerzten STRUCT_SPEC! *)
+  begin
+  save := testbit(STab[STab[Idx].SType].SFeld4, TypeDeclared);
+  setbit(STab[STab[Idx].SType].SFeld4, TypeDeclared);
+  end;
+end;
+
+
+procedure Link(Idx:integer; save:boolean);
+begin
+if IsTagName(Idx)
+then               (* ruecksetzen! *)
+  if save
+  then
+    setbit(STab[STab[Idx].SType].SFeld4, TypeDeclared)
+  else
+    clearbit(STab[STab[Idx].SType].SFeld4, TypeDeclared);
+end;
+
+
+procedure GenArray(Idx, size:integer);
+var Idx2:integer;
+begin
+
+BumpSymPtr;         (*  Neues STab-Element fuer Index erzeugen!  *)
+Idx2:= SymPtr;
+
+STab[Idx].SType:= ArrayType;
+STab[Idx].SIndex:= Idx2;
+STab[Idx].SElement:=CHARTYPE_INDEX;   (* = char-Type *)
+
+STab[Idx2].SType:= INTTYPE_INDEX;
+STab[Idx2].SLowRange:=1;
+STab[Idx2].SHighRange:=size div 8;
+end;
+
+function GenCBlock(ObjIdx:integer):integer;
+var Idx1, Idx2, Idx3, Idx4, Idx5, Idx6 : integer;
+    size:integer;
+begin
+
+size := STab[ObjIdx].SFeld2 - STab[ObjIdx].SFeld1;
+
+BumpSymPtr;
+Idx1:= SymPtr;
+BumpSymPtr;
+Idx2:= SymPtr;
+BumpSymPtr;
+Idx3:= SymPtr;
+BumpSymPtr;
+Idx4:= SymPtr;
+BumpSymPtr;
+Idx5:= SymPtr;
+BumpSymPtr;
+Idx6:= SymPtr;
+STab[Idx1].SName:=0;
+STab[Idx1].SType:=RecordType;
+STab[Idx1].SFirstField:=Idx2;
+STab[Idx1].SFirstVariant:=-1;
+STab[Idx2].SName:=0;
+STab[Idx2].SType:=1;
+STab[Idx2].SKind:=RecordElementDcl;
+STab[Idx2].SNextField:=Idx3;
+STab[Idx3].SName:=0;
+STab[Idx3].SType:=Idx4;
+STab[Idx3].SKind:=RecordElementDcl;
+STab[Idx3].SNextField:=-1;
+STab[Idx4].SType:=ArrayType;
+STab[Idx4].SIndex:=Idx5;
+STab[Idx4].SElement:=Idx6;
+STab[Idx5].SLowRange:=1;
+STab[Idx5].SHighRange:=size;
+STab[Idx6].SType:=PointerType;
+STab[Idx6].SDomain:=CHARTYPE_INDEX;	(* TODO: suchen in SymTab *)
+GenCBlock:=Idx1;
+end;
+
+function GetTypeName(ObjIdx, TypIdx:integer; DontUseBackRef:boolean):integer;
+var tnam:integer;
+begin
+   tnam := 0;
+   if ObjIdx <> 0
+   then
+     if STab[ObjIdx].SType = TypIdx		(* should always be *)
+     then
+       if (not DontUseBackRef) and (STab[ObjIdx].SKind = TypeNameDcl) (* then use the ObjIdx itself *)
+       then
+	 tnam := ObjIdx
+       else			
+   	 if (STab[ObjIdx].STname > 0)
+	 then
+	   tnam := STab[ObjIdx].STname;
+
+   if (tnam = 0) and (not DontUseBackRef)
+   then
+     tnam := STab[TypIdx].STmyname;
+
+   if tnam > 0
+   then
+     if ((STab[tnam].SLevel = 0) and (not ComplexType(TypIdx))) or
+        (STab[tnam].SKind <> TypeNameDcl) or				
+        (not testbit(STab[tnam].SFeld4, TypeDeclared))			(* the name is not defined yet, so don't' use it *)
+     then
+       tnam := 0;
+   GetTypeName := tnam;
+end;
+
+(* returns the type it finds a name for *)
+
+function TYPE_SPECIFIER(ObjIdx, TypIdx:integer; DontUseBackRef:boolean; inc:integer):integer;
+var Idx_h, i, ST_Idx : integer;
+    tname, tn: integer;
+    save:boolean;
+begin
+TYPE_SPECIFIER := TypIdx;	(* assume we have a name for the type *)
+tname := GetTypeName(ObjIdx, TypIdx, DontUseBackRef);
+if (tname <> 0)
+then
+  begin
+  indent(1, ObjIdx, inc);
+  PrintString(tname);
+  write(outfile, ' ');
+  with STab[ObjIdx] do
+    if (SKind = FuncParmDcl) or (SKind = ProcParmDcl) and (tname = STname)
+    then
+	(*  This is a mess: the type name apears here but in fact it's '
+	    the name of the result of the domain of the type of this object *)
+	TYPE_SPECIFIER := STab[STab[TypIdx].SDomain].SResult;
+
+  with STab[TypIdx] do
+    if ((SType = FileType) or (SType = StringType) or (SType = SetType))
+    then
+      begin (* mache den typ zu einem Array *)
+      TypeSize(TypIdx);
+      GenArray(TypIdx, STab[TypIdx].TypeInfo.SSize);
+      end;
+  end
+else
+begin	
+if STab[TypIdx].SType < 0
+then
+  case STab[TypIdx].SType of
+  FloatType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'float ');
+    end;
+  DoubleType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'double ');
+    end;
+  VoidType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'void ');
+    end;
+  IntegerType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'int ');
+    end;
+  UnsignedType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'unsigned ');
+    end;
+  LongType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, '_ptoc_long ');
+    end;
+  UlongType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'unsigned _ptoc_long ');
+    end;
+  ShortType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'short ');
+    end;
+  UshortType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'unsigned short ');
+    end;
+  CharType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'char ');
+    end;
+  UcharType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'unsigned char ');
+    end;
+  BooleanType:
+    begin
+    indent(1, TypIdx, inc);
+    if control['q']
+    then 	
+	write(outfile, 'char ')
+    else
+    	write(outfile, 'int ');
+    end;
+  CharacterType:
+    begin
+    indent(1, TypIdx, inc);
+    write(outfile, 'unsigned char ');
+    end;
+  PointerType:
+    begin
+    if not IsMarked(STab[TypIdx].SDomain)
+    then
+      if BreakPointerType
+      then
+        STab[TypIdx].SDomain := INTTYPE_INDEX;
+    Unlink(STab[TypIdx].SDomain, save);  (* falls Zeiger auf STRUCT_SPEC *)
+
+    (* check for rekursive type definitions: *)
+    if testbit(STab[TypIdx].SFeld4, SelfRefPointer)
+    then (* we are in a loop, make it an integer pointer 	   *)	
+         (* I hope this forces casts to whereever we dereference it *)
+      STab[TypIdx].SDomain := INTTYPE_INDEX;
+    setbit(STab[TypIdx].SFeld4, SelfRefPointer);
+    TYPE_SPECIFIER := TYPE_SPECIFIER(0, STab[TypIdx].SDomain, false, inc);  (* dann keine Definition! *)
+    clearbit(STab[TypIdx].SFeld4, SelfRefPointer);
+	
+    Link(STab[TypIdx].SDomain, save);
+    end;
+  RecordType,
+  UnionType:
+    STRUCT_SPEC(TypIdx, inc);
+  ArrayType:
+    TYPE_SPECIFIER := TYPE_SPECIFIER(0, STab[TypIdx].SElement, false, inc);
+  ProcedureType:
+    if control ['a'] then
+      begin
+      indent(1, TypIdx, inc);
+      write(outfile, 'void ');
+      TYPE_SPECIFIER := STab[TypIdx].SResult;
+      end
+    else
+      TYPE_SPECIFIER := TYPE_SPECIFIER(0, STab[TypIdx].SResult, false, inc);
+  FunctionType:
+    TYPE_SPECIFIER := TYPE_SPECIFIER(0, STab[TypIdx].SResult, false, inc);
+  EnumerativeType:
+    ENUM_SPEC(TypIdx, inc);
+#ifdef RAS /*RAS02 change set type to UcharType etc.*/
+  SetType: begin
+      TypeSize(TypIdx);
+      if ( RAS_control ['S'] ) then
+         case  STab[TypIdx].TypeInfo.SSize of
+            8:  STab[TypIdx].SType := UcharType;
+            16: STab[TypIdx].SType := UshortType;
+            24,
+            32: STab[TypIdx].SType := UlongType;
+            otherwise: GenArray(TypIdx, STab[TypIdx].TypeInfo.SSize);
+         end
+      else GenArray(TypIdx, STab[TypIdx].TypeInfo.SSize);
+      TYPE_SPECIFIER := TYPE_SPECIFIER(ObjIdx, TypIdx, false, inc);
+    end;
+#else
+  SetType,
+#endif
+  FileType,  (*  gibt es nur fuer PASCAL  *)
+  StringType:
+    begin
+    TypeSize(TypIdx);
+    GenArray(TypIdx, STab[TypIdx].TypeInfo.SSize);
+    TYPE_SPECIFIER := TYPE_SPECIFIER(ObjIdx, TypIdx, false, inc);
+    end;
+  BlockType:
+    tn := TYPE_SPECIFIER(0, GenCBlock(ObjIdx), false, inc);
+  otherwise:
+    begin
+    indent(1, TypIdx, inc);
+    Missing(TypIdx);
+    end;
+  end
+else
+  if TypIdx = 0
+  then
+	Fehler(TypIdx)
+  else
+        TYPE_SPECIFIER := TYPE_SPECIFIER(TypIdx, STab[TypIdx].SType, false, inc);
+end;
+end;
+
+(*  ------------------------------------------------------------------ *)
+
+procedure AbstrDeklarator(Idx:integer; Oop, Side:integer);
+var s_index : integer;
+    par: boolean;
+begin
+if Idx=-1
+then
+  begin
+  (*  Identifier(Idx)  *)
+  end
+else
+  begin
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    par := PAR(Oop, Side, DerefOp);
+    LPAR(par);
+    write(outfile, '*');
+    AbstrDeklarator(STab[Idx].SDomain, DerefOp, RIGHT);
+    RPAR(par);
+    end;
+  ArrayType:
+    begin
+    par := PAR(Oop, Side, SubscriptOp);
+    LPAR(par);
+    AbstrDeklarator(STab[Idx].SElement, SubscriptOp, LEFT);
+    write(outfile, '[');
+    s_index:=STab[Idx].SIndex;
+    write(outfile, (STab[s_index].SHighRange - STab[s_index].SLowRange + 1) :1);
+    write(outfile, ']');
+    RPAR(par);
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    par := PAR(Oop, Side, CallOp);
+    LPAR(par);
+    AbstrDeklarator(STab[Idx].SResult, CallOp, LEFT);
+    if control ['a'] then
+      begin
+      write(outfile, '(');
+      ANSIDeklFormPar(Idx_name);
+      write(outfile, ')');
+      end
+    else
+      write(outfile, '()');
+    RPAR(par);
+    end;
+  otherwise:
+    begin
+    Mistake(Idx);
+    end;
+  end;
+  end;
+end;
+
+procedure Aufbau_AbstrDekl(Idx, vorg:integer);
+var orig_son : integer;
+begin
+if Idx = Idx_typespec
+then
+    AbstrDeklarator(vorg, NopOp, ANYSIDE)
+else
+begin
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    orig_son:=STab[Idx].SDomain;
+    STab[Idx].SDomain:=vorg;
+    Aufbau_AbstrDekl(orig_son, Idx);
+    STab[Idx].SDomain:=orig_son;
+    end;
+  ArrayType:
+    begin
+    orig_son:=STab[Idx].SElement;
+    STab[Idx].SElement:=vorg;
+    Aufbau_AbstrDekl(orig_son, Idx);
+    STab[Idx].SElement:=orig_son;
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    orig_son:=STab[Idx].SResult;
+    STab[Idx].SResult:=vorg;
+    Aufbau_AbstrDekl(orig_son, Idx);
+    STab[Idx].SResult:=orig_son;
+    end;
+  otherwise:
+    if (STab[Idx].SType > 0)
+    then
+      Aufbau_AbstrDekl(STab[Idx].SType, vorg)  (* Ueberspringen TypeName! *)
+    else
+      AbstrDeklarator(vorg, NopOp, ANYSIDE);       (* Ergebnistyp, =Blatt *)
+  end;
+  end;
+end;
+
+procedure ABSTRACT_DECLARATOR(Idx:integer; namedtype:integer);
+begin
+Idx_typespec := namedtype;
+Aufbau_AbstrDekl(Idx, -1);
+end;
+
+procedure TYPE_NAME(Idx:integer; DontUseBackRef:boolean);
+var tn:integer;
+begin
+tn := TYPE_SPECIFIER(0, Idx, DontUseBackRef, -1);      (*  = ohne indent!  *)
+ABSTRACT_DECLARATOR(Idx, tn);
+end;
+
+procedure TypeCast(Idx:integer);
+begin
+write(outfile, '(');
+TYPE_NAME(Idx, true);
+write(outfile, ') ');
+end;
+
+procedure PointerTypeCast(TypIdx:integer);
+begin
+  STab[IDX_PTR].SDomain := TypIdx;
+  TypeCast(IDX_PTR);
+end;
+
+procedure StructArray(TypIdx:integer);
+begin
+  STab[IDX_DATA].SType := TypIdx;
+  write(outfile, 'struct { ');
+  STRUCT_DEC(IDX_DATA, -1);
+  write(outfile, ';} ');
+end;
+
+
+(*  ------------------------------------------------------------------ *)
+
+procedure Func_Konstruktor(Idx:integer;Oop, Side:integer);
+var s_index : integer;
+    par:boolean;
+begin
+if Idx = Idx_name
+then
+  if control ['a'] then
+    ANSI_FUNC_HEAD(Idx)
+  else
+    FUNC_HEAD(Idx)
+else
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    par := PAR(Oop, Side, DerefOp);
+    LPAR(par);
+    write(outfile, '*');
+    Func_Konstruktor(STab[Idx].SDomain, DerefOp, RIGHT);
+    RPAR(par);
+    end;
+  ArrayType:
+    begin
+    par := PAR(Oop, Side, SubscriptOp);
+    LPAR(par);
+    Func_Konstruktor(STab[Idx].SElement, SubscriptOp, LEFT);
+    write(outfile, '[');
+    s_index:=STab[Idx].SIndex;
+    write(outfile, (STab[s_index].SHighRange - STab[s_index].SLowRange + 1) :1);
+    write(outfile, ']');
+    RPAR(par);
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    Func_Konstruktor(STab[Idx].SResult, Oop, Side);
+    end;
+  otherwise:
+    begin
+    Mistake(Idx);
+    end;
+  end;
+end;
+
+procedure Aufbau_Func(Idx, vorg:integer);
+var orig_son : integer;
+begin
+if Idx=Idx_typespec
+then
+  Func_Konstruktor(vorg, NopOp, ANYSIDE)       (* Ergebnistyp, =Blatt *)
+else
+  begin
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    orig_son:=STab[Idx].SDomain;
+    STab[Idx].SDomain:=vorg;
+    Aufbau_Func(orig_son, Idx);
+    STab[Idx].SDomain:=orig_son;
+    end;
+  ArrayType:
+    begin
+    orig_son:=STab[Idx].SElement;
+    STab[Idx].SElement:=vorg;
+    Aufbau_Func(orig_son, Idx);
+    STab[Idx].SElement:=orig_son;
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    orig_son:=STab[Idx].SResult;
+    STab[Idx].SResult:=vorg;
+    Aufbau_Func(orig_son, Idx);
+    STab[Idx].SResult:=orig_son;
+    end;
+  otherwise:
+    if (STab[Idx].SType > 0)
+    then
+      Aufbau_Func(STab[Idx].SType, vorg)  (* Ueberspringen TypeName! *)
+    else
+      Func_Konstruktor(vorg, NopOp, ANYSIDE);       (* Ergebnistyp, =Blatt *)
+  end;
+  end;
+end;
+
+procedure FUNC_DEC(Idx:integer; namedtype:integer);
+begin
+Idx_name:=Idx;        (*  globale Variable: in Deklarator benuetzt!  *)
+Idx_typespec:=namedtype;
+Aufbau_Func(STab[Idx].SType, Idx);
+end;
+
+(* -------------------------------------------------------------------- *)
+
+procedure Deklarator(Idx:integer;Oop, Side:integer);
+var s_index : integer;
+    par:boolean;
+begin
+
+if control ['Q'] then
+  write ('Deklarator : ' : 30 ) ;
+
+if Idx = Idx_name
+then
+  begin
+  if control ['Q'] then
+    writeln ('Identifier') ;
+  Identifier(Idx, Oop, Side)
+  end
+else
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    if control ['Q'] then
+      writeln ('PointerType') ;
+    par := PAR(Oop, Side, DerefOp);
+    LPAR(par);
+    write(outfile, '*');
+    Deklarator(STab[Idx].SDomain, DerefOp, RIGHT);
+    RPAR(par);
+    end;
+  ArrayType:
+    begin
+    if control ['Q'] then
+      writeln ('ArrayType') ;
+    par := PAR(Oop, Side, SubscriptOp);
+    LPAR(par);
+    Deklarator(STab[Idx].SElement, SubscriptOp, LEFT);
+    write(outfile, '[');
+    s_index:=STab[Idx].SIndex;
+    write(outfile, (STab[s_index].SHighRange - STab[s_index].SLowRange + 1) :1);
+    write(outfile, ']');
+    RPAR(par);
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    if control ['Q'] then
+      writeln ('PprocedureType/FunctionType') ;
+    par := PAR(Oop, Side, CallOp);
+    LPAR(par);
+    Deklarator(STab[Idx].SResult, CallOp, LEFT);
+    if control ['a'] then
+      begin
+      write(outfile, '(');
+      ANSIDeklFormPar(Idx_name);
+      write(outfile, ')');
+      end
+    else
+      write(outfile, '()');
+    RPAR(par);
+    end;
+  otherwise:
+    begin
+    Mistake(Idx);
+    end;
+  end;
+end;
+
+procedure Aufbau_Dekl(Idx, vorg:integer);
+var orig_son : integer;
+begin
+if Idx = Idx_typespec
+then
+	Deklarator(vorg, NopOp, ANYSIDE)
+else
+  begin
+  case STab[Idx].SType of
+  PointerType:
+    begin
+    orig_son:=STab[Idx].SDomain;
+    STab[Idx].SDomain:=vorg;
+    Aufbau_Dekl(orig_son, Idx);
+    STab[Idx].SDomain:=orig_son;
+    end;
+  ArrayType:
+    begin
+    orig_son:=STab[Idx].SElement;
+    STab[Idx].SElement:=vorg;
+    Aufbau_Dekl(orig_son, Idx);
+    STab[Idx].SElement:=orig_son;
+    end;
+  ProcedureType,
+  FunctionType:
+    begin
+    orig_son:=STab[Idx].SResult;
+    STab[Idx].SResult:=vorg;
+    Aufbau_Dekl(orig_son, Idx);
+    STab[Idx].SResult:=orig_son;
+    end;
+  otherwise:
+    if (STab[Idx].SType > 0)
+    then
+      Aufbau_Dekl(STab[Idx].SType, vorg)  (* Ueberspringen TypeName! *)
+    else
+      Deklarator(vorg, NopOp, ANYSIDE);       (* Ergebnistyp, =Blatt *)
+  end; (* case *)
+  end; (* else *)
+end;
+
+procedure DECLARATOR(Idx:integer; namedtype:integer);
+var Idx1, Idx2:integer;
+begin
+Idx_name:=Idx;        (*  globale Variable: in Deklarator benuetzt!  *)
+Idx_typespec:=namedtype;
+Idx1:=STab[Idx].SType;
+Aufbau_Dekl(Idx1, Idx);
+end;
+
+procedure DEC_LIST(Idx:integer;namedtype:integer);
+begin
+DECLARATOR(Idx, namedtype);
+end;     (* Liste hat immer nur 1 Element *)
+
+procedure TYPE_DECL_LIST(Idx, inc:integer);
+var tn:integer;
+begin
+tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc);
+DEC_LIST(Idx, tn);
+end;
+
+function IsSelfRef(Idx:integer):boolean;
+   (*  zur Abwehr von PASCAL-Typedef:  type purelink = ^purelink  *)
+   (*  oder schlimmer: type x = ^y; y = ^z; z = ^x; usw. *)
+var Idx1:integer;
+begin
+IsSelfRef := false;
+Idx1:=STab[Idx].SType;
+if STab[Idx1].SType = PointerType
+then
+  if STab[Idx1].SDomain = Idx
+  then
+    IsSelfRef := true;
+end;
+
+function Unnamed(Idx:integer):boolean;
+begin
+Unnamed:= (STab[Idx].SName = 0);
+end;
+
+procedure TYPE_DEFINITION(Idx, inc:integer);
+var Idx1, scard:integer;
+    tn:integer;
+begin
+if control ['Q'] then
+    begin
+    write   ( 'TYPE_DEFINITION   : ' : 30 ) ;
+    DumpDumpString (STab[Idx].SName ) ;
+    writeln ;
+    end ;
+
+if not Unnamed(Idx)    (* Sonst werden type-casts zu typedef's' *)
+then
+  begin
+  if IsSelfRef(Idx)
+  then
+	STab[STab[Idx].SType].SDomain := INTTYPE_INDEX;
+  indent(1, Idx, inc);
+  write(outfile, 'typedef');
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, true, inc+2);
+  DEC_LIST(Idx, tn);
+  write(outfile, ';');
+  setbit(STab[Idx].SFeld4, TypeDeclared);	 (* Mark it defined *)
+  end;
+end;
+
+procedure DECL_STAT_params(Idx0, inc:integer);
+(* STab[Idx].SKind = ProcDcl/FuncDcl/Forward... *)
+var Idx: integer;
+begin
+Idx:=Idx0;
+Idx:=STab[Idx].SParent;
+indent(1, Idx, inc);
+write(outfile, 'struct _ptoc_FRAME_');
+Identifier(Idx, NopOp, ANYSIDE);
+write(outfile, ' *_ptoc_LINK');
+end;
+
+procedure DeklFormPar(Idx1, inc:integer; inframe:boolean);
+var
+  Idx2, Idx : integer;
+  paranz, i : integer;
+  tn : integer;
+begin
+
+if control['Q'] then
+    begin
+    writeln ( 'DeklFormPar : ' : 30 , 'inframe = ' , inframe , ', ' ) ;
+    end ;
+
+if StatLink and ( STab[Idx1].SParent <> -1 )
+then
+  begin
+  DECL_STAT_params(Idx1, inc);
+  write(outfile, ';');
+  end;
+Idx2 := STab[Idx1].SType;
+paranz:= STab[Idx2].SParmCnt;
+Idx:=Idx2;
+for i:=1 to paranz do
+  begin
+  Idx:=STab[Idx].SNext;
+  if control['Q'] then
+    begin
+    write ( 'DeklFormPar : ' : 30 , 'Parameter ' ) ;
+    DumpPrintString(Idx) ;
+    writeln;
+    end ;
+  case STab[Idx].SKind of
+  ParmDcl,
+  FuncParmDcl,
+  ProcParmDcl:
+    if (not inframe) or IsInFrameParam(Idx)
+    then
+(*JH*)begin
+(*JH*)if control ['W'] then
+(*JH*)  begin
+(*JH*)  if ((STab[Idx].SSubClass <> ByRefParm) or IsValueArray(Idx)) and
+(*JH*)     (STab[STab[Idx].SType].TypeInfo.SSize > (WOptSize * 8))
+(*JH*)  then
+(*JH*)    begin
+(*JH*)    write ('Warning : Sizeof Val.P. "');
+(*JH*)    DumpPrintString(Idx);
+(*JH*)    write ('" in "');
+(*JH*)    DumpPrintString (Idx1) ;
+(*JH*)    writeln('" = ', (STab[STab[Idx].SType].TypeInfo.SSize div 8):5);
+(*JH*)    end ;
+(*JH*)  end ;
+      if IsValueArray(Idx)
+      then	
+        if DelayedParCopy
+        then
+	  begin		
+          tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc);
+          write(outfile, 'ptoc_ptr_');
+	  PrintString(Idx);
+      	  end
+        else
+	  begin		
+          indent(0, Node, inc);
+	  StructArray(STab[Idx].SType);
+	  PrintString(Idx);
+      	  end
+      else
+	TYPE_DECL_LIST(Idx, inc);
+      write(outfile, ';');
+      end;
+  otherwise:
+    begin
+    end;
+  end;
+  end;
+end;
+
+procedure ANSIDeklFormPar(Idx1:integer);
+var
+  Idx2, Idx : integer;
+  paranz, i : integer;
+  tn : integer;
+begin
+Idx2 := STab[Idx1].SType;
+paranz:= STab[Idx2].SParmCnt;
+if StatLink and ( STab[Idx1].SParent <> -1 )
+then
+  begin
+  DECL_STAT_params(Idx1, 4);
+  if paranz > 0 then
+    write(outfile, ',');
+  end;
+Idx:=Idx2;
+for i:=1 to paranz do
+  begin
+  Idx:=STab[Idx].SNext;
+  case STab[Idx].SKind of
+  ParmDcl,
+  FuncParmDcl,
+  ProcParmDcl:
+    begin
+    if control ['W'] then
+      if ((STab[Idx].SSubClass <> ByRefParm) or IsValueArray(Idx)) and
+         (STab[STab[Idx].SType].TypeInfo.SSize > (WOptSize * 8))
+      then
+        begin
+        write ('Warning : Sizeof Val.P. "');
+        DumpPrintString(Idx);
+        write ('" in "');
+        DumpPrintString (Idx1) ;
+        writeln('" = ', (STab[STab[Idx].SType].TypeInfo.SSize div 8):5);
+        end ;
+    if IsValueArray(Idx)
+    then	
+      if DelayedParCopy
+      then
+	begin		
+	tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, 4);
+	write(outfile, 'ptoc_ptr_');
+	PrintString(Idx);
+	end
+      else
+	begin		
+	indent(0, Node, 4);
+	StructArray(STab[Idx].SType);
+	PrintString(Idx);
+	end
+    else
+      TYPE_DECL_LIST(Idx, 4);
+    end ;
+  otherwise:
+    begin
+    end;
+  end;
+  if i <> paranz then
+    write(outfile, ',');
+  end;
+end;
+
+procedure InitTypIfTyp(Node:integer);
+var next, NodeIndex : integer;
+begin
+NodeIndex := Node;
+next := NextLink;
+NextLink := -1;  (* Sonst geht GenTyp die ganze Liste durch!  *)
+GenTyp(Node);    (* Diese Knoten wurden zu Beginn noch nicht erreicht! *)
+GenIfTyp(Node);  (* Knotenliste ist verkettet, er erreicht alle! *)
+NextLink := next;
+end;
+
+function Max_Positions(IdxVar, anz:integer):integer;
+var Idx:integer;
+    elemtyp:integer;
+    range:integer;
+begin
+Max_Positions:=MaxPos;
+if MaxPos = 0  (* d.h. = nicht vorbesetzt! *)
+then
+  begin
+  Max_Positions :=1;  (* also zumindest = 1 setzen! *)
+  Idx:= STab[IdxVar].SType;
+  case STab[Idx].SType of
+  ArrayType:
+    begin
+    Idx:=STab[Idx].SIndex;
+    range:= STab[Idx].SHighRange - STab[Idx].SLowRange +1;
+    if anz mod range <> 0   (* eigtl. nicht moeglich! *)
+    then
+      Mistake(Idx);
+
+    elemtyp := STab[STab[Idx].SElement].SType;
+    if elemtyp <= ArrayType
+    then
+       Max_Positions := anz div range (* also jedes ArrayElement in eine Zeile! *)
+    else
+       Max_Positions := 8;
+    end;
+  otherwise:
+    begin
+    end;
+  end;
+  end;
+end;
+
+procedure INITIALIZER(Idx, inc:integer);
+var entry, Node, i : integer;
+    pos, maxpos : integer;
+    von, bis : integer;
+#ifdef RAS /*RAS02 loc.vars.*/
+    NodeIndex : HdgRange;
+    byte: integer;
+#endif
+begin
+(*JH*) if control['Q'] then
+(*JH*)   writeln   ( 'INITIALIZER : ' : 30 , STab[STab[Idx].SType].SType ) ;
+von := STab[Idx].SFeld1;
+bis := STab[Idx].SFeld2;
+#ifdef RAS /*RAS02 call _ptoc_ISET_X<n> macros*/
+if ( RAS_control ['S'] ) and ( STab[STab[Idx].SType].SType in [ UcharType, UshortType, UlongType ] ) then begin
+  write(outfile, '_ptoc_ISET_X', (bis-von+1):1, ' ( ');
+  for i:= von to bis  do begin
+    NodeIndex := DataNode(i);
+    GenTyp(NodeIndex);
+    if ( DscField <> T_CONSTANT	) or ( STab[TypeField].SType <> CharacterType ) then
+        Error(inc, NodeIndex);
+    byte := Node1parameter mod 256; (* process_initializer() uses SIGNED! char for pattern!*)
+    write( outfile, '0x', hexes[byte div 16], hexes[byte mod 16]);
+    if ( i <> bis ) then write ( outfile, ', ');
+    end;
+  write(outfile, ' )');
+end else
+#endif
+if  (  STab[STab[Idx].SType].SType <> ArrayType ) (* 1992-Jul-09 J.Bruehe *)
+	(* Bedingung uebernommen aus Abgleich des generierten C-Codes *)
+	and  ( von = bis )
+then     (*  =Normalfall: einfach initialisierte Variable!  *)
+  begin
+  entry := STab[Idx].SFeld1;
+  Node := DataNode(entry);
+  InitTypIfTyp(Node);
+  EXPRESSION(Node, StoreOp, RIGHT);
+  end
+else
+  begin
+  maxpos:=Max_Positions(Idx, bis-von+1);   (* Anzahl Elemente pro Zeile *)
+  pos:=0;
+  indent(1, Idx, inc+2);
+  write(outfile, '{');
+  for i:= von to bis do
+    begin
+    pos := pos+1;
+    Node := DataNode(i);
+    InitTypIfTyp(Node);
+    if (pos-1) mod maxpos = 0
+    then
+      indent(2, Node, inc+2);
+    EXPRESSION(Node, LoadOp, ANYSIDE);
+(*JH*) if i <> bis then
+      write(outfile, ', ');
+    end;
+  indent(1, Idx, inc+2);
+  write(outfile, '}');
+  end;
+end;
+
+procedure INIT_DEC_LIST(Idx, inc:integer; namedtype:integer);
+begin
+DECLARATOR(Idx, namedtype);    (* Liste hat immer nur 1 Element *)
+if STab[Idx].SSubClass = InitializedVar
+then
+  begin
+  write(outfile, ' = ');
+  INITIALIZER(Idx, inc);
+  end;
+end;
+
+procedure DECLARATION(Idx, inc:integer);
+var tn:integer;
+begin
+indent(1, Idx, inc);
+write(outfile, 'extern');
+tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc+2);
+DEC_LIST(Idx, tn);
+write(outfile, ';');
+end;
+
+procedure E_DATA_DEFINITION(Idx, inc: integer);
+var tn:integer;
+begin
+case STab[Idx].SClass of
+FILESTATIC:
+  begin
+  indent(1, Idx, inc);
+  write(outfile, 'static');
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc+2);
+  end;
+otherwise:
+  begin
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc);
+  end;
+end;
+if (STab[Idx].SKind <> TypeNameDcl) and
+   (STab[Idx].SKind <> TagNameDcl)
+then
+  INIT_DEC_LIST(Idx, inc, tn);
+write(outfile, ';');
+end;
+
+procedure I_DATA_DEFINITION(Idx, inc: integer);
+var tn:integer;
+begin
+case STab[Idx].SClass of
+FILESTATIC,
+LOCALSTATIC:
+  begin
+  indent(1, Idx, inc);
+  write(outfile, 'static');
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc+2);
+  end;
+REGISTER:
+  begin
+  indent(1, Idx, inc);
+  write(outfile, 'register');
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc+2);
+  end;
+otherwise:
+  begin
+  tn := TYPE_SPECIFIER(Idx, STab[Idx].SType, false, inc);
+  end;
+end;
+if (STab[Idx].SKind <> TypeNameDcl) and
+   (STab[Idx].SKind <> TagNameDcl)
+then
+  INIT_DEC_LIST(Idx, inc, tn);
+write(outfile, ';');
+end;
+
+function GetNode(Idx:integer):integer;
+var NodeIndex : HdgRange;
+    found:boolean;
+begin
+found:=false;
+NodeIndex:=HdgHead;
+while NodeIndex <> -1 do
+  begin
+  if MajorOperator=Proc
+  then
+    if ProcLabel = Idx
+    then
+      begin
+      found:= true;
+      GetNode:=NodeIndex;
+      end;
+  NodeIndex := NextLink;
+  end;
+if found = false
+then
+  begin
+  Space;
+  writeln(outfile, 'Fehler: Hdg-Node fuer ProcDcl/FuncDcl nicht gefunden!');
+  writeln(outfile, 'Idx = ', Idx:1);
+  Abbruch;
+  end;
+end;
+
+#ifdef RASN /*RASN4 #define instead PTOC_CONST */
+
+procedure DefineConstant(Idx:integer);
+var t:integer;
+    dblstr:STRING;
+    anz_bytes:integer;
+begin
+if ( RAS_control ['0'] ) then
+begin
+  writeln(outfile);
+  write(outfile, '#define ');
+  PrintString(Idx);
+  write(outfile, ' ');
+  InitTypIfTyp(STab[Idx].SFeld3);
+  EXPRESSION(STab[Idx].SFeld3, NopOp, ANYSIDE);
+end else
+begin
+  writeln(outfile);
+  write(outfile, 'PTOC_CONST(');
+  PrintString(Idx);
+  write(outfile, ', ');
+  InitTypIfTyp(STab[Idx].SFeld3);
+  EXPRESSION(STab[Idx].SFeld3, NopOp, ANYSIDE);
+  write(outfile, ');');
+end;
+end;
+
+#else
+
+procedure DefineConstant(Idx:integer);
+var t:integer;
+    dblstr:STRING;
+    anz_bytes:integer;
+begin
+  writeln(outfile);
+  write(outfile, 'PTOC_CONST(');
+  PrintString(Idx);
+  write(outfile, ', ');
+  InitTypIfTyp(STab[Idx].SFeld3);
+  EXPRESSION(STab[Idx].SFeld3, NopOp, ANYSIDE);
+  write(outfile, ');');
+end;
+
+#endif
+
+(*=====================================================================================*)
+
+function IsInFrameParam(Idx:integer):boolean;
+begin
+if StatLink
+then
+  with STab[Idx] do
+    IsInFrameParam := (((SKind = ParmDcl) or (SKind = ProcParmDcl) or (SKind = FuncParmDcl)) and testbit(SFeld4, StaticLinkRef))
+else
+   IsInFrameParam := false;
+end;
+
+function IsInFrame(Idx:integer):boolean;
+begin
+if StatLink
+then
+  with STab[Idx] do
+#ifdef NO_AUTONR
+    IsInFrame:= (SKind = VarDcl) and  (SSubClass = UninitializedVar) and  (SClass = AUTO) and testbit(SFeld4, StaticLinkRef)
+#else
+   IsInFrame:= (SKind = VarDcl) and  (SSubClass = UninitializedVar) and  (SClass = AUTONR) and testbit(SFeld4, StaticLinkRef)
+#endif
+else
+   IsInFrame := false;
+end;
+
+(*
+   return true if the symbol table element has to be made global (pulled out of the block)
+   to be accesible by inner procedures, like type definitions, forward, extern and static
+   declarations.
+*)
+
+function IsGlobalLocal(Idx:integer):boolean;
+begin
+   with STab[Idx] do
+     IsGlobalLocal := (SKind = TypeDcl) or
+		      (SKind = TypeNameDcl) or
+		      (SKind = ForwardProcDcl) or
+                      (SKind = ForwardFuncDcl) or
+		      (SKind = VarDcl) and ((SClass = SNULL) or (SClass = FILESTATIC) or (SClass = LOCALSTATIC)) or
+		      (SKind = ConDcl)
+end;
+
+function IsEnumvalueDcl(Idx:integer):boolean;
+begin
+   with STab[Idx] do
+#ifdef RAS /*RAS00 err.17: fixed IsEnumvalueDcl()*/
+     IsEnumvalueDcl := (SKind = ConDcl) and (SFeld3 = 0)
+#else
+     IsEnumvalueDcl := (SKind = ConDcl) and (SNextEnum <> 0)
+#endif
+end;
+
+function IsCharArray(Idx0:integer):boolean;
+var Idx:integer;
+begin
+(* Zusicherung: IsSimpleVar(Idx) *)
+IsCharArray := false;
+Idx:=STab[Idx0].SType;
+if STab[Idx].SType = ArrayType
+then
+  IsCharArray := (STab[Idx].SElement = CHARTYPE_INDEX);
+end;
+
+procedure FillInteger(inc:integer);
+var Idx:integer;
+begin
+BumpSymPtr;
+Idx:= SymPtr;
+STab[Idx].SName :=0;
+STab[Idx].SType :=1;
+STab[Idx].SKind :=VarDcl;
+STab[Idx].SClass := AUTO;
+STab[Idx].SSubClass := UninitializedVar;
+Single_Definition(Idx, inc, false, false);
+end;
+
+function IsForwardDcl(Idx:integer):boolean;
+begin
+with STab[Idx] do
+  IsForwardDcl:= (SKind = ForwardProcDcl) or (SKind = ForwardFuncDcl)
+end;
+
+function IsFuncDcl(Idx:integer):boolean;
+begin
+with STab[Idx] do
+  IsFuncDcl:= (SKind = FuncDcl) or (SKind = ProcDcl) or (SKind = ModuleDcl)
+end;
+
+function IsBlockDcl(Idx:integer):boolean;
+begin
+IsBlockDcl:= (STab[Idx].SKind = BlockDcl);
+end;
+
+function LevelNext(Idx:integer):integer;
+var next:integer;
+begin
+next:=STab[Idx].SNext;
+if IsBlockDcl(next)
+then
+  LevelNext:= LevelNext(STab[next].SLastEntry)
+else
+  LevelNext:= next;
+end;
+
+(*
+   - print a declaration of a symbol table element
+     if pulloutside is true we are pulling a declaration out of it's' block,
+     so we have to make it unique unless it is't' class is SNULL or FILESTATIC
+*)
+
+procedure Single_Definition(Idx, inc: integer; pulloutside, ismodul:boolean);
+var Idx1:integer;
+begin
+
+(*JH*)if control ['Q'] then
+(*JH*) begin
+(*JH*) write   ( 'Single_Definition : ' : 30 ) ;
+(*JH*) if control ['Y'] then
+(*JH*)   begin
+(*JH*)   if STab[Idx].SKind = VarDcl then
+(*JH*)     begin
+(*JH*)     if control ['Q'] then
+(*JH*)       begin
+(*JH*)       write ( 'Variable Defition ' ) ;
+(*JH*)       if STab[Idx].SClass = EXTERN then
+(*JH*)         write ('(global !) ') ;
+(*JH*)       end ;
+(*JH*)     end ;
+(*JH*)   end ;
+(*JH*)    DumpDumpString (STab[Idx].SName ) ;
+(*JH*)    writeln ;
+(*JH*) end ;
+
+case STab[Idx].SKind of
+VarDcl,
+ForwardFuncDcl,
+ForwardProcDcl,
+CBlockDcl:
+  begin
+
+(*JH*) if control ['Y'] then
+(*JH*)   begin
+(*JH*)   if STab[Idx].SKind = VarDcl then
+(*JH*)     begin
+(*JH*)       if STab[Idx].SClass = EXTERN then
+(*JH*)       begin
+(*JH*)          writeln(outfile);
+(*JH*)          writeln(outfile);
+(*JH*)          write(outfile , '/*size printf ("' ) ;
+(*JH*)          DumpString (STab[Idx].SName ) ;
+(*JH*)          write(outfile , '   %d\\n" , sizeof (' ) ;
+(*JH*)
+(*JH*)          STab[Idx].SName := GenPName ( Idx ) ;
+(*JH*)
+(*JH*)          DumpString (STab[Idx].SName ) ;
+(*JH*)          writeln(outfile , ')); */' ) ;
+(*JH*)          writeln(outfile);
+(*JH*)          write (outfile, 'extern ') ;
+(*JH*)
+(*JH*)          if control ['Q'] then
+(*JH*)          begin
+(*JH*)            write   ( 'Single_Definition : ' :30 , 'New Name = ' ) ;
+(*JH*)            DumpDumpString (STab[Idx].SName ) ;
+(*JH*)            writeln ;
+(*JH*)          end ;
+(*JH*)       end ;
+(*JH*)     end ;
+(*JH*)   end ;
+
+#ifdef RASX /*RAS05 skip unused tmp.var. */
+  if  testbit ( STab[Idx].SFeld4, WithTmpVar )
+      and not testbit ( STab[Idx].SFeld4, WithAktiv ) then
+    begin
+(*      writeln ( outfile ); write ( outfile, '/*RAS05 tmp unused*/' ); *)
+/*      if RAS_control ['u'] then begin
+        writeln ( outfile ); write ( outfile, '*** unrefered WITH expression: ' );
+        EXPRESSION ( STab[Idx].SFeld3, NopOp, ANYSIDE);
+        writeln ( outfile, '  - aborting');
+        PasCerror ( 'unrefered WITH expression - aborting' );
+      end; */
+    end
+  else
+#endif
+
+  if STab[Idx].SClass = SNULL
+  then
+    DECLARATION(Idx, inc)
+  else
+    begin
+    if pulloutside and (STab[Idx].SClass <> FILESTATIC)
+    then MakeUnique(Idx, CurrentProc);
+    if ismodul
+    then
+      E_DATA_DEFINITION(Idx, inc)    (*ANSI-protos here*)
+    else
+      I_DATA_DEFINITION(Idx, inc);
+    end;
+  end;
+
+TypeNameDcl:
+#ifdef RASN /* RASN3 ANSI-protos only */
+  if not RAS_control [ 'a' ] then
+#endif
+  begin
+  if (pulloutside)
+  then
+    MakeUnique(Idx, CurrentProc);
+  TYPE_DEFINITION(Idx, inc);
+  end;
+
+TypeDcl:
+  (* Definition von complex Typen, sollte unter case 'TagNameDcl:' erscheinen,
+     fuehrt aber zu Fehler falls TagNameDcl vor der Definition auftritt *)
+#ifdef RASN /* RASN3 ANSI-protos only */
+  if not RAS_control [ 'a' ] then
+#endif
+  begin
+  Idx1:= STab[Idx].STmyname;
+  if Idx1 <> 0
+  then
+    if IsTagName(Idx1)
+    then
+      begin
+      if (pulloutside)
+      then
+        MakeUnique(Idx1, CurrentProc);
+      if ismodul
+      then
+        E_DATA_DEFINITION(Idx1, inc)        (*  = Half-Type-Definition! *)
+      else
+        I_DATA_DEFINITION(Idx1, inc);        (*  = Half-Type-Definition! *)
+      end;
+  end;
+
+ModuleDcl,
+FuncDcl,
+ProcDcl:
+#ifdef RASN /* RASN3 RASN4 no func.def. in -R0 & -Ra */
+  if not ( RAS_control ['0'] or RAS_control ['a'] ) then
+#endif
+  FUNCTION_DEFINITION(GetNode(Idx), inc);
+
+otherwise:
+  begin
+  end;
+end
+end;
+
+(*
+   traverse symbol table of a block, skipping embedded
+   blocks, and print those symbol table definitions wich need to be pulled out.
+*)
+
+procedure Outside_Definitions(Idx, inc: integer);
+var last, x : integer;
+begin
+last:=STab[Idx].SLastEntry;
+
+(* first print constants and enum types *)
+
+x := Idx;
+x := LevelNext(x);
+while x <= last do
+  begin
+  if IsEnumDcl(x) then begin
+     DefineEnum(x, inc);
+  end;
+  x:=LevelNext(x);
+  end;
+
+(* then the rest *)
+
+x := Idx;
+x := LevelNext(x);
+while x <= last do
+  begin
+  if IsGlobalLocal(x) and (not IsEnumDcl(x))  and (not IsConstDcl(x))
+  then
+      Single_Definition(x, inc, true, false)
+  else if UseSymbolicConst and IsConstDcl(x) and IsOrdinal(PrimType(STab[x].SType)) and (not IsEnumvalueDcl(x)) then begin
+     MakeUnique(x, CurrentProc);
+     DefineConstant(x);
+  end;
+  x:=LevelNext(x);
+  end;
+end;
+
+(*
+   traverse symbol table of a block, skipping embedded blocks,
+   and print those symbol table definitions which need to be put in the frame structure.
+*)
+
+procedure Frame_Definitions(Idx, inc: integer);
+var last, level : integer;
+begin
+level:=STab[Idx].SLevel;
+last:=STab[Idx].SLastEntry;
+Idx:=LevelNext(Idx);
+while Idx <= last do
+  begin
+  if (level = STab[Idx].SLevel) and IsInFrame(Idx)
+  then
+    begin
+    if IsCharArray(Idx)  (* notwendig, aber noch nicht hinreichend! *)
+    then FillInteger(inc);
+    Single_Definition(Idx, inc, false, false);
+    end;
+  Idx:=LevelNext(Idx);
+  end;
+end;
+
+(*
+   traverse symbol table of a block, skipping embedded blocks,
+   and print those symbol table definitions which are left local
+*)
+
+procedure Local_Definitions(Idx_Defs, inc, minlevel: integer);
+var Idx, last, level, first : integer;
+begin
+Idx:= Idx_Defs;
+level:=STab[Idx].SLevel;	(* block level *)
+if (level >= minlevel) then
+    begin
+    last:=STab[Idx].SLastEntry;
+    Idx:=LevelNext(Idx);
+    while Idx <= last do
+       begin
+       if (not IsInFrame(Idx)) and (not IsGlobalLocal(Idx))
+          and (not IsFuncDcl(Idx))
+       then
+          Single_Definition(Idx, inc, false, false);
+       Idx:=LevelNext(Idx);
+       end;
+
+     Idx:= STab[Idx_Defs].SFuncBlock;
+     first:=STab[Idx].SFeld1;
+     last:=STab[Idx].SFeld2;
+     while (first <= last) and (first <>0) and (last <> 0) do
+	begin
+	Idx:=first;
+        Single_Definition(Idx, inc, false, false);
+	first := first+1;
+        end;
+    end;
+end;
+
+(*
+   traverse symbol table of level 1 block, skipping embedded blocks,
+   and print all the symbol table definition
+*)
+
+procedure Global_Definitions(Idx_Defs, inc, minlevel: integer);
+var Idx, last, level, x, first : integer;
+begin
+Idx:= Idx_Defs;
+level:=STab[Idx].SLevel;	(* block level *)
+if (level >= minlevel) then	(* warum *)
+  begin
+  last:=STab[Idx].SLastEntry;
+
+  x := Idx;
+  x:=LevelNext(x);
+  while x <= last do
+     begin
+     if IsEnumDcl(x) then
+        DefineEnum(x, inc);
+     x:=LevelNext(x);
+     end;
+
+  x := Idx;
+  x:=LevelNext(x);
+  while x <= last do
+     begin
+     if (not IsEnumDcl(x)) and (not IsConstDcl(x)) and (not IsFuncDcl(x))
+     then
+        Single_Definition(x, inc, false, false)
+     else if UseSymbolicConst and IsConstDcl(x) and IsOrdinal(PrimType(STab[x].SType)) and (not IsEnumvalueDcl(x)) then
+        DefineConstant(x);
+      x:=LevelNext(x);
+     end;
+
+     Idx:= STab[Idx_Defs].SFuncBlock;
+     first:=STab[Idx].SFeld1;
+     last:=STab[Idx].SFeld2;
+     while (first <= last) and (first <>0) and (last <> 0) do
+	begin
+	Idx:=first;
+        Single_Definition(Idx, inc, false, false);
+	first := first+1;
+        end;
+  end;
+end;
+
+
+procedure Modul_Definitions(Idx_Defs, inc, minlevel: integer);
+var Idx, Idx1 : integer;
+begin
+
+Idx1 := Idx_Defs;
+
+/* skip all level 0 entries */
+
+while (Idx1 <= SymPtr) and (STab[Idx1].SLevel < minlevel) do
+  Idx1 := STab[Idx1].SNext;
+
+Idx := Idx1;
+while (Idx <= to_stab) do
+  begin
+  if IsEnumDcl(Idx)
+  then
+    if IsMarked(Idx)
+    then
+#ifdef RASN /* RASN3 RASN4 filter valid enums */
+      if    ( not RAS_control [ 'a' ] )
+        and (   ( ( not RAS_control [ '0' ] )
+             or (    ( Idx >= RAS_first_type + 2 )
+                 and ( Idx <= RAS_last_type + 2 ) ) ) ) (* +2 is experim. result!*)
+        then
+#endif
+      DefineEnum(Idx, inc);
+  Idx:= LevelNext(Idx);
+  end;
+
+Idx:= Idx1;
+#ifdef RASN /* RASN3 ANSI-protos only */
+if RAS_control [ 'a' ] then
+while Idx <= to_stab do begin
+  Single_Definition(Idx, inc, false, true);
+  Idx:= LevelNext(Idx);
+end else
+#endif
+while Idx <= to_stab do
+  begin
+  if (not IsConstDcl(Idx)) and (not IsEnumDcl(Idx))
+  then
+    begin
+    if UnmarkedType(Idx)
+    then
+      begin
+      if DeleteUnusedType
+      then
+        begin
+        /* keine Typen-Definition! */
+        end
+      else
+        Single_Definition(Idx, inc, false, true)
+      end
+    else
+      if (DeleteUnusedVar) and (UnmarkedVar(Idx))
+	/* and (STab[Idx].SClass = SNULL) */
+      /* Variable wird nicht verwendet! */
+      /* eigentlich sollten nur extern Deklarationen unterdrueckt werden */
+      /* aber CLE Pascal Frontend kennt keine extern Deklarationen       */
+      then
+	begin
+		/* Keine Ausgabe */
+	end
+      else   /* Normalfall! */
+#ifdef RASN /* RASN4 filter valid types */
+        if (   ( not RAS_control [ '0' ] )
+            or (    ( Idx >= RAS_first_type + 2 )
+                 and ( Idx <= RAS_last_type + 2 ) ) )
+        then
+#endif
+        Single_Definition(Idx, inc, false, true);
+    end
+#ifdef RASN /* RASN4 incl. string const */
+  else if UseSymbolicConst and IsConstDcl(Idx)
+        and ( IsOrdinal(PrimType(STab[Idx].SType)) or RAS_control [ '0' ] )
+        and (not IsEnumvalueDcl(Idx)) then
+#else
+  else if UseSymbolicConst and IsConstDcl(Idx) and IsOrdinal(PrimType(STab[Idx].SType)) and (not IsEnumvalueDcl(Idx)) then
+#endif
+    begin
+    if not IsMarked(Idx)
+    then
+      if DeleteUnusedConst
+      then
+        begin
+        /* keine Ausgabe der Konstante */
+        end
+      else
+        DefineConstant(Idx)
+    else
+#ifdef RASN /* RASN4 filter valid const */
+    if (   ( not RAS_control [ '0' ] )
+        or (    ( Idx >= RAS_first_const + 2 )
+             and ( Idx <= RAS_last_const + 2 ) ) )
+    then
+#endif
+      DefineConstant(Idx);
+    end;
+  Idx:= LevelNext(Idx);
+  end;
+end;
+
+(*===========================================================================================*)
+
+procedure BINOP(Op: integer);
+begin
+case Op of
+MultOp: write(outfile, ' * ');
+DivOp:  write(outfile, ' / ');
+ModOp:  write(outfile, ' % ');
+AddOp:  write(outfile, ' + ');
+SubtOp: write(outfile, ' - ');
+ShrOp:  write(outfile, ' >> ');
+ShlOp:  write(outfile, ' << ');
+LtOp:   write(outfile, ' < ');
+GtOp:   write(outfile, ' > ');
+LeOp:   write(outfile, ' <= ');
+GeOp:   write(outfile, ' >= ');
+EqOp:   write(outfile, ' == ');
+NeOp:   write(outfile, ' != ');
+BAndOp: write(outfile, ' & ');
+BXorOp: write(outfile, ' ^ ');
+BOrOp:  write(outfile, ' | ');
+
+AndOp:  write(outfile, ' && ');
+OrOp:   write(outfile, ' || ');
+end;
+end;
+
+procedure ASGNOP(Op: integer);
+begin
+case Op of
+AddOp:  write(outfile, ' += ');
+SubtOp: write(outfile, ' -= ');
+MultOp: write(outfile, ' *= ');
+DivOp:  write(outfile, ' /= ');
+ModOp:  write(outfile, ' %= ');
+ShrOp:  write(outfile, ' >>= ');
+ShlOp:  write(outfile, ' <<= ');
+BAndOp: write(outfile, ' &= ');
+BXorOp: write(outfile, ' ^= ');
+BOrOp:  write(outfile, ' |= ');
+end;
+end;
+
+procedure DruPostfix(Op:integer);
+begin
+case Op of
+AddOp:  write(outfile, '++');
+SubtOp: write(outfile, '--');
+end;
+end;
+
+procedure FillBlanks(Idx, index:integer);
+var i, len, typelen, s_index : integer;
+begin
+len := GetStringLength(index);
+s_index:=STab[Idx].SIndex;
+typelen := (STab[s_index].SHighRange - STab[s_index].SLowRange + 1);
+for i:=len+1 to typelen do
+  write(outfile, ' ');
+end;
+
+procedure CONSTANT(Node:HdgRange; Oop, Side:integer);
+var anz:integer;
+    level:integer;
+    NodeIndex:HdgRange;
+    anz_bytes:integer;
+    Idx, i:integer;
+    dblstr:STRING;
+
+begin
+NodeIndex:=Node;
+case MajorOperator of
+node:
+  case MinorOperator of
+  LitOp:
+   begin
+    if control ['Q'] then
+      writeln ( 'LitOp') ;
+    case STab[TypeField].SType of
+    LongType,
+    UlongType:
+      begin
+      TypeCast(TypeField);
+      long_to_string(Node1parameter, Node2parameter, dblstr, anz_bytes);
+      write(outfile, dblstr:anz_bytes);
+      end;
+    FloatType,
+    DoubleType:
+      begin
+      TypeCast(TypeField);
+      double_to_string(Node1parameter, Node2parameter, dblstr, anz_bytes);
+      write(outfile, dblstr:anz_bytes);
+      end;
+    ArrayType:				(* ???? DK ???? *)
+      begin
+      if control ['a'] then
+        write(outfile, '(unsigned char *)"')
+      else
+        write(outfile, '"');
+      DumpString(Node1parameter);
+      FillBlanks(TypeField, Node1parameter);
+      write(outfile, '"');
+      end;
+    PointerType:
+      begin
+      TypeCast(TypeField);
+      write(outfile, Node1parameter:1);
+      end;
+    UcharType,
+    CharacterType:
+      begin
+      write(outfile, '(unsigned char)''');	
+      DumpChar(chr(Node1parameter));
+      write(outfile, '''');	
+      end;
+    CharType:
+      begin
+      write(outfile, '''');	
+      DumpChar(chr(Node1parameter));
+      write(outfile, '''');	
+      end;
+    otherwise:
+      write(outfile, Node1parameter:1);
+    end;
+   end;
+  LoadstrOp:
+    begin
+    if control ['Q'] then
+      writeln ( 'LoadstrOp') ;
+    write(outfile, '"');
+    DumpString(Node1parameter);
+    write(outfile, '"');
+    end;
+  LitSizeOp:
+    begin
+    if control ['Q'] then
+      writeln ( 'LitSizeOp') ;
+    Idx:=Node1parameter;
+#ifdef RASX /*RAS04 make LitSizeOp const too*/
+    if RAS_control ['s'] then begin
+        anz_bytes:=STab[Idx].TypeInfo.SSize div 8;
+        write(outfile, anz_bytes:1);
+    end else begin
+        write(outfile, 'sizeof(');
+        TYPE_NAME(Idx, false);
+        write(outfile, ')');
+    end;
+#else
+(*
+ *  anz_bytes:=STab[Idx].TypeInfo.SSize div 8;
+ *  write(outfile, anz_bytes:1);
+ *)
+   (* anz_bytes := STab [Idx].SName;*)
+    write(outfile, 'sizeof(');
+    TYPE_NAME(Idx, false);
+    write(outfile, ')');
+#endif
+    end;
+ (* ???? eher sizeof *)
+  StaticLinkOp:
+    begin
+    if control ['Q'] then
+      writeln ( 'StaticLinkOp') ;
+    level := STab[Node1parameter].SLevel;
+    if (level <= 1)
+    then
+      write(outfile, ' 0 ')
+    else
+      begin	
+      level := CurrentLevel - level + 1;
+      if level = 0
+      then
+	if PAR(Oop, Side, LoadadrOp)
+        then
+	  write(outfile, '(&_ptoc_LOCAL)')
+	else
+	  write(outfile, '&_ptoc_LOCAL')
+      else
+	begin
+	write(outfile, '_ptoc_LOCAL._ptoc_LINK');
+        while level > 1 do
+	  begin
+          write(outfile, '->_ptoc_LINK');
+          level := level - 1;
+	  end;
+        end;
+      end;
+    end;
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+otherwise:
+  Fehler(NodeIndex);
+end;
+end;
+
+procedure FillSRecVar(Idx:integer; typ:integer);
+begin
+if STab[Idx].SRecVar > 0   (* d.h. initialisiert von InitSRecVar      *)
+then                       (* betrifft Komponenten von VariantRecords *)
+  if (STab[STab[Idx].SRecVar].SType <> typ)
+  then   (*  Er darf nicht zu weit hochgehen! Test: CONF/6.4.3.3-5 *)
+    begin
+    FillSRecVar(STab[Idx].SRecVar, typ);
+#ifdef RASN /*RASN2 no variant names printed */
+    if not ( RAS_control ['v'] and ( STab[STab[STab[Idx].SRecVar].SType].SType = UnionType ) ) then
+#endif
+    write(outfile, '.');
+    end;
+#ifdef RASN /*RASN2 no variant names printed */
+if not ( RAS_control ['v'] and ( STab[STab[Idx].SType].SType = UnionType ) ) then
+#endif
+PrintString(Idx);
+end;
+
+procedure IDENTIFIER(Node:HdgRange; typ:integer);
+  (*  Parameter typ nur fuer PASCAL:  = fuer FillSRecVar  *)
+var NodeIndex:HdgRange;
+begin
+NodeIndex:=Node;
+case MajorOperator of
+node:
+  case MinorOperator of
+  LitOffsetOp:
+    if (STab[Node1parameter].SRecVar > 0)
+    then
+      FillSRecVar(Node1parameter, typ)
+    else                        (*  = Normalfall!  *)
+      PrintString(Node1parameter);
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+otherwise:
+  Fehler(NodeIndex);
+end;
+end;
+
+function IsNodeId(NodeIndex:integer):boolean;
+begin
+IsNodeId:= ((MajorOperator = node) and (MinorOperator = IdOp));
+end;
+
+function IsParam(Idx:integer):boolean;
+begin
+IsParam:= (STab[Idx].SKind = ParmDcl);
+end;
+
+function IsRecordElement(NodeIndex:integer):boolean;
+begin
+IsRecordElement:= (MajorOperator = BinaryExp)
+		  and (MinorOperator = ElementOp);
+end;
+
+function IsPointerExpression(NodeIndex:integer):boolean;
+begin
+  (* Es gab Fehler bei:  static *ptr = &a[5] *)
+IsPointerExpression :=
+    (MajorOperator = BinaryExp) and (MinorOperator <> SubscriptOp);
+end;
+
+
+
+function Typ(Node:integer):integer;
+var t:integer;
+begin
+t:=TypeFieldOf(Node);
+while (STab[t].SKind = TypeNameDcl) do t := STab[t].SType;
+Typ := t;
+end;
+
+(* return the element type of type or typename idx *)
+function ElementTyp(Node:integer):integer;
+var t:integer;
+begin
+t:=Typ(Node);
+if (STab[t].SType = ArrayType)
+then
+   begin
+   t := STab[t].SElement;
+   while (STab[t].SKind = TypeNameDcl) do t := STab[t].SType;
+   end
+else
+   t := 0;
+ElementTyp := t;
+end;
+
+(* return the domain type of type or typename idx *)
+function DerefTyp(Node:integer):integer;
+var t:integer;
+begin
+t:=Typ(Node); 	
+if (STab[t].SType = PointerType)
+then
+   begin
+   t := STab[t].SDomain;
+   while (STab[t].SKind = TypeNameDcl) do t := STab[t].SType;
+   end
+else
+   t := 0;
+DerefTyp := t;
+end;
+
+function EqualSizeTypes(typ_1, typ_2:integer):boolean;
+begin
+
+   while typ_1 > 0 do
+     typ_1 := STab[typ_1].SType;
+
+   while typ_2 > 0 do
+     typ_2 := STab[typ_2].SType;
+
+   if typ_1 = typ_2
+   then EqualSizeTypes := true
+   else if (typ_1 = CharType) or (typ_1 = UcharType) or (typ_1 = CharacterType)
+   then EqualSizeTypes := (typ_2 = CharType) or (typ_2 = UcharType) or (typ_2 = CharacterType)
+   else if (typ_1=ShortType) or (typ_1=UshortType)
+   then EqualSizeTypes := (typ_2 = ShortType) or (typ_2 = UshortType)
+   else if (typ_1=LongType) or (typ_1=UlongType)
+   then EqualSizeTypes := (typ_2 = LongType) or (typ_2 = UlongType)
+   else if (typ_1=IntegerType) or (typ_1=UnsignedType)
+   then EqualSizeTypes := (typ_2 = IntegerType) or (typ_2 = UnsignedType)
+   else EqualSizeTypes := false;
+end;
+
+function IsDerefOp(NodeIndex:integer):boolean;
+begin
+    IsDerefOp:=(MajorOperator = UnaryExp) and (MinorOperator = DerefOp);
+end;
+
+
+procedure actual_paramlist(NodeIndex:integer);
+begin
+if NodeIndex <> -1
+then
+  begin
+  NodeIndex:=ListHeadField;
+  while NodeIndex <> -1 do
+    begin
+    EXPRESSION(NodeIndex, LoadOp, ANYSIDE);
+    NodeIndex:=NextLink;
+    if NodeIndex <> -1
+    then write(outfile, ' , ');
+    end;
+  end;
+end;
+
+function TypeofStaticLink(NodeIndex:integer):integer;
+(* returns
+	0 if no Static link code required
+        1 if requiered
+	2 if conditionally requiered
+*)
+(* NodeIndex = Static Link code of CallOp *)
+
+begin
+if (NodeIndex <> -1) 	(* static link code exists *)
+then
+  if (MajorOperator = node) and
+     (MinorOperator = StaticLinkOp)
+  then
+    if (STab[Node1parameter].SLevel) > 1
+    then
+      TypeofStaticLink := 1
+    else
+      TypeofStaticLink := 0
+  else
+    TypeofStaticLink := 2
+else
+  TypeofStaticLink := 0;
+end;
+
+function IsSpecSys(index:integer):boolean;
+begin
+IsSpecSys := (SpecFunction(index) = 3);   (* = GOTO *)
+end;
+
+procedure SpecSys(index:integer);
+begin
+case SpecFunction(index) of
+3:   (* = GOTO  *)
+  write(outfile, 'exit(1)');
+otherwise:
+  begin
+  end;
+end;
+end;
+
+function IsArrayExpression(NodeIndex:integer):boolean;
+var t:integer;
+begin
+  t:= STab[TypeField].SType;
+  IsArrayExpression := (t = ArrayType) or (t = FileType) or (t= SetType) or (t = StringType);
+end;
+
+function IsFuncExpression(NodeIndex:integer):boolean;
+begin
+  IsFuncExpression := (STab[TypeField].SType = ProcedureType) or
+		       (STab[TypeField].SType = FunctionType);
+end;
+
+#ifdef RAST2
+
+function GetNthParm ( Node, no : integer ) : integer;
+var i: integer;
+var NodeIndex: HdgRange;
+begin
+  NodeIndex := Node;
+  NodeIndex := Ls2operand;
+  NodeIndex := ListHeadField;
+  while ( no > 1 ) and ( NodeIndex <> -1 ) do begin
+    no := no - 1;
+    NodeIndex := NextLink;
+  end;
+  GetNthParm := NodeIndex;
+  if ( no > 1 ) then Error ( 0, Node );
+end;
+
+procedure ApndMacQual ( Node: HdgRange );
+(* asserted:  Sys0Op *)
+var NodeIndex: HdgRange;
+   s: String20;
+begin
+  NodeIndex := Node;
+  s := ' ';
+  GetString (Ls1parameter, s[0] );
+
+  if  s = 'sql__pcnst\0         ' then begin
+    NodeIndex := GetNthParm ( Node, 1);
+    NodeIndex := Unary1operand; (*vorsicht!*)
+    if ( STab[TypeField].TypeInfo.SSize <= 32 ) then begin
+        NodeIndex := GetNthParm ( Node, 3 );
+        NodeIndex := Unary1operand; (*vorsicht!*)
+        if ( DscField <> T_CONSTANT ) or ( STab[TypeField].SType <> IntegerType )
+          then Error ( 0, Node );
+        NodeIndex := GetNthParm ( Node, 4 ); (* check no pairs: [1..5] *)
+        NodeIndex := Unary1operand; (*vorsicht!*)
+        if ( DscField <> T_CONSTANT ) or ( STab[TypeField].SType <> IntegerType )
+          or ( Node1parameter <> 0 ) then Error ( 0, Node );
+        NodeIndex := GetNthParm ( Node, 5 ); (* get & check no. of singls: [1,3,5] *)
+        NodeIndex := Unary1operand; (*vorsicht!*)
+        if ( DscField <> T_CONSTANT )
+            or ( STab[TypeField].SType <> IntegerType )
+            or ( Node1parameter > 3 ) then Error ( 0, Node );
+        write ( outfile, '_', Node1parameter:1, 'bit');
+    end;
+
+  end else if  s = 'sql__psetadd\0       ' then begin
+    NodeIndex := GetNthParm ( Node, 1);
+    NodeIndex := Unary1operand; (*vorsicht!*)
+    if ( STab[TypeField].TypeInfo.SSize <= 32 ) then
+      write ( outfile, '_int' );
+
+  end else if
+        ( s = 'sql__psetge\0        ' ) or
+        ( s = 'sql__erq\0           ' ) then begin
+    NodeIndex := GetNthParm ( Node, 2);
+    NodeIndex := Unary1operand; (*vorsicht!*)
+    if ( STab[TypeField].TypeInfo.SSize <= 32 ) then
+      write ( outfile, '_int' );
+  end;
+
+end;
+
+#endif
+
+procedure TERM(Node:HdgRange; Oop, Side:integer);
+var anz, i:integer;
+    NodeIndex:HdgRange;
+    NodeId: HdgRange;
+    par:boolean;
+begin
+if control ['Q'] then
+  write ('TERM : ':30 ) ;
+NodeIndex:=Node;
+case MajorOperator of
+UnaryExp:
+  case MinorOperator of
+  LoadOp:
+    begin
+    if control ['Q'] then
+      writeln ('UnaryExp, LoadOp -> TERM') ;
+    TERM(Unary1operand, Oop, Side);
+    end;
+  LoadadrOp:
+    begin
+    if control ['Q'] then
+      writeln ('UnaryExp, LoadadrOp') ;
+    if IsDerefOp(Unary1operand)
+    then
+      if (TypeField <> TypeFieldOf(Unary1operandOf(Unary1operand)))
+      then	(* ueberspringen Deref Knoten *)
+	begin
+	par := PAR(Oop, Side, ConvertOp);
+	LPAR(par);
+#ifdef RAS /*RASE err.14: typecast ptr->short->ptr bei RAS02*/
+        if ( RAS_control ['S'] ) and ( STab[TypeField].SType <> PointerType ) then begin
+            write(outfile, ' /*RAS?>'); (*m.E. ein ptoc-fehler: ptr -> (short), was soll das? *)
+	    TypeCast(TypeField);
+            write(outfile, '<RAS?*/ ');
+        end else
+#endif
+	TypeCast(TypeField);
+	EXPRESSION(Unary1operandOf(Unary1operand), ConvertOp, RIGHT);
+	RPAR(par);
+	end
+      else
+        EXPRESSION(Unary1operandOf(Unary1operand), Oop, Side)
+    else if not IsPointerExpression(Unary1operand)
+             or IsRecordElement(Unary1operand)
+    then    (*  Normalfall  *)
+      begin
+      if not (IsArrayExpression(Unary1operand) or
+	      IsFuncExpression(Unary1operand))
+      then
+        begin
+	par := PAR(Oop, Side, LoadadrOp);
+	LPAR(par);
+	write(outfile, '&');
+        TERM(Unary1operand, LoadadrOp, Side);
+	RPAR(par);
+        end
+      else
+        TERM(Unary1operand, Oop, Side);
+      end
+    else
+      begin
+      if (TypeField <> TypeFieldOf(Unary1operand))
+      then
+	begin
+	par := PAR(Oop, Side, ConvertOp);
+	LPAR(par);
+	TypeCast(TypeField);
+	EXPRESSION(Unary1operand, ConvertOp, RIGHT);
+	RPAR(par);
+	end
+      else
+      	EXPRESSION(Unary1operand, Oop, Side);
+      end;
+    end;
+  DerefOp:
+    begin
+    if control ['Q'] then
+      writeln ('UnaryExp, DerefOp') ;
+    par := PAR(Oop, Side, DerefOp);
+    LPAR(par); 	
+    write(outfile, '*');
+    if Typ(NodeIndex) <> DerefTyp(Unary1operand)
+    then
+      PointerTypeCast(TypeField);
+    EXPRESSION(Unary1operand, DerefOp, RIGHT);
+    RPAR(par);
+    end;
+  StorepadrOp:
+    begin
+    if control ['Q'] then
+      writeln ('UnaryExp, StorepadrOp') ;
+    if IsDerefOp(Unary1operand)
+    then
+      EXPRESSION(Unary1operandOf(Unary1operand), LoadOp, ANYSIDE) (* ueberspringen Deref *)
+    else    (*  Normalfall!  *)
+      begin
+      if not (IsArrayExpression(Unary1operand) or IsFuncExpression(Unary1operand))
+      then
+        begin
+	write(outfile, '&');
+        EXPRESSION(Unary1operand, LoadadrOp, ANYSIDE);
+        end
+      else
+        EXPRESSION(Unary1operand, LoadOp, ANYSIDE);
+      end
+    end;
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+node:
+  case MinorOperator of
+  IdOp:
+    begin
+    if control ['Q'] then
+      writeln ('node, IdOp') ;
+    if StatLink
+    then
+      STAT_Identifier(Node1parameter, Oop, Side)
+    else
+      Identifier(Node1parameter, Oop, Side);
+    end;
+  RegOp:
+    (*  Node = RegOp - 13, d.h. CFP *)
+    (*  write(outfile, '&daten');  *)     (*   = nur Provisorium!  *)
+    begin
+    if control ['Q'] then
+      writeln ('node, RegOp') ;
+    /*
+    write(outfile, 'GETCFP()');
+    */
+    write(outfile, 'sql__gc()');
+    end ;
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+LongStmnt:
+  case MinorOperator of
+  CallOp:
+    begin
+    if control ['Q'] then
+      writeln ('LongStmnt, CallOp') ;
+    if StatLink
+    then
+      case TypeofStaticLink(Ls1parameter) of
+      0: (* no Static link code *)
+        begin
+       	par := PAR(Oop, Side, CallOp);
+	LPAR(par);
+        TERM(Ls1operand, CallOp, LEFT);     (* also ohne(!) Klammern *)
+       	write(outfile, '(');
+	actual_paramlist(Ls2operand);
+       	write(outfile, ')');
+	RPAR(par);
+        end;
+      1: (* fix static link code *)
+	begin
+       	par := PAR(Oop, Side, CallOp);
+	LPAR(par);
+	TERM(Ls1operand, CallOp, LEFT);
+	write(outfile, '(');
+	EXPRESSION(Ls1parameter, LoadOp, ANYSIDE);
+        if (Ls2operand <> -1) then write(outfile, ', ');
+        actual_paramlist(Ls2operand);
+	write(outfile, ')');
+	RPAR(par);
+	end;
+      2: (* conditional	 Static link *)
+ 	begin
+       	par := PAR(Oop, Side, IfthenelseOp);
+	LPAR(par);
+	EXPRESSION(Ls1parameter, IfthenelseOp, LEFT);
+	write(outfile, ' ? ');
+	(* ssl not zero, so push it *)
+	TERM(Ls1operand, CallOp, LEFT);
+	write(outfile, '(');
+	EXPRESSION(Ls1parameter, LoadOp, ANYSIDE);
+	if (Ls2operand <> -1) then write(outfile, ', ');
+        actual_paramlist(Ls2operand);
+	write(outfile, ')');
+	write(outfile, ' : ');
+	(* ssl zero, so don't' push it *)
+        TERM(Ls1operand, CallOp, LEFT);
+       	write(outfile, '(');
+        actual_paramlist(Ls2operand);
+       	write(outfile, ')');
+       	RPAR(par);
+        end;	
+      otherwise:
+	begin
+	end;
+      end (* end case *)
+    else
+      begin
+      par := PAR(Oop, Side, CallOp);
+      LPAR(par);
+      TERM(Ls1operand, CallOp, LEFT);
+      write(outfile, '(');
+      actual_paramlist(Ls2operand);
+      write(outfile, ')');
+      RPAR(par);
+      end;
+    end;
+  Sys0Op:
+    begin
+    if control ['Q'] then
+      writeln ('LongStmnt, SysOp') ;
+    if IsSpecSys(Ls1parameter)
+    then
+      SpecSys(Ls1parameter)
+    else
+      begin
+      par := PAR(Oop, Side, CallOp);
+      LPAR(par);
+      PutString(Ls1parameter, 0);
+#ifdef RAST2
+      ApndMacQual(NodeIndex);
+#endif
+      write(outfile, '(');
+      actual_paramlist(Ls2operand);
+      write(outfile, ')');
+      RPAR(par);
+      end;
+    end;
+  PostfixOp:
+    begin
+    if control ['Q'] then
+      writeln ('LongStmnt, PostfixOp -> EXPRESSION') ;
+    EXPRESSION(NodeIndex, Oop, Side);
+    end ;
+  StoreOp:                   (* = PYRAMID-Spracherweiterung! *)
+    begin
+    if control ['Q'] then
+      writeln ('LongStmnt, StoreOp -> EXPRESSION') ;
+    EXPRESSION(NodeIndex, Oop, Side);
+    end ;
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+BinaryExp:
+  case MinorOperator of
+  SubscriptOp:
+    begin
+    if control ['Q'] then
+      writeln ('BinaryExp, SubscriptOp') ;
+    par := PAR(Oop, Side, SubscriptOp);
+    LPAR(par);
+    if not EqualSizeTypes(Typ(NodeIndex), ElementTyp(Bin1operand))
+    then
+      begin
+      write(outfile, '(');
+      PointerTypeCast(TypeField);
+      TERM(Bin1operand, ConvertOp, RIGHT);
+      write(outfile, ')');
+      end
+    else
+      TERM(Bin1operand, SubscriptOp, LEFT);
+
+    write(outfile, '[');
+    if Bin2operand <> -1
+    then
+      begin
+      if Bin2parameter <> 0
+      then
+	begin
+        EXPRESSION(Bin2operand, AddOp, LEFT);
+	write(outfile, ' + ', Bin2parameter:1);
+	end
+      else
+        EXPRESSION(Bin2operand, LoadOp, ANYSIDE);
+      end
+    else
+      write(outfile, Bin2parameter:1);
+    write(outfile, ']');
+    RPAR(par);
+    end;
+  ElementOp:
+    begin
+    if control ['Q'] then
+      writeln ('BinaryExp, ElementOp');
+    par := PAR(Oop, Side, ElementOp);
+    LPAR(par);
+    if IsDerefOp(Bin1operand) and
+       (DerefTyp(Unary1operandOf(Bin1operand)) = Typ(Bin1operand))
+    then begin	
+      (* produce -> form, it's' more readable *)
+      TERM(Unary1operandOf(Bin1operand), ElementOp, LEFT);
+      write(outfile, '->');
+    end
+    else begin
+      TERM(Bin1operand, ElementOp, LEFT);
+      write(outfile, '.');
+    end;
+    IDENTIFIER(Bin2operand, Typ(Bin1operand));
+    RPAR(par);
+    end;
+  otherwise:
+    Fehler(NodeIndex);
+  end;
+otherwise:
+  Fehler(NodeIndex);
+end;
+end;
+
+function IsArrayAssign(NodeIndex:integer):boolean;
+var t:integer;
+begin
+if (MajorOperator = LongStmnt) and (MinorOperator = StoreOp)
+then
+  begin
+  t := STab[TypeField].SType;
+  IsArrayAssign := (t=ArrayType) or (t=SetType) or (t=StringType) or (t=FileType);
+  end
+else
+  IsArrayAssign:=false;
+end;
+
+
+function IsStringOperation(Node:integer):boolean;
+var NodeIndex:integer;
+begin
+NodeIndex:=Node;
+IsStringOperation := (STab[Typ(Bin1operand)].SType = ArrayType);
+end;
+
+#ifdef RAS /*RAS01 IsOk4Me(), RekursivStringComp(), new StringOperation() */
+
+function IsOk4Me ( NodeIndex: integer ) : boolean;
+begin
+(*minmum:
+    IsOk4Me :=	    ( DscField in [ T_IDENTIFIER, T_CONSTANT ] )
+		        or  ( DscField = T_TERM )
+			        and ( MajorOperator = UnaryExp ) and ( MinorOperator = LoadOp )
+			        and IsNodeId ( Unary1operand );
+*)
+(*maximum:*)
+    IsOk4Me := NoSideEffects ( NodeIndex );
+end;
+
+procedure RekursivStringComp ( Node, Cnt, CharIx: integer; MacId, CompOp: String20 );
+var NodeIndex, NeqRes:integer;
+begin
+NodeIndex:=Node;
+if ( CharIx = Cnt-1 ) then
+    write(outfile, '( _ptoc_CMP1( ' )
+else
+    write(outfile, '( ', MacId:11, '( ' );
+EXPRESSION(Bin1operand, StoreOp, LEFT);
+write(outfile, ', ' );
+EXPRESSION(Bin2operand, StoreOp, RIGHT);
+write(outfile, ', ', CharIx:1, ', ' );
+if ( CompOp = '!=') then NeqRes := 1 else NeqRes := 0;
+write(outfile, CompOp:2, ', ', NeqRes:1 );
+if ( CharIx < Cnt-1 ) then begin
+    write(outfile, ', ' );
+    RekursivStringComp ( Node, Cnt, CharIx+1, MacId, CompOp );
+end;
+write(outfile, '))' );
+end;
+
+procedure StringOperation(Node:integer; Oop, Side:integer);
+var NodeIndex:integer;
+    Idx, Idx1:integer;
+    cnt:integer;
+    par:boolean;
+begin
+NodeIndex:=Node;
+Idx:=TypeFieldOf(Bin1operand);
+Idx1 := STab[Idx].SIndex;
+cnt := STab[Idx1].SHighRange - STab[Idx1].SLowRange+1;
+
+if ( RAS_control ['C'] and ( cnt <= 4 )
+     and IsOk4Me ( Bin1operand ) and IsOk4Me ( Bin2operand )  ) then begin
+    case MinorOperator of
+	LtOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP3W', '<' );
+	GtOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP3W', '>' );
+	LeOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP3W', '<=' );
+	GeOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP3W', '>=' );
+	EqOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP2W', '==' );
+	NeOp: RekursivStringComp ( Node, cnt, 0, '_ptoc_CMP2W', '!=' );
+	otherwise: Fehler(NodeIndex);
+    end;
+
+end else begin
+    par := PAR(Oop, Side, IfthenelseOp);
+    LPAR(par);
+    write(outfile, '_ptoc_MEMCMP(');
+    TYPE_NAME(STab[Idx].SElement, false);
+    write(outfile, ', ');
+    write(outfile, cnt:1);
+    write(outfile, ', ');
+    EXPRESSION(Bin1operand, StoreOp, LEFT);
+    write(outfile, ' , ');
+    EXPRESSION(Bin2operand, StoreOp, RIGHT);
+    write(outfile, ')');
+    case MinorOperator of
+    LtOp:
+      write(outfile, ' < 0 ? 1 : 0');
+    GtOp:
+      write(outfile, ' > 0 ? 1 : 0');
+    LeOp:
+      write(outfile, ' > 0 ? 0 : 1');
+    GeOp:
+      write(outfile, ' < 0 ? 0 : 1');
+    EqOp:
+      write(outfile, ' == 0 ? 1 : 0');
+    NeOp:
+      write(outfile, ' == 0 ? 0 : 1');
+    otherwise:
+      Fehler(NodeIndex);
+    end;
+    RPAR(par);
+end;
+end;
+
+#else
+
+procedure StringOperation(Node:integer; Oop, Side:integer);
+var NodeIndex:integer;
+    Idx, Idx1:integer;
+    par:boolean;
+begin
+NodeIndex:=Node;
+Idx:=TypeFieldOf(Bin1operand);
+par := PAR(Oop, Side, IfthenelseOp);
+LPAR(par);
+write(outfile, '_ptoc_MEMCMP(');
+TYPE_NAME(STab[Idx].SElement, false);
+write(outfile, ', ');
+Idx1 := STab[Idx].SIndex;
+write(outfile, STab[Idx1].SHighRange - STab[Idx1].SLowRange+1:1);
+write(outfile, ', ');
+EXPRESSION(Bin1operand, StoreOp, LEFT);
+write(outfile, ' , ');
+EXPRESSION(Bin2operand, StoreOp, RIGHT);
+write(outfile, ')');
+case MinorOperator of
+LtOp:
+  write(outfile, ' < 0 ? 1 : 0');
+GtOp:
+  write(outfile, ' > 0 ? 1 : 0');
+LeOp:
+  write(outfile, ' > 0 ? 0 : 1');
+GeOp:
+  write(outfile, ' < 0 ? 0 : 1');
+EqOp:
+  write(outfile, ' == 0 ? 1 : 0');
+NeOp:
+  write(outfile, ' == 0 ? 0 : 1');
+otherwise:
+  Fehler(NodeIndex);
+end;
+RPAR(par);
+end;
+
+#endif
+
+#ifdef RAS /*RAS01 new ArrayAssign()*/
+
+procedure ArrayAssign(Node, inc:integer);
+(* Zusicherung: IsArrayAssign(Node) *)
+var Idx, Idx1, t:integer;
+    NodeIndex:integer;
+	cnt, i: integer;
+begin
+NodeIndex:=Node;
+Idx:=TypeField;
+if ( inc > 0 ) then indent(0, Node, inc);
+
+t := STab[Idx].SType;
+if (t = SetType) or (t = FileType) or (t=StringType)
+then begin
+    TypeSize(Idx);
+    GenArray(Idx, STab[Idx].TypeInfo.SSize);
+end;
+
+Idx1 := STab[Idx].SIndex;
+cnt := STab[Idx1].SHighRange - STab[Idx1].SLowRange+1;
+
+if ( RAS_control ['A'] and ( cnt <= 4 )
+     and IsOk4Me ( Ls1operand ) and IsOk4Me ( Ls2operand ) ) then begin
+    write(outfile, '{ ');
+    for i := 0 to cnt-1 do begin
+	    TERM(Ls1operand, StoreOp, LEFT);
+	    write(outfile, '[' , i:1, '] = ' );
+	    EXPRESSION(Ls2operand, StoreOp, RIGHT);
+	    write(outfile, '[' , i:1, ']; ');
+    end;
+    write(outfile, '} ');
+
+end else begin
+    write(outfile, '_ptoc_ASSIGN(');
+    TYPE_NAME(STab[Idx].SElement, false);
+    write(outfile, ', ');
+    write(outfile, cnt:1);
+    write(outfile, ', ');
+    TERM(Ls1operand, StoreOp, LEFT);
+    write(outfile, ', ');
+    EXPRESSION(Ls2operand, StoreOp, RIGHT);
+    write(outfile, ')');	(* no ; , the macro is a block *)
+end;
+end;
+
+#else
+
+procedure ArrayAssign(Node, inc:integer);
+(* Zusicherung: IsArrayAssign(Node) *)
+var Idx, Idx1, t:integer;
+    NodeIndex:integer;
+begin
+NodeIndex:=Node;
+Idx:=TypeField;
+indent(0, Node, inc);
+write(outfile, '_ptoc_ASSIGN(');
+
+t := STab[Idx].SType;
+if (t = SetType) or (t = FileType) or (t=StringType)
+then begin
+    TypeSize(Idx);
+    GenArray(Idx, STab[Idx].TypeInfo.SSize);
+end;
+
+TYPE_NAME(STab[Idx].SElement, false);
+write(outfile, ', ');
+Idx1 := STab[Idx].SIndex;
+write(outfile, STab[Idx1].SHighRange - STab[Idx1].SLowRange+1:1);
+write(outfile, ', ');
+TERM(Ls1operand, StoreOp, LEFT);
+write(outfile, ', ');
+EXPRESSION(Ls2operand, StoreOp, RIGHT);
+write(outfile, ')');	(* no ; , the macro is a block *)
+end;
+
+#endif
+
+procedure ArrayMove(Node:integer);
+var Idx, Idx1, t:integer;
+    NodeIndex:integer;
+begin
+NodeIndex:=Node;
+Idx:=TypeField;
+write(outfile, '_ptoc_MOVE(');
+
+t := STab[Idx].SType;
+if (t = SetType) or (t = FileType) or (t=StringType)
+then begin
+    TypeSize(Idx);
+    GenArray(Idx, STab[Idx].TypeInfo.SSize);
+end;
+
+TYPE_NAME(STab[Idx].SElement, false);
+write(outfile, ', ');
+Idx1 := STab[Idx].SIndex;
+write(outfile, STab[Idx1].SHighRange - STab[Idx1].SLowRange+1:1);
+write(outfile, ', ');
+TERM(Ls1operand, StoreOp, LEFT);
+write(outfile, ', ');
+EXPRESSION(Ls2operand, StoreOp, RIGHT);
+write(outfile, ')');
+end;
+
+procedure PadVariable(NodeIndex: integer);
+begin
+  write(outfile, '_ptoc_MEMSET(&');
+  Identifier(Node1parameter, NopOp, ANYSIDE);
+  write(outfile, ', (unsigned char)''');
+  DumpChar(FillByte);
+  write(outfile, ''', sizeof(');
+  Identifier(Node1parameter, NopOp, ANYSIDE);
+  write(outfile, '))');
+end;
+
+procedure EXPRESSION(Node:HdgRange; Oop, Side:integer);
+var NodeIndex: HdgRange;
+    par:boolean;
+begin
+
+if control ['Q'] then
+    write ( 'EXPRESSION : ' : 30 ) ;
+
+NodeIndex:=Node;
+if DscField = T_CONSTANT
+then
+  begin
+  if control ['Q'] then
+     write ('CONSTANT, ') ;
+  CONSTANT(NodeIndex, Oop, Side)
+  end
+else
+  if (DscField = T_IDENTIFIER) or (DscField = T_TERM)
+  then
+    begin
+    if control ['Q'] then
+       writeln ('TERM') ;
+    TERM(NodeIndex, Oop, Side)
+    end
+  else
+    begin
+    case MajorOperator of
+    BinaryExp:
+      begin
+      if control ['Q'] then
+	 writeln ('BinaryExp') ;
+      if IsStringOperation(NodeIndex)
+      then
+	StringOperation(NodeIndex, Oop, Side)
+      else       (*  Normalfall  *)
+	begin
+	par := PAR(Oop, Side, MinorOperator);
+	LPAR(par);
+	EXPRESSION(Bin1operand, MinorOperator, LEFT);
+	BINOP(MinorOperator);
+	EXPRESSION(Bin2operand, MinorOperator, RIGHT);
+	RPAR(par);
+	end;
+      end;
+    LongStmnt:
+      begin
+      if control ['Q'] then
+	 write ('LongStmnt, ') ;
+      case MinorOperator of
+      StoreOp:
+	begin
+	if control ['Q'] then
+	  writeln ('StoreOp') ;
+	if IsArrayAssign(NodeIndex)
+	then
+#ifdef RAS /*RAS01 opt. -RM */
+	  if ( RAS_control ['M'] and ( Oop = NopOp ) ) then
+	    ArrayAssign(NodeIndex, 0)
+	  else
+	    ArrayMove(NodeIndex)
+#else
+	  ArrayMove(NodeIndex)
+#endif
+	else     (*  = Normalfall!  *)
+	  begin
+	  par := PAR(Oop, Side, StoreOp);
+	  LPAR(par);
+	  TERM(Ls1operand, StoreOp, LEFT);
+	  write(outfile, ' = ');
+	  EXPRESSION(Ls2operand, StoreOp, RIGHT);
+	  RPAR(par);
+	  end;
+	end;
+      PrefixOp:
+	begin
+	if control ['Q'] then
+	  writeln ('PrefixOp') ;
+	par := PAR(Oop, Side, StoreOp);
+	LPAR(par);
+	TERM(Ls1operand, StoreOp, LEFT);
+	ASGNOP(Ls2parameter);
+	EXPRESSION(Ls2operand, StoreOp, RIGHT);
+	RPAR(par);
+	end;
+      PostfixOp:
+	begin
+	if control ['Q'] then
+	  writeln ('PostfixOp') ;
+        par := PAR(Oop, Side, PostfixOp);
+        LPAR(par);
+	TERM(Ls1operand, PostfixOp, LEFT);
+	DruPostfix(Ls2parameter);
+        RPAR(par);
+	end;
+      otherwise:
+	Fehler(NodeIndex);
+      end;
+      end;
+    ifthenelse:
+      begin
+      if control ['Q'] then
+	 writeln ('ifthenelse') ;
+      par := PAR(Oop, Side, IfthenelseOp);	
+      LPAR(par);
+      EXPRESSION(IfCondField, IfthenelseOp, ANYSIDE);
+      write(outfile, ' ? ');
+      EXPRESSION(IfTrueField, IfthenelseOp, ANYSIDE);
+      write(outfile, ' : ');
+      EXPRESSION(IfFalseField, IfthenelseOp, ANYSIDE);
+      RPAR(par);
+      end;
+    UnaryExp:
+      begin
+      if control ['Q'] then
+	 write ('UnaryExp, ') ;
+      case MinorOperator of
+      ConvertOp:
+	begin
+	if control ['Q'] then
+	   writeln ('ConvertOp') ;
+	if STab[TypeField].SType = VoidType then
+	  PadVariable(Unary1operand)
+	else
+	  begin
+	  par := PAR(Oop, Side, ConvertOp);
+	  LPAR(par);
+	  TypeCast(TypeField);
+	  EXPRESSION(Unary1operand, ConvertOp, RIGHT);
+	  RPAR(par);
+	  end;
+	end;
+      UminusOp:
+	begin
+	if control ['Q'] then
+	   writeln ('UminusOp') ;
+	par := PAR(Oop, Side, UminusOp);
+	LPAR(par);
+	write(outfile, '-');
+	EXPRESSION(Unary1operand, UminusOp, RIGHT);
+	RPAR(par);
+	end;
+      NotOp:
+	begin
+	if control ['Q'] then
+	   writeln ('NotOp') ;
+	par := PAR(Oop, Side, NotOp);
+	LPAR(par);
+	write(outfile, '!');
+	EXPRESSION(Unary1operand, NotOp, RIGHT);
+	RPAR(par);
+	end;
+      BNotOp:
+	begin
+	if control ['Q'] then
+	   writeln ('BNotOp') ;
+	par := PAR(Oop, Side, BNotOp);
+	LPAR(par);
+	write(outfile, '~');
+	EXPRESSION(Unary1operand, BNotOp, RIGHT);
+	RPAR(par);
+	end;
+      StorepOp:
+	begin
+	if control ['Q'] then
+	   writeln ('StoreOp') ;
+	if STab[Typ(Unary1operand)].SType = ArrayType
+        then
+          if DelayedParCopy
+          then
+	    EXPRESSION(Unary1operand, ConvertOp, RIGHT)
+          else
+	    begin	
+	    write(outfile, '*('); StructArray(Typ(Unary1operand));
+	    write(outfile, ' *)');
+	    EXPRESSION(Unary1operand, ConvertOp, RIGHT);
+            end
+        else
+          EXPRESSION(Unary1operand, StorepOp, LEFT);
+	end;
+      otherwise:
+	Fehler(NodeIndex);
+      end;
+     end;
+    ExpList:		(* simplify it to an expression if it's' ( (a = b) , &a ) and we don't' need the value *)
+      begin			
+      NodeIndex:=ListHeadField;
+      if (Oop = NopOp) and (NextLinkOf(NextLink) = -1) and NoSideEffects(NextLink)
+      then 	
+	EXPRESSION(NodeIndex, Oop, Side)
+      else
+	begin
+        LPAR(true);
+        while NodeIndex <> -1 do
+	  begin
+	  EXPRESSION(NodeIndex, CommaOp, LEFT);
+	  NodeIndex:=NextLink;
+	  if NodeIndex <> -1
+	    then write(outfile, ' , ');
+	  end;
+        RPAR(true);
+        end;
+      end;
+    otherwise:
+      Fehler(NodeIndex);
+    end;
+    end;
+end;
+
+function empty_statement(Node:HdgRange):boolean;
+var NodeIndex: integer;
+begin
+NodeIndex:=Node;
+empty_statement:= (NodeIndex = -1);
+(*
+ * empty_statement:= (NodeIndex = -1) or (MajorOperator = Case)
+ *)
+end;
+
+function is_label(Node:HdgRange): boolean;
+var NodeIndex:HdgRange;
+begin
+NodeIndex:=Node;
+is_label:= (MajorOperator=spec) and (MinorOperator=LabelOp);
+end;
+
+function next_statement(Node:HdgRange):HdgRange;
+var NodeIndex:HdgRange;
+begin
+NodeIndex:=Node;
+case MajorOperator of
+spec:
+  begin
+  case MinorOperator of
+  LabelOp:
+    begin
+    while is_label(NodeIndex) do
+      NodeIndex:=NextLink;
+    if not EmptyStatement(NodeIndex)
+    (*
+     * if not empty_statement(NodeIndex)
+     *)
+    then NodeIndex:=next_statement(NodeIndex);
+    end;
+  BeginOp:
+    begin
+    NodeIndex:=TailLink;
+    NodeIndex:=NextLink;
+    end;
+  otherwise:
+    NodeIndex:=NextLink;
+  end;
+otherwise:
+  NodeIndex:=NextLink;
+end;
+next_statement:=NodeIndex;
+end;
+
+procedure CASE_STATEMENT(Node:HdgRange; inc:integer);
+var NodeIndex : HdgRange;
+begin
+NodeIndex:=Node;
+indent(2, Node, inc);
+write(outfile, '{');
+if (MajorOperator=spec) and (MinorOperator=BeginOp)
+then NodeIndex:=NextLink;
+while NodeIndex <> -1 do
+  begin
+  case MajorOperator of
+  Case:
+    case MinorOperator of
+    CaseOp:
+      begin
+      indent(2, NodeIndex, inc);
+      write(outfile, 'case ');
+      if CaseLowVal <> CaseHighVal
+      then
+	Fehler(NodeIndex)
+      else
+	write(outfile, CaseLowVal:1, ' :');
+      end;
+    DefaultOp:
+      begin
+      indent(2, NodeIndex, inc);
+      write(outfile, 'default :');
+      CaseEmptyStatement(NextLink, inc+4);
+      end;
+    otherwise:
+      begin
+      Fehler(NodeIndex);
+      (*	
+      STATEMENT(NodeIndex, inc+4);
+      *)
+      end;
+    end;
+  otherwise:
+    begin
+    STATEMENT(NodeIndex, inc+4);
+    end;
+  end;
+  NodeIndex:=next_statement(NodeIndex);
+  end;
+indent(2, Node, inc);
+write(outfile, '}');
+end;
+
+function IsField (Node:integer):boolean;
+var NodeIndex, major, minor :integer;
+begin
+NodeIndex:=Node;
+major:=MajorOperator;
+minor:=MinorOperator;
+if (major>=1) and (major<=15)
+  and (minor>=0) and (minor<=LastOp)
+then
+  IsField:=true
+else
+  IsField:=false;
+end;
+
+procedure TestField (Node:integer);
+begin
+if Node <> -1
+then
+  if not IsField(Node)      (*  A.06.Statement/c0601n03csan.c  *)
+  then                      (*  lieferte Endlos-Schleife  *)
+    begin
+    Space;
+    writeln(outfile, 'Fehler in TestField!');
+    Abbruch;
+    end;
+end;
+
+procedure statement(Node:HdgRange; inc:integer);
+var NodeIndex: HdgRange;
+begin
+TestField(Node);
+NodeIndex:=Node;
+if NodeIndex = -1
+then STATEMENT(Node, inc)
+else
+  if NextLink = -1
+  then STATEMENT(Node, inc)
+  else BLOCK(Node, inc, -1);
+end;
+
+function LastNode(Node:integer):integer;
+var NodeIndex:integer;
+    tiefe: integer;
+begin
+NodeIndex:=Node;
+tiefe:=0;
+repeat
+  case MajorOperator of
+  spec:
+    case MinorOperator of
+    BeginOp: tiefe:=tiefe+1;
+    EndOp:  tiefe:=tiefe-1;
+    otherwise: ;
+    end;
+  otherwise: ;
+  end;
+  NodeIndex := NextLink;
+until tiefe=0;
+LastNode := NodeIndex;
+end;
+
+function ElseConflict(Node:integer):boolean;
+var NodeIndex: integer;
+begin
+NodeIndex:=Node;
+ElseConflict := false;
+if IfFalseField <> -1
+then
+  ElseConflict := true;
+end;
+
+function EmptyStatement(Node:integer):boolean;
+var NodeIndex: integer;
+begin
+EmptyStatement:=false;
+NodeIndex:=Node;
+if NodeIndex = -1
+then
+  EmptyStatement:=true
+else
+  if ((MajorOperator = spec) and (MinorOperator = EndOp) and (NextLink = -1))
+  or (MajorOperator = Case)
+  then
+    EmptyStatement:=true;
+end;
+
+procedure CaseEmptyStatement(Node, inc:integer);
+begin
+if EmptyStatement(Node)
+then
+  begin
+  indent(2, Node, inc);
+  write(outfile, ';');
+  end;
+end;
+
+procedure ANWEISUNG(Node:HdgRange; inc:integer);
+var NodeIndex: HdgRange;
+begin
+NodeIndex:=Node;
+if empty_statement(Node)
+then
+  begin
+  if control ['Q'] then
+     writeln ( 'empty_statement' ) ;
+  indent(2, Node, inc);
+  write(outfile, ';');
+  end
+else
+  if (DscField > T_NULL ) and (DscField <= T_EXPRESSION)
+  then
+    begin
+    if control ['Q'] then
+       writeln ( 'EXPRESSION' ) ;
+    indent(2, Node, inc);
+    EXPRESSION(Node, NopOp, ANYSIDE);
+#ifdef RASX /*RAS06*/
+    if ( not RAS_control ['f'] ) then
+#endif
+    write(outfile, ';');
+    end
+  else
+    case MajorOperator of
+    spec:
+      case MinorOperator of
+      RtrnOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'RtrnOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'return;');
+	end;
+      BreakOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'BreakOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'break;');
+	end;
+      ContinueOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'ContinueOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'continue;');
+	end;
+      GotoOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'GotoOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'goto ');
+	write(outfile, 'LAB_');  (* C will Identifier, PASCAL hat unsigned integers *)
+	PrintString(Spec1parameter);
+	write(outfile, ';');
+	end;
+      BeginOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'BeginOp' ) ;
+	BLOCK(Node, inc, LastNode(Node));
+	end;
+      LabelOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'LabelOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'LAB_');  (* C will Identifier, PASCAL hat unsigned integers *)
+	PrintString(Spec1parameter);
+	write(outfile, ' :');
+        if EmptyStatement(NextLink)
+        then
+          CaseEmptyStatement(NextLink, inc)
+        else       (* Normalfall! *)
+	  STATEMENT(NextLink, inc);
+	end;
+      EndOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'EndOp' ) ;
+	end;
+      AsmOp:
+	begin
+	if control ['Q'] then
+	   writeln ( 'AsmOp' ) ;
+	indent(2, Node, inc);
+#ifdef RASX /*RAS07*/
+        writeln(outfile);
+	writeln(outfile, '/*EmbedC>*/');
+	DumpEmbedCString(Spec1parameter);
+        writeln(outfile);
+	writeln(outfile, '/*<EmbedC*/');
+#else
+	write(outfile, 'asm("');
+	DumpAsmString(Spec1parameter);
+	write(outfile, '");');
+#endif
+	end;
+      otherwise:
+	Error(inc, NodeIndex);
+      end;
+    LongStmnt:
+      case MinorOperator of
+      RtrnxOp:
+#ifdef RASX /*RAS06*/
+        if ( RAS_control ['f'] ) then begin
+	if control ['Q'] then
+	   writeln ( 'RtrnxOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, ' (');
+        EXPRESSION(Ls2operand, LoadOp, ANYSIDE);
+        write(outfile, ') ');
+        end else
+#endif
+	begin
+	if control ['Q'] then
+	   writeln ( 'RtrnxOp' ) ;
+	indent(2, Node, inc);
+	write(outfile, 'return('); EXPRESSION(Ls2operand, LoadOp, ANYSIDE); write(outfile, ');');
+	end;
+      otherwise:
+#ifdef RASX /*RAS05 just ignore NopOp */
+        if ( RAS_control ['W'] or RAS_control ['w'] ) and ( MinorOperator <> NopOp ) then
+#endif
+	Error(inc, NodeIndex);
+      end;
+    ifthenelse:
+#ifdef RASX /*RAS06*/
+       if ( RAS_control ['f'] ) then begin
+          if control ['Q'] then
+	     writeln ( 'ifthenelse' ) ;
+          indent(2, Node, inc);
+          write(outfile, ' ( (');
+          EXPRESSION(IfCondField, LoadOp, ANYSIDE);
+          write(outfile, ') ? ');
+          BLOCK(IfTrueField, inc+4, -1);
+          if IfFalseField <> -1
+          then
+	    begin
+	    indent(2, Node, inc);
+	    write(outfile, ' : ');
+            BLOCK(IfFalseField, inc+4, -1);
+	    end;
+          write(outfile, ' ) ');
+       end else
+#endif
+      begin
+      if control ['Q'] then
+	 writeln ( 'ifthenelse' ) ;
+      indent(2, Node, inc);
+      write(outfile, 'if ('); EXPRESSION(IfCondField, LoadOp, ANYSIDE);
+      write(outfile, ')');
+(*JH  if ElseConflict(Node)
+      then    JH*)                   (* vgl. CONFTESTSA/t6p6p6p5d2.p *)
+	BLOCK(IfTrueField, inc+4, -1)
+(*JH*) ;
+(*JH  else
+	statement(IfTrueField, inc+4);   *)
+      if IfFalseField <> -1
+      then
+	begin
+	indent(2, Node, inc);
+	write(outfile, 'else');
+(*JH    statement(IfFalseField, inc+4); *)
+(*JH*)  BLOCK(IfFalseField, inc+4, -1);
+	end;
+      end;
+    Switch:
+      begin
+      if control ['Q'] then
+	 writeln ( 'Switch' ) ;
+      indent(2, Node, inc);
+      write(outfile, 'switch ('); EXPRESSION(SwitchTest, LoadOp, ANYSIDE); write(outfile, ')');
+      CASE_STATEMENT(SwitchBody, inc+4);
+      end;
+    RepeatUntil:
+      begin
+      if control ['Q'] then
+	 writeln ( 'RepeatUntil' ) ;
+      indent(2, Node, inc);
+      write(outfile, 'do');
+      statement(RepeatBody, inc+4);
+      indent(2, Node, inc);
+      write(outfile, 'while (!'); EXPRESSION(RepeatTest, NotOp, RIGHT); write(outfile, ');');
+      end;
+    loop:
+      begin
+      if control ['Q'] then
+	 writeln ( 'loop' ) ;
+      indent(2, Node, inc);
+      write(outfile, 'while ('); EXPRESSION(WhileTestField, LoadOp, ANYSIDE); write(outfile, ')');
+      statement(WhileBodyField, inc+4);
+      end;
+    Case:  (* = PYRAMID-Syntax, nicht C-Syntax, 25.10.89 *)
+      case MinorOperator of
+      CaseOp:
+        begin
+	if control ['Q'] then
+	   writeln ( 'CaseOp' ) ;
+        indent(2, Node, inc);
+        write(outfile, 'case ');
+        if CaseLowVal <> CaseHighVal
+        then
+          Fehler(NodeIndex)
+        else
+          write(outfile, CaseLowVal:1, ' :');
+        end;
+      otherwise:
+        Error(inc, NodeIndex);
+      end;
+    otherwise:
+      Error(inc, NodeIndex);
+    end;
+end;
+
+function IsFunctionVar(Idx:integer):boolean;
+begin
+IsFunctionVar:= (STab[Idx].SKind = VarDcl)
+	    and (STab[Idx].SLevel = 2)
+	    and (STab[Idx].SClass = LOCALSTATIC);
+end;
+
+function ComplReturnStmnt(Node:integer):boolean;
+var NodeIndex : integer;
+begin
+NodeIndex:= Node;
+if empty_statement(NodeIndex)
+then ComplReturnStmnt:= false
+else
+  if not ((MajorOperator = LongStmnt) and (MinorOperator = RtrnxOp))
+  then ComplReturnStmnt:= false
+  else
+    begin
+    NodeIndex:= Ls2operand;
+    if not ((MajorOperator = UnaryExp) and (MinorOperator = LoadadrOp))
+    then ComplReturnStmnt:= false
+    else
+      begin
+      NodeIndex:= Unary1operand;
+      if not ((MajorOperator = node) and (MinorOperator = IdOp))
+      then ComplReturnStmnt:= false
+      else
+	if not IsFunctionVar(Node1parameter)
+	then ComplReturnStmnt:= false
+	else ComplReturnStmnt:= true;
+      end;
+    end;
+end;
+
+function SpecFileStmnt(Node:integer):boolean;
+(* PreProzessor legt gelegentlich solche Nodes als Statements ab *)
+(* einfach ueberlesen! *)
+var NodeIndex:integer;
+begin
+NodeIndex:=Node;
+SpecFileStmnt:= (MajorOperator = spec) and (MinorOperator = FileOp);
+end;
+
+procedure STATEMENT(Node:HdgRange; inc:integer);
+  (*  Wurde eingebaut fuer die return-Statements in C  *)
+  (*  mit nicht-elementarem Ergebniswert!              *)
+  (*  vgl. Testprogramm  A.10.Type_Rev/c1001p05esan.c  *)
+var NodeIndex: integer;
+begin
+
+if control ['Q'] then
+  write ('----------STATEMENT : ':30) ;
+if ComplReturnStmnt(Node) or SpecFileStmnt(Node)
+then
+  begin   (*  wurde vorher schon ausgegeben!  *)
+  if control ['Q'] then
+    writeln ('ComplReturnStmnt or SpecFileStmnt');
+  end     (*  siehe unten! *)
+else
+  if empty_statement(Node)
+  then
+    begin
+    if control ['Q'] then
+      write ('empty_statemennt -> ANWEISUNG : ') ;
+    ANWEISUNG(Node, inc)         (*  = Normalfall!  *)
+    end
+  else
+    begin
+    NodeIndex:=Node;
+    if ComplReturnStmnt(NextLink)  (* existiert, da NICHT empty_statement *)
+    then                        (*  Node = LongStmnt/RtrnxOp  *)
+      begin
+      if control ['Q'] then
+	writeln ('ComplReturnStmnt') ;
+      indent(2, NextLink, inc);
+      write(outfile, 'return(');
+      EXPRESSION(Ls2operand, LoadOp, ANYSIDE);   (* Achtung: = Ls2operand von NodeIndex  *)
+      write(outfile, ');');              (*            nicht von NextLink!       *)
+      end
+    else
+      if IsArrayAssign(Node)
+      then
+	begin
+	if control ['Q'] then
+	  writeln ('IsArrayAssign -> ArrayAssign') ;
+	ArrayAssign(Node, inc)
+	end
+      else
+	begin
+	if control ['Q'] then
+	  write ('ANWEISUNG : ') ;
+	ANWEISUNG(Node, inc);      (*  = Normalfall!  *)
+	end ;
+    end;
+end;
+
+procedure Define_LOCAL(Node, inc:integer);
+var NodeIndex: integer;
+    Idx:integer;
+begin
+NodeIndex:=Node;
+Idx:=Spec1parameter;
+Idx:=STab[Idx].SFuncBlock;
+indent(2, Node, inc);
+write(outfile, 'struct _ptoc_FRAME_');
+Identifier(Idx, NopOp, ANYSIDE);
+write(outfile, ' _ptoc_LOCAL;');
+end;
+
+procedure CopySingleParam(Idx, inc:integer);
+var Idx1:integer;
+begin
+indent(1, Idx, inc);
+write(outfile, '_ptoc_LOCAL.');
+PrintString(Idx);
+write(outfile, ' = ');
+PrintString(Idx);
+write(outfile, ';');
+end;
+
+
+procedure CopyParams(Node, inc:integer);
+var NodeIndex: integer;
+    Idx, i, paranz:integer;
+    level:integer;
+begin
+NodeIndex:=Node;
+Idx:=Spec1parameter;
+Idx:=STab[Idx].SFuncBlock;
+level:=STab[Idx].SLevel;
+Idx := STab[Idx].SType;
+indent(1, Idx, inc);
+if level > 1
+then
+    write(outfile, '_ptoc_LOCAL._ptoc_LINK = _ptoc_LINK;');
+paranz:= STab[Idx].SParmCnt;
+for i:=1 to paranz do
+  begin
+  Idx:=STab[Idx].SNext;
+  case STab[Idx].SKind of
+  ParmDcl,
+  FuncParmDcl,
+  ProcParmDcl:
+    if IsInFrameParam(Idx)
+    then	
+       CopySingleParam(Idx, inc);
+  otherwise:
+    begin
+    end;
+  end
+  end;
+end;
+
+#ifdef RAS /*RAS01 new CopySingleValueArray()*/
+
+procedure CopySingleValueArray(Idx, inc:integer);
+(* asserted: IsValueArray(Idx) *)
+var Idx1, Idx2, cnt, i: integer;
+begin
+
+indent(1, Idx, inc);
+
+Idx1 := STab[Idx].SType;
+Idx2 := STab[Idx1].SIndex;
+cnt := STab[Idx2].SHighRange - STab[Idx2].SLowRange+1;
+
+if ( RAS_control ['V'] and ( cnt <= 4 ) ) then
+    for i := 0 to cnt-1 do begin
+	Identifier(Idx, NopOp, ANYSIDE);
+	write(outfile, '[' , i:1, '] = ' );
+	write(outfile, 'ptoc_ptr_');
+	PrintString(Idx);
+	write(outfile, '[' , i:1, ']; ');
+    end
+
+else begin
+    if RAS_control ['M'] then
+      write(outfile, '_ptoc_ASSIGN(char, sizeof(')
+    else
+      write(outfile, '_ptoc_MOVE(char, sizeof(');
+    TYPE_NAME(Idx, false);
+    write(outfile, '), ');
+    Identifier(Idx, NopOp, ANYSIDE);
+    write(outfile, ', ptoc_ptr_');
+    PrintString(Idx);
+    write(outfile, ');');
+end;
+end;
+
+#else
+
+procedure CopySingleValueArray(Idx, inc:integer);
+var Idx1:integer;
+begin
+indent(1, Idx, inc);
+write(outfile, '_ptoc_MOVE(char, sizeof(');
+TYPE_NAME(Idx, false);
+write(outfile, '), ');
+Identifier(Idx, NopOp, ANYSIDE);
+write(outfile, ', ptoc_ptr_');
+PrintString(Idx);
+write(outfile, ');');
+end;
+
+#endif
+
+procedure CopyValueArrays(Node, inc:integer);
+var NodeIndex: integer;
+    Idx, i, paranz:integer;
+begin
+NodeIndex:=Node;
+Idx:=Spec1parameter;
+Idx:=STab[Idx].SFuncBlock;
+Idx := STab[Idx].SType;
+paranz:= STab[Idx].SParmCnt;
+for i:=1 to paranz do
+  begin
+  Idx:=STab[Idx].SNext;
+  case STab[Idx].SKind of
+  ParmDcl,
+  FuncParmDcl,
+  ProcParmDcl:
+    if IsValueArray(Idx)
+    then	
+       CopySingleValueArray(Idx, inc);
+  otherwise:
+    begin
+    end;
+  end
+  end;
+end;
+
+procedure DefineSingleValueArray(Idx, inc:integer);
+var Idx1:integer;
+begin
+indent(1, Idx, inc);
+TYPE_NAME(Idx, false);
+Identifier(Idx, NopOp, ANYSIDE);
+write(outfile, ';');
+end;
+
+procedure DefineValueArrays(Node:HdgRange; inc:integer);
+var NodeIndex: integer;
+    Idx, i, paranz:integer;
+begin
+NodeIndex:=Node;
+Idx:=Spec1parameter;
+Idx:=STab[Idx].SFuncBlock;
+Idx := STab[Idx].SType;
+paranz:= STab[Idx].SParmCnt;
+for i:=1 to paranz do
+  begin
+  Idx:=STab[Idx].SNext;
+  case STab[Idx].SKind of
+  ParmDcl,
+  FuncParmDcl,
+  ProcParmDcl:
+    if IsValueArray(Idx)
+    then	
+       DefineSingleValueArray(Idx, inc);
+  otherwise:
+    begin
+    end;
+  end
+  end;
+end;
+
+
+procedure BLOCK(Node:HdgRange; inc:integer; last:integer);
+(*  Parameter last gibt letzten NodeIndex an!  *)
+var NodeIndex: HdgRange;
+begin
+indent(2, Node, inc);
+write(outfile, '{');
+NodeIndex:=Node;
+if (MajorOperator = spec) and (MinorOperator = BeginOp)
+then
+  begin
+  if StatLink
+  then
+    begin
+    if CurrentLevel > 0
+    then
+      begin	
+      Define_LOCAL(Node, inc);
+      Local_Definitions(Spec1parameter, inc, 2);
+      if DelayedParCopy
+      then
+        DefineValueArrays(Node, inc);
+      CopyParams(Node, inc);
+      end	
+    end
+  else
+    begin
+    Local_Definitions(Spec1parameter, inc, 2);
+    if DelayedParCopy
+    then
+      DefineValueArrays(Node, inc);
+    end;
+  if DelayedParCopy
+  then
+    CopyValueArrays(Node, inc);
+  NodeIndex:=NextLink;
+  end;
+while NodeIndex <> last do
+  begin
+  STATEMENT(NodeIndex, inc);
+  NodeIndex:=next_statement(NodeIndex);
+  end;
+indent(2, Node, inc);
+write(outfile, '}');
+end;
+
+#ifdef RASX /*RAS06*/
+
+procedure MAC_BLOCK(Node:HdgRange; inc:integer; last:integer);
+(*  Parameter last gibt letzten NodeIndex an!  *)
+var NodeIndex: HdgRange;
+begin
+indent(2, Node, inc);
+if ( RAS_control ['f'] ) then
+  write(outfile, '(') else
+write(outfile, '{');
+NodeIndex:=Node;
+if (MajorOperator = spec) and (MinorOperator = BeginOp)
+then
+  begin
+    if ( not RAS_control ['f'] ) then
+      Local_Definitions(Spec1parameter, inc, 2);
+  NodeIndex:=NextLink;
+  end;
+while NodeIndex <> last do
+  begin
+  STATEMENT(NodeIndex, inc);
+  (*RAS06 test start of for const. FOR loop*)
+  if  ( ( MajorOperator = LongStmnt ) and ( MinorOperator = StoreOp )
+        and ( Ls1parameter <> 0 ) ) then begin
+    writeln ( outfile );
+    write(outfile, '/*RASX ');
+    GenTyp(Ls1parameter);
+    EXPRESSION(Ls1parameter, NopOp, ANYSIDE);
+    write(outfile, ' .. ');
+    GenTyp(Ls2parameter);
+    EXPRESSION(Ls2parameter, NopOp, ANYSIDE);
+    writeln(outfile, ' */');
+  end;
+  NodeIndex:=next_statement(NodeIndex);
+  if ( RAS_control ['f'] ) and ( NodeIndex <> last )
+      and not ( ( MajorOperator = spec ) and ( MinorOperator = EndOp ) ) then
+    write(outfile, ', ');
+  end;
+indent(2, Node, inc);
+if ( RAS_control ['f'] ) then
+  write(outfile, ' )') else
+write(outfile, '}');
+end;
+
+procedure GenProcMacro(Node:HdgRange; inc:integer);
+var
+  NodeIndex : HdgRange;
+  Idx1, tn: integer;
+begin
+NodeIndex := Node;
+CurrentProc:=ProcLabel;   (* = fuer Identifizierung der Halb-Typen *)
+CurrentLevel:=STab[ProcLabel].SLevel;
+
+if STab[ProcLabel].SOrder > 0 (* points to forward decl *)
+then
+  STab[ProcLabel].SName := STab[STab[ProcLabel].SOrder].SName;
+
+(*check??
+DefineBlock(Node, inc);
+Space;
+InsideFunctions(ProcLabel, inc);
+Space;
+CurrentProc:=ProcLabel;
+CurrentLevel:=STab[ProcLabel].SLevel;
+*)
+
+Idx1 := ProcLabel;
+if  RAS_control ['f'] then begin
+    writeln( outfile );
+    write(outfile, '#define MVARS_');
+    PrintString(Idx1);
+    NodeIndex := ProcBody;
+    Local_Definitions(Spec1parameter, inc, 2);
+    writeln( outfile );
+    NodeIndex := Node;
+    end;
+writeln( outfile );
+write(outfile, '#define MAC_');
+FUNC_DEC(Idx1, tn);
+(* DeklFormPar(Idx1, inc, false); *)
+MAC_BLOCK(ProcBody, inc+4, -1);
+writeln( outfile );
+end;
+
+procedure Macro_Definitions(Idx_Defs, inc, minlevel: integer; MacNames: STRING );
+var
+  Idx : integer;
+begin
+
+Idx := Idx_Defs;
+/* skip all level 0 entries */
+while (Idx <= SymPtr) and (STab[Idx].SLevel < minlevel) do
+  Idx := STab[Idx].SNext;
+
+while (Idx <= to_stab) do begin
+  if ( STab[Idx].SKind = ProcDcl ) and
+     NameInNames ( STab[Idx].SName, MacNames ) then begin
+     GenProcMacro ( GetNode(Idx), inc );
+  end else
+  if ( STab[Idx].SKind = FuncDcl ) and
+     NameInNames ( STab[Idx].SName, MacNames ) then begin
+	 RAS_control ['f'] := true;
+     GenProcMacro ( GetNode(Idx), inc );
+	 RAS_control ['f'] := false;
+  end;
+  Idx:= LevelNext(Idx);
+end;
+end;
+
+#endif
+
+procedure DummyDekl(Node, inc:integer);
+begin
+indent(2, Node, inc);
+write(outfile, 'char dummy;');
+end;
+
+procedure DefineBlock(Node, inc:integer);
+var NodeIndex:integer;
+    Idx:integer;
+begin
+NodeIndex:=Node;
+if not (MajorOperator = Proc)
+then
+  begin
+  writeln(outfile, 'Fehler in DefineBlock!');
+  Abbruch;
+  end;
+Idx:=ProcLabel;
+NodeIndex:=ProcBody;
+if (MajorOperator = spec) and (MinorOperator = BeginOp)
+then
+  begin
+  Space;
+  if StatLink
+  then
+    begin	
+    indent(2, Node, inc);
+    write(outfile, 'struct _ptoc_FRAME_');
+    Identifier(Idx, NopOp, ANYSIDE);
+    indent(2, Node, inc+2);
+    write(outfile, '{');
+    DeklFormPar(Idx, inc+2, true);
+    Frame_Definitions(Spec1parameter, inc+2);
+    DummyDekl(Node, inc+2);       (* damit mindestens 1 Element! *)
+    indent(2, Node, inc+2);
+    write(outfile, '} ;');
+    end;
+  Outside_Definitions(Spec1parameter, inc);
+  end;
+end;
+
+function NextEntry(Idx0:integer):integer;
+var Idx:integer;
+begin
+Idx:=Idx0;
+case STab[Idx].SKind of
+  ForwardFuncDcl,
+  ForwardProcDcl,
+  FuncDcl,
+  ProcDcl:
+    NextEntry:=STab[STab[STab[STab[Idx].SType].SBlock].SLastEntry].SNext;
+  otherwise:
+    NextEntry:=STab[Idx].SNext;
+  end;
+end;
+
+procedure InsideFunctions(Idx0, inc:integer);
+  (* Idx0 = ProcLabel *)
+var Idx:integer;
+    last:integer;
+begin
+Idx:=Idx0;
+Idx:=STab[Idx].SType;
+Idx:=STab[Idx].SBlock;
+last:=STab[Idx].SLastEntry;
+Idx:=NextEntry(Idx);
+while Idx < last do
+  begin
+  if IsFuncDcl(Idx)
+  then
+    FUNCTION_DEFINITION(GetNode(Idx), inc);
+  Idx:=NextEntry(Idx);
+  end;
+end;
+
+procedure FUNCTION_DEFINITION(Node:HdgRange; inc:integer);
+var
+  NodeIndex : HdgRange;
+  Idx1, Idx2, Idx3 : integer;
+  FunctionType : integer;
+  tn:integer;
+begin
+(*JH*) if control ['Y'] then
+(*JH*) begin
+(*JH*)   writeln ( outfile ) ;
+(*JH*)   writeln ( outfile ) ;
+(*JH*)   writeln ( outfile , '/*SOFU*/' ) ;
+(*JH*) end ;
+NodeIndex := Node;
+CurrentProc:=ProcLabel;   (* = fuer Identifizierung der Halb-Typen *)
+CurrentLevel:=STab[ProcLabel].SLevel;
+
+if STab[ProcLabel].SOrder > 0 (* points to forward decl *)
+then
+  STab[ProcLabel].SName := STab[STab[ProcLabel].SOrder].SName;
+
+DefineBlock(Node, inc);
+Space;
+InsideFunctions(ProcLabel, inc);
+Space;
+
+CurrentProc:=ProcLabel;   (* = fuer Identifizierung der Halb-Typen *)
+CurrentLevel:=STab[ProcLabel].SLevel;
+
+Idx1 := ProcLabel;
+if STab[Idx1].SClass = FILESTATIC
+then
+  begin
+  indent(1, Idx1, inc);
+  write(outfile, 'static');
+  end;
+Idx2 := STab[Idx1].SType;
+Idx3 := STab[Idx2].SResult;
+if control['a'] and (STab[Idx2].SType = ProcedureType) then
+  begin
+  indent(1, Idx1, inc);
+  write(outfile, 'void ');
+  end
+else
+  tn := TYPE_SPECIFIER(Idx1, Idx3, false, inc);
+FUNC_DEC(Idx1, tn);
+if not control['a'] then
+  DeklFormPar(Idx1, inc, false);
+if ProcProlog > 0     (*  = fuer PASCAL   *)
+then
+  begin
+  indent(2, Node, inc+4);
+  write(outfile, '{');
+  BLOCK(ProcProlog, inc+8, -1);
+  BLOCK(ProcBody, inc+8, -1);
+  indent(2, Node, inc+4);
+  write(outfile, '}');
+  end
+else
+  BLOCK(ProcBody, inc+4, -1);
+end;
+
+
+function ComplexType(Idx:integer):boolean;
+var typ: integer;
+begin
+typ:=STab[Idx].SType;
+ComplexType:= (typ=RecordType) or (typ=UnionType) or (typ=EnumerativeType);
+end;
+
+function DifferentLevels(Idx1, Idx2:integer):boolean;
+begin
+DifferentLevels:=(STab[Idx1].SLevel <> STab[Idx2].SLevel);
+end;
+
+
+function IsCTagName(Idx:integer):boolean;
+begin
+	IsCTagName := false;
+(* muss noch geloest werden:
+   - aus NameSpace im C-Frontend direkt oder
+     durch Erweiterung der Schnittstelle
+*)
+end;
+
+
+procedure single_TypeNameDcl(Idx:integer);
+var Idx1:integer;
+begin
+
+if control ['Q'] then
+   writeln ( 'single_TypeNameDcl : ':30, 'Idx = ' , Idx ) ;
+
+if STab[Idx].SKind = TypeNameDcl then
+   begin
+   Idx1 := STab[Idx].SType;
+   with STab[Idx1] do
+     if SKind = TypeDcl then
+     begin
+
+	if control ['Q'] then
+	  begin
+	  write ( 'single_TypeNameDcl : ':30, 'SKind = TypeDcl : ' ) ;
+	  DumpDumpString (STab[Idx].SName ) ;
+	  write ( '  (' ) ;
+	  DumpDumpString (STab[Idx1].SName ) ;
+	  writeln ( ')' ) ;
+	  end ;
+
+	(* Markieren von Tags *)
+	if (ComplexType(Idx1))
+	then
+	   begin
+
+	   if control ['Q'] then
+	       writeln ( 'single_TypeNameDcl : ':30, 'ComplexType' ) ;
+
+	   if (IsCTagName(Idx) or ((Idx < Idx1) and (STmyname=0)))     (* A struct/union/enum tag from C *)
+           then 					               (* or a forward type reference from pascal, *)
+	       begin
+
+	       if control ['Q'] then
+		 writeln ( 'single_TypeNameDcl : ':30, 'STab[Idx].SKind := TagNameDcl' ) ;
+
+	       STab[Idx].SKind := TagNameDcl;           (* representable in C only with tags    *)
+	       end ;
+
+	   if (SLevel = 0)      (* mark it defined, it is defined the the include file *)
+	   then
+	       setbit(STab[Idx].SFeld4, TypeDeclared);
+	   end;
+
+	if STmyname <= 0 then STmyname := Idx;          (* Rueckverkettung der Typnamen *)
+     end;
+   end;
+end;
+
+
+procedure init_SymtabExtensions(from_stab, to_stab:integer);
+var Idx:integer;
+begin
+
+Idx:=from_stab;
+single_TypeNameDcl(Idx);
+while Idx <> to_stab do
+  begin
+  Idx:= STab[Idx].SNext;
+  single_TypeNameDcl(Idx);
+  end;
+end;
+
+
+procedure STabMark(from_stab, to_stab : integer);
+var i : integer;
+begin
+i := from_stab;
+
+/* skip all level 0 entries */
+while (i <= SymPtr) and (STab[i].SLevel < 1) do
+  i := STab[i].SNext;
+
+while i <= to_stab do
+  begin
+  case STab[i].SKind of
+  VarDcl:
+    if DeleteUnusedType
+    then
+      if DeleteUnusedVar
+      then
+        if (not IsMarked(i)) and
+           (STab[i].SLevel = 1)
+	/* and (STab[i].SClass = SNULL) */
+	/* Siehe Kommentar in STabMark */
+        then
+          begin
+          /*
+          Variable wird nicht verwendet,
+          dann benoetigen wir auch deren Typ nicht -
+          zumindest nicht bezueglich der Variablen
+          */
+          end
+        else
+          markT(TypeOfVar(i))
+      else
+        markT(TypeOfVar(i))
+    else
+      markT(TypeOfVar(i));
+  ParmDcl:
+      markT(TypeOfVar(i));
+  FuncDcl:    /* Funktionsergebnis kann selbst-definierten Typ haben */
+    markT(STab[STab[i].SType].SResult);
+  otherwise:
+    begin
+    end;
+  end;
+  i := STab[i].SNext;
+  end;
+end;
+
+
+
+
+/* ========================== Body: GenC ================================= */
+
+begin   (* GenC *)
+init_SymtabExtensions(from_stab, to_stab);
+Ref_STab_datafile;
+GenTyp(Node);
+GenIfTyp(Node);
+HdgMark(Node);
+STabMark(from_stab, to_stab);
+
+if enc_block > 0 then
+  begin
+  /* level 1 global */
+  Global_Definitions(STab[enc_block].SBlock, 0, 1);
+  /* main function  */
+  FUNCTION_DEFINITION(GetNode(STab[STab[enc_block].SBlock].SFuncBlock), 0);	
+  end
+else
+#ifdef RASX /*RAS06*/
+  if RAS_control ['H'] then
+    Macro_Definitions ( from_stab, 0, 1, MacNames )
+  else
+#endif
+  Modul_Definitions(from_stab, 0, 1);
+
+Space;
+end;
+
+/* ======================================================================= */
+
+
+
+procedure gen_idx_ptr;
+begin
+ BumpSymPtr;         (*  Neues STab-Elemente erzeugen!  *)
+ STab[SymPtr].SKind := TypeDcl;
+ STab[SymPtr].SType := PointerType;
+ IDX_PTR:= SymPtr;   (*  fuer PointerTypeCast  *)
+end;
+
+procedure gen_idx_data;
+var s:STRING;
+begin
+ BumpSymPtr;         (*  Neues STab-Elemente erzeugen!  *)
+ s := 'data';
+ STab[SymPtr].SName := EnterString(s[0], 4);
+ STab[SymPtr].SKind := RecordElementDcl;
+ IDX_DATA := SymPtr;   (*  fuer array -> struct Cast  *)
+end;
+
+procedure InitGenC;
+begin
+	if control['Q'] then
+	  begin (* 1992-Sep-15 J.Bruehe  forces inclusion of Version.c *)
+	  version_writing ;
+	  end;
+        rewrite(outfile);
+	rediroutput(outfile);
+#ifdef RAS /*RAS00 InitGenC() */
+        hexes := '0123456789ABCDEF';
+	if control ['R'] then begin
+	    if RAS_control ['T'] then
+                writeln(outfile, '#include <TA_ptoc.h>')
+            else
+#ifdef RASX /*RAS06*/
+        if not RAS_control ['H'] then
+#endif
+#ifdef RASN /* RASN3 RASN4 no #inc for 00-papers & ansi-protos */
+        if not ( RAS_control ['0'] or RAS_control ['a'] ) then
+#endif
+	    writeln(outfile, '#include <RAS_ptoc.h>');
+	end else
+#endif
+	writeln(outfile, '#include <ptoc.h>');
+	if control['D'] then DumpFlag := 1 else DumpFlag := 0;
+
+	gen_idx_ptr;
+	gen_idx_data;
+
+	nummer:=0;
+	CurrentProc := 0;
+	CurrentLevel := 0;
+
+end;

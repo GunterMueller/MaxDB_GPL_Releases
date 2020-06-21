@@ -1,0 +1,165 @@
+#!/usr/bin/perl
+# @(#) knl-tcc	1995-08-01  Torsten Strahl
+#
+# Type-Check fuer alle Module, die von der Kerngruppe gepflegt
+# werden.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Std;
+
+do "$TOOLVARS";
+
+if (!getopts('lhp') || $opt_h) {
+
+    print <DATA>;
+    exit 1;
+}
+
+$Local    = "";
+$Local    = "-l" if ( $opt_l );
+$MakeProt = $opt_p;
+
+
+
+chdir("$WRK/fast/prot") || die "Can't change to directory $WRK/fast/prot: $!";
+
+unlink("$TMP/all", "$TMP/all1");
+
+if ( $MakeProt ) {
+    open(SAVESTDOUT, ">&STDOUT"); close(STDOUT);
+    open(STDOUT, ">knl-tcc.prt");
+}
+
+print "\n+++++ T C C +++++\n";
+print "prepare list of files .";
+
+open(SAVEOUT, ">&STDOUT");
+open(STDOUT, ">$TMP/all");
+
+if (@ARGV != 0) {
+    @desc = @ARGV;
+    foreach $desc (@desc) {
+	@ARGV = ("-m", $desc);
+	do "$TOOL/bin/imf$TOOLEXT";
+	if ( $@ ) { die "Error while executing ims$TOOLEXT: $@" }
+    }
+}
+else {
+    @ARGV = ("-m", "all");
+    do "$TOOL/bin/imf$TOOLEXT";
+    if ( $@ ) { die "Error while executing ims$TOOLEXT: $@" }
+     if ($RELVER le "R74") {    
+    @ARGV = ("-m", "quickknl");    
+    do "$TOOL/bin/ims$TOOLEXT";    
+    if ( $@ ) { die "Error while executing ims$TOOLEXT: $@" }     }
+
+    @ARGV = ("-m", "slowknl");
+    do "$TOOL/bin/ims$TOOLEXT";
+    if ( $@ ) { die "Error while executing ims$TOOLEXT: $@" }
+}
+
+
+close(STDOUT);
+open(STDOUT, ">&SAVEOUT");
+
+# Die Sourcen, die von uns verwendet, aber nicht gepflegt werden,
+# kommen nicht in die Liste. Zusaetzlich wird von allen Modulen
+# die Variantenkennung abgeschnitten.
+
+open(FILE_IN, "<$TMP/all");
+LINE:
+    while(<FILE_IN>) {
+	  chop;
+      if (/v[a-z][a-z]\d{2,}[^acx]{0,1}$/) {
+
+	    push @FILE_OUT, $_."\n";
+      }
+    }
+close(FILE_IN);
+@FILE_OUT = sort @FILE_OUT;
+open(FILE_OUT, ">$TMP/all1");
+undef($prevline);
+foreach $out (@FILE_OUT) {
+    next if $prevline eq $out;
+    $prevline = $out;
+    print FILE_OUT $out;
+}
+close(FILE_OUT);
+print "... ";
+
+open(FILE_IN, "<$TMP/all1"); local @count = <FILE_IN>;
+print "check ", scalar(@count),  " files ...\n";
+seek FILE_IN, 0, 0;
+while(<FILE_IN>) {
+    chomp;
+    if ( m!^src/ak/vak260!i or m!^src/ak/vak36!i or m!^dg.*!i ) {
+	if ( $Local eq "" )
+	{
+	    @ARGV = ( "-DINLINK", $_);
+	}
+	else
+	{
+	    @ARGV = ($Local, "-DINLINK", $_);
+	}
+	do "$TOOL/bin/itcc$TOOLEXT";
+	if ( $@ ) { die "Error while executing itcc$TOOLEXT: $@" }
+    }
+    else {
+	if ( $Local eq "" )
+	{
+	    @ARGV = ( $_);
+	}
+	else
+	{
+	    @ARGV = ($Local, $_);
+	}
+	do "$TOOL/bin/itcc$TOOLEXT";
+	if ( $@ ) { die "Error while executing itcc$TOOLEXT: $@" }
+    }
+}
+close(FILE_IN);
+unlink("$TMP/all", "$TMP/all1");
+
+
+if ( $MakeProt ) {
+    close(STDOUT);
+    open(STDOUT, ">&SAVESTDOUT"); close(SAVESTDOUT);
+}
+
+
+
+
+__DATA__
+
+
+  USAGE:  knl-tcc [-pl] [component]
+
+    calls itcc for every modul used by the kernel or by
+    the component argument.
+
+  OPTIONS:
+
+    -h  : prints this help screen
+    -l  : open source in $TMP
+    -p  : creates a summary in $WRK/fast/prot/knl-tcc.prt
+

@@ -1,0 +1,752 @@
+#!/usr/bin/perl
+#
+# icar.pm
+#
+# for help see 'sub PrintHelp'
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package icar;
+
+use Env;
+use Getopt::Long;
+use File::Basename;
+use File::Copy;
+
+use Exporter;
+
+@ISA = ('Exporter');
+@EXPORT = ('icar');
+
+$ProgramVersion = "icar.pm 1.16";
+
+sub icar {
+	@Positions = ();
+	$Date = time ();
+	local @KnowenDirectories = ();
+	local @CarFilenames = ();
+
+	# allow use of '-xvf' as a bundled option
+	if ((GetPerlVersion ()) >= 5.004) {
+		Getopt::Long::config ("bundling");
+	}
+
+	GetOptions (
+	'f=s', \$CarFilename, 'c', \$CreateFlag, 'x', \$ExtractFlag, 
+	't', \$TestFlag, 'v', \$VerboseFlag, 'p', \$PatchFlag,
+	'A=s',\$ListFilename, 'l=s', \$Label, 'version', \$VersionWanted, 
+	'help', \$HelpWanted, 'h', \$HelpWanted);
+
+	if (defined $VersionWanted) {
+		PrintVersion ();
+		return 0;
+	}
+
+	if (defined $HelpWanted) {
+		PrintHelp ();
+		return 0;
+	}
+
+	CheckOptions ();
+
+	if ((defined $PatchFlag) && (!defined $CreateFlag)){
+		@CarFilenames = split (/,/, $CarFilename);
+		GetInputFile ($CarFilenames[0]);
+		$SwpFilename = basename ($CarFilenames[0]).".swp";
+		copy ($CarFilenames[0], $SwpFilename) unless (-f $SwpFilename);
+
+		FixupCarHdr ( \@CarFilenames, $SwpFilename, $Label);
+		unlink $SwpFilename;
+		return;
+	}	
+
+	if ($^O =~ /^MsWin/i) {
+		@CarCmd = $ENV{'TOOL'}."\\bin\\CAR.exe";
+	} else {
+		@CarCmd = "CAR";
+	}
+
+	if (defined $VerboseFlag) {
+		push @CarCmd, "-v";
+	}
+
+	if (defined $TestFlag) {
+		push @CarCmd, "-t";
+		$SwpFilename = GetInputFile ($CarFilename);
+		push @CarCmd, "-f", $SwpFilename;
+	}
+
+	if (defined $ExtractFlag) {
+		push @CarCmd, "-x";
+		$SwpFilename = GetInputFile ($CarFilename);
+		push @CarCmd, "-f", $SwpFilename;
+	}
+
+	if (defined $CreateFlag) {
+		@CarFilenames = split (/,/, $CarFilename);
+		$SwpFilename = basename ($CarFilenames[0]).".swp";
+		push @CarCmd, "-f", $SwpFilename;
+
+		push @CarCmd, "-c", "-A";
+
+		if (defined $ListFilename) {
+			# get filelist from file (with -A option)
+			die "icar: permission denied for file ".$ListFilename
+				 unless ( -r $ListFilename);
+			push @CarCmd, $ListFilename;
+		} elsif (defined $ARGV[0]) {
+			# get filelist from parameter list
+			$TmpFilename = "list.tmp";
+			open (TMP_FILE, "> ".$TmpFilename);
+			my $Line = undef;
+			foreach (@ARGV) {
+				print TMP_FILE $Line;
+				$Line = $_."\n";
+			}
+			# CAR does not like '\n' in last line
+			chomp $Line;
+			print TMP_FILE $Line;
+			close (TMP_FILE);
+			push @CarCmd, $TmpFilename;
+		} else {
+			# get filelist from <STDIN>
+			$TmpFilename = "list.tmp";
+			open (TMP_FILE, "> ".$TmpFilename);
+			my $Line = undef;
+			while (<STDIN>) {
+				print TMP_FILE $Line;
+				chomp;
+				$Line = $_."\n";
+			}
+			# CAR does not like '\n' in last line
+			chomp $Line;
+			print TMP_FILE $Line;
+			close (TMP_FILE);
+			push @CarCmd, $TmpFilename;
+		}
+	}
+
+	ExecuteCarCmd ($TmpFilename, @CarCmd);
+	if (defined $CreateFlag) {
+		FixupCarHdr ( \@CarFilenames, $SwpFilename, $Label);
+		unlink $SwpFilename;
+	}
+
+	if ((defined $ExtractFlag) or (defined $TestFlag)) {
+		ClearInputFile ($CarFilename);
+	}
+	return 0;
+}
+
+sub CheckOptions {
+	die "$0: please use either -x, -t, -c or -p flag\n"
+		if (((defined $CreateFlag) and (defined $ExtractFlag))
+		or ((defined $CreateFlag) and (defined $TestFlag))
+		or ((defined $ExtractFlag) and (defined $TestFlag))
+		or ((defined $ExtractFlag) and (defined $PatchFlag))
+		or ((defined $TestFlag) and (defined $PatchFlag))
+		or ((!defined $CreateFlag) and (!defined $ExtractFlag)
+		and (!defined $TestFlag) and (!defined $PatchFlag)));
+	die "$0: filename required\n"
+		if (!defined $CarFilename);
+}
+
+sub ExecuteCarCmd {
+	(local $TmpFilename, local @CarCmd) = @_;
+
+	my $RC = system (@CarCmd);
+	unlink $TmpFilename if ( -e $TmpFilename );
+	if ($RC != 0) {
+		die "icar: execution of \"".(join " ", @CarCmd)."\" failed";
+	}
+}
+
+sub FixupCarHdr {
+	my ($rCarFilenames, $SwpFilename, $Label) = @_;
+	my @CarFilenames = @$rCarFilenames;
+
+	my @fhWrite = ();
+	my $fhRead = OpenFileRead ($SwpFilename);
+	foreach $CarFilename (@CarFilenames) {
+		push @fhWrite, OpenFileWrite ($CarFilename);
+	}
+	# initialize parser
+	$ST_HEADER_START = 0;
+	$ST_CATALOG = 1;
+	$ST_BINARY = 2;
+	my $State = $ST_HEADER_START;
+	my $Buffer = undef;
+	my $Len = 0;
+
+	while (true) {
+		($ReadLen, $Len) = ReadIntoBuffer ($fhRead, $Buffer, 4096, $Len);
+		last if ($ReadLen == 0);
+		if ($State == $ST_BINARY) {
+			foreach $fh (@fhWrite) {
+				WriteFH ($fh, $Buffer, $Len);
+			}
+			$Len = 0;
+			next;
+		}
+		while (true) {
+			($Buffer, $Len, $RC, $Line) = GetLineFromBuffer ($Buffer, $Len);
+			if ($RC eq false) {
+				$State = $ST_BINARY;
+				foreach $fh (@fhWrite) {
+					WriteFH ($fh, $Buffer, $Len);
+				}
+				$Len = 0;
+				last;
+			}
+			last unless (defined $Line);
+			if ($Line =~ /^#/) {
+				# comment
+				if ($State == $ST_CATALOG) {
+					$State = $ST_BINARY;
+					$Comment = "#\n";
+					foreach $fh (@fhWrite) {
+						WriteFH ($fh, $Comment, length ($Comment));
+						WriteFH ($fh, $Buffer, $Len);
+					}
+					$Len = 0;
+					last;
+				} elsif ($State == $ST_HEADER_START) {
+				} else {
+					die "icar: incorrect car file";
+				}
+			} elsif ($Line =~ /^D/) {
+				# directory
+			} elsif ($Line =~ /^F/) {
+				if ($State == $ST_HEADER_START) {
+					$State = $ST_CATALOG;
+					@Positions = GetPositions ($Line);
+					foreach $fh (@fhWrite) {
+						WriteHeaderToFH ($fh, $CarFilenames[0], $Label);
+					}
+				} elsif ($State == $ST_CATALOG) {
+				} else {
+					die "icar: incorrect car file";
+				}
+				local @DirLines = CheckDirectory ($Line);
+				if (defined @DirLines) {
+					local $DirLine;
+					foreach $DirLine (@DirLines) {
+						foreach $fh (@fhWrite) {
+							WriteFH ($fh, $DirLine, length ($DirLine));
+						}
+					}
+				}
+				foreach $fh (@fhWrite) {
+					WriteFileToFH ($fh, $Line);
+				}
+			}
+		}
+		next;
+	}
+
+	close ($fhRead);
+	foreach $fh (@fhWrite) {
+		close ($fh);
+	}
+}
+
+sub CheckDirectory {
+	local $Directory = ExtractDirectory ($_[0]);
+	return (undef)
+		unless (defined ($Directory));
+	return (undef)
+		if (IsKnowenDirectory ($Directory));
+
+	# unknowen directory found
+	my @Lines = ();
+	local @Levels = GetDirectoryLevels ($Directory);
+	foreach (@Levels) {
+		next if (IsKnowenDirectory ($_));
+		local @Values = ("D", $_, "755", 0, 0, $Date, 0);
+		push @Lines, BuildEntry (\@Positions, \@Values);
+		unshift @KnowenDirectories, $_;
+	}
+	return @Lines;
+}
+
+#
+# IsKnowenDirectory ()
+# returns true, if given scalar is in the list of knowen
+# directories, otherwise returnes false
+#
+sub IsKnowenDirectory {
+	local $Directory = $_[0];
+	foreach (@KnowenDirectories) {
+		return (0 == 0) if ($_ eq $Directory);
+	}
+	return (0 != 0);
+}
+
+#
+# GetParentDirectory ()
+# returns the parent directory form a given directory
+# or undef, if the given directory is a first level directory
+#
+sub GetParentDirectory {
+	my $Parent = undef;
+	local $Pos = 0;
+	while ($_[0] =~ m/\//g) {
+		$Pos = pos ($_[0]);
+	}
+	$Parent = substr ($_[0], 0, $Pos - 1)
+		unless ($Pos == 0);
+	return ($Parent);
+}
+
+#
+# GetDirectoryLevels ()
+# retruns a list of all parent directories from a given directory
+# given directory is included
+# directory list is sorted form first level to given directory
+#
+sub GetDirectoryLevels {
+	my @Levels = $_[0];
+	while (true) {
+		local $ParentDirectory = GetParentDirectory ($Levels[0]);
+		last unless (defined ($ParentDirectory));
+		unshift @Levels, $ParentDirectory;
+	}
+	return @Levels;
+}
+
+sub GetPositions {
+	my $Line = $_[0];
+
+	pos ($Line) = 0;
+	local @Pos = ();
+
+	while (true) {
+		# find fist position of non white space
+		last unless ($Line =~ m/\S/g);
+		push @Pos, pos ($Line) - 1;
+		# find next position after last non white space
+		last unless ($Line =~ m/\s/g);
+		push @Pos, pos ($Line) - 1;
+	}
+
+	return @Pos;
+}
+
+sub BuildEntry {
+	my $i = 0;
+	my $Line;
+	while (true) {
+		last unless (defined $_[0][$i]);
+		if ($i <= 1) {
+			$Line = ConcatLeft ($Line, $_[0][2 * $i], $_[1][$i]);
+		} else {
+			$Line = ConcatRight ($Line, $_[0][2 * $i + 1], $_[1][$i]);
+		}
+		$i++;
+	}
+	$Line .= "\n";
+
+	return ($Line);
+}
+
+sub ConcatLeft {
+	my $Line = $_[0];
+	my $CountFill = $_[1] - length ($Line);
+	if ($CountFill >= 0) {
+		$Line .= " " x $CountFill;
+	}
+	$Line .= $_[2];
+	return ($Line);
+}
+
+sub ConcatRight {
+	my $Line = $_[0];
+	my $CountFill = $_[1] - length ($Line) - length ($_[2]);
+	if ($CountFill >= 0) {
+		$Line .= " " x $CountFill;
+	}
+	$Line .= $_[2];
+	return ($Line);
+}
+
+#
+# ExtractDirectory ()
+# in:
+#   $Line........a line form CAR header
+# out:
+#   $Directory...directory if there is one, else undef
+#
+sub ExtractDirectory {
+	my $Directory = undef;
+
+	(local $Type, local $Name, local $Mode, local $Size, local $Compressed, local $Date, local $CRC) = split ' ', $_[0];
+	if ($Type eq "D") {
+		$Directory = $Name;
+	} elsif ($Type eq "F") {
+		$Directory = GetParentDirectory ($Name);
+	} else {
+		die "icar: unknowen type";
+	}
+	return ($Directory);
+}
+
+#
+# WriteFH ()
+# in:
+#   $FileHandle...file handle to write to
+#   $Buffer.......buffer contains data to be written
+#   $LenWant......count of bytes want to be written
+# out:
+#   $LenPut.......count of bytes written
+#
+sub WriteFH {
+	my $LenWant = $_[2];
+	my $LenPut;
+	$LenPut = syswrite ($_[0], $_[1], $LenWant);
+	die "icar: could not write" unless ($LenWant == $LenPut);
+	return ($LenPut);
+}
+
+#
+# ReadLineIntoBuffer ()
+# in:
+#   $FileHandle...file handle to read from
+#   $Buffer.......buffer to write into
+#   $LenWant......count of bytes want to read
+#   $Offset.......write position in buffer
+# out:
+#   $ReadLen......count of bytes read
+#   $Offset.......new write position in buffer
+#
+sub ReadIntoBuffer {
+	my $ReadLen;
+	my $Offset = $_[3];
+
+	$ReadLen = sysread ($_[0], $_[1], $_[2], $Offset);
+	die "icar: error reading ".$CarFilename unless (defined $ReadLen);
+	$Offset += $ReadLen if ($ReadLen >= 0);
+	return ($ReadLen, $Offset);
+}
+
+
+#
+# GetLineFromBuffer ()
+# in:
+#   $BufIn....input buffer
+#   $Len......count of used bytes in output buffer
+# out:
+#   $BufOut...output buffer
+#   $Len......count of bytes used in output buffer
+#   $rc.......return code
+#   $Line.....extracted line from input buffer
+#
+# extracts a line of ascii text from input buffer
+# $rc returns true, if $BufIn starts with 'F', 'D' or '#'
+# $Line returns undef, if no trailing '\n' was found in buffer
+#
+sub GetLineFromBuffer {
+	my $In;
+	my $Line;
+	my $Len;
+	my $Buffer;
+	my $Pos;
+
+	$In = $_[0];
+	$Len = $_[1];
+	if ($In =~ m/\n/g) {
+		$Pos = pos $In;
+
+		$Line = substr ($In, 0, $Pos);
+		if (($Line =~ /^#/) or ($Line =~ /^F/) or ($Line =~ /^D/)){
+			$Buffer = substr ($In, $Pos);
+			$Len -= $Pos;
+			return ($Buffer, $Len, true, $Line);
+		}
+	} else {
+		if (($In =~ /^#/) or ($In =~ /^F/) or ($In =~ /^D/)){
+			return ($In, $Len, true, undef);
+		}
+	}
+	return ($In, $Len, false, undef);
+}
+
+sub GetOs {
+        if (RunningWindows()) {
+                (local $System, local $Major, local $Minor, local $Build, local $Id) = Win32::GetOSVersion ();
+                local $Release = $Major.".".$Minor;
+                return ("Windows 95", $Release) if ($Id == 1);
+                return ("Windows NT", $Release) if ($Id == 2);
+        } else {
+                open (IN, "uname -s |");
+                local $System = <IN>;
+                close (IN);
+                chomp $System;
+
+                open (IN, "uname -r |");
+                local $Release = <IN>;
+                close (IN);
+                chomp $Release;
+
+                open (IN, "uname -v |");
+                local $Version = <IN>;
+                close (IN);
+                chomp $Version;
+
+                if ($System =~ /aix/i) {
+                        $System = "AIX";
+                        $Release = $Version.".".$Release;
+                        return ($System, $Release);
+                } elsif ($System =~ /osf/i) {
+                        $System = "DEC";
+                        if ($Version == 564) {
+                                $Release .= "B";
+                        } elsif ($Version == 878) {
+                                $Release .= "D";
+                        } else {
+                                die "unknowen os version";
+                        }
+                        return ($System, $Release);
+                } elsif ($System =~ /hp/i) {
+                        $System = "HPUX";
+                        $Release = substr ($Release, 2);
+                        return ($System, $Release);
+                } elsif ($System =~ /reliant/i) {
+                        $System = "RELIANT";
+                        return ($System, $Release);
+                } elsif ($System =~ /sun/i) {
+                        $System = "SOLARIS";
+                        my @Tmp = split (/\./, $Release);
+                        $Tmp[0] -= 3;
+                        $Release = join ('.', @Tmp);
+                        return ($System, $Release);
+                } elsif ($System =~ /linux/i ) {
+                        my $RedHatReleaseFilename = "/etc/redhat-release";
+                        if ( -r $RedHatReleaseFilename) {
+                                $System = "REDHAT LINUX";
+                                open (RH_IN, $RedHatReleaseFilename);
+                                $_ = <RH_IN>;
+                                chomp;
+                                if ($_ =~ /6\.0$/) {
+                                        $Release = "6.0";
+                                        return ($System, $Release);
+                                }
+                        }
+                }
+                die "icar: unknowen os name"
+        }
+}
+
+sub WriteFileToFH {
+	local @Values = split ' ', $_[1];
+	$Values[5] = $Date;
+	$Values[2] = OctalOr ($Values[2], "222") if (defined $PatchFlag);
+	local $LineOut = BuildEntry (\@Positions, \@Values);
+	WriteFH ($_[0], $LineOut, length ($LineOut));
+}
+
+sub WriteHeaderToFH {
+
+	my $FileHandle = $_[0];
+	my $ArchiveName = fileparse ($_[1]);
+	my $Label = substr ($_[2], 0, 56);
+	my $UTC = gmtime ($Date)." UTC";
+	my $Os = join " ", GetOs ();
+	my $Text;
+
+	$Text = "# \n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# archive name       : ".$ArchiveName."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# operating system   : ".$Os."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# creation time      : ".$UTC."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# created by         : ".GetUserAndHost()."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# created with       : ".$ProgramVersion."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# label              : ".$Label."\n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+	$Text = "# \n";
+	WriteFH ($FileHandle, $Text, length ($Text));
+}
+
+sub GetUserAndHost {
+	my $User = my $Host = undef;
+
+ 	if (defined $ENV{"LOGNAME"}) {
+		$User = $ENV{"LOGNAME"};
+	} elsif (defined $ENV{"USERNAME"}) {
+		$User = $ENV{"USERNAME"};
+	} else {
+		die "LOGNAME or USERNAME not defined";
+	}
+
+	if (defined $ENV{"HOSTNAME"}) {
+		$Host = $ENV{"HOSTNAME"};
+	} elsif (defined $ENV{"COMPUTERNAME"}) {
+		$Host = $ENV{"COMPUTERNAME"};
+	} else {
+		die "HOSTNAME or COMPUTERNAME not defined";
+	}
+
+	return ($User."@".$Host);
+}
+
+sub OpenFileWrite {
+        local $Filename = $_[0];
+        if ($Filename =~ m/:/g) {
+               	local @RemCmd = ("|");
+				if (RunningWindows()) {
+					push @RemCmd, "_rem";
+				} else {
+					push @RemCmd, "rem";
+				}
+				push @RemCmd, "write";
+               	local $Pos = pos ($Filename);
+               	push @RemCmd, substr ($Filename, 0, $Pos -1);
+               	push @RemCmd, substr ($Filename, $Pos);
+               	open (WRITE, join " ", @RemCmd)
+                       	|| die "icar: cannot open ".(join " ", @RemCmd);
+               	binmode (WRITE);
+               	return (WRITE);
+        } else {
+                unless (defined (&O_RDWR)) {
+                        require Fcntl;
+                        import Fcntl qw/O_RDWR O_CREAT O_EXCL O_RDONLY O_TRUNC /;
+                }
+                my $fhLocal = "\:\:$Filename";
+		sysopen ($fhLocal, $Filename, &O_RDWR | &O_CREAT | &O_TRUNC)
+                        || die "icar: cannot open ".$Filename." read write";
+        	binmode ($fhLocal);
+	        return ($fhLocal);
+	 }
+}
+
+sub OpenFileRead {
+        local $Filename = $_[0];
+        if ($Filename =~ m/:/g) {
+               	local @RemCmd = ();
+				if (RunningWindows()) {
+					push @RemCmd, "_rem";
+				} else {
+					push @RemCmd, "rem";
+				}
+				push @RemCmd, "read";
+               	local $Pos = pos ($Filename);
+               	push @RemCmd, substr ($Filename, 0, $Pos -1);
+               	push @RemCmd, substr ($Filename, $Pos);
+		push @RemCmd, "|";
+		open (READ, join " ", @RemCmd)
+                       	|| die "icar: cannot open ".(join " ", @RemCmd);
+               	binmode (READ);
+               	return (READ);
+        } else {
+                unless (defined (&O_RDONLY)) {
+                        require Fcntl;
+                        import Fcntl qw/O_RDWR O_CREAT O_EXCL O_RDONLY O_TRUNC /;
+                }
+                my $fhLocal = "\:\:$Filename";
+                sysopen ($fhLocal, $Filename, &O_RDONLY)
+                        || die "icar: cannot open ".$Filename." read only";
+        	binmode ($fhLocal);
+		return ($fhLocal);
+        }
+}
+
+sub GetInputFile {
+	if ($_[0] =~ m/:/g) {
+		local $Filename = basename($_[0]).".swp";
+		local $fhWrite = OpenFileWrite ($Filename);
+		local $fhRead = OpenFileRead ($_[0]);
+		local $Buffer;
+		local $LenWant = 4096;
+		local $LenGot;
+
+		while (true) {
+			$LenGot = sysread ($fhRead, $Buffer, $LenWant);
+			last if ($LenGot == 0);
+			syswrite ($fhWrite, $Buffer, $LenGot);
+		}
+
+		close ($fhRead);
+		close ($fhWrite);
+		return ($Filename);
+	} else {
+		return ($_[0]);
+	}
+}
+
+sub ClearInputFile {
+        if ($_[0] =~ m/:/g) {
+		unlink ((basename ($_[0])).".swp");
+	}
+}
+
+sub RunningWindows {
+	return ((defined $ENV{"OS"}) and ($ENV{"OS"} =~ /^Windows/i));
+}
+
+sub GetPerlVersion {
+	return ($]);
+}
+
+sub PrintVersion {
+	print $ProgramVersion."\n";
+}
+
+sub PrintHelp {
+	print "icar --help, icar -h\n";
+	print "icar --version\n";
+	print "icar -p[v]f [host:]archive\n";
+	print "icar -x[v]f [host:]archive\n";
+	print "icar -t[v]f [host:]archive\n";
+	print "icar -c[p][v]f [host:]archive[,[host:]archive][,...] [-l label]\n\t[-A listfile]\n";
+	print "icar -c[p][v]f [host:]archive[,[host:]archive][,...] [-l label]\n\tfile_0 file_1 file_2 ...\n";
+	print "icar -c[p][v]f [host:]archive[,[host:]archive][,...] [-l label]\n\tuse <STDIN> to pipe in filelist\n";
+}
+
+sub OctalOr {
+	my ($arg0, $arg1) = @_;
+	my @ret = ();
+
+	my @arg0 = split (//, $arg0);
+	my @arg1 = split (//, $arg1);
+	
+	while ($#arg0 < $#arg1) {
+		unshift (@arg0, 0);
+	}
+
+	while ($#arg0 < $#arg1) {
+		unshift (@argr1, 0);
+	}
+	
+	foreach $_ (@arg0) {
+		$_ |= shift @arg1;
+		push @ret, $_;
+	}
+	
+	return (join "", @ret);
+}
+
+1;
+

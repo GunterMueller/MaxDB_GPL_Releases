@@ -1,0 +1,521 @@
+(* @(#)common/genc_typ.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+
+#define NULL 0
+#define CONSTANT 1
+#define IDENTIFIER 2
+#define TERM 3
+#define EXPRESSION 4
+#define BLOCK 5
+#define STATEMENT 6
+
+
+#include "csg.def"
+#include "globals.i"
+#include "csg.i"
+#include "opcode.i"
+#include "strtab.h"
+#include "utilities.h"
+#include "_shifts.h"
+#include "dumptree.h"
+
+procedure BumpSymPtr; external;
+
+procedure GenTyp(Node:integer);
+type
+   String20 = packed array [0..19] of char;
+var
+   NestLevel : integer;
+   nummer : integer;
+
+
+function TYP(NodeIndex:integer):integer;
+begin
+if NodeIndex = -1
+then TYP:=0
+else TYP:=DscField;
+end;
+
+
+function max(a,b:integer):integer;
+begin
+if a>b
+then max:=a
+else max:=b;
+end;
+
+function Block(NodeIndex : HdgRange): boolean;
+begin
+Block:=NextLink <> -1;
+end;
+
+procedure HdgGenTyp(NodeIndex : HdgRange); forward;
+
+
+procedure CsgGenTyp(NodeIndex : HdgRange);
+var
+   s: STRING;
+   SaveIndex: HdgRange;
+begin
+   if NodeIndex <> -1 then begin
+      NestLevel := NestLevel + 3;
+      case MajorOperator of
+
+	 node: begin
+	     case MinorOperator of
+		     IdOp:           DscField:=IDENTIFIER;
+		     RegOp:          DscField:=IDENTIFIER;
+		     LitOp:          DscField:=CONSTANT;
+		     LoadstrOp:      DscField:=CONSTANT;
+		     LitOffsetOp:    DscField:=IDENTIFIER;
+		     LitSizeOp:      DscField:=CONSTANT;
+		     StaticLinkOp:   DscField:=CONSTANT;
+		     otherwise:      DscField:=NULL;
+	     end;
+	 end;
+
+	 spec: begin
+	     case MinorOperator of
+		     BeginOp:        DscField:=BLOCK;
+		     BreakOp,
+		     ContinueOp,
+		     GotoOp,
+		     LabelOp:        DscField:=STATEMENT;
+		     otherwise:      DscField:=NULL;
+	     end;
+	 end;
+
+	 ShortStmnt: begin
+	    CsgGenTyp (Ss1operand);
+	 end;
+
+	 UnaryExp: begin
+	     CsgGenTyp (Unary1operand);
+	     case MinorOperator of
+		     StorepOp,
+		     ConvertOp,
+		     BNotOp,
+		     NotOp,
+		     UminusOp:       DscField:=EXPRESSION;
+		     StorepadrOp,
+		     DerefOp,
+		     LoadOp,
+		     LoadadrOp:      DscField:=TERM;
+		     otherwise:      DscField:=TYP(Unary1operand);
+	     end;
+	 end;
+
+	 BinaryExp: begin
+	     CsgGenTyp (Bin1operand);
+	     CsgGenTyp (Bin2operand);
+	     case MinorOperator of
+		     AddOp,
+		     AndOp,
+		     BAndOp,
+		     BOrOp,
+		     BXorOp,
+		     DivOp,
+		     EqOp,
+		     GeOp,
+		     GtOp,
+		     LeOp,
+		     LtOp,
+		     ModOp,
+		     MultOp,
+		     NeOp,
+		     OrOp,
+		     ShlOp,
+		     ShrOp,
+		     SubtOp:         DscField:=EXPRESSION;
+		     ElementOp,
+		     SubscriptOp:    DscField:=TERM;
+		     otherwise:      DscField:=max(TYP(Bin1operand),TYP(Bin2operand));
+	     end;
+	 end;
+
+	 ExpList: begin
+	     SaveIndex := NodeIndex;
+	     NodeIndex := ListHeadField;
+	     while NodeIndex <> -1 do begin
+		CsgGenTyp (NodeIndex);
+		NodeIndex := NextLink;
+	     end;
+	     NodeIndex:=SaveIndex;
+	     DscField:=EXPRESSION;    (*  20.09.89  *)
+	 end;
+
+	 LongStmnt: begin
+	     if MinorOperator = CallOp then begin
+		CsgGenTyp (Ls1parameter);
+	     end;
+	     if MinorOperator <> Sys0Op then
+		CsgGenTyp (Ls1operand);
+	     CsgGenTyp (Ls2operand);
+	     case MinorOperator of
+		     CallOp,
+		     Sys0Op:         DscField:=TERM;
+		     PostfixOp,
+		     PrefixOp,
+		     StoreOp,
+		     StoreadrOp:     DscField:=EXPRESSION;
+		     RtrnxOp:        DscField:=STATEMENT;
+		     otherwise:      DscField:=NULL;
+	     end;
+	 end;
+
+	 ifthenelse: begin
+	     CsgGenTyp (IfCondField);
+	     HdgGenTyp(IfTrueField);
+	     if IfFalseField <> -1 then begin
+		HdgGenTyp(IfFalseField);
+	     end  (* if *);
+	     DscField:=max(TYP(IfTrueField),TYP(IfFalseField));
+	     if DscField <= EXPRESSION
+	     then DscField := EXPRESSION
+	     else DscField := STATEMENT;
+	     if (IfTrueField = -1) or (IfFalseField = -1)
+	     then DscField := STATEMENT;
+	     if Block(IfTrueField) or Block(IfFalseField)
+	     then DscField := STATEMENT;
+	 end;
+
+
+	 loop: begin
+	     CsgGenTyp (WhileTestField);
+	     HdgGenTyp(WhileBodyField);
+	     DscField:=STATEMENT;
+	 end;
+
+	 Switch: begin
+	     CsgGenTyp (SwitchTest);
+	     HdgGenTyp(SwitchBody);
+	     DscField:=STATEMENT;
+	 end;
+
+	 Case: begin
+	     DscField:=NULL;
+	 end;
+
+	 RepeatUntil: begin
+	     HdgGenTyp(RepeatBody);
+	     CsgGenTyp (RepeatTest);
+	     DscField:=STATEMENT;
+	 end;
+
+	 Proc: begin
+	     HdgGenTyp(ProcProlog);
+	     HdgGenTyp(ProcBody);
+	     DscField:=NULL;
+	 end;
+
+	 OpenProc: begin
+	     HdgGenTyp(ProcBody);
+	     DscField:=NULL;
+	 end;
+
+      end  (* case *);
+      NestLevel := NestLevel - 3;
+   end  (* if *);
+end  (* CsgGenTyp *);
+
+
+procedure HdgGenTyp;
+begin
+   while NodeIndex <> -1  do begin
+      CsgGenTyp(NodeIndex);
+      NodeIndex := NextLink;
+   end  (* while *);
+end (*HdgGenTyp*);
+
+
+begin
+   NestLevel := -3;
+   HdgGenTyp(Node);
+end (* GenTyp *);
+
+
+procedure GenIfTyp(Node:integer);
+
+type
+   String20 = packed array [0..19] of char;
+
+var
+   NestLevel : integer;
+
+   function TYP(NodeIndex:integer):integer;
+   begin
+   if NodeIndex = -1
+   then TYP:=0
+   else TYP:=DscField;
+   end;
+
+
+function Block(NodeIndex : HdgRange): boolean;
+begin
+Block:=NextLink <> -1;
+end;
+
+procedure WithCompletion(Node:integer); forward;
+
+procedure HdgGenIfTyp(NodeIndex : HdgRange); forward;
+
+procedure CsgGenIfTyp(NodeIndex : HdgRange; inc:integer);
+var
+   s: STRING;
+   SaveIndex: HdgRange;
+begin
+   if NodeIndex <> -1 then begin
+      NestLevel := NestLevel + 3;
+      case MajorOperator of
+
+	 node: begin
+	 end;
+
+	 spec: begin
+	 end;
+
+	 ShortStmnt: begin
+	    CsgGenIfTyp (Ss1operand,1);
+	 end;
+
+	 UnaryExp: begin
+	     CsgGenIfTyp (Unary1operand,1);
+	 end;
+
+	 BinaryExp: begin
+	     CsgGenIfTyp (Bin1operand,1);
+	     CsgGenIfTyp (Bin2operand,1);
+	 end;
+
+	 ExpList: begin
+	     SaveIndex := NodeIndex;
+	     NodeIndex := ListHeadField;
+	     while NodeIndex <> -1 do begin
+		CsgGenIfTyp (NodeIndex,1);
+		NodeIndex := NextLink;
+	     end;
+	 end;
+
+	 LongStmnt: begin
+	     if MinorOperator = CallOp then begin
+		CsgGenIfTyp (Ls1parameter,1);
+	     end;
+	     if MinorOperator <> Sys0Op then
+		CsgGenIfTyp (Ls1operand,1);
+	     CsgGenIfTyp (Ls2operand,1);
+	 end;
+
+	 ifthenelse: begin
+	     if inc=0
+	     then DscField:=STATEMENT
+	     else DscField:=EXPRESSION;
+	     CsgGenIfTyp (IfCondField,1);
+	     HdgGenIfTyp(IfTrueField);
+	     if IfFalseField <> -1 then begin
+		HdgGenIfTyp(IfFalseField);
+	     end  (* if *);
+	 end;
+
+
+	 loop: begin
+	     CsgGenIfTyp (WhileTestField,1);
+	     HdgGenIfTyp(WhileBodyField);
+	 end;
+
+	 Switch: begin
+	     CsgGenIfTyp (SwitchTest,1);
+	     HdgGenIfTyp(SwitchBody);
+	 end;
+
+	 Case: begin
+	 end;
+
+	 RepeatUntil: begin
+	     HdgGenIfTyp(RepeatBody);
+	     CsgGenIfTyp (RepeatTest,1);
+	 end;
+
+	 Proc: begin
+	     HdgGenIfTyp(ProcProlog);
+	     HdgGenIfTyp(ProcBody);
+	 end;
+
+	 OpenProc: begin
+	     HdgGenIfTyp(ProcBody);
+	 end;
+
+      end  (* case *);
+      NestLevel := NestLevel - 3;
+   end  (* if *);
+end  (* CsgGenIfTyp *);
+
+
+procedure HdgGenIfTyp;
+begin
+   while NodeIndex <> -1  do begin
+      CsgGenIfTyp(NodeIndex,0);
+      NodeIndex := NextLink;
+   end  (* while *);
+end (*HdgGenIfTyp*);
+
+
+function IsAnyPointerType(Node:integer):boolean;
+var NodeIndex:integer;
+    Idx:integer;
+begin
+IsAnyPointerType:=false;
+NodeIndex:=Node;
+if (MajorOperator = node)
+   and (MinorOperator = IdOp)
+then
+  begin
+  Idx:=Node1parameter;
+  if (STab[Idx].SName = 0)          (*  = unnamed!   *)
+     and (STab[Idx].SType = 40)     (*  = anyptrptr  *)
+  then
+    IsAnyPointerType:=true;
+  end;
+end;
+
+function IsLoadadrOp(Node:integer):boolean;
+var NodeIndex:integer;
+begin
+IsLoadadrOp:=false;
+NodeIndex:=Node;
+if (MajorOperator = UnaryExp)
+   and (MinorOperator = LoadadrOp)
+then
+  IsLoadadrOp:=true;
+end;
+
+function IsWithStatement(Node:integer):boolean;
+var NodeIndex:integer;
+begin
+IsWithStatement:=false;
+NodeIndex:=Node;
+if (MajorOperator = LongStmnt)
+   and (MinorOperator = StoreOp)
+then
+  if IsAnyPointerType(Ls1operand)
+     and IsLoadadrOp(Ls2operand)
+  then
+    IsWithStatement:=true;
+end;
+
+procedure Complete(Node:integer);
+  (*  Zusicherung: IsWithStatement(Node) = true  *)
+var Idx1,Idx2,Idx_neu: integer;
+    NodeIndex: integer;
+begin
+NodeIndex:=Node;
+NodeIndex:=Ls1operand;
+Idx1:=Node1parameter;
+NodeIndex:=Node;
+NodeIndex:=Ls2operand;
+NodeIndex:=Unary1operand;
+Idx2:=TypeField;
+BumpSymPtr;         (*  Neues STab-Element erzeugen!  *)
+Idx_neu:= SymPtr;
+STab[Idx_neu].SType:= PointerType;
+STab[Idx_neu].SDomain:= Idx2;
+STab[Idx1].SType:= Idx_neu;
+end;
+
+procedure WithCompletion;
+begin
+if IsWithStatement(Node)
+then
+  Complete(Node);
+end;
+
+begin (* GenIfTyp *)
+   NestLevel := -3;
+   HdgGenIfTyp(Node);
+end;
+
+
+(*================================================================================================*)
+
+function IsConstantExpr(NodeIndex : HdgRange):boolean;
+var
+   s: STRING;
+   SaveIndex: HdgRange;
+begin
+   if NodeIndex <> -1 then begin
+      case MajorOperator of
+
+	 node: begin
+	     case MinorOperator of
+		     IdOp:           IsConstantExpr := STab[Node1parameter].SKind = ConDcl;
+		     LitOp,
+#ifdef RASX /*RAS04*/
+		     LitSizeOp,
+#endif
+		     LoadstrOp:	     IsConstantExpr:=true;
+		     otherwise:      IsConstantExpr:=false;
+	     end;
+	 end;
+
+	 UnaryExp: begin
+	     case MinorOperator of
+		     ConvertOp,
+		     BNotOp,
+		     NotOp,
+		     UminusOp,
+		     DerefOp,
+		     LoadOp,
+		     LoadadrOp:      IsConstantExpr:=IsConstantExpr(Unary1operand);
+		     otherwise:      IsConstantExpr:=false;
+	     end;
+	 end;
+
+	 BinaryExp: begin
+	     case MinorOperator of
+		     AddOp,
+		     AndOp,
+		     BAndOp,
+		     BOrOp,
+		     BXorOp,
+		     DivOp,
+		     EqOp,
+		     GeOp,
+		     GtOp,
+		     LeOp,
+		     LtOp,
+		     ModOp,
+		     MultOp,
+		     NeOp,
+		     OrOp,
+		     ShlOp,
+		     ShrOp,
+		     SubtOp:         IsConstantExpr:=(IsConstantExpr(Bin1operand) and IsConstantExpr(Bin2operand));
+		     otherwise:      IsConstantExpr:=false
+	     end;
+	 end;
+	     otherwise:      IsConstantExpr:=false;
+      end  (* case *);
+   end  (* if *)
+   else
+	IsConstantExpr:=false;
+end  (* IsConstantExpr *);
+

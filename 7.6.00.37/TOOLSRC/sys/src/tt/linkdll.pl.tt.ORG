@@ -1,0 +1,392 @@
+#!/usr/bin/perl
+# linkdll       *** internal script (called by vmake !)
+#
+# @(#)linkdll		1997-11-18
+#
+# link object modules to create a shared library
+#
+# TOOL          directory for tools
+# LDFLAGS       optional loader flags
+# KEEPFLG       optional keep intermediate files flag
+#
+# 1994-06-02 J.Bruehe  modify for AIX import lists
+#
+# 1995-08-01	R. Appelt	Einbau des "-deflib"-Parameters
+# 1997-02-04 GG: Map-Files werden nach $SYS/map/$VMAKE_VERSION verschoben
+# 1998-09-09 &gar: MAP-Files moved to $DBROOT/Support/Mapfiles -> 2 files: 
+#                  normal (xxx.map) and one with second extension <VMAKE_EXT>
+# 1999-06-02 &gar: rename old linkdll.pl to link62.dll (only for UNIX)
+#                  and call it in linkdll.pl if RELVER<72
+
+
+package linkdll;
+use Env;
+use File::Copy;
+use ICopy;
+use ToolLib;
+
+&if $OS in [ UNIX ]
+if ( $RELVER eq "R62" or $RELVER eq "R71" ) 
+{
+	do "$TOOL/bin/linkdll62$TOOLEXT";
+	if ( $@ ) { die "Error while executing linkdll62:\n", "$@"; }
+}
+else
+{
+&endif
+
+# Get LDFLAGS, AR
+@LIBMATH = ();
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("linkdll called with @ARGV\n");
+
+$USAGE = "usage: linkdll [ld-flags] dll archive objects\n";
+
+$MAP    = "";
+$DEF    = "";
+$NODLL  = "";
+$DLLFLG = "";
+$ENT    = "";
+@Lib    = ();
+@ELIB   = ();
+$DEFLIB = "-nodefaultlib";
+$DEBUG  = "";
+$PROF   = "";
+$SCRIPT = "";
+$RCFILE = "";
+@LIBPC;
+local @LDCMD=();
+@SLIBS=();
+
+do "$TOOL/bin/link_opts$TOOLEXT";
+if ( $@ ) { print "$@"; exit }
+@IMPLIST = ();
+
+while ($_ = $ARGV[0], /^-/) {
+    shift;
+    last if /^--$/;
+
+    if ( /^-linkoption=(.+)$/ ) { push @OFLAGS, $1; next } 
+
+    if ( /^-tooloption=(.+)$/ ) { next } 
+
+&if $OSSPEC in [ WIN32 ]
+    if(/^-dll$/)     { next }     # ignored 
+
+    if(/^-nodll$/)   { $NODLL = $_; next }
+
+    if(/^-def=(.*)/) { $DEF = "$1.def"; next }
+
+    if(/^-deflib=(.*)/) {
+        $DEFLIB   = "-defaultlib:$1.lib";
+        @LIBMPROC =	();
+		next; }
+
+    if(/^-elib=(.*)/) { push @ELIB, "$1.lib"; next }
+
+    if(/^-usedef$/)  { next }    # unused
+
+    if(/^-e=(.*)/)   { $ENT = "-entry:$1"; next }
+
+    if(/^-exp=.*/) {
+        #additional export, not implemented.
+        print "linkdll: warning: Parameter not implemented: $_\n";
+		next; }
+&elif $OSSPEC in [ AIX ]
+    # We have to separate the arguments into objects and import lists
+    # because 1) only objects are given to "nm" for the export list
+    # and     2) import lists must be searched in a hierarchy until found.
+    if ( /^-bI:(.*)/ ) 
+	{
+		$IMPMOD = $1;
+        if  ( -f "$WRK/fast/obj/$IMPMOD" ) {push @IMPLIST , "-bI:$WRK/fast/obj/$IMPMOD"; }
+        elsif ( -f "$WRK/quick/obj/$IMPMOD" ) {push @IMPLIST, "-bI:$WRK/quick/obj/$IMPMOD";}
+        elsif ( -f "$WRK/slow/obj/$IMPMOD" ) { push @IMPLIST, "-bI:$WRK/slow/obj/$IMPMOD";}
+        elsif ( -f "$TOOL/lib/$IMPMOD" ) { push @IMPLIST, "-bI:$TOOL/lib/$IMPMOD";}
+        else { 	push @IMPLIST, $F; 	}
+	}
+&endif 
+
+    if(/^-.*/)     { push @OFLAGS, $_; next }
+
+} #while
+
+if ( @ARGV < 3 ) { print $USAGE; exit 1 }
+
+$DLLFILE = shift;
+
+&if $OSSPEC in [ WIN32 ]
+if (!$DEBUG)
+    { $STRIPDEBUG = "y" }
+&endif
+
+#some systems forbid some extensions for executables
+if ($DLLFILE =~ /(.*)\.[fqs]/) { $DLL = $1} else { $DLL = $DLLFILE }
+&if $OSSPEC in [ WIN32 ]
+($DLLBASE) = $DLLFILE =~ /(\.*[^\.]*)/ ;  # alle Endungen werden abgeschnitten 
+&endif WIN32
+
+$ARCFILE = shift;
+&if $OSSPEC in [ WIN32 ]
+if ($ARCFILE =~ /(.*)\.[fqs]/) { $ARC = $1 } else { $ARC = $ARCFILE }
+($ARCBASE) = $ARCFILE =~ /(\.*[^\.]*)/ ;  # alle Endungen werden abgeschnitten 
+&endif WIN32
+
+&if $OSSPEC in [ WIN32 ]
+$ARC_TYPE = "lib" unless defined($ARC_TYPE);
+@OBJECTS = ();
+foreach $F (@ARGV) {
+    if ($F =~ /(.*)\.dll(.*)/) { 
+       $SUFF = $2;
+       push @OBJECTS, "$1.$ARC_TYPE$SUFF" ; 
+       next;
+    }
+	if ( $F =~ /-def:(.*)/ ) { $DEF = $1 ; next; }
+    push(@OBJECTS, $F) if $F !~ /.*\.def/;
+} #foraech
+&else WIN32
+    @OBJECTS = ();
+    @SLIBS = ();
+    foreach $F (@ARGV) {
+		if ( $F =~ /-def:(.*)/ ) { $DEF = $1 ; next; }
+        if ( $F =~ /.*\.o/ ) { push @OBJECTS, $F } 
+		else {
+			if ($F =~ /(.*)\.[fqs]/) { $F = $1; } 
+			push(@SLIBS, $F) if $F !~ /.*\.def/;
+		}
+    }
+&endif WIN32
+
+&if $OSSPEC not in [ AIX ]
+@LDCMD = ($LDDLL);
+if ($LDDLL eq $LDDLL_CXX) {
+	push @LDCMD, @DLDXXFLAGS, @OFLAGS;
+} 
+# CTS 1107045
+elsif ($LDDLL eq $LDDLL_CXX_C) { 
+	push @LDCMD, @DLD_CXX_C_FLAGS_START;
+}
+else {
+	push @LDCMD, @DLDFLAGS, @OFLAGS;
+}
+&endif
+
+push @OBJECTS, ToolLib::CreateBuildNrModule(@KEEPFLG,$DEBUG?("-g"):());
+
+&if $OSSPEC in [ WIN32 ]
+
+if ( $CURR_VERSION !~ /^fast$/i || $LIBDEBUG ) { $DEBUG = "y" }
+
+if ( $DEBUG && $PROF ) {
+        push @LDCMD, "-debug", "-debugtype:both", "-pdb:none", "/PROFILE";
+}
+else {
+
+   if ( $PROF ) {
+      push @LDCMD, "-debug", "-debugtype:both", "-pdb:none", "/PROFILE";
+   }
+   elsif ( ! $NOLINKDEBUG ) {
+      push @LDCMD, "-debug", "-debugtype:cv", "-pdb:none", "/OPT:REF";
+   }
+
+}
+
+if ( $NODLL eq "" ) {
+   $TMPFILE = "$ARCBASE.tmp";
+   
+	$DEF = "$DLLBASE.def" if $DEF eq "";
+	if ( ! -f $DEF ) {
+		warn "INFORMATION: Obsolete usage of -def=! Adapt description.\n";
+		ICopy::icp("$DESC/fast/$DEF", "$WRK/$CURR_VERSION/tmp", 0, 0, 1);
+	}
+	if ( -f $DEF ) {
+		system("$TOOL/pgm/mfconcom $DEF $TMPFILE $MACH $VMAKE_VERSION n $LD $OS $OSSPEC") == 0
+			or die "Error while executing \"mfconcom $DEF $TMPFILE $MACH $VMAKE_VERSION n $LD $OS $OSSPEC\"\n".
+			"message: $!\n"; 
+
+		unlink $DEF;        # delete before write because it may be read-only
+
+		open(FILE_IN, "<$TMPFILE") or die "Can't open $TMPFILE (input): $!\n";
+		open(FILE_OUT, ">$DEF") or die "Can't open $DEF (output): $!\n";
+		while(<FILE_IN>) { 
+			s/INITINSTANCE TERMINSTANCE/$ARC/;
+			print FILE_OUT ;
+		}
+		close FILE_IN; close FILE_OUT;
+
+		$DLLFLG = "-def:$DEF";
+	} else { warn "No definition file for $DLLFILE" }
+}
+
+if ( $MAP eq "" ) { $MAP = "-map:$ARCBASE.map" }
+
+if ( $SCRIPT ne "" ) {
+        print "SCRIPT = $SCRIPT $DLLBASE\n";
+        system("$TOOL/bin/$SCRIPT $DLLBASE") == 0
+           or die "Error while executing \"$TOOL/bin/$SCRIPT $DLLBASE\"\n".
+		   "message: $!\n"; 
+    }
+    if ( $RCFILE ne "" ) {
+
+		@ARGV = ( "$DLLBASE", "$RCFILE", @RCINCL );
+		do "$TOOL/bin/comprc$TOOLEXT";
+		if ( $@ ) { warn "Error while executing comprc:\n", "$@"; exit }
+    }
+&endif WIN32
+
+
+#
+#  Create the static library
+#
+@ARFLAGS;
+&if $OSSPEC in [ WIN32 ]
+ToolTrace("$AR called with: @ARFLAGS -out:$ARC -debugtype:cv $DLLFLG @ELIB @OBJECTS\n");
+print ("$AR @ARFLAGS -out:$ARC -debugtype:cv $DLLFLG @ELIB @OBJECTS\n") if ($ENV{NOQUIET});
+system("$AR @ARFLAGS -out:$ARC -debugtype:cv $DLLFLG @ELIB @OBJECTS") == 0
+   or die "Error while executing $AR @ARFLAGS -out:$ARC -debugtype:cv $DLLFLG @ELIB ...\n".
+   "message: $!\n"; 
+# if $DLLFLG is set, $AR creates $ARC and $ARCBASE.exp
+&else
+ToolTrace("$AR called with: @ARFLAGS $ARCFILE @OBJECTS\n");
+print ("$AR @ARFLAGS $ARCFILE @OBJECTS\n") if ($ENV{NOQUIET});
+system($AR, @ARFLAGS, $ARCFILE, @OBJECTS) == 0
+   or die "Error while executing $AR @ARFLAGS $ARCFILE @OBJECTS\n".
+   "message: $!\n"; 
+&endif
+
+#
+#  Link the dynamic library
+#
+
+if ( $NODLL eq "" ) {
+&if $OS in [ UNIX ]
+	$LIBPATH = "-L$TOOL/lib";
+&endif
+
+&if $OSSPEC in [ AIX ]
+	# shared library <libname>.o requires list of extern procs
+	# to be exported and list(s) of all still unresolved symbols
+   	($BASE) = $DLL =~ /(.*)\./;
+	# PTS 1002032 ->
+	@LDCMD=("makeC++SharedLib_r","-p","-100", "-o");
+    push @LDCMD, $DLL, @OBJECTS; 
+    # push @LDCMD;  @LIBMATH, @IMPLIST; 
+    push @LDCMD, @LIBPC, "-G";  # "-lC" (PTS 1104276)  
+	push @LDCMD, @SLIBS;
+	push @LDCMD, @DLDFLAGS, @OFLAGS;
+    push @LDCMD, "-bnoquiet" if ($ENV{NOQUIET});
+    # $ENV{LIB}="/usr/lpp/xlC/lib";
+    # $ENV{BIN}="/usr/lpp/xlC/bin";
+    # $ENV{EXE}="/usr/lpp/xlC/exe";
+	# &gar: not the same path for compiler on different machines 
+	# => have to delete $LIB, $BIN, $EXE in .vdnvars
+	ToolTrace("linkdll call: @LDCMD\n");
+	print ("@LDCMD\n") if ($ENV{NOQUIET});
+    system(@LDCMD)<=4
+         or die "Error while executing @LDCMD\n".
+           "message: $!\n";
+	# <- PTS 1002032
+&elif $OSSPEC in [ WIN32 ]
+   # $ARCBASE.exp has been created by $AR
+   push @LDCMD, "-out:$DLL", "$ARCBASE.exp", "$DEFLIB";
+   ToolTrace("linkdll: @LDCMD -dll $ENT $MAP $RBJ @OBJECTS @LIBPC @Lib @ELIB @LIBMPROC $PROF"); 
+   print("@LDCMD -dll $ENT $MAP $RBJ @OBJECTS @LIBPC @Lib @ELIB @LIBMPROC $PROF") if ($ENV{NOQUIET}); 
+   system("@LDCMD -dll $ENT $MAP $RBJ @OBJECTS @LIBPC @Lib @ELIB @LIBMPROC $PROF") == 0
+      or die "Error while executing @LDCMD -dll $ENT $MAP $RBJ @OBJECTS @LIBPC @Lib @ELIB @LIBMPROC $PROF\n".
+	  "message: $!\n"; 
+&elif $OSSPEC in [ HPUX, SVR4, LINUX, OSF1 ]
+   push @LDCMD, "-o", $DLL, $LIBPATH, @SLIBS, @OBJECTS; 
+&if $OSSPEC in [ OSF1 ]
+   push @LDCMD, @LIBMATH, "-lc";
+&elif $OSSPEC in [ SVR4 ]
+   push @LIBPC, @LIBMATH, @LIBNET, @LIBAIO, "-lc";
+&endif OSF1
+    # CTS 1107045
+	if ($LDDLL eq $LDDLL_CXX_C) { 
+	   push @LDCMD, @DLD_CXX_C_FLAGS_END;
+	}
+
+   	ToolTrace("linkdll call: @LDCMD\n");
+	print ("@LDCMD\n") if ($ENV{NOQUIET});
+    system(@LDCMD)<=4
+         or die "Error while executing @LDCMD\nmessage: $!\n";
+&else AIX
+ 	# don't create shared library
+	# vmake needs a dummy
+	system("$TOOL/Posix/touch $DLL");
+
+&endif AIX
+}
+else {
+   # don't create shared library
+   # vmake needs a dummy
+	if ( -f $DLL ) { my($now)=time; utime($now, $now, $DLL)}
+	else { 
+		open(FILE_OUT, ">>$DLL") or die "Can't open $DLL (touch): $!\n";
+		close FILE_OUT;
+	} 
+}
+
+&if $OSSPEC in [ WIN32 ]
+if ( -f $DLL && $NODLL eq "" ) {
+
+	($VMAKE_EXT) = $CURR_VERSION =~ /^(.)/;
+	$VMAKE_EXT = lc($VMAKE_EXT);
+
+	if ( $STRIPDEBUG ne "" && $PROF eq "" ) {
+          ToolTrace("separate debug info from $DLL\n");
+		  system("$TOOL/pgm/symedit X -qo $DLLBASE.DBG $DLL") == 0
+			 or die "Error while executing \"$TOOL/pgm/symedit X -qo $DLLBASE.DBG $DLL\"\n".
+			 "message: $!\n"; 
+
+		  if ( ! -d "$OWN/usr/symbols" ) { mkdir ("$OWN/usr/symbols", 0) }
+		  copy "$DLLBASE.DBG", "$OWN/usr/symbols/$DLLBASE.dbg.$VMAKE_EXT";
+		  unlink "$OWN/usr/symbols/$DLLBASE.dbg";
+		  rename "$DLLBASE.DBG", "$OWN/usr/symbols/$DLLBASE.dbg";
+	}
+	else {
+		  unlink "$OWN/usr/symbols/$DLLBASE.dbg.$VMAKE_EXT";
+		  unlink "$OWN/usr/symbols/$DLLBASE.dbg";
+	}
+}
+&endif WIN32
+
+if ( @KEEPFLG == 0 ) {
+
+   unlink "$DLLBASE.res";
+   unlink "$DLLBASE.rbj";
+   # unlink "$DEF";
+    if ( -f $PROG && -f "$BASE.map" ) {
+      mkdir ("$OWN/usr/Support", 0775) if ( ! -d "$OWN/usr/Support") ;
+	  mkdir ("$OWN/usr/Support/Mapfiles", 0775) if ( ! -d "$OWN/usr/Support/Mapfiles") ;
+	  copy "$BASE.map", "$OWN/usr/Support/Mapfiles/$BASE.map.$VMAKE_EXT" 
+	  || warn "Can't copy $BASE.map to $OWN/usr/Support/Mapfiles/$BASE.map.$VMAKE_EXT: $!\n";
+	  unlink "$OWN/usr/Support/Mapfiles/$BASE.map";
+      rename "$BASE.map", "$OWN/usr/Support/Mapfiles/$BASE.map";
+   }
+
+   if ( $NODLL eq "" && -f $DLL && -f "$ARCBASE.map" ) {
+
+      unlink "$ARCBASE.tmp", "$ARCBASE.exp";
+      mkdir ("$OWN/usr/Support", 0775) if ( ! -d "$OWN/usr/Support") ;
+      mkdir ("$OWN/usr/Support/Mapfiles", 0775) if ( ! -d "$OWN/usr/Support/Mapfiles") ;
+      copy "$ARCBASE.map", "$OWN/usr/Support/Mapfiles/$ARCBASE.map.$VMAKE_EXT" 
+	  || warn "Can't copy $ARCBASE.map to $OWN/usr/Support/Mapfiles/$ARCBASE.map.$VMAKE_EXT: $!\n";
+	  unlink "$OWN/usr/Support/Mapfiles/$ARCBASE.map";
+	  rename "$ARCBASE.map", "$OWN/usr/Support/Mapfiles/$ARCBASE.map";
+   }
+   else {
+	unlink "$ARCBASE.tmp", "$ARCBASE.exp", "$ARCBASE.map";
+   }
+
+}
+
+if ( $DLLFILE ne $DLL && -f $DLL ) { unlink $DLLFILE; rename $DLL, $DLLFILE }
+&if $OSSPEC in [ WIN32 ]
+if ( $ARCFILE ne $ARC && -f $ARC ) { unlink $ARCFILE; rename $ARC, $ARCFILE }
+&endif WIN32
+
+&if $OS in [ UNIX ]
+}
+&endif

@@ -1,0 +1,172 @@
+#!/usr/bin/perl
+# CPCTest 
+#
+# @(#)CPCTest  6.2  1997-10-15 
+#
+# Burkhard Diesing
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package CPCTest;
+use Env;
+&if $OS in [ WIN32 ]
+use Win32::TieRegistry;
+&endif
+$Trace=1 if ($ENV{PCTOOL_TRACE});
+$Trace++ if ($Trace);
+sub XUserMakeData;
+sub XUserClear;
+sub MailProt;
+sub MapDB;
+sub _checkenv;
+sub UnqouteOrUpper;
+
+$serverdb=$ENV{SERVERDB};
+$servernode=$ENV{SERVERNODE};
+$superuid=$ENV{SUPERUID};
+$superpwd=$ENV{SUPERPWD};
+
+sub XUserMakeData
+{
+    local ($uid, $pwd);
+
+    $serverdb=$ENV{SERVERDB};
+    $servernode=$ENV{SERVERNODE};
+    $superuid=$ENV{SUPERUID};
+    $superpwd=$ENV{SUPERPWD};
+
+    $uid = $_[0] if (defined $_[0]);
+    $pwd = $_[1] if (defined $_[1]);
+    $serverdb = $_[2] if (defined $_[2]);
+    $servernode = $_[3] if (defined $_[3]);
+    _checkenv unless (defined $serverdb);
+    $USAGE ="USAGE: XUserMakeData uid pwd [[serverdb] servernode]\n";
+    local ($xuserfile)=$ENV{TMP}."/xuser.tmp";    
+    $uid = UnqouteOrUpper $uid;
+    $pwd = UnqouteOrUpper $pwd;
+    $serverdb = $ENV{SERVERDB} unless (defined $serverdb);
+    $servernode = $ENV{SERVERNODE} unless (defined $servernode);
+    if (length $uid == 0 || length $pwd == 0) {
+	print $USAGE; 
+	exit;
+    }
+    if ( $servernode =~ /localhost/ ) {
+        $servernode = "";
+    }    
+    if (!open(FILE_OUT, ">$xuserfile")) {
+        print "Can't open $xuserfile (output): $!";
+        exit -1;
+    }
+    print FILE_OUT "DEFAULT";
+    print FILE_OUT "$uid";
+    print FILE_OUT "$pwd";
+    print FILE_OUT "$serverdb";
+    print FILE_OUT "$servernode";
+    print FILE_OUT "ADABAS";
+    print FILE_OUT "-1";
+    print FILE_OUT "-1";
+    print FILE_OUT "-1";
+    print FILE_OUT " ";
+    close(FILE_OUT);    
+    XUserClear;
+    system("xuser -b $xuserfile");
+#    system("rm -f $xuserfile");
+}
+
+sub UnqouteOrUpper
+{
+    local($s);
+    $s=$_[0];
+    return $1 if ($s =~ /^"(.*)"$/ );
+    return uc $s;
+}
+
+sub XUserClear
+{
+    $USAGE ="USAGE: XUserClear\n";
+&if $OSSPEC in [ WIN32 ]
+    $key = $Registry->{"LMachine\\SOFTWARE\\SAP\\SAP DBTech\\User\\"};
+    if ($key) {
+        delete $key->{($key->SubKeyNames)[0] . "\\\\UData"};
+    }
+&else
+    system("rm -f $HOME/.XUSER.62");    
+&endif
+}
+
+sub MailProt
+{
+    local( @sender, @receiver, $subject, $sendfile);
+    local( $cmd, $receiver, $sender );
+
+    print "MailProt" if ($Trace);
+    $sender=$_[0];shift;@sender=split(' ', $sender);
+    $receiver=$_[0];shift;@receiver=split(' ', $receiver);
+    $subject=$_[0];shift;
+    $sendfile=$_[0];shift;
+    print "Sender  : @sender"   if ($Trace);
+    print "Receiver: @receiver" if ($Trace);
+    print "Subject : $subject"  if ($Trace);
+    print "File    : $sendfile" if ($Trace);
+    
+  LOOP: foreach $sender (@sender){
+      if ( $COMPUTERNAME =~ /$sender/ ) {
+	  foreach $receiver (@receiver) {
+	      $cmd = "imail$TOOLEXT -u $receiver -s \"$subject\" $sendfile";
+	      print $cmd if ($Trace);
+	      do $cmd;
+	  }
+	  last LOOP;
+      }
+  }	
+}
+
+sub MapDB
+{
+    local( @filelist, $file, $cmd );
+    print "MapDB" if ($Trace);
+
+    $file=$_[0];shift;@filelist=split(' ', $file);
+    foreach $file (@filelist){
+	if ( -f "$file" ) {
+	    $cmd = "pcdbmap$TOOLEXT $file";
+	    print $cmd if ($Trace);
+	    do $cmd;
+	}
+	else {
+	  PCTest::WriteProt(PCTest::date()." ERROR: Couldn't find file $file");
+	}
+    }    
+}
+
+sub _checkenv
+{
+    local ($XX) = "";
+    $XX="$XX SERVERDB" if (length $serverdb == 0);
+    $XX="$XX SUPERUID" if (length $superuid == 0);
+    $XX="$XX SUPERPWD" if (length $superpwd == 0);
+    if ( length $XX ) {
+        print "Env $XX not set.\n";
+        exit -1
+    }
+}
+
+1;

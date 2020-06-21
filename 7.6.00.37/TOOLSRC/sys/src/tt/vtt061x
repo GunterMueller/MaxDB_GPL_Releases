@@ -1,0 +1,954 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP AG$ADABAS FOR R/3$VTT061X$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : Josef Hasenberger
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+
+// iserver.cpp
+//
+// IServer for handling iput/iget - requests 
+// 1997-07-23	    Josef Hasenberger
+// Version: 2.0
+
+// Changes:
+// ++++++++
+// Josef, 9.10.97
+//			Aenderungen fuer den Status MLOCKED
+
+// Description:
+//  Server to handle locking and unlocking of modules.
+//  For each GRP-Area the clients communicate via a named pipe with 
+//  the server (naming convention for pipe: "SHARENAME")
+//  The pipe name is read from the registry (see function GetPipeParameters
+//  for description) .
+//	Each pipe is handled in a seperate Thread. Pipes are in this context
+//  used to synchronize the access to the lock information.
+//  The locking is done in the Object TILock (which was designed as a work
+//  and die object, i.e it read locking information evertime a service 
+//  from the object is requested - In the beginning we wanted to write
+//  a fat client rather then a fat server)
+//  
+//  The clients request 2 general types of services:
+//	1) IGet:
+//		Request a lock for a certain module, if module not locked, lock
+//		the module for the user on the associated node.
+//		If module locked, tell the client by whom and when.
+//		The client uses _icp to copy the module when it is not locked.
+//		
+//  2) IPut:
+//		unlock a module (only allowed when module is locked by the same
+//		user on the same node).
+//		If unlock is OK then the client sends the module to the server
+//		which saves it on the GRP-Area (or DEVELOP-Area).
+//		The old module is copied and gets the Extension MMDD (Month and Day).
+//		A backup file is only generated once a day!
+//		At the moment the new module gets the security attributes of
+//		the module root directory.
+
+//	Installation:
+//		The server is designed to run as a service.
+//		After installing the service (iserver -install), the service
+//		has to run in the environment of the GRP-Administrator
+//		(Log on as ... in the Service Control Panel)
+//		The service can be started and stopped in the Control Panel.
+//		Stopping the service does not interact with running client requests
+//		
+//		The Grp-Share is read from the registry (see above). The 
+//		GRP-Administrator (and therefor the IServer) has to have Read/Write
+//		permission on this share. 
+//
+//		In the Grp-Share-Directory the file containig the lock information
+//		must exist (it can be empty in the beginning) and the GRP-Admi must
+//		have read/write permission on this file. Other users should have
+//		no access on this file. The file is a binary.
+//		A detailed description on this file can be found in the
+//		documentation of TILock.
+//		The name of the file is specified with the constant STATFILENAME.
+//		Every action on the STATFILENAME is documented in an ascii
+//		protocoll file (extension .prot).
+//		If STATFILENAME is lost, every information on the lock status is lost.
+
+//	Remarks:
+//		If locking, unlocking or copying the file fails, the old status
+//		on the lockfile is restored or not commited (tp like mechanism for
+//		copying modules on the server.
+
+
+
+
+
+
+// Issues for further development: 
+		// Check Security of the newly created module in the GRP-Area after IPut ...
+		// Dynamically check registry for updated GRP-Share entries
+
+
+#define  STRICT
+#include <windows.h>
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <tchar.h>
+#include <process.h>
+#include  <io.h>   /* &gar */
+#include <sys/stat.h>
+
+//#define DEBUG
+
+//#include "iconstants.h"
+//#include "iserver.h"
+//#include "ilock.h"
+#define PACKAGE_COUNT 100
+
+// Function prototypes for local functions
+int	ConvertStatfile(const char * ); /* CTS 1104231 */
+int		GetPipeParameters(char ***, int *);
+void	MyError(const char *, const char *, DWORD);
+int MySetFilePointer (HANDLE, DWORD );
+
+
+LPTSTR GetLastErrorText( LPTSTR lpszBuf, DWORD dwSize );
+BOOL ReportStatusToSCMgr(DWORD, DWORD, DWORD);
+VOID AddToMessageLog(LPTSTR, WORD wErrorType=EVENTLOG_ERROR_TYPE);
+
+
+// local constants
+const char * SZAPPNAME = "IServer";
+
+
+// A development tree is read only, if the file TREELOCKEINDICATOR does exist
+// in the root of the tree.
+const char * TREELOCKEDINDICATOR = ".rel";
+
+
+
+// internal variables
+SERVICE_STATUS          ssStatus;       // current status of the service
+SERVICE_STATUS_HANDLE   sshStatusHandle;
+BOOL                    bDebug = FALSE;
+HANDLE					hServerStopEvent = NULL;
+DWORD					dwErr;
+
+
+void main (int argc, char *argv[])
+{
+	char	    **PipeArray = NULL;			// Character array with the names of pipes
+	int		    NumPipes;					// Number of pipes, i.e. array size
+
+	// Read the names of the pipes to create from config-file (or registry)
+	if (GetPipeParameters(&PipeArray, &NumPipes)!=MY_OK)
+	{
+	    printf("Error:Cannot get pipe parameters from registry\n");
+	    exit (1);
+	}
+    
+	// For each named pipe create a listening thread
+	for (int i=0; i<NumPipes; i++)
+	{
+		if ( ConvertStatfile(PipeArray[i]) < 0) 
+			printf ("converting failed \n");
+	}
+		
+
+	if (PipeArray) delete [] PipeArray;
+	
+}
+
+
+/* CTS 1104231 -> */
+int ConvertStatfile (const char * PipeName)
+{
+
+   HANDLE hOldStatfile,hStatfile;      // statfile handles.
+   CHAR   inBuf[IN_BUF_SIZE] = "";     // Input buffer for pipe.
+   CHAR   errorBuf[ERR_BUF_SIZE] = ""; // Used for error messages.
+   CHAR   BackupDir[_MAX_PATH];		   // Used for backup path
+   DWORD  retCode;                     // Used to trap return codes.
+
+       
+   DWORD i,j;
+      
+   // Naming convention for Statfile-Path: Pipename (without \\.\pipe)
+   // (This is equal to the GRP-Working directory)
+   char ComputerName[MAX_COMPUTERNAME_LENGTH + 1];
+   char Statfile[MAX_PATH], *p, GRPShare[MAX_PATH];
+   char OldStatfile[MAX_PATH];
+   
+   TFileInfo	OldMyFileInfo, MyFileInfo;
+   
+   OldTStateData	*pOldMyStateData;		// zu bearbeitender InfoBlock
+   OldTStateIndex   *pOldMyStateIndex;
+   
+   TStateData	*pMyStateData,MyStateData;		// zu bearbeitender InfoBlock
+   TStateIndex  *pMyStateIndex;
+
+
+
+   char err[512];
+   DWORD dwBytesRead=0;
+   DWORD dwBytesWritten=0;
+
+   BOOLEAN bResult;
+   DWORD lock_info_count=0;
+
+   DWORD sizeof_TStateData;
+   DWORD sizeof_OldTStateData;
+
+   struct stat             statbuf;
+   time_t			       Date_OldStatfile,Date_Statfile;
+  
+
+
+   DWORD dwSize = MAX_COMPUTERNAME_LENGTH + 1;	
+   
+   if (GetComputerName(ComputerName, &dwSize) != TRUE)
+   {
+	 printf("Error:Error cannot get computer name\n");
+	 return(-1);
+   }
+   p = strrchr(PipeName,'\\');
+   if (p) 
+	if (strlen(++p)>0)
+	{
+	   strcpy(GRPShare, "\\\\");
+	   strcat(GRPShare, ComputerName);
+	   strcat(GRPShare, "\\");
+	   strcat(GRPShare, p);
+	}	
+    else
+      p = NULL;
+   if (p==NULL)
+   {
+	 printf("Error:Error cannot get GRPShare name");
+	 return(-1);
+   }
+   
+   strcpy(OldStatfile, GRPShare);
+   strcat(OldStatfile, "\\");
+   strcpy(Statfile, OldStatfile );
+   strcat(OldStatfile, OLDSTATFILENAME);
+   strcat(Statfile, STATFILENAME);
+
+
+   printf("convert statfile %s...\n",OldStatfile);
+/*
+   if ( stat ( OldStatfile , &statbuf ) < 0)
+   {
+	   printf("Error: Cannot read modification time from old Stafile\n");
+	   return(-1);
+   }
+   Date_OldStatfile = statbuf.st_mtime;
+   
+   if ( stat ( Statfile , &statbuf ) < 0)
+   {
+	   printf("Error: Cannot read modification time from Stafile\n");
+	   return(-1);
+   }
+   Date_Statfile = statbuf.st_mtime;
+   
+   if ( Date_Statfile > Date_OldStatfile )
+   {
+		printf("Error: New Statfile is newer then the old Stafile\n");
+		return(-1);
+   }
+*/   
+   hStatfile = CreateFile(
+		Statfile,				// Name der Datei
+		GENERIC_READ | GENERIC_WRITE,	// Lesen und Schreiben
+		0,						// File nicht geshared
+		NULL,					// No inheritance
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH ,
+		NULL);
+
+   if (hStatfile == INVALID_HANDLE_VALUE)
+   {
+		printf("cannot open new statfile %s\n", Statfile);
+		return (-1);
+   }
+
+   hOldStatfile = CreateFile(
+		OldStatfile,				// Name der Datei
+		GENERIC_READ | GENERIC_WRITE,	// Lesen und Schreiben
+		0,						// File nicht geshared
+		NULL,					// No inheritance
+		OPEN_EXISTING ,			// File must exist
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH ,
+		NULL);
+	
+	if (hOldStatfile == INVALID_HANDLE_VALUE)
+	{
+		printf("cannot open old statfile %s\n", Statfile);
+		return (-1);
+	}
+	try
+	{
+		// SetFilePointer to the beginning of the old file
+		if (MySetFilePointer (hOldStatfile, (DWORD)0) != 0)
+		{	
+			sprintf(err, "cannot set file pointer for reading FileInfo to statfile %s"
+					, OldStatfile);
+			throw err;
+		}
+		
+		bResult= ReadFile (
+			hOldStatfile,
+			(LPVOID) &OldMyFileInfo,
+			(DWORD) sizeof(OldMyFileInfo),
+			&dwBytesRead,
+			NULL);
+		
+		if (bResult == FALSE)
+		{
+			sprintf(err, "cannot read FileInfo from old statfile %s"
+					, OldStatfile);
+			throw err;
+		}
+		else
+		{
+			if (dwBytesRead == 0)	// Handle the case when file is emtpy (EOF occured)
+			{
+				sprintf(err, "Statefile %s is empty\n", OldStatfile);
+				throw err;
+			}
+			if (OldMyFileInfo.Version == CURRENT_VERSION)
+			{
+				sprintf(err, "Statfile %s has already the right version\n", OldStatfile);
+				throw err;
+			}
+			
+			// the new statefile version
+			MyFileInfo.Version=CURRENT_VERSION;	
+			MyFileInfo.OffsetStateData	= OldMyFileInfo.OffsetStateData;
+			MyFileInfo.NoOfDataElements = OldMyFileInfo.NoOfDataElements;
+			MyFileInfo.OffsetStateIndex = MyFileInfo.OffsetStateData+ 
+											sizeof (TStateData)*MyFileInfo.NoOfDataElements;
+
+
+			if (MySetFilePointer (hStatfile, (DWORD)0) != 0)
+			{
+				sprintf(err, "cannot set file pointer for reading FileInfo to new statfile %s"
+							, Statfile);
+				throw err;
+			}
+
+			printf("Write FileInfo to new StatFile ...\n");	
+			// write new file info to file
+			bResult = WriteFile (hStatfile, 
+								(LPVOID) &MyFileInfo,
+								(DWORD) sizeof(MyFileInfo),
+								&dwBytesWritten,
+								NULL);
+			if (bResult != TRUE)
+			{
+				sprintf(err,"cannot write file info to new statfile %s", Statfile);
+				throw err;
+			}
+			
+			printf("convert %i lock informations ...\n",MyFileInfo.NoOfDataElements);	
+
+			if ( (( pOldMyStateData = new OldTStateData [PACKAGE_COUNT])==NULL)
+				|| ( (pMyStateData = new TStateData [PACKAGE_COUNT])==NULL) )
+			{
+				sprintf(err, "malloc for %u data entries failed!\n", 
+							PACKAGE_COUNT);
+				throw err;
+			}
+			i=0;
+			while (i < MyFileInfo.NoOfDataElements)
+			{
+				// not a full packet
+				if ( ( (int) MyFileInfo.NoOfDataElements - (int) PACKAGE_COUNT < 0) || 
+					(MyFileInfo.NoOfDataElements - (int) PACKAGE_COUNT < i ) )
+					lock_info_count = MyFileInfo.NoOfDataElements - i ;
+				else
+					lock_info_count = PACKAGE_COUNT;
+
+				bResult= ReadFile (	hOldStatfile,
+									(LPVOID) pOldMyStateData,
+									(DWORD) sizeof(OldTStateData) * lock_info_count,
+									&dwBytesRead,
+									NULL);
+				if ( (bResult != TRUE) || 
+					(dwBytesRead =! (DWORD) (sizeof(OldTStateData) * lock_info_count)))
+				{
+					sprintf(err, "Error while reading from old statfile \n", 
+							i);
+					throw err;
+				}
+				for (j=0;j < lock_info_count; j++)
+				{
+					//copy data
+					strcpy(pMyStateData[j].Name, pOldMyStateData[j].Name);	// Name des zu verwaltenden Elements (Modul)
+					pMyStateData[j].State = pOldMyStateData[j].State;		// Status (locked, unlocked)
+					strcpy(pMyStateData[j].Node , pOldMyStateData[j].Node);	// If locked, von welchem Rechner?
+					strcpy( pMyStateData[j].User, pOldMyStateData[j].User);	// If locked, von welchem Benutzer?
+					pMyStateData[j].date = pOldMyStateData[j].date;			// If locked, when?
+					pMyStateData[j].Version = pOldMyStateData[j].Version;	// aktuelle Versionsnummer (Pre-Incrementel)
+					pMyStateData[j].CountMax = pOldMyStateData[j].CountMax;		// Maximale Anzahl von User-ID Eintraegen verfuegbar in diesem Block
+					pMyStateData[j].CountUsed = pOldMyStateData[j].CountUsed;	// Anzahl der aktuell belegten User-IDs in diesem Block 
+
+
+					for (UINT u=0; u< pMyStateData[j].CountMax; u++)
+					{
+						strncpy (&pMyStateData[j].UserList[(MAX_USERNAME_LENGTH+1)*u],
+							          &pOldMyStateData[j].UserList[(MAX_USERNAME_LENGTH+1)*u], 
+							          MAX_USERNAME_LENGTH+1);
+					}
+					//memcpy (&pMyStateData[j].UserList,&pOldMyStateData[j].UserList, (MAX_USERNAME_LENGTH+1)*INITIAL_VERSION_USER_REF_LIST_ENTRIES);
+				}
+
+
+				bResult = WriteFile (hStatfile, 
+									(LPVOID) pMyStateData,
+									(DWORD) sizeof(TStateData)* lock_info_count,
+									&dwBytesRead,
+									NULL);
+				if ( (bResult != TRUE) || (dwBytesWritten =! (DWORD) sizeof(TStateData)))
+				{
+					sprintf(err, "Error while writing data into statfile \n" );
+					throw err;
+				}	
+
+				i += lock_info_count;
+				
+				printf ("%i ",i);
+			}		
+			
+			delete [] pMyStateData;
+			delete [] pOldMyStateData;
+			
+			if (SetFilePointer (hStatfile, 0, NULL, FILE_CURRENT) != MyFileInfo.OffsetStateIndex )
+				throw "Error: inconsistence of file pointer for index !\n";
+			
+			
+			printf("convert index informations ...\n");	
+
+			// old stateindex and new stateindex
+			if ( (( pOldMyStateIndex = new OldTStateIndex [MyFileInfo.NoOfDataElements])==NULL)
+				|| ( (pMyStateIndex = new TStateIndex [MyFileInfo.NoOfDataElements])==NULL) )
+			{
+				sprintf(err, "Error: malloc for %u index entries failed!\n", 
+							MyFileInfo.NoOfDataElements);
+				throw err;
+			}
+			
+			bResult = ReadFile (
+					hOldStatfile,
+					(LPVOID) pOldMyStateIndex,
+					(DWORD) (sizeof (OldTStateIndex) * MyFileInfo.NoOfDataElements),
+					&dwBytesRead,
+					NULL);
+
+			if (bResult == FALSE)
+			{
+				sprintf(err, "Error: ReadStateIndex from old stafile (%s) failed\n", OldStatfile);
+				throw err;
+			}
+			if (dwBytesRead != (DWORD) (sizeof (OldTStateIndex) * MyFileInfo.NoOfDataElements))
+			{
+				sprintf(err, "Error: ReadStateIndex - staefile (%s) currupted\n", OldStatfile);
+				throw err;
+			}
+			sizeof_TStateData = (DWORD) (sizeof (TStateData));
+			sizeof_OldTStateData = (DWORD) (sizeof (OldTStateData));
+			for (i=0;i < MyFileInfo.NoOfDataElements;i++)
+			{
+				strcpy(pMyStateIndex[i].Name, pOldMyStateIndex[i].Name);
+				pMyStateIndex[i].Pos = ((pOldMyStateIndex[i].Pos - OldMyFileInfo.OffsetStateData) /
+											sizeof_OldTStateData ) * sizeof_TStateData +
+											MyFileInfo.OffsetStateData ;
+			}
+			bResult = WriteFile (hStatfile, 
+								(LPVOID) pMyStateIndex,
+								(DWORD) (sizeof(TStateIndex) * MyFileInfo.NoOfDataElements),
+								&dwBytesRead,
+								NULL);
+			if ( (bResult != TRUE) || 
+				(dwBytesWritten =! (DWORD) (sizeof(TStateIndex) * MyFileInfo.NoOfDataElements)))
+			{
+				sprintf(err, "Error while writing index into statfile \n" );
+				throw err;
+			}
+
+			printf("check consistence of new statfile ...\n");	
+			for (i=0 ;i < MyFileInfo.NoOfDataElements;i++)
+			{
+				if (MySetFilePointer (hStatfile, pMyStateIndex[i].Pos) != 0)
+				{
+					sprintf(err, "cannot set file pointer for reading LockInfo for %s"
+								, pMyStateIndex[i].Name);
+					throw err;
+				}
+				bResult= ReadFile (	hStatfile,
+									(LPVOID) &MyStateData,
+									(DWORD) sizeof(TStateData),
+									&dwBytesRead,
+									NULL);
+				
+				if ( (bResult != TRUE) || (dwBytesRead =! (DWORD) sizeof(TStateData)) )
+				{
+					sprintf(err, "Error while reading of %s (%i) from new statfile (%i)\n", 
+							pMyStateIndex[i].Name, i, dwBytesRead );
+					throw err;
+				}
+
+				if ( strcmp(pMyStateIndex[i].Name, MyStateData.Name) != 0)
+				{
+					sprintf(err, "Wrong index reference of %s (%i) from new statfile (reference to %s)\n", 
+							pMyStateIndex[i].Name, i, MyStateData.Name );
+					throw err;
+				}
+			}
+			
+			// Close file again
+			CloseHandle(hStatfile);
+			// Close file again
+			CloseHandle(hOldStatfile);
+		}
+	}
+	catch (const char * errString)
+	{
+		// Close file again
+		CloseHandle(hStatfile);
+		// Close file again
+		CloseHandle(hOldStatfile);
+		printf("Error: %s",err); 
+		return (-2); 
+	}
+
+   	return (0);
+}
+
+
+// Read the names of the pipes to create from the registry
+int GetPipeParameters(char ***PipeArray, int *NumPipes)
+{
+    // Name of named pipes: read from registry 
+	// Entries:
+	// Number of Grp-Pipes:	HKEY_LOCAL_MACHINE\Software\SAP\ITools\IServer\NumShares
+	// Grp-Share:			HKEY_LOCAL_MACHINE\Software\SAP\ITools\IServer\ShareN
+	//				(where N = NumShares)
+    // Build up each pipename by the following convention: \\.\pipe\ShareN
+
+	const char * IServerKey = "Software\\SAP\\ITools\\IServer";
+	const char * psNumGrpShares = "NumShares";
+	const char * psPipeNameSpec = "\\\\.\\pipe\\";
+	const char * GrpShareSpec = "Share";
+
+    char **NamedPipes;		// Array of pipe names
+
+	LONG lResult;
+	HKEY hkIServerKey;
+	DWORD dwNumGrpShares;
+
+	// Open the Key:
+	lResult = RegOpenKeyEx(
+		HKEY_LOCAL_MACHINE,
+		IServerKey,
+		0,
+		KEY_READ,
+		&hkIServerKey);
+	if (lResult != ERROR_SUCCESS)
+	{
+		MyError("GetPipeParameters","cannot read IserverKey from registry",
+			GetLastError());
+		return MY_NOTOK;
+	}
+	// Query Value
+	DWORD dwType; DWORD Size = sizeof (DWORD); 
+	lResult = RegQueryValueEx(
+		hkIServerKey,
+		psNumGrpShares,
+		0,
+		&dwType,
+		(LPBYTE)&dwNumGrpShares,
+		&Size);
+	if (lResult != ERROR_SUCCESS)
+	{
+		// Error handling
+		MyError("GetPipeParameters", "cannot read value NumShares from registry",
+			GetLastError());
+		return MY_NOTOK;
+	}
+	if (dwType != REG_DWORD)
+	{
+		MyError("GetPipeParameters", "Key NumShares must be defined as DWORD in registry",0);
+		return MY_NOTOK;
+	}
+
+	// Get the space for the NamedPipes array
+	NamedPipes = (char**) new char [dwNumGrpShares * sizeof (char*)];
+	
+	// Now read the appropriate Grp-Shares and build up the pipenames
+	for (DWORD i=0; i<dwNumGrpShares; i++)
+	{
+		// Build up the value name
+		char regKey[64] = "";
+		char * regValue = NULL;
+		char * pipeName = NULL;
+		sprintf(regKey,"%s%li",  GrpShareSpec, i);
+
+		// Query Value - Get size needed for result buffer
+		lResult = RegQueryValueEx(
+			hkIServerKey,
+			regKey,
+			0,
+			NULL,
+			NULL,
+			&Size);
+
+		if (lResult != ERROR_SUCCESS)
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot read size for Share variable from registry",
+				GetLastError());
+			return MY_NOTOK;
+		}
+		regValue = new char [Size];
+		pipeName = new char [strlen(psPipeNameSpec) + Size];
+		if ((regValue == NULL) || (pipeName == NULL))
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot allocate memory for Share and pipeName",
+				GetLastError());
+			return MY_NOTOK;
+		}
+		// Read Value
+		lResult = RegQueryValueEx(
+			hkIServerKey,
+			regKey,
+			0,
+			NULL,
+			(LPBYTE)regValue,
+			&Size);
+		if (lResult != ERROR_SUCCESS)
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot read value for Share from registry",
+				GetLastError());
+			return MY_NOTOK;
+		}
+
+		// Build up the pipename and enter it to the array
+		strcpy (pipeName, psPipeNameSpec);
+		strcat (pipeName, regValue);
+		delete [] regValue;
+		NamedPipes[i] = pipeName;
+	}// for
+
+	*NumPipes = dwNumGrpShares;
+	*PipeArray = NamedPipes;
+	return MY_OK;
+}
+
+
+// error function (version one)
+void MyError(const char * Function, const char * errString, DWORD dwError)
+{
+	TCHAR buf[1024], api_msg[256] = "";
+
+	if (dwError != NO_ERROR)
+	{
+		GetLastErrorText( api_msg, 256 );
+	}
+	printf("Error in %s: %s (%s[%li]", Function, errString, api_msg, dwError);
+
+}
+
+
+int MySetFilePointer (HANDLE hFile, DWORD Pos)
+{
+	if (SetFilePointer (hFile, Pos, NULL, FILE_BEGIN) == 0xFFFFFFFF)
+	{
+		char err[512];
+		sprintf(err, "cannot set FilePointer to %li!\n", Pos);
+		MyError("MySetFilePointer", err, GetLastError());
+		return(-1);	// no sense to continue
+	}
+	return 0;
+}
+
+
+
+
+//
+//  FUNCTION: ReportStatusToSCMgr()
+//
+//  PURPOSE: Sets the current status of the service and
+//           reports it to the Service Control Manager
+//
+//  PARAMETERS:
+//    dwCurrentState - the state of the service
+//    dwWin32ExitCode - error code to report
+//    dwWaitHint - worst case estimate to next checkpoint
+//
+//  RETURN VALUE:
+//    TRUE  - success
+//    FALSE - failure
+//
+//  COMMENTS:
+//
+BOOL ReportStatusToSCMgr(DWORD dwCurrentState,
+                         DWORD dwWin32ExitCode,
+                         DWORD dwWaitHint)
+{
+    static DWORD dwCheckPoint = 1;
+    BOOL fResult = TRUE;
+
+
+    if ( !bDebug ) // when debugging we don't report to the SCM
+    {
+        if (dwCurrentState == SERVICE_START_PENDING)
+            ssStatus.dwControlsAccepted = 0;
+        else
+            ssStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+
+        ssStatus.dwCurrentState = dwCurrentState;
+        ssStatus.dwWin32ExitCode = dwWin32ExitCode;
+        ssStatus.dwWaitHint = dwWaitHint;
+
+        if ( ( dwCurrentState == SERVICE_RUNNING ) ||
+             ( dwCurrentState == SERVICE_STOPPED ) )
+            ssStatus.dwCheckPoint = 0;
+        else
+            ssStatus.dwCheckPoint = dwCheckPoint++;
+
+
+        // Report the status of the service to the service control manager.
+        //
+        if (!(fResult = SetServiceStatus( sshStatusHandle, &ssStatus))) {
+            AddToMessageLog(TEXT("SetServiceStatus"));
+        }
+    }
+    return fResult;
+}
+
+
+
+//
+//  FUNCTION: AddToMessageLog(LPTSTR lpszMsg)
+//
+//  PURPOSE: Allows any thread to log an error message
+//
+//  PARAMETERS:
+//    lpszMsg - text for message
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+VOID AddToMessageLog(LPTSTR lpszMsg, WORD wErrorType)
+{
+    TCHAR   szMsg[256];
+    HANDLE  hEventSource;
+    LPTSTR  lpszStrings[2];
+
+
+    if ( !bDebug )
+    {
+        dwErr = GetLastError();
+
+        // Use event logging to log the error.
+        //
+        hEventSource = RegisterEventSource(NULL, TEXT(SZAPPNAME));
+
+		if (wErrorType == EVENTLOG_ERROR_TYPE)
+		{
+			_stprintf(szMsg, TEXT("%s error: %d"), TEXT(SZAPPNAME), dwErr);
+			lpszStrings[0] = szMsg;
+			lpszStrings[1] = lpszMsg;
+
+			if (hEventSource != NULL) 
+				ReportEvent(hEventSource, // handle of event source
+					wErrorType,  // event type
+					0,                    // event category
+					0,                    // event ID
+					NULL,                 // current user's SID
+					2,                    // strings in lpszStrings
+					0,                    // no bytes of raw data
+					(const char **)lpszStrings,   // array of error strings
+					NULL);                // no raw data
+		}
+		else
+		{
+			_stprintf(szMsg, TEXT("%s: %s"), TEXT(SZAPPNAME), lpszMsg);
+			lpszStrings[0] = szMsg;
+
+			if (hEventSource != NULL)
+				ReportEvent(hEventSource, // handle of event source
+					wErrorType,  // event type
+					0,                    // event category
+					0,                    // event ID
+					NULL,                 // current user's SID
+					1,                    // strings in lpszStrings
+					0,                    // no bytes of raw data
+					(const char **)lpszStrings,   // array of error strings
+					NULL);                // no raw data
+
+
+		}
+        
+		(VOID) DeregisterEventSource(hEventSource);
+        
+    }
+}
+
+
+
+
+
+
+//
+//  FUNCTION: GetLastErrorText
+//
+//  PURPOSE: copies error message text to string
+//
+//  PARAMETERS:
+//    lpszBuf - destination buffer
+//    dwSize - size of buffer
+//
+//  RETURN VALUE:
+//    destination buffer
+//
+//  COMMENTS:
+//
+LPTSTR GetLastErrorText( LPTSTR lpszBuf, DWORD dwSize )
+{
+    DWORD dwRet;
+    LPTSTR lpszTemp = NULL;
+
+    dwRet = FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                           NULL,
+                           GetLastError(),
+                           LANG_NEUTRAL,
+                           (LPTSTR)&lpszTemp,
+                           0,
+                           NULL );
+
+    // supplied buffer is not long enough
+    if ( !dwRet || ( (long)dwSize < (long)dwRet+14 ) )
+        lpszBuf[0] = TEXT('\0');
+    else
+    {
+        lpszTemp[lstrlen(lpszTemp)-2] = TEXT('\0');  //remove cr and newline character
+        _stprintf( lpszBuf, TEXT("%s (0x%x)"), lpszTemp, GetLastError() );
+    }
+
+    if ( lpszTemp )
+        LocalFree((HLOCAL) lpszTemp );
+
+    return lpszBuf;
+}
+
+
+
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

@@ -1,0 +1,3952 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-23
+*****************************************************
+modname : VKB720
+changed : 2000-11-23
+module  : Single_Select
+ 
+Author  : ElkeZ
+Created : 1987-09-22
+*****************************************************
+ 
+Purpose : Search in one table using the strategy
+          information build in AK
+ 
+Define  :
+ 
+        PROCEDURE
+              k720finish_catalog_select (
+                    VAR m             : tgg00_MessBlock;
+                    VAR sel           : tgg00_SelectFieldsParam;
+                    VAR strat         : tgg07_StrategyInfo;
+                    VAR selrec        : tgg07_select_context;
+                    VAR getrec        : tgg07_get_param;
+                    VAR lbuf          : tgg00_Rec);
+ 
+        PROCEDURE
+              k720init_ref_statistic;
+ 
+        PROCEDURE
+              k720ref_statistic (
+                    VAR arr_index : tgg00_RefInfoIndex;
+                    VAR strat     : tgg07_StrategyInfo);
+ 
+        PROCEDURE
+              k720diagmon_strat_put (
+                    VAR trans         : tgg00_TransContext;
+                    VAR gg_strategy   : tgg07_StrategyInfo);
+&       ifdef trace
+ 
+        PROCEDURE
+              k720trace_selrec (
+                    VAR m      : tgg00_MessBlock;
+                    VAR selrec : tgg07_select_param);
+&       endif
+ 
+        PROCEDURE
+              k720start_catalog_select (
+                    VAR m                : tgg00_MessBlock;
+                    VAR sel              : tgg00_SelectFieldsParam;
+                    VAR gg_strategy      : tgg07_StrategyInfo;
+                    VAR selrec           : tgg07_select_context;
+                    VAR finding_possible : boolean );
+ 
+        PROCEDURE
+              k720monitor (
+                    VAR trans         : tgg00_TransContext;
+                    VAR sel           : tgg00_SelectFieldsParam;
+                    start_sec         : tsp00_Int4;
+                    start_microsec    : tsp00_Int4;
+                    start_phys_ios    : tsp00_Int4;
+                    start_suspends    : tsp00_Int4;
+                    start_waits       : tsp00_Int4;
+                    put_strat         : boolean;
+                    arr_index         : tgg00_RefInfoIndex;
+                    strat_cnt         : boolean);
+ 
+        PROCEDURE
+              k720show_monitor (VAR info : tgg00_ReferenceInfo);
+ 
+        PROCEDURE
+              k720_initialize (
+                    VAR m                : tgg00_MessBlock;
+                    VAR selrec           : tgg07_select_param;
+                    VAR gg_strategy      : tgg07_StrategyInfo;
+                    VAR use_stopkey      : boolean);
+ 
+        PROCEDURE
+              k720_select (
+                    VAR m      : tgg00_MessBlock;
+                    VAR getrec : tgg07_get_param;
+                    VAR selrec : tgg07_select_param);
+ 
+        PROCEDURE
+              k720_single_select (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k720_test_subquery (
+                    VAR trans   : tgg00_TransContext;
+                    VAR datapart: tgg00_DataPart;
+                    datapartsize: tsp00_Int4;
+                    VAR mdesc   : tgg00_StackDesc;
+                    VAR rec     : tgg00_Rec);
+ 
+        PROCEDURE
+              k720apply_aggr_func (
+                    VAR funct_fields : tgg00_AggrDescrRec;
+                    VAR listkey      : tgg00_Lkey;
+                    VAR lbuf         : tsp00_Buf;
+                    one_list_only    : boolean;
+                    VAR e            : tgg00_BasisError);
+ 
+        PROCEDURE
+              k720_maxresult_get (
+                    strat_maxcnt       : tsp00_Int4;
+                    VAR maxresult      : tsp00_Int4);
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        PROCEDURE
+              a101_CreateGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    tempFileType   : tgg00_TfnTemp);
+ 
+        PROCEDURE
+              a101_ResetGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    tempFileType   : tgg00_TfnTemp);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFiles(
+                    VAR trans      : tgg00_TransContext;
+                    fileType       : tgg00_TfnTemp(*ptocConst*);
+                    level          : tsp00_Int4(*ptocConst*);
+                    subLevel       : tsp00_Int2(*ptocConst*);
+                    VAR fileName   : tgg00_Filename);
+ 
+        PROCEDURE
+              a101_GetTempFileInstance(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_GetLogicalFilename(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01diag_monitor_on : boolean;
+              a01diag_analyze_on : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy : VAK70;
+ 
+        VAR
+              a70glob_fetch_strats      : tgg07_StratEnumSet;
+              a70glob_build_strats      : tgg07_StratEnumSet;
+              a70glob_key_fetch_strats  : tgg07_StratEnumSet;
+              a70glob_inv_fetch_strats  : tgg07_StratEnumSet;
+              a70glob_inv_strats        : tgg07_StratEnumSet;
+              a70glob_key_strats        : tgg07_StratEnumSet;
+              a70glob_join_strats       : tgg07_StratEnumSet;
+              a70glob_join_inv_strats   : tgg07_StratEnumSet;
+              a70glob_subq_strats       : tgg07_StratEnumSet;
+              a70glob_in_strats         : tgg07_StratEnumSet;
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_1 : VAK725;
+ 
+        PROCEDURE
+              a725output_gg_strat (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR gg_strat  : tgg07_StrategyInfo);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_2 : VAK71;
+ 
+        FUNCTION
+              a71code_distinct_optim (
+                    VAR gg_strategy : tgg07_StrategyInfo) : tsp00_Int2;
+ 
+        PROCEDURE
+              a71change_stack_at_runtime(
+                    VAR mblock      : tgg00_MessBlock;
+                    VAR strategy    : tgg07_StrategyInfo;
+                    VAR backup_info : tgg07_stack_backup_info;
+                    VAR mblock_changed  : boolean);
+ 
+        PROCEDURE
+              a71restore_stack_at_runtime(
+                    VAR mblock      : tgg00_MessBlock;
+                    VAR strategy    : tgg07_StrategyInfo;
+                    VAR backup_info : tgg07_stack_backup_info;
+                    mblock_changed  : boolean );
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_transaction : VKB53;
+ 
+        PROCEDURE
+              k53wait (
+                    VAR t     : tgg00_TransContext;
+                    MessType  : tgg00_MessType;
+                    MessType2 : tgg00_MessType2);
+ 
+        PROCEDURE
+              k53perm_temp_lock (
+                    VAR t          : tgg00_TransContext;
+                    lock_unlock    : tgg00_MessType;
+                    lock_mode      : tgg00_LockReqMode;
+                    lock_handling  : tgg00_HandlingSet;
+                    VAR lock_tabid : tgg00_Surrogate;
+                    VAR k          : tgg00_Lkey);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_inv_link_trigger_handling : VKB62;
+ 
+        PROCEDURE
+              k62return_trigger (VAR m : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_get : VKB71;
+ 
+        PROCEDURE
+              k71sub_value_get (
+                    VAR t   : tgg00_TransContext;
+                    VAR op  : tgg00_StackEntry;
+                    dataptr : tsp00_MoveObjPtr;
+                    datasize: integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select_Part2: VKB721;
+ 
+        PROCEDURE
+              k721call_later_output (
+                    VAR m    : tgg00_MessBlock;
+                    VAR buf  : tsp00_Buf;
+                    m_keylen : integer);
+ 
+        PROCEDURE
+              k721do_avg (
+                    VAR m        : tgg00_MessBlock;
+                    VAR selrec   : tgg07_select_param);
+ 
+        PROCEDURE
+              k721do_rowno (
+                    VAR m      : tgg00_MessBlock;
+                    VAR selrec : tgg07_select_param);
+ 
+        PROCEDURE
+              k721null_result (
+                    VAR m         : tgg00_MessBlock;
+                    VAR selrec    : tgg07_select_param;
+                    VAR sel       : tgg00_SelectFieldsParam;
+                    act_cntresult : tsp00_Int4;
+                    later_output  : boolean;
+                    m_keylen      : integer);
+ 
+        PROCEDURE
+              k721strat_distribution (
+                    VAR m                : tgg00_MessBlock;
+                    VAR getrec           : tgg07_get_param;
+                    VAR selrec           : tgg07_select_param;
+                    VAR sel              : tgg00_SelectFieldsParam;
+                    VAR strat            : tgg07_StrategyInfo;
+                    VAR finding_possible : boolean);
+ 
+        FUNCTION
+              k721out_entry (
+                    mb_st : tgg00_StackListPtr;
+                    curr : integer) : integer;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select : VKB73;
+ 
+        PROCEDURE
+              k73_index_range (
+                    VAR m                : tgg00_MessBlock;
+                    VAR getrec           : tgg07_get_param;
+                    VAR selrec           : tgg07_select_param;
+                    VAR sel              : tgg00_SelectFieldsParam;
+                    VAR strat            : tgg07_StrategyInfo;
+                    VAR finding_possible : boolean);
+ 
+        PROCEDURE
+              k73_seq_search (
+                    VAR m            : tgg00_MessBlock;
+                    VAR selrec       : tgg07_select_param;
+                    VAR sel          : tgg00_SelectFieldsParam;
+                    VAR strat        : tgg07_StrategyInfo;
+                    finding_possible : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_Join_Select : VKB74;
+ 
+        PROCEDURE
+              k74rowno_position (
+                    VAR m      : tgg00_MessBlock;
+                    VAR getrec : tgg07_get_param;
+                    VAR selrec : tgg07_select_param);
+ 
+        PROCEDURE
+              k74finish_l_outer_join (
+                    VAR m      : tgg00_MessBlock;
+                    VAR getrec : tgg07_get_param;
+                    VAR selrec : tgg07_select_param);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id     : tgg00_FileId;
+              b01fullkey        : tsp00_Key;
+ 
+        PROCEDURE
+              b01move_filecontent (
+                    VAR t         : tgg00_TransContext;
+                    VAR source_id : tgg00_FileId;
+                    VAR target_id : tgg00_FileId);
+ 
+        PROCEDURE
+              b01empty_file (
+                    VAR t       : tgg00_TransContext;
+                    VAR current : tgg00_FileId);
+ 
+        PROCEDURE
+              b01vstate_fileversion (VAR t : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_7 : VBD07;
+ 
+        PROCEDURE
+              b07cadd_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR act_tree_id : tgg00_FileId;
+                    VAR b           : tsp00_Buf);
+ 
+        PROCEDURE
+              b07cprev_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR act_tree_id : tgg00_FileId;
+                    VAR rk          : tgg00_Lkey;
+                    VAR set_result  : tgg00_BdSetResultRecord;
+                    VAR tree_pos    : tgg00_FilePos;
+                    VAR b           : tsp00_Buf);
+ 
+        PROCEDURE
+              b07cnext_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR act_tree_id : tgg00_FileId;
+                    VAR rk          : tgg00_Lkey;
+                    VAR set_result  : tgg00_BdSetResultRecord;
+                    VAR tree_pos    : tgg00_FilePos;
+                    VAR b           : tsp00_MoveObj);
+ 
+        PROCEDURE
+              b07cdel_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR act_tree_id : tgg00_FileId;
+                    VAR rk          : tgg00_Lkey);
+ 
+        PROCEDURE
+              b07cget_record (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId;
+                    VAR rk      : tgg00_Lkey;
+                    VAR b       : tsp00_Buf);
+ 
+      ------------------------------ 
+ 
+        FROM
+              task_temp_data_cache : VBD21;
+ 
+        PROCEDURE
+              b21m_reset_monitor (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    reset_sum : boolean);
+ 
+        PROCEDURE
+              b21mp_copy_result_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    copy_result : tsp00_C3);
+ 
+        PROCEDURE
+              b21mp_kb_calls_put (temp_cache_ptr : tgg00_TempDataCachePtr);
+ 
+        PROCEDURE
+              b21mp_microsec_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_new_sum_put (temp_cache_ptr : tgg00_TempDataCachePtr);
+ 
+        PROCEDURE
+              b21mp_phys_ios_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    phys_ios : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_rows_qual_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    rows_qual : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_rows_read_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    rows_read : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_sec_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    sec : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_strat_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    VAR strategy : tsp00_C40;
+                    len : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_suspends_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    suspends : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_virt_reads_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    virt_reads : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_waits_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    waits : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              ref_statistic : VBD73;
+ 
+        PROCEDURE
+              b73cmd_count (statement_kind : tgg00_RefInfoIndex);
+ 
+        PROCEDURE
+              b73cmds_count (
+                    statement_kind : tgg00_RefInfoIndex;
+                    count : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              FileDir_Wrapper : vbd998;
+ 
+        FUNCTION
+              bd998IsTempFile(
+                    VAR trans  : tgg00_TransContext;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              bd998IsExtendedTempFile(
+                    VAR trans  : tgg00_TransContext;
+                    VAR fileId : tgg00_FileId) : boolean;
+ 
+        FUNCTION
+              bd998GetExtendedTempFileType(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        PROCEDURE
+              bd998SetTempFileIndex(
+                    VAR trans  : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    sublevel       : tsp00_Int4(*ptocConst*));
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              bd999GetDataIOBlockCount : tsp00_Int4;
+ 
+        FUNCTION
+              bd999GetPageSize : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01ConsistentReadEnabled : boolean;
+              g01vtrace                : tgg00_VtraceState;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04init_select_fields (
+                    VAR sel       : tgg00_SelectFieldsParam;
+                    data_addr     : tsp00_MoveObjPtr;
+                    data_size     : tsp00_Int4;
+                    work_st_addr  : tgg00_StackListPtr;
+                    work_st_max   : tsp00_Int2;
+                    work_buf_addr : tsp00_MoveObjPtr;
+                    work_buf_size : tsp00_Int4;
+                    curr_sqlmode  : tsp00_SqlMode;
+                    fieldlistptr  : tgg00_FieldListsPtr);
+ 
+        PROCEDURE
+              g04limitprimkeys (
+                    VAR m           : tgg00_MessBlock;
+                    VAR startkeyarr : tgg07_ColPosArr;
+                    VAR start_key   : tgg00_Lkey;
+                    VAR stopkeyarr  : tgg07_ColPosArr;
+                    VAR stop_key    : tgg00_Lkey;
+                    VAR use_stopkey : boolean;
+                    in_stpos_hint   : tsp00_Int2;
+                    in_value_idx    : tsp00_Int2);
+ 
+        PROCEDURE
+              g04inbetween_change (
+                    VAR m                : tgg00_MessBlock;
+                    VAR finding_possible : boolean);
+ 
+        PROCEDURE
+              g04build_temp_tree_id (
+                    VAR curr : tgg00_FileId;
+                    VAR t : tgg00_TransContext);
+ 
+        PROCEDURE
+              g04spec_null_check (
+                    VAR m     : tgg00_MessBlock;
+                    VAR b_err : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Help_Procedures: VGG041;
+ 
+        PROCEDURE
+              g041statistic_trace (
+                    VAR t     : tgg00_TransContext;
+                    arr_index : tgg00_RefInfoIndex;
+                    int1      : tsp00_Int4;
+                    int2      : tsp00_Int4;
+                    int3      : tsp00_Int4;
+                    int4      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalForcedFill (
+                    size     : tsp00_Int4;
+                    m        : tsp00_MoveObjPtr;
+                    pos      : tsp00_Int4;
+                    len      : tsp00_Int4;
+                    fillchar : char);
+ 
+        PROCEDURE
+              SAPDB_PascalFill  (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    fill_char      : char;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove   (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    destin_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    destin         : tsp00_MoveObjPtr;
+                    destin_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vclock (
+                    VAR sec      : tsp00_Int4;
+                    VAR microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              vmonitor (
+                    pid          : tsp00_TaskId;
+                    VAR phys_ios : tsp00_Int4;
+                    VAR suspends : tsp00_Int4;
+                    VAR waits    : tsp00_Int4);
+ 
+        PROCEDURE
+              vnewbuf (count      : tsp00_Int4;
+                    VAR available : tsp00_Int4;
+                    VAR p         : tsp00_Addr;
+                    VAR ok        : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-20 : VSP20;
+ 
+        FUNCTION
+              s20buf_to_int4 (
+                    VAR source : tsp00_MoveObj;
+                    source_pos : tsp00_Int4) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40glint (
+                    VAR buf  : tsp00_MoveObj;
+                    pos      : tsp00_Int4;
+                    len      : integer;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              PUT-Conversions : VSP41;
+ 
+        PROCEDURE
+              s41p4int (
+                    VAR buf : tsp00_ResNum;
+                    pos     : tsp00_Int4;
+                    source  : tsp00_Int4;
+                    VAR res : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Number-Arithmetic : VSP51;
+ 
+        PROCEDURE
+              s51add (
+                    VAR left       : tsp00_Buf;
+                    lpos           : tsp00_Int4;
+                    llen           : integer;
+                    VAR right      : tsp00_Key;
+                    rpos           : tsp00_Int4;
+                    rlen           : integer;
+                    VAR result     : tsp00_Buf;
+                    respos         : tsp00_Int4;
+                    reslen         : integer;
+                    resfrac        : integer;
+                    VAR resbytelen : integer;
+                    VAR ret        : tsp00_NumError);
+&       IFDEF TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01refinfoindex (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    idx   : tgg00_RefInfoIndex);
+ 
+        PROCEDURE
+              t01name (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Name);
+ 
+        PROCEDURE
+              t01messtype (
+                    debug        : tgg00_Debug;
+                    nam          : tsp00_Sname;
+                    mess_type    : tgg00_MessType);
+ 
+        PROCEDURE
+              t01mess2type (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    mess2_type    : tgg00_MessType2);
+ 
+        PROCEDURE
+              t01key (
+                    debug   : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    VAR k   : tgg00_Lkey);
+ 
+        PROCEDURE
+              t01sname (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01basis_error (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01bool2 (
+                    debug     : tgg00_Debug;
+                    nam1      : tsp00_Sname;
+                    bool1     : boolean;
+                    nam2      : tsp00_Sname;
+                    bool2     : boolean);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01p2int4 (
+                    debug : tgg00_Debug;
+                    nam_1 : tsp00_Sname;
+                    int_1 : tsp00_Int4;
+                    nam_2 : tsp00_Sname;
+                    int_2 : tsp00_Int4);
+ 
+        PROCEDURE
+              t01qual (
+                    level     : tgg00_Debug;
+                    VAR part1 : tgg00_QualBuf);
+ 
+        PROCEDURE
+              t01site (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    site     : tgg00_ServerdbNo);
+ 
+        FUNCTION
+              t01trace (debug : tgg00_Debug) : boolean;
+ 
+        PROCEDURE
+              t01treeid  (
+                    level    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    VAR tree : tgg00_FileId);
+ 
+        PROCEDURE
+              t01strat_enum (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    strat : tgg07_StratEnum);
+&       ENDIF
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+        PROCEDURE
+              b07cadd_record;
+ 
+              tgg00_Rec tsp00_Buf
+ 
+        PROCEDURE
+              b07cprev_record;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              b07cget_record;
+ 
+              tgg00_Rec tsp00_Buf
+ 
+        PROCEDURE
+              s41p4int;
+ 
+              tsp00_MoveObj tsp00_ResNum
+ 
+        PROCEDURE
+              s51add;
+ 
+              tsp00_MoveObj tsp00_Buf
+              tsp00_MoveObj tsp00_Key
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              vnewbuf;
+ 
+              tsp00_PageAddr tsp00_Addr
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Specification:
+ 
+K720_INITIALIZE
+------------------------
+ 
+The strategy, file names, file versions, maximum permissible result
+count, primary startkey and primary stopkey are transferred from
+the mess_buffer to suitable structures that are used
+in the further processing.
+ 
+K720_TEST_SUBQUERY
+------------------------
+ 
+For each qualification that contains a subquery, a check is run to
+find out whether the (previously executed) subquery has supplied at
+least one result so that, if applicable, unnecessary searching can
+be avoided during the qualification check of individual table records.
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+ 
+Description:
+ 
+K720_INITIALIZE is used to initialize strat, finding_possible and
+parts of selrec.  As in AK, the strategy information or, if there is
+more than one strategy, the first part of the strategies is
+available in strat.  Finding_possible indicates whether any
+table record could possibly fulfill the condition or whether, for
+example, a 'between' condition with lower limit > upper limit
+renders it impossible and, therefore, the search need not take place
+at all.
+If there is more than one strategy (cnt_strat > 1) and duplicate
+records are not to be deleted in any case, a help file is
+generated.  The primary key of the particular record from which the
+result record to be processed was formed is then entered in this
+help file.  If the key is already present, the result record can no
+longer be entered.  Example:  Primary record with field1 = 'Mueller',
+field2 = 3.  Query: WHERE field1 = 'Mueller' OR field2 = 3.
+ 
+There are never result files for FETCH-strategies, for
+set updates or set deletes or for insert-selects.  If the result is
+supposed to be written to the file that exists throughout the
+entire session (res_tabname = blankname), the 'current' that was
+transferred is used; otherwise, a file with the transferred name is
+generated.
+One_result means that the result is not entered in a file but
+is entered in a buffer that is available in selrec.  BD orders and
+I/Os are not necessary.
+In the case of search orders with functions (SUM, AVG, etc ],
+'distinct' files are used to ensure that one file each is available
+for DISTINCT AVG|SUM|COUNT in which the distinctness can be checked
+before a result record is added to those that have
+already accumulated or counted.
+K720_TEST_SUBQUERY is called if any subquery is contained in the
+qualification. If appropriate, the stack entries are thereby manipulated
+in order to avoid unnecessary accesses to the subquery during the
+search operation in the primary data because the resulting knowledge
+(false or true result) is independent of the primary data and,
+for this reason, are already to be determined and entered in the
+stack entries at this time.
+Since, in the case of search conditions with 'OR', several search
+strategies sometimes must be processed consecutively, this is
+executed in a 'while' loop.  After KB720NEXT_STRAT has been processed,
+strat always looks as though there is only one strategy, on the end
+of which are currently appended totally uninteresting bytes.
+The CASE clause divides the strategies into two large categories:
+FETCH-strategies and all others. FETCH_strategies
+signify that, at the time of the select, a check should be
+run only to determine whether any result exists.  If no, the user
+immediately receives the error row_not_found at the time of the select.
+If yes, he is informed that the resultcount is unknown but
+at least one result exists.  These results, however, are not retrieved from
+the database until subsequent fetch operations are performed.
+For non FETCH-strategies, the entire search is performed
+at the time of the select.  The results are copied to a temporary
+result table.  From there they can be retrieved by 'fetch' without
+a complicated search and qualification test.
+The processing of all FETCH-strategies takes place in VKB73. Some
+parts of the procedure must be executed in any case, regardless of
+whether the search can be successful or not.
+The rest of the strategies are divided into
+strat_key_in    : the only key field has been qualified with '=' or 'IN'
+strat_key_range : no usable condition via an inverted field exists
+strat_inv_range : the first x fields of a multiple, named index have
+been qualified with '=', '>','>=','<','<=',BETWEEN or LIKE
+strat_join_viewkey,strat_viewkey : used only for the qualification test of the
+updateable join views.  The record whose key is at the beginning of
+mb_data is to be found and checked.
+ 
+If all strategies have been processed, the file is deleted
+that was generated only if there was more than one strategy.
+Any files that may have been generated for DISTINCT AVG|SUM|COUNT
+are also deleted.
+The AVG values are formed from the stored sums and record counters (DO_AVG).
+If there was otherwise no result (NULL_RESULT),
+a record with NULL or 0 values is generated.
+If rowno was in the output list during the select, the rowno value
+is installed at the appropriate positions (call of K720_DO_ROWNO).
+Then either the number of results found is supplied (strategies
+without fe_, no SELECT .. INTO) or the result record is transferred
+from the auxiliary buffer or from the file to mb_data of the
+mess_buffer.  The record must be removed from the file.
+In the case of an error, the result file must either be entirely
+deleted or emptied.
+ 
+K720_INITIALIZE
+------------------------
+ 
+The strategy is transferred from the mess_buffer to the associated
+record; result counters and file names are initialized.  For
+insert-select, the 2 fileversions (of the file to be searched and
+the file into
+which insertion is to be made) are kept separate. Positions 7 and
+8 of mb_data determine what should be done with duplicates during the
+insert (dupl).
+ 
+K720_MAXRESULT_GET
+------------------------
+ 
+2 bytes are available in the  Strategy_info for single-table selects
+and in minfo.n_maxcnt for joins. The maximum permissible number of
+results derives from these two bytes in conjunction with the
+Mess-Buffer.
+This number could not be stated directly without an int4.
+Execution would entail placing this value at the correct position in
+the last join mess buffer for Rowno_statements with parameters, a
+process that would be too complicated.
+The 2 bytes are transferred to K74_MAXRESULT_GET as strat_maxcnt
+and signify:
+ 
+-1  the number is not restricted(largest possible value)
+-2  Subquery without ALL or ANY; no more than one record may be
+found
+-3,-4 cannot occur
+<-4 ROWNO < x was stated as a condition. The value of x is at
+the position abs(strat_maxcnt) in part2 of the Mess-Buffer. Only
+x-1 records need be found.
+0   SELECT..INTO; no more than one record may be found
+1   EXISTS; a record need only be found
+2-4 cannot occur
+>4 ROWNO <= x was stated as a condition. the value of x is at
+the position strat_maxcnt in part2 of the Mess-Buffer
+Only values of abs(strat_maxcnt) > 4 can be considered for the
+Rowno data, because values appear only as of position 5 in part2 of
+the mess buffer and are preceded by total length and key length, where
+applicable.
+Since ROWNO <= 1 is permissible, in other words the value to be
+used during the search (maxresult) may be 1, the upper limit for
+SELECT..INTO has to be identified by other means.
+ROWNO <= x leads to an abort with an error of which the user is
+not notified, if there are x results.
+In the case of SELECT..INTO the first result should not lead to an
+abort; instead, a check has to be run for a second result that would
+lead to an error if it exists.
+SELECT..INTO or the subqueries that can have only one result thus
+have to be specially identified. Maxresult is, therefore, set to 0 and
+suitably queried in K72_ADD_INTO_RESULT.
+In a join, a strat_maxcnt <> -1 does not occur before the last
+join step, because it is the number of final results that is to be
+restricted, and not that of intermediate results.
+ 
+KB720DISTINCT_FILES
+------------------------
+ 
+This procedure is used to generate and delete files (controlled by
+the parameter 'create').  Each DISTINCT AVG|SUM|COUNT (MIN and MAX
+are internal only without 'distinct') needs a file into which it
+attempts to insert one record whose key consists of the group
+values, if specified, and of the value that is to be tested for
+its distinctness.
+A run-through of the stack entries is facilitated by the fact
+that the last qualification stack entry and all function stack
+entries indicate how many stack entries there have been since the
+previous function stack entry.
+ 
+K720_TEST_SUBQUERY
+------------------------
+ 
+The entire qualification is searched according to subquery conditions.
+Since subqueries have already been executed, the specified file name
+must exist.  An attempt is made to retrieve the last record of the file
+in order to check whether or not it is an empty file.  If there is a
+record there, it is useful for the qualification test to know whether
+or not it has a NULL value (elen_var = 2).
+If the file is empty, in order to avoid unnecessary accesses to the
+empty file, the result of the condition is entered in a Boolean stack
+entry (epos = 0 or 1), depending on whether the subquery condition is
+an ALL or an ANY condition or is a negated condition.
+ 
+KB720NEXT_STRAT
+------------------------
+ 
+If more than one strategy is required for the search (at least one
+'OR' condition was specified), the strategies have the following
+structure when they are transferred to KB:
+ 
+ 
+         88        ||     1         1          ilen     ||
+  -----------------||-----------------------------------||
+ | strategy header || strat-enum | ilen | strategy data ||
+  -----------------||-----------------------------------||
+                   ||                                   ||
+ 
+ 
+The strategy header includes data on file names, result record length
+and key length, etc.
+Strat-enum indicates the strategy enumeration value.
+If there were only one strategy, the strategy header would be
+followed by the strategy data only.  Strat-enum is contained in
+the strategy header.
+Strat-enum is transferred to the strategy header in KB720NEXT_STRAT.
+The next strategy data is moved over adjacent to the header.  Further
+processing can then be carried out as if there were only 1 strategy.
+Leng identifies the length of the strategy data that must be
+clipped off the beginning during the next KB720NEXT_STRAT.
+In the case of a join-select (or the first select for a join),
+the stack entry positions are increased, since the stack entry positions
+were established before the output stack entries were shifted to
+a position ahead of the qualification stack entries.  For strategies
+that can have a primary startkey and/or a primary stopkey, this
+is formed in G04_LIMITKEYS.
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_strat_cnt      = true (* k720monitor      *);
+      c_put_strat      = true (* k720monitor      *);
+ 
+VAR
+      k720monitor_info : tgg00_ReferenceInfo;
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720_select (
+            VAR m      : tgg00_MessBlock;
+            VAR getrec : tgg07_get_param;
+            VAR selrec : tgg07_select_param);
+ 
+CONST
+      c_copy_result     = 'YES';
+      c_not_copy_result = 'NO ';
+ 
+VAR
+      _backup_info    : tgg07_stack_backup_info;
+      _SumStratInfoLen: tsp00_Int4;
+      _start          : tsp00_Int2;
+      _stop           : tsp00_Int2;
+      _i              : tsp00_Int2;
+      _stratnum       : tsp00_Int2;
+      _start_sec      : tsp00_Int4;
+      _start_microsec : tsp00_Int4;
+      _start_phys_ios : tsp00_Int4;
+      _start_suspends : tsp00_Int4;
+      _start_waits    : tsp00_Int4;
+      _selfields      : tgg00_SelectFieldsParam;
+      _gg_strategy    : tgg07_StrategyInfo;
+      _arr_index      : tgg00_RefInfoIndex;
+      _b_err          : tgg00_BasisError;
+      _aux_error      : tgg00_BasisError;
+      _old_find_poss  : boolean;
+      _mblock_changed : boolean;
+ 
+BEGIN
+(* PTS 1001469 E.Z. *)
+IF  ( a01diag_monitor_on OR a01diag_analyze_on )
+THEN
+    BEGIN
+    vclock( _start_sec, _start_microsec );
+    vmonitor( m.mb_trns^.trTaskId_gg00, _start_phys_ios, _start_suspends,
+          _start_waits );
+    END
+ELSE
+    BEGIN
+    _start_sec      := 1;
+    _start_microsec := 0;
+    _start_phys_ios := 0;
+    _start_suspends := 0;
+    _start_waits    := 0;
+    END;
+(*ENDIF*) 
+(* check overflows *)
+g04spec_null_check( m, _b_err );
+;
+IF  ( _b_err = e_ok )
+THEN
+    kb720sel_first_part( m, selrec, _selfields, _gg_strategy )
+ELSE
+    m.mb_trns^.trError_gg00 := _b_err;
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    _stratnum := 1;
+    IF  ( _gg_strategy.str_strategy in
+        [ strat_key_range, strat_key_range_fetch ] )
+        AND
+        ( _gg_strategy.str_key_in_range.skir_keystart[ 0 ] = 0 ) AND
+        ( _gg_strategy.str_key_in_range.skir_keystop [ 0 ] = 0 )
+    THEN
+        BEGIN
+        IF  ( NOT (
+            ( ksp_aggr_MIN_opt in _gg_strategy.str_key_in_range.skir_strat_props )
+            OR
+            ( ksp_aggr_MAX_opt in _gg_strategy.str_key_in_range.skir_strat_props )))
+        THEN
+            BEGIN
+&           ifdef TRACE
+            t01strat_enum( kb, 'WARN8 SCAN  ', _gg_strategy.str_strategy );
+&           endif
+            m.mb_trns^.trWarning_gg00 := m.mb_trns^.trWarning_gg00 +
+                  [ warn0_exist, warn8_scan_or_sort ];
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        selrec.selr.selr_no_warn8_sort :=
+              ( NOT _gg_strategy.str_use_order )
+              OR
+              ( m.mb_type2 in
+              [ mm_first_join_select, mm_join_with_last_tab, mm_with_join ] )
+              OR
+              ( bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id) AND
+              ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id) in
+              [ ttfnSubquery_egg00, ttfnCorrelation_egg00 ] ));
+    (*ENDIF*) 
+    _SumStratInfoLen := 0;
+    _old_find_poss   := selrec.selr.selr_finding_poss;
+    _backup_info.bi_backup_ptr := NIL;
+    ;
+    (* loop a71restore_stack_at_runtimeall given strategies *)
+    WHILE ( _stratnum <= _gg_strategy.str_cnt_strat ) AND
+          ( m.mb_trns^.trError_gg00 = e_ok ) DO
+        BEGIN
+        _mblock_changed := false;
+        m.mb_trns^.trRteCommPtr_gg00^.virt_reads := -csp_maxint2;
+        _selfields.sfp_rows_read := 0;
+        _selfields.sfp_rows_qual := 0;
+        IF  ( _gg_strategy.str_cnt_strat > 1 )
+        THEN
+            BEGIN
+            kb720next_strat( m, selrec, _gg_strategy,
+                  _selfields.sfp_bd_use_stopkey, _SumStratInfoLen );
+            IF  ( _stratnum > 1 )
+            THEN
+                selrec.selr.selr_finding_poss := _old_find_poss;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        ;
+        IF  ( m.mb_trns^.trBdTcachePtr_gg00 <> NIL ) AND
+            ( a01diag_monitor_on OR a01diag_analyze_on )
+        THEN
+            BEGIN
+            IF  ( _gg_strategy.str_strategy in a70glob_fetch_strats )
+            THEN
+                b21mp_copy_result_put( m.mb_trns^.trBdTcachePtr_gg00,
+                      c_not_copy_result )
+            ELSE
+                b21mp_copy_result_put( m.mb_trns^.trBdTcachePtr_gg00,
+                      c_copy_result );
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ( m.mb_trns^.trError_gg00 = e_ok ) AND
+            (_gg_strategy.str_strategy in  a70glob_inv_strats) (* PTS 1116600 *)
+        THEN
+            b01vstate_fileversion( m.mb_trns^, m.mb_qual^.mtree );
+        (*ENDIF*) 
+        ;
+        IF  ( _gg_strategy.str_cnt_strat > 1 ) AND
+            ( _gg_strategy.str_strategy in a70glob_inv_strats )
+        THEN
+            BEGIN
+            (* change stack code and str_qual_kind if necessary *)
+            a71change_stack_at_runtime( m, _gg_strategy,
+                  _backup_info, _mblock_changed );
+            _selfields.sfp_bd_inv_only := _gg_strategy.str_qual_kind;
+            END;
+        (*ENDIF*) 
+        ;
+&       ifdef trace
+        IF  t01trace( kb ) AND ( _gg_strategy.str_strategy in
+            [strat_inv_range_merge_fetch, strat_inv_range_fetch,
+            strat_key_range_fetch] )
+        THEN
+            k720trace_selrec( m, selrec );
+&       endif
+        (*ENDIF*) 
+        IF  ( m.mb_trns^.trError_gg00 = e_ok )
+        THEN
+            CASE _gg_strategy.str_strategy OF
+                strat_inv_range_merge_fetch,
+                strat_inv_range_fetch :
+                    k73_index_range( m, getrec, selrec,
+                          _selfields, _gg_strategy,
+                          selrec.selr.selr_finding_poss );
+                strat_key_equal_fetch,
+                strat_key_range_fetch :
+                    k73_seq_search( m, selrec, _selfields, _gg_strategy,
+                          selrec.selr.selr_finding_poss );
+                OTHERWISE
+                    BEGIN
+                    IF  ( selrec.selr.selr_finding_poss )
+                    THEN
+                        BEGIN
+                        IF  ( selrec.selr.selr_count_all )
+                        THEN
+                            BEGIN
+                            selrec.selr.selr_count_bd :=
+                                  NOT selrec.selr.selr_join_with_func;
+                            _start := m.mb_qual^.mqual_pos +
+                                  m.mb_st^[ m.mb_qual^.mqual_pos ].epos - 1;
+                            _stop  := m.mb_qual^.mqual_pos + m.mb_qual^.mqual_cnt - 1;
+                            FOR _i := _start TO _stop DO
+                                IF  NOT (
+                                    ( m.mb_st^[ _i ].etype = st_dummy)
+                                    OR
+                                    ((m.mb_st^[ _i ].etype = st_bool) AND
+                                    ( m.mb_st^[ _i ].epos = cgg04_is_true))
+                                    OR
+                                    ( m.mb_st^[ _i ].etype = st_jump_false)
+                                    OR
+                                    ((m.mb_st^[ _i ].etype = st_op) AND
+                                    ( m.mb_st^[ _i ].eop = op_and)))
+                                THEN
+                                    selrec.selr.selr_count_bd := false;
+                                (*ENDIF*) 
+                            (*ENDFOR*) 
+                            END;
+                        (* PTS 1112079 E.Z. *)
+                        (*ENDIF*) 
+                        _selfields.sfp_check_for_result := false;
+&                       ifdef trace
+                        IF  t01trace( kb )
+                        THEN
+                            k720trace_selrec( m, selrec );
+&                       endif
+                        (*ENDIF*) 
+                        k721strat_distribution( m, getrec, selrec,
+                              _selfields, _gg_strategy,
+                              selrec.selr.selr_finding_poss );
+                        END;
+                    (*ENDIF*) 
+                    IF  ( m.mb_type = m_select ) AND
+                        ( selrec.selr.selr_res_keyl > RESCNT_MXGG04 ) (* PTS 1113927 *)
+                    THEN
+                        b73cmd_count( iins_sorts );
+                    (*ENDIF*) 
+                    IF  ( _stratnum  = _gg_strategy.str_cnt_strat ) AND
+                        ( m.mb_type   =  m_select )               AND
+                        ( m.mb_type2  <> mm_first_join_select )   AND
+                        ( m.mb_type2  <> mm_with_join )           AND
+                        ( NOT bd998IsTempFile (m.mb_trns^, m.mb_qual^.mtree)) AND
+                        ( hsTempLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00 )
+                    THEN
+                        BEGIN
+                        _aux_error := m.mb_trns^.trError_gg00;
+                        k53perm_temp_lock( m.mb_trns^,
+                              m_unlock, lckTabShare_egg00,
+                              m.mb_qual^.mtree.fileHandling_gg00,
+                              m.mb_qual^.mtree.fileTabId_gg00,
+                              selrec.selr.selr_invkey (* dummy *) );
+                        ;
+                        IF  ( _aux_error <> e_ok )
+                        THEN
+                            m.mb_trns^.trError_gg00 := _aux_error;
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END
+                END;
+            (*ENDCASE*) 
+        (*ENDIF*) 
+        ;
+        (* PTS 1001518 E.Z. *)
+        IF  ( _start_sec > 0 )
+        THEN
+            IF  ( m.mb_trns^.trError_gg00 <> e_unknown_strategy )  AND
+                ( m.mb_qual^.mtree.fileTfn_gg00    <> tfnSys_egg00 )
+            THEN
+                BEGIN
+                k720ref_statistic( _arr_index, _gg_strategy );
+                k720monitor( m.mb_trns^, _selfields, _start_sec,
+                      _start_microsec, _start_phys_ios,_start_suspends,
+                      _start_waits, c_put_strat, _arr_index, c_strat_cnt );
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        ;
+        a71restore_stack_at_runtime( m, _gg_strategy,
+              _backup_info, _mblock_changed );
+        _selfields.sfp_bd_inv_only := _gg_strategy.str_qual_kind;
+        ;
+        _stratnum := succ( _stratnum );
+        END;
+    (*ENDWHILE*) 
+    kb720sel_last_part( m, selrec, getrec, _selfields, _gg_strategy );
+    END
+ELSE
+    (* m.mb_trns^.trError_gg00 <> e_ok *)
+    BEGIN
+    m.mb_qual_len  := 0;
+    m.mb_data_len  := 0;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720distinct_files (
+            VAR m       : tgg00_MessBlock;
+            VAR selrec  : tgg07_select_param);
+ 
+VAR
+      _aux_error        : tgg00_BasisError;
+      _func_pos         : integer;
+      _output_start     : integer;
+      _func_cnt         : integer;
+      _f_count_all_pos  : integer;
+      _stpos            : integer;
+      _htree_id         : tgg00_FileId;
+ 
+BEGIN
+_output_start := m.mb_qual^.mqual_pos;
+_func_pos     := _output_start + m.mb_st^[ _output_start ].epos - 2;
+selrec.selr.selr_call_avg     := sfh_none;
+selrec.selr.selr_dis_file_cnt := 0;
+_func_cnt        := 0;
+_f_count_all_pos := 0;
+(* starts with 1, selrec.selr.selr_dis_file_cnt = 0 is used for the *)
+(* helpfile for more than one strategies *)
+_htree_id := selrec.selr.selr_distinct_id;
+m.mb_trns^.trError_gg00 := e_ok;
+IF  NOT (( m.mb_st^[ _func_pos ].etype = st_func ) AND
+    ( m.mb_st^[ _func_pos ].eop_func = op_f_none ))
+THEN
+    (* NOT LASTFUNCTION *)
+    m.mb_trns^.trError_gg00 := e_stack_type_illegal;
+(*ENDIF*) 
+_aux_error := m.mb_trns^.trError_gg00;
+;
+(* m.mb_st^[ _func_pos ].epos == offset to previous function *)
+WHILE (( _func_pos - m.mb_st^[ _func_pos ].epos > _output_start ) AND
+      ( m.mb_trns^.trError_gg00 = e_ok )) DO
+    BEGIN
+    _func_cnt := succ( _func_cnt );
+    _func_pos := _func_pos - m.mb_st^[ _func_pos ].epos;
+    (* loop over LASTFUNCTIONs *)
+    WHILE (( m.mb_st^[ _func_pos ].etype = st_func ) AND
+          ( m.mb_st^[ _func_pos ].eop_func = op_f_none )) DO
+        _func_pos := _func_pos - m.mb_st^[ _func_pos ].epos;
+    (*ENDWHILE*) 
+    IF  (m.mb_st^[ _func_pos ].etype = st_func)
+    THEN
+        IF  (m.mb_st^[ _func_pos ].eop_func in
+            [ op_f_avg   , op_f_dis_avg,
+            (*         op_f_sum     , op_f_dis_sum, *)
+            op_f_stddev  , op_f_dis_stddev,
+            op_f_variance, op_f_dis_variance ]) AND
+            (
+            (m.mb_st^[ _func_pos ].ecol_tab[1] = chr(true)) OR
+            selrec.selr.selr_union                         OR
+            (bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id) AND
+            (bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+            <> ttfnUserResult_egg00) AND
+            ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+            <> ttfnInto_egg00))
+            )
+        THEN
+            selrec.selr.selr_call_avg := sfh_all
+        ELSE
+            IF  (m.mb_st^[ _func_pos ].eop_func in
+                [ op_f_stddev  , op_f_dis_stddev,
+                op_f_variance, op_f_dis_variance ])
+            THEN
+                selrec.selr.selr_call_avg := sfh_stddev_variance;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    _stpos := k721out_entry( m.mb_st, _func_pos );
+    IF  (( m.mb_st^[ _stpos ].etype = st_output ) AND
+        ( m.mb_st^[ _stpos ].eop_out = op_o_output_hold ) AND
+        ( m.mb_st^[ _stpos + 1 ].eop_out = op_o_output_later ))
+    THEN
+        BEGIN
+        selrec.selr.selr_one_result     := true;
+        selrec.selr.selr_call_later_out := true;
+&       ifdef trace
+        t01name(kb, 'set call later out' );
+        t01sname(kb, 'set one res3' );
+&       endif
+        END;
+    (*ENDIF*) 
+    IF  ( m.mb_st^[ _func_pos ].etype = st_func )
+    THEN
+        BEGIN
+        IF  ( m.mb_st^[ _func_pos ].eop_func = op_f_all_count )
+        THEN
+            _f_count_all_pos := _func_pos
+        ELSE
+            BEGIN
+            IF  ( m.mb_st^[ _func_pos ].eop_func = op_f_check_null )
+            THEN
+                (* loop over op_f_check_null *)
+                _func_cnt := pred( _func_cnt )
+            ELSE
+                BEGIN
+                IF  ( m.mb_st^[_func_pos].eop_func in [
+                    op_f_dis_avg, op_f_dis_sum, op_f_dis_count,
+                    op_f_stddev, op_f_dis_stddev,
+                    op_f_variance, op_f_dis_variance ] )
+                THEN
+                    (* create one file for every function *)
+                    BEGIN
+                    IF  ( selrec.selr.selr_dis_file_cnt < cgg07_maxdistinctfiles )
+                    THEN
+                        selrec.selr.selr_dis_file_cnt :=
+                              succ( selrec.selr.selr_dis_file_cnt )
+                    ELSE
+                        m.mb_trns^.trError_gg00 := e_buffer_limit;
+                    (*ENDIF*) 
+                    a101_GetLogicalFilename (m.mb_trns^, _htree_id);
+                    bd998SetTempFileIndex (m.mb_trns^, _htree_id,
+                          selrec.selr.selr_dis_file_cnt);
+                    IF  ( m.mb_trns^.trError_gg00 = e_ok )
+                    THEN
+                        BEGIN
+                        a101_CreateGroupedTempFile(
+                              m.mb_trns^, _htree_id, ttfnDistinct_egg00);
+                        selrec.selr.selr_disrootarr[ selrec.selr.selr_dis_file_cnt ].
+                              dfi_root := _htree_id.fileRoot_gg00;
+                        selrec.selr.selr_disrootarr[ selrec.selr.selr_dis_file_cnt ].
+                              dfi_root_check := _htree_id.fileRootCheck_gg00;
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+selrec.selr.selr_count_all := ( selrec.selr.selr_count_all AND
+      ( selrec.selr.selr_keyl = RESCNT_MXGG04 ));
+IF  ( _func_cnt = 1 ) AND ( _f_count_all_pos > 0 ) AND ( selrec.selr.selr_count_all )
+THEN
+    BEGIN
+    IF  ( NOT selrec.selr.selr_join_with_func )
+    THEN
+        m.mb_st^[ _f_count_all_pos ].eop_func := op_f_count_kb;
+    (*ENDIF*) 
+    END
+ELSE
+    (* _func_cnt <> 1 OR _f_count_all_pos = 0 OR NOT selr.selr_count_all *)
+    selrec.selr.selr_count_all  := false;
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    m.mb_trns^.trError_gg00 := _aux_error;
+(*ENDIF*) 
+END;
+ 
+(* PTS 1104018 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720_maxresult_get (
+            strat_maxcnt       : tsp00_Int4;
+            VAR maxresult      : tsp00_Int4);
+ 
+VAR
+      _res : tsp00_NumError;
+ 
+BEGIN (* h.b. PTS 1001366 *)
+&ifdef trace
+t01int4( kb, 'strat_maxcnt', strat_maxcnt );
+&endif
+IF  strat_maxcnt = cgg04_no_rowno_predicate
+THEN
+    maxresult := csp_maxint4
+ELSE
+    IF  ( strat_maxcnt in
+        [ cgg04_subquery_one_record, cgg04_one_record_at_most_oracle,
+        cgg04_one_record_at_most_internal ] )
+    THEN
+        maxresult := 0
+    ELSE
+        IF  ( strat_maxcnt = cgg04_at_least_one_record )
+        THEN
+            maxresult := 1
+        ELSE
+            maxresult := strat_maxcnt;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+&ifdef trace
+IF  ( t01trace(kb) OR t01trace(ak_sem) )
+THEN
+    t01int4( td_always, 'maxresult   ', maxresult );
+&endif
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720next_strat (
+            VAR m               : tgg00_MessBlock;
+            VAR selrec          : tgg07_select_param;
+            VAR gg_strategy     : tgg07_StrategyInfo;
+            VAR use_stopkey     : boolean;
+            VAR SumStratInfoLen : tsp00_Int4);
+ 
+VAR
+      _StratInfo_len  : tsp00_Int4;
+      _next_strat_pos : tsp00_Int4;
+ 
+      _str            : RECORD
+            CASE boolean OF
+                true  :
+                    (strat_char : tsp00_C1);
+                false :
+                    (strat_enum : tgg07_StratEnum);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+_next_strat_pos := m.mb_st^[ m.mb_qual^.mstrat_pos ].epos +
+      STRATEGY_START_MXGG07 + SumStratInfoLen;
+_str.strat_char[ 1 ] := m.mb_strat^[ _next_strat_pos ];
+gg_strategy.str_strategy := _str.strat_enum;
+_StratInfo_len := s20buf_to_int4( m.mb_strat^, _next_strat_pos + 4 );
+&ifdef TRACE
+t01strat_enum( kb, 'next strat  ', gg_strategy.str_strategy );
+t01int4( kb, 'strat len   ', _StratInfo_len );
+&endif
+(* get strategy *)
+SAPDB_PascalMove ('VKB720',   1,    
+      m.mb_strat_size, sizeof( gg_strategy ),
+      @m.mb_strat^, _next_strat_pos + cgg07_stratpos_offs,
+      @gg_strategy, STRATEGY_START_MXGG07 + 1,
+      _StratInfo_len, m.mb_trns^.trError_gg00);
+SumStratInfoLen := SumStratInfoLen + _StratInfo_len + cgg07_stratpos_offs;
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    IF  ( gg_strategy.str_strategy in a70glob_subq_strats )
+        OR
+        ( gg_strategy.str_strategy in a70glob_in_strats )
+    THEN
+        BEGIN
+        selrec.selr.selr_startkey.len := 0;
+        selrec.selr.selr_stopkey.len  := 0;
+        use_stopkey              := false;
+        END
+    ELSE
+        BEGIN
+        use_stopkey := true;
+        g04limitprimkeys( m, gg_strategy.str_key_in_range.skir_keystart,
+              selrec.selr.selr_startkey, gg_strategy.str_key_in_range.skir_keystop,
+              selrec.selr.selr_stopkey, use_stopkey,
+              IS_UNDEFINED_GG07, -1 (* use IN as range *) );
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720finish_catalog_select (
+            VAR m             : tgg00_MessBlock;
+            VAR sel           : tgg00_SelectFieldsParam;
+            VAR strat         : tgg07_StrategyInfo;
+            VAR selrec        : tgg07_select_context;
+            VAR getrec        : tgg07_get_param;
+            VAR lbuf          : tgg00_Rec);
+ 
+VAR
+      _selrec : tgg07_select_param;
+ 
+BEGIN
+_selrec.selr := selrec;
+IF  lbuf.len > 0
+THEN
+    SAPDB_PascalMove ('VKB720',   2,    
+          sizeof (lbuf.buf), sizeof (_selrec.selr_selectbuffer.lbuf),
+          @lbuf.buf, 1, @_selrec.selr_selectbuffer.lbuf, 1, lbuf.len,
+          m.mb_trns^.trError_gg00);
+(*ENDIF*) 
+kb720sel_last_part (m, _selrec, getrec, sel, strat );
+IF  ( _selrec.selr.selr_res_keyl > RESCNT_MXGG04 )(* PTS 1113927 *)
+THEN
+    b73cmd_count (iins_sorts);
+(*ENDIF*) 
+selrec := _selrec.selr;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720ref_statistic (
+            VAR arr_index : tgg00_RefInfoIndex;
+            VAR strat     : tgg07_StrategyInfo);
+ 
+BEGIN
+IF  ( strat.str_strategy in a70glob_key_strats )
+THEN
+    BEGIN
+    CASE strat.str_strategy OF
+        strat_key_equal, 
+        strat_key_equal_fetch, 
+        strat_viewkey:
+            arr_index := iprim_key;
+        strat_key_in:
+            arr_index := iprim_key_in;
+        strat_key_subq:
+            arr_index := iprim_key_subq;
+        OTHERWISE
+            BEGIN
+            IF  ( strat.str_key_in_range.skir_keystart[ 0 ] = 0 ) AND
+                ( strat.str_key_in_range.skir_keystop[ 0 ]  = 0 )
+            THEN
+                arr_index := itable_scan
+            ELSE
+                arr_index := iprim_key_range;
+            (*ENDIF*) 
+            END;
+        END;
+    (*ENDCASE*) 
+    END
+ELSE
+    BEGIN
+    IF  ( strat.str_strategy in a70glob_inv_strats )
+    THEN
+        BEGIN
+        CASE strat.str_strategy OF
+            strat_inv_in: 
+                IF  ( strat.str_qual_kind <> inv_only )
+                THEN
+                    arr_index := iindex_in
+                ELSE
+                    arr_index := iis_index_in;
+                (*ENDIF*) 
+            strat_inv_subq:
+                IF  ( strat.str_qual_kind <> inv_only )
+                THEN
+                    arr_index := iindex_subq
+                ELSE
+                    arr_index := iis_index_subq;
+                (*ENDIF*) 
+            OTHERWISE
+                BEGIN
+                IF  ( isp_exact_match in strat.str_inv_in_range.siir_strat_props )
+                THEN
+                    BEGIN
+                    IF  ( strat.str_qual_kind <> inv_only )
+                    THEN
+                        arr_index := iindex
+                    ELSE
+                        arr_index := iis_index;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    IF  ( strat.str_inv_in_range.siir_startcnt = 0 ) AND
+                        ( strat.str_inv_in_range.siir_stopcnt = 0 )
+                    THEN
+                        BEGIN
+                        IF  ( strat.str_qual_kind <> inv_only )
+                        THEN
+                            arr_index := iindex_scan
+                        ELSE
+                            arr_index := iis_index_scan;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        IF  ( strat.str_qual_kind <> inv_only )
+                        THEN
+                            arr_index := iindex_range
+                        ELSE
+                            arr_index := iis_index_range;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            END;
+        (*ENDCASE*) 
+        END
+    ELSE
+        BEGIN
+        IF  ( strat.str_strategy in a70glob_join_strats )
+        THEN
+            BEGIN
+            IF  ( strat.str_strategy in a70glob_join_inv_strats )
+            THEN
+                arr_index := iindex_range
+            ELSE
+                BEGIN
+                IF  ( strat.str_strategy in [ strat_join_all_keys_equal,
+                    strat_join_key_equal, strat_join_viewkey ])
+                THEN
+                    arr_index := iprim_key
+                ELSE
+                    arr_index := iprim_key_range;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            arr_index := ir_v_acc;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720init_ref_statistic;
+ 
+BEGIN
+WITH k720monitor_info DO
+    BEGIN
+    prim_key           := 0;
+    prim_key_read      := 0;
+    prim_key_qual      := 0;
+    prim_key_range     := 0;
+    prim_key_range_read:= 0;
+    prim_key_range_qual:= 0;
+    index              := 0;
+    index_read         := 0;
+    index_qual         := 0;
+    index_range        := 0;
+    index_range_read   := 0;
+    index_range_qual   := 0;
+    is_index           := 0;
+    is_index_read      := 0;
+    is_index_qual      := 0;
+    is_index_range     := 0;
+    is_index_range_read:= 0;
+    is_index_range_qual:= 0;
+    table_scan         := 0;
+    table_scan_read    := 0;
+    table_scan_qual    := 0;
+    is_index_scan      := 0;
+    is_index_scan_read := 0;
+    is_index_scan_qual := 0;
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720show_monitor (VAR info : tgg00_ReferenceInfo);
+ 
+VAR
+      _arr_index : tgg00_RefInfoIndex;
+ 
+BEGIN
+FOR _arr_index := iprim_key TO iis_index_scan_qual DO
+    info.reference_array[ _arr_index ] :=
+          k720monitor_info.reference_array[ _arr_index ];
+(*ENDFOR*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720start_catalog_select (
+            VAR m                : tgg00_MessBlock;
+            VAR sel              : tgg00_SelectFieldsParam;
+            VAR gg_strategy      : tgg07_StrategyInfo;
+            VAR selrec           : tgg07_select_context;
+            VAR finding_possible : boolean );
+ 
+VAR
+      _selrec : tgg07_select_param;
+ 
+BEGIN
+_selrec.selr := selrec;
+_selrec.selr.selr_last_join := ( m.mb_type2 = mm_join_with_last_tab );
+kb720sel_first_part( m, _selrec, sel, gg_strategy );
+finding_possible := _selrec.selr.selr_finding_poss;
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+&   ifdef trace
+    k720trace_selrec( m, _selrec );
+&   endif
+    selrec := _selrec.selr;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720monitor (
+            VAR trans         : tgg00_TransContext;
+            VAR sel           : tgg00_SelectFieldsParam;
+            start_sec         : tsp00_Int4;
+            start_microsec    : tsp00_Int4;
+            start_phys_ios    : tsp00_Int4;
+            start_suspends    : tsp00_Int4;
+            start_waits       : tsp00_Int4;
+            put_strat         : boolean;
+            arr_index         : tgg00_RefInfoIndex;
+            strat_cnt         : boolean);
+ 
+CONST
+      _c_reset_sum = true;
+ 
+VAR
+      _stop_sec      : tsp00_Int4;
+      _stop_microsec : tsp00_Int4;
+      _diff_sec      : tsp00_Int4;
+      _diff_microsec : tsp00_Int4;
+      _stop_phys_ios : tsp00_Int4;
+      _stop_suspends : tsp00_Int4;
+      _stop_waits    : tsp00_Int4;
+      _aggr_index    : tgg00_RefInfoIndex;
+ 
+BEGIN
+WITH k720monitor_info, sel DO
+    BEGIN
+    IF  (trans.trBdTcachePtr_gg00 <> NIL) AND
+        (a01diag_monitor_on OR a01diag_analyze_on)
+    THEN
+        BEGIN
+        IF  put_strat
+        THEN
+            kb720strat_put (trans, arr_index);
+        (*ENDIF*) 
+        vclock (_stop_sec, _stop_microsec); (* h.b. PTS 1106105 *)
+        vmonitor (trans.trTaskId_gg00, _stop_phys_ios, _stop_suspends,
+              _stop_waits);
+        _diff_sec      := _stop_sec - start_sec;
+        _diff_microsec := _stop_microsec - start_microsec;
+        IF  (_stop_microsec < start_microsec)
+        THEN
+            BEGIN
+            _diff_sec      := _diff_sec  - 1;
+            _diff_microsec := _diff_microsec + 1000000 ;
+            END;
+        (*ENDIF*) 
+        b21mp_sec_put      (trans.trBdTcachePtr_gg00, _diff_sec);
+        b21mp_microsec_put (trans.trBdTcachePtr_gg00, _diff_microsec);
+        b21mp_phys_ios_put   (trans.trBdTcachePtr_gg00,
+              _stop_phys_ios - start_phys_ios);
+        b21mp_suspends_put   (trans.trBdTcachePtr_gg00,
+              _stop_suspends - start_suspends);
+        b21mp_waits_put      (trans.trBdTcachePtr_gg00,
+              _stop_waits - start_waits);
+        b21mp_rows_read_put (trans.trBdTcachePtr_gg00, sfp_rows_read);
+        b21mp_rows_qual_put (trans.trBdTcachePtr_gg00, sfp_rows_qual);
+        b21mp_virt_reads_put (trans.trBdTcachePtr_gg00,
+              trans.trRteCommPtr_gg00^.virt_reads + csp_maxint2);
+        b21mp_kb_calls_put   (trans.trBdTcachePtr_gg00);
+        b21mp_new_sum_put    (trans.trBdTcachePtr_gg00);
+        b21m_reset_monitor   (trans.trBdTcachePtr_gg00, NOT _c_reset_sum);
+        END;
+    (*ENDIF*) 
+    IF  g01vtrace.vtrTime_gg00
+    THEN
+        g041statistic_trace (trans, arr_index,
+              sfp_rows_read, sfp_rows_qual,
+              trans.trRteCommPtr_gg00^.file_record_cnt,
+              trans.trRteCommPtr_gg00^.virt_reads + csp_maxint2);
+&   IFDEF TRACE
+    (*ENDIF*) 
+    t01p2int4 (kb, 'rows_read   ', sfp_rows_read
+          ,              'rows_qual   ', sfp_rows_qual);
+    t01refinfoindex(kb, 'arr_index   ', arr_index);
+&   ENDIF
+    IF  arr_index
+        IN [ itable_scan, iprim_key, iprim_key_in, iprim_key_subq,  iprim_key_range,
+        iindex, iindex_in, iindex_subq, iindex_scan, iindex_range,
+        iis_index, iis_index_in, iis_index_subq, iis_index_range,
+        iis_index_scan ]
+    THEN
+        BEGIN
+        IF  strat_cnt
+        THEN
+            reference_array[ arr_index ] := reference_array[ arr_index ] + 1;
+        (*ENDIF*) 
+        CASE arr_index OF
+            itable_scan:
+                _aggr_index := itable_scan_read;
+            iprim_key:
+                _aggr_index := iprim_key_read;
+            iprim_key_in, iprim_key_subq, iprim_key_range:
+                _aggr_index := iprim_read_key_range;
+            iindex:
+                _aggr_index := iindex_read;
+            iindex_in, iindex_subq, iindex_range:
+                _aggr_index := iindex_range_read;
+            iis_index:
+                _aggr_index := iis_index_read;
+            iis_index_in, iis_index_subq, iis_index_range:
+                _aggr_index := iis_index_read_range;
+            iindex_scan, iis_index_scan:
+                _aggr_index := iis_index_scan_read;
+            OTHERWISE
+                (* unexpected *)
+                _aggr_index := iprim_read_key_range;
+            END;
+        (*ENDCASE*) 
+        reference_array[ _aggr_index ] := reference_array[ _aggr_index ] +
+              sfp_rows_read;
+        _aggr_index := succ(_aggr_index);
+        reference_array[ _aggr_index ] := reference_array[ _aggr_index ] +
+              sfp_rows_qual;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720strat_put (
+            VAR trans         : tgg00_TransContext;
+            arr_index         : tgg00_RefInfoIndex);
+ 
+VAR
+      _aux_len       : integer;
+      _aux_c40       : tsp00_C40;
+ 
+BEGIN
+CASE arr_index OF
+    iprim_key :
+        BEGIN
+        _aux_c40 := 'PK_EQ                                   ';
+        _aux_len := 6
+        END;
+    iprim_key_in :
+        BEGIN
+        _aux_c40 := 'PK_IN                                   ';
+        _aux_len := 6
+        END;
+    iprim_key_subq :
+        BEGIN
+        _aux_c40 := 'PK_SUBQ                                 ';
+        _aux_len := 8
+        END;
+    iprim_key_range :
+        BEGIN
+        _aux_c40 := 'PK_RG                                   ';
+        _aux_len := 6
+        END;
+    itable_scan :
+        BEGIN
+        _aux_c40 := 'SCAN                                    ';
+        _aux_len := 5
+        END;
+    iindex :
+        BEGIN
+        _aux_c40 := 'IX_EQ                                   ';
+        _aux_len := 6
+        END;
+    iindex_scan :
+        BEGIN
+        _aux_c40 := 'IX_SCAN                                 ';
+        _aux_len := 8
+        END;
+    iindex_in :
+        BEGIN
+        _aux_c40 := 'IX_IN                                   ';
+        _aux_len := 6
+        END;
+    iindex_subq :
+        BEGIN
+        _aux_c40 := 'IX_SUBQ                                 ';
+        _aux_len := 8
+        END;
+    iindex_range :
+        BEGIN
+        _aux_c40 := 'IX_RG                                   ';
+        _aux_len := 6
+        END;
+    iis_index :
+        BEGIN
+        _aux_c40 := 'XO_EQ                                   ';
+        _aux_len := 6
+        END;
+    iis_index_in :
+        BEGIN
+        _aux_c40 := 'XO_IN                                   ';
+        _aux_len := 6
+        END;
+    iis_index_subq :
+        BEGIN
+        _aux_c40 := 'XO_SUBQ                                 ';
+        _aux_len := 8
+        END;
+    iis_index_range :
+        BEGIN
+        _aux_c40 := 'XO_RG                                   ';
+        _aux_len := 6
+        END;
+    iis_index_scan :
+        BEGIN
+        _aux_c40 := 'XO_SCAN                                 ';
+        _aux_len := 8
+        END;
+    OTHERWISE
+        BEGIN
+        _aux_c40 := '????                                    ';
+        _aux_len := 5
+        END;
+    END;
+(*ENDCASE*) 
+b21mp_strat_put  (trans.trBdTcachePtr_gg00, _aux_c40, _aux_len);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720diagmon_strat_put (
+            VAR trans         : tgg00_TransContext;
+            VAR gg_strategy   : tgg07_StrategyInfo);
+ 
+VAR
+      _arr_index         : tgg00_RefInfoIndex;
+ 
+BEGIN
+k720ref_statistic(_arr_index, gg_strategy );
+kb720strat_put (trans, _arr_index);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720_initialize (
+            VAR m                : tgg00_MessBlock;
+            VAR selrec           : tgg07_select_param;
+            VAR gg_strategy      : tgg07_StrategyInfo;
+            VAR use_stopkey      : boolean);
+ 
+VAR
+      _key_upd_found    : boolean;
+      _curr_col         : tsp00_Int2;
+      _i                : tsp00_Int4;
+      _movelength       : tsp00_Int4;
+      _stratlen         : tsp00_Int4;
+      _my_treeid        : tgg00_FileId;
+      _aux_mresqual_pos : tsp00_Int2;
+      _aux_mresqual_cnt : tsp00_Int2;
+      _aux_mqual_pos    : tsp00_Int2;
+      _aux_mqual_cnt    : tsp00_Int2;
+ 
+BEGIN
+_stratlen := m.mb_st^[ m.mb_qual^.mstrat_pos ].elen_var;
+&ifdef trace
+t01int4( kb, 'StratInfolen', _stratlen );
+&endif
+IF  ( _stratlen > sizeof( tgg07_StrategyInfo ))
+THEN
+    _movelength := sizeof( tgg07_StrategyInfo )
+ELSE
+    _movelength := _stratlen;
+(*ENDIF*) 
+(* get gg_strategy *)
+SAPDB_PascalMove ('VKB720',   3,    
+      m.mb_strat_size, sizeof( gg_strategy ),
+      @m.mb_strat^, m.mb_st^[ m.mb_qual^.mstrat_pos ].epos,
+      @gg_strategy, 1, _movelength,
+      m.mb_trns^.trError_gg00);
+;
+&ifdef trace
+IF  ( t01trace( ak_strat ) OR t01trace( kb ) )
+THEN
+    a725output_gg_strat( td_always, 'gg strategy ', gg_strategy );
+&endif
+(*ENDIF*) 
+IF  ( gg_strategy.str_strategy = strat_undecided )
+THEN
+    m.mb_trns^.trError_gg00 := e_unknown_strategy;
+(*ENDIF*) 
+;
+IF  ( _stratlen = STRATEGY_START_MXGG07 ) OR
+    ( gg_strategy.str_strategy = strat_viewkey )
+THEN
+    BEGIN
+    (* table scan, strat_more_then_one, strat_viewkey *)
+    FOR _i := 0 TO MAX_COLPOSARR_IDX_GG07 DO
+        BEGIN
+        gg_strategy.str_key_in_range.skir_keystart[ _i ] := 0;
+        gg_strategy.str_key_in_range.skir_keystop[ _i ]  := 0
+        END;
+    (*ENDFOR*) 
+    IF  ( gg_strategy.str_strategy in a70glob_key_strats )
+    THEN
+        BEGIN
+        gg_strategy.str_key_in_range.skir_IN_SUBQ_stpos := IS_UNDEFINED_GG07;
+        gg_strategy.str_key_in_range.skir_inelemcnt     := IS_UNDEFINED_GG07;
+        IF  ( gg_strategy.str_strategy = strat_viewkey )
+        THEN
+            gg_strategy.str_key_in_range.skir_strat_props := [ ksp_exact_match ]
+        ELSE
+            gg_strategy.str_key_in_range.skir_strat_props := [];
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+m.mb_trns^.trRteCommPtr_gg00^.file_root       := NIL_PAGE_NO_GG00;
+m.mb_trns^.trRteCommPtr_gg00^.file_record_cnt := 1;
+IF  bd998IsTempFile (m.mb_trns^, gg_strategy.str_result_id)
+    AND (bd998GetExtendedTempFileType (m.mb_trns^, gg_strategy.str_result_id)
+    in [ ttfnUnion_egg00, ttfnUnionIntersect_egg00 ])
+THEN
+    SAPDB_PascalForcedFill( sizeof( selrec.selr_selectbuffer.result.info ),
+          @selrec.selr_selectbuffer.result.info, 1, sizeof( tsp00_Key ), chr( 0 ));
+(*ENDIF*) 
+selrec.selr.selr_intersect_id := b01niltree_id;
+selrec.selr.selr_finding_poss := gg_strategy.str_res_possible;
+selrec.selr.selr_intern_dist  := false;
+selrec.selr.selr_countresult  := gg_strategy.str_foundresults; (* mass selects! *)
+;
+selrec.selr.selr_set_operator   := [];
+selrec.selr.selr_reverse_fetch  := false;
+selrec.selr.selr_dis_file_cnt   := 0;
+selrec.selr.selr_call_avg       := sfh_none;
+selrec.selr.selr_call_later_out := false;
+selrec.selr.selr_trunc_part2    :=
+      ( m.mb_type2 <> mm_first_join_select ) AND
+      ( m.mb_type2 <> mm_with_join );
+IF   m.mb_type2 = mm_join_with_last_tab
+THEN
+    m.mb_type2  := mm_with_join;
+(*ENDIF*) 
+IF  bd998IsExtendedTempFile (m.mb_trns^, m.mb_qual^.mtree)
+THEN
+    a101_GetTempFileInstance (m.mb_trns^, m.mb_qual^.mtree);
+(*ENDIF*) 
+selrec.selr.selr_tree   := m.mb_qual^.mtree;
+(* FIXME: is this ok? *)
+IF  bd998IsExtendedTempFile (m.mb_trns^, selrec.selr.selr_tree)
+THEN
+    a101_GetTempFileInstance (m.mb_trns^, selrec.selr.selr_tree);
+(*ENDIF*) 
+selrec.selr.selr_mbtype := m.mb_type;
+;
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    IF  ( gg_strategy.str_union_kind >= cgg04_union_select )
+    THEN
+        (* *** second part of a combined UNION-SELECT-command *** *)
+        BEGIN
+        gg_strategy.str_union_kind    := gg_strategy.str_union_kind - cgg04_union_select;
+        selrec.selr.selr_UNION_ALL_append := gg_strategy.str_union_kind >= cgg04_union_append;
+        IF  ( selrec.selr.selr_UNION_ALL_append )
+        THEN
+            gg_strategy.str_union_kind := gg_strategy.str_union_kind - cgg04_union_append;
+        (*ENDIF*) 
+        IF  ( gg_strategy.str_union_kind > 3 )
+        THEN
+            BEGIN
+            gg_strategy.str_union_kind := gg_strategy.str_union_kind - 3;
+            selrec.selr.selr_set_operator :=
+                  selrec.selr.selr_set_operator + [ so_ALL_mod ];
+            END;
+        (*ENDIF*) 
+        CASE gg_strategy.str_union_kind OF
+            cgg04_union_byte :
+                selrec.selr.selr_set_operator :=
+                      selrec.selr.selr_set_operator + [ so_UNION ];
+            (*
+                  cgg04_except_byte :
+                  selrec.selr.selr_set_operator :=
+                  selrec.selr.selr_set_operator + [ so_EXCEPT ];
+                  cgg04_intersect_byte :
+                  BEGIN
+                  selrec.selr.selr_set_operator :=
+                  selrec.selr.selr_set_operator + [ so_INTERSECT ];
+                  selrec.selr.selr_countresult                   := 0;
+                  selrec.selr.selr_intersect_id                  := gg_strategy.str_result_id;
+                  a101_GetLogicalFilename (m.mb_trns^, selrec.selr.selr_intersect_id);
+                  a101_CreateGroupedTempFile (m.mb_trns^, selrec.selr.selr_intersect_id,
+                  ttfnUnionIntersect_egg00);
+                  END;
+                  OTHERWISE:
+                  ;
+                  *)
+            END;
+        (*ENDCASE*) 
+        selrec.selr.selr_key_cnt_offs := gg_strategy.str_union_key_cnt_offs;
+&       IFDEF TRACE
+        t01int4 (kb, 'key_cnt_offs', selrec.selr.selr_key_cnt_offs);
+        t01bool2(kb, 'isunion     ', so_UNION in selrec.selr.selr_set_operator
+              ,        'isexcept    ', so_EXCEPT in selrec.selr.selr_set_operator);
+        t01bool2(kb, 'isintersect ', so_INTERSECT in selrec.selr.selr_set_operator
+              ,        'isall       ', so_ALL_mod in selrec.selr.selr_set_operator);
+&       ENDIF
+        END
+    ELSE
+        BEGIN
+        (* gg_strategy.str_union_kind < cgg04_union_select *)
+        (* a) normal select or b) first select of any select for set operation *)
+        selrec.selr.selr_UNION_ALL_append   :=
+              ( gg_strategy.str_union_kind >= cgg04_union_append );
+        (* if selr_UNION_ALL_append=true avoid hashing of record *)
+        selrec.selr.selr_key_cnt_offs := 0;
+        IF  (( m.mb_type = m_update ) AND ( m.mb_type2 = mm_qual ))
+        THEN
+            BEGIN
+            _key_upd_found  := false;
+            _curr_col       := m.mb_qual^.mcol_pos;
+            WHILE ( NOT _key_upd_found ) AND
+                  ( _curr_col < m.mb_qual^.mcol_pos + m.mb_qual^.mcol_cnt )
+                  DO
+                BEGIN
+                IF  ( m.mb_st^ [ _curr_col ].etype = st_fixkey ) OR
+                    ( m.mb_st^ [ _curr_col ].etype = st_varkey )
+                THEN
+                    _key_upd_found := true
+                ELSE
+                    _curr_col := _curr_col + 1;
+                (*ENDIF*) 
+                END;
+            (*ENDWHILE*) 
+            IF  ( _key_upd_found )
+            THEN
+                BEGIN
+                g04build_temp_tree_id( selrec.selr.selr_intersect_id, m.mb_trns^ );
+                a101_ResetGroupedTempFile(
+                      m.mb_trns^,
+                      selrec.selr.selr_intersect_id,
+                      ttfnKeyUpdate_egg00);
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+selrec.selr.selr_resf_id := gg_strategy.str_result_id;
+IF  bd998IsExtendedTempFile (m.mb_trns^, selrec.selr.selr_resf_id)
+THEN
+    BEGIN
+    a101_GetTempFileInstance (m.mb_trns^, selrec.selr.selr_resf_id);
+    IF  ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+        <> ttfnInto_egg00 )                                          AND
+        ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+        <> ttfnUserResult_egg00)                                     AND
+        (gg_strategy.str_result_id.fileRoot_gg00 = NIL_PAGE_NO_GG00) AND
+        (selrec.selr.selr_resf_id.fileRoot_gg00 <> NIL_PAGE_NO_GG00) AND
+        ( hsCreateFile_egg00 in selrec.selr.selr_resf_id.fileHandling_gg00 ) AND
+        (gg_strategy.str_foundresults = 0)
+    THEN
+        BEGIN
+        a101_DestroyGroupedTempFile( m.mb_trns^, selrec.selr.selr_resf_id );
+        selrec.selr.selr_resf_id.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+_i := a71code_distinct_optim( gg_strategy );
+IF  ( _i = AUTO_DISTINCT_OPTIM_GG07 ) OR
+    (( gg_strategy.str_strategy in a70glob_fetch_strats ) AND
+    ( _i <> NO_DISTINCT_OPTIM_GG07 ))
+THEN
+    selrec.selr.selr_distinct := no_distinct
+ELSE
+    selrec.selr.selr_distinct := gg_strategy.str_distinc;
+(*ENDIF*) 
+selrec.selr.selr_distinct_bytes :=
+      ( gg_strategy.str_ordering OR ( gg_strategy.str_union_kind <> 0 ));
+selrec.selr.selr_one_result     := false;
+selrec.selr.selr_union          := gg_strategy.str_union_kind <> 0;
+selrec.selr.selr_group_count    := selrec.selr.selr_countresult;
+selrec.selr.selr_tree_pos.tpsPno_gg00   := NIL_PAGE_NO_GG00;
+selrec.selr.selr_tree_pos.tpsIndex_gg00 := 0;
+(* PTS 1124863 E.Z. *)
+selrec.selr.selr_write_rownum   := (gg_strategy.str_use_rowno AND
+      (m.mb_type <> m_update) AND (m.mb_type <> m_delete));
+selrec.selr.selr_no_warn8_sort  := true;
+selrec.selr.selr_act_cntresult  := 0;
+selrec.selr.selr_all_recursive  := gg_strategy.str_all_files;
+FOR _i := 1 TO cgg07_maxdistinctfiles DO
+    selrec.selr.selr_disrootarr[ _i ].dfi_root := NIL_PAGE_NO_GG00;
+(*ENDFOR*) 
+&IFDEF TRACE
+t01bool   (kb, 'selr_UNION_A', selrec.selr.selr_UNION_ALL_append);
+t01p2int4 (kb, 'union_kind  ', gg_strategy.str_union_kind
+      ,        'count_res   ', selrec.selr.selr_countresult);
+&ENDIF
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    IF  ( m.mb_type = m_insert_select )
+    THEN
+        WITH m.mb_data^.mbp_info DO
+            BEGIN
+            selrec.selr.selr_resf_id.fileHandling_gg00 :=
+                  selrec.selr.selr_resf_id.fileHandling_gg00 + [ hsIntentExcl_egg00 ] -
+                  [ hsWithoutLock_egg00, hsConsistentLock_egg00,
+                  hsCollisionTest_egg00 ];
+            (* prevent from checking treeleafnodes *)
+            selrec.selr.selr_resf_id.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+            (* otherwise tableas.vdnts will not work *)
+            selrec.selr.selr_resf_id.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+            IF  bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id)
+            THEN
+                IF  ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+                    = ttfnLink_egg00 ) AND
+                    ( hsCreateFile_egg00 in selrec.selr.selr_resf_id.fileHandling_gg00 )
+                THEN
+                    a101_CreateGroupedTempFile( m.mb_trns^,
+                          selrec.selr.selr_resf_id,
+                          ttfnLink_egg00);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  ( rb_ins_sel_info [ 1 ] = cgg04_ins_sel_nokey )
+            THEN
+                BEGIN
+                selrec.selr.selr_key_props  := kp_nokey;
+                selrec.selr.selr_dupl[ 1 ]  := csp_defined_byte
+                END
+            ELSE
+                IF  ( rb_ins_sel_info [ 1 ] = cgg04_cluster_key ) (* PTS 1139184 *)
+                THEN
+                    BEGIN
+                    selrec.selr.selr_key_props  := kp_clusterKey;
+                    selrec.selr.selr_dupl[ 1 ]  := csp_defined_byte
+                    END
+                ELSE
+                    BEGIN
+                    selrec.selr.selr_key_props := kp_key;
+                    selrec.selr.selr_dupl     := rb_ins_sel_info;
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            (* prevent from checking treeleafnodes *)
+            m.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+            SAPDB_PascalMove ('VKB720',   4,    
+                  m.mb_strat_size, sizeof(_my_treeid),
+                  @m.mb_strat^,
+                  m.mb_st^[ m.mb_qual^.mstrat_pos ].epos,
+                  @_my_treeid, 1, FILE_ID_MXGG00, m.mb_trns^.trError_gg00);
+            ;
+            IF  ( m.mb_type                  = m_insert_select ) AND
+                bd998IsTempFile (m.mb_trns^, _my_treeid)        AND
+                (* PTS 1119177 E.Z. *)
+                ( bd998GetExtendedTempFileType (m.mb_trns^, _my_treeid)
+                = ttfnTempTable_egg00 ) AND
+                (selrec.selr.selr_key_props = kp_nokey)
+            THEN (* insert_select into temp table *)
+                rb_into_temp := true;
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+    ELSE
+        (* m.mb_type <> m_insert_select *)
+        BEGIN
+        selrec.selr.selr_key_props := kp_key;
+        IF  ( m.mb_type = m_update ) OR
+            ( m.mb_type = m_delete )
+        THEN
+            (* prevent from checking treeleafnodes *)
+            (* during mass-changing command        *)
+            m.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    k720_maxresult_get(gg_strategy.str_rowno, selrec.selr.selr_rowno);
+    IF  ( gg_strategy.str_selinto )
+    THEN
+        selrec.selr.selr_maxresult := 0
+    ELSE
+        selrec.selr.selr_maxresult := selrec.selr.selr_rowno;
+    (*ENDIF*) 
+    selrec.selr.selr_subquery := ( gg_strategy.str_rowno = cgg04_subquery_one_record );
+    IF  ( gg_strategy.str_selinto AND
+        (( m.mb_qual^.msqlmode = sqlm_oracle ) OR ( selrec.selr.selr_rowno = 1 )))
+    THEN
+        selrec.selr.selr_oracle_selinto := true
+    ELSE
+        selrec.selr.selr_oracle_selinto := false;
+    (*ENDIF*) 
+    selrec.selr.selr_keyl     := gg_strategy.str_key_len;
+    selrec.selr.selr_recl     := gg_strategy.str_rec_len;
+    selrec.selr.selr_res_keyl := selrec.selr.selr_keyl;
+    IF  gg_strategy.str_strategy in a70glob_build_strats
+    THEN
+        SAPDB_PascalFill ('VKB720',   5,    
+              sizeof( selrec.selr_selectbuffer.result.buf ),
+              @selrec.selr_selectbuffer.result.buf, 1,
+              selrec.selr.selr_recl, csp_defined_byte, m.mb_trns^.trError_gg00);
+    (*ENDIF*) 
+    selrec.selr_selectbuffer.result.recLen_gg00          := 0;
+    selrec.selr_selectbuffer.result.recKeyLen_gg00       := 0;
+    selrec.selr_selectbuffer.result.recVarcolOffset_gg00 := 0;
+    selrec.selr_selectbuffer.result.recVarcolCnt_gg00    := 0;
+    END;
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    IF  NOT
+        (( gg_strategy.str_strategy = strat_catalog ) OR
+        ( gg_strategy.str_strategy in a70glob_fetch_strats ) OR
+        NOT selrec.selr.selr_finding_poss )
+    THEN
+        (* in other cases made in AK, because it is necessary *)
+        (* for emessbuf used by FETCH *)
+        g04inbetween_change( m, selrec.selr.selr_finding_poss );
+    (*ENDIF*) 
+    IF  (( gg_strategy.str_strategy in
+        [ strat_more_than_one, strat_catalog ] )
+        OR
+        ( gg_strategy.str_strategy in a70glob_join_strats )
+        OR
+        ( gg_strategy.str_strategy in a70glob_subq_strats )
+        OR
+        ( gg_strategy.str_strategy in a70glob_in_strats ))
+    THEN
+        BEGIN
+        selrec.selr.selr_startkey.len := 0;
+        selrec.selr.selr_stopkey.len  := 0;
+        use_stopkey              := false
+        END
+    ELSE
+        BEGIN
+        IF  ( gg_strategy.str_strategy = strat_viewkey )
+        THEN
+            BEGIN
+&           ifdef trace
+            t01name (kb, 'viewkey ->startkey');
+&           endif
+            selrec.selr.selr_startkey.len := m.mb_data^.mbp_keylen;
+            SAPDB_PascalMove ('VKB720',   6,    
+                  m.mb_data_size, sizeof(selrec.selr.selr_startkey.k),
+                  @m.mb_data^.mbp_buf, cgg_rec_key_offset + 1,
+                  @selrec.selr.selr_startkey.k, 1, selrec.selr.selr_startkey.len,
+                  m.mb_trns^.trError_gg00);
+            END
+        ELSE
+            BEGIN
+&           ifdef trace
+            t01name (kb, 'build start/stopke');
+&           endif
+            use_stopkey := true;
+            g04limitprimkeys( m, gg_strategy.str_key_in_range.skir_keystart,
+                  selrec.selr.selr_startkey, gg_strategy.str_key_in_range.skir_keystop,
+                  selrec.selr.selr_stopkey, use_stopkey,
+                  IS_UNDEFINED_GG07, -1 (* use IN as range *) );
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    t01treeid (kb, 'resf_id     ', selrec.selr.selr_resf_id);
+    t01key (kb, 'selr_startke', selrec.selr.selr_startkey);
+    t01bool(kb, 'use_stopkey ', use_stopkey);
+    t01key (kb, 'selr_stopkey', selrec.selr.selr_stopkey);
+    END;
+&endif
+(*ENDIF*) 
+selrec.selr.selr_join_with_func := false;
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+    AND
+    ( m.mb_qual^.mresqual_cnt > 0 )
+    AND
+    ( m.mb_type = m_select )
+    AND
+    ( m.mb_type2 = mm_with_join )
+THEN
+    BEGIN
+    IF  ( m.mb_st^[ m.mb_qual^.mresqual_pos ].etype = st_jump_output )
+    THEN
+        BEGIN
+        selrec.selr.selr_res_keyl := m.mb_st^[ m.mb_qual^.mstrat_pos + 1 ].ecol_pos;
+        _i := m.mb_qual^.mresqual_pos;
+        WHILE ( _i < m.mb_st^[ m.mb_qual^.mresqual_pos ].epos +
+              m.mb_qual^.mresqual_pos - 2 ) DO
+            BEGIN
+            _i := succ ( _i );
+            IF  ( m.mb_st^[ _i ].etype = st_func )
+            THEN
+                BEGIN
+                selrec.selr.selr_join_with_func := true;
+&               ifdef trace
+                t01name( kb, 'set join_with_func' );
+&               endif
+                _i := m.mb_st^[ m.mb_qual^.mresqual_pos ].epos +
+                      m.mb_qual^.mresqual_pos - 2;
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+g04build_temp_tree_id( selrec.selr.selr_distinct_id, m.mb_trns^ );
+selrec.selr.selr_distinct_id.fileTfnTemp_gg00 := ttfnDistinct_egg00;
+bd998SetTempFileIndex (m.mb_trns^, selrec.selr.selr_distinct_id, 0);
+;
+selrec.selr.selr_count_all    := false;
+selrec.selr.selr_count_bd     := false;
+;
+IF  ((( m.mb_type2 = mm_with_functions ) OR selrec.selr.selr_join_with_func ) AND
+    ( m.mb_trns^.trError_gg00 = e_ok ))
+THEN
+    BEGIN
+    selrec.selr.selr_count_all :=
+          NOT (( selrec.selr.selr_keyl > RESCNT_MXGG04 ) OR
+          ( gg_strategy.str_cnt_strat > 1 )) AND
+          ( gg_strategy.str_rowno < cgg04_valid_rowno );
+    (*rowno*)
+    IF  ( selrec.selr.selr_join_with_func )
+    THEN
+        BEGIN
+        _aux_mresqual_pos       := m.mb_qual^.mresqual_pos;
+        _aux_mresqual_cnt       := m.mb_qual^.mresqual_cnt;
+        _aux_mqual_pos          := m.mb_qual^.mqual_pos;
+        _aux_mqual_cnt          := m.mb_qual^.mqual_cnt;
+        m.mb_qual^.mqual_pos    := m.mb_qual^.mresqual_pos;
+        m.mb_qual^.mqual_cnt    := m.mb_qual^.mresqual_cnt;
+        m.mb_qual^.mresqual_pos := 0;
+        m.mb_qual^.mresqual_cnt := 0;
+        _i                      := selrec.selr.selr_keyl;
+        selrec.selr.selr_keyl        := selrec.selr.selr_res_keyl;
+        END;
+    (*ENDIF*) 
+    kb720distinct_files( m, selrec );
+    IF  ( selrec.selr.selr_join_with_func )
+    THEN
+        BEGIN
+        m.mb_qual^.mresqual_pos := _aux_mresqual_pos;
+        m.mb_qual^.mresqual_cnt := _aux_mresqual_cnt;
+        m.mb_qual^.mqual_pos    := _aux_mqual_pos;
+        m.mb_qual^.mqual_cnt    := _aux_mqual_cnt;
+        selrec.selr.selr_keyl        := _i;
+        END;
+    (*ENDIF*) 
+    IF  ( selrec.selr.selr_count_all )
+    THEN
+        IF  ( m.mb_st^[ m.mb_qual^.mqual_pos ].epos = m.mb_qual^.mqual_cnt ) AND
+            ( NOT selrec.selr.selr_join_with_func )
+        THEN
+            selrec.selr.selr_count_bd := true;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( gg_strategy.str_cnt_strat = 1 )
+    THEN
+        BEGIN
+        (* PTS 1000718 E.Z. *)
+        IF  ( selrec.selr.selr_res_keyl = RESCNT_MXGG04 )
+            AND
+            ( gg_strategy.str_strategy <> strat_more_than_one )
+        THEN
+            BEGIN
+            selrec.selr.selr_one_result := true;
+&           ifdef trace
+            t01sname(kb, 'set one res2' );
+&           endif
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720_single_select (VAR m : tgg00_MessBlock);
+ 
+VAR
+      _selrec       : tgg07_select_param;
+      _getrec_dummy : tgg07_get_param;
+ 
+BEGIN
+(* looks a little bit silly, but getrec and selrec *)
+(* are very hugh (>56K), so it's better to create  *)
+(* them only when necessary and not every time in  *)
+(* k05functions.                                   *)
+k720_select( m, _getrec_dummy, _selrec );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720_test_subquery (
+            VAR trans   : tgg00_TransContext;
+            VAR datapart: tgg00_DataPart;
+            datapartsize: tsp00_Int4;
+            VAR mdesc   : tgg00_StackDesc;
+            VAR rec     : tgg00_Rec);
+ 
+VAR
+      _set_result : tgg00_BdSetResultRecord;
+      _first_prim : integer;
+      _i          : integer;
+      _last       : tsp00_Int2;
+      _pos        : tsp00_Int2;
+      _last_pos   : tsp00_Int2;
+      _start      : tsp00_Int2;
+      _k          : tgg00_Lkey;
+      _htree_id   : tgg00_FileId;
+      _t_tree_pos : tgg00_FilePos;
+ 
+BEGIN
+(* substitute EXISTS, ANY <subquery> --> BOOL TRUE/FALSE               *)
+(* marks NULL value record with st_subquery.elen_var *= -1             *)
+(* update important key length information for any subquery (d_keylen) *)
+IF  ( mdesc.mqual_pos < mdesc.mresqual_pos )
+THEN
+    BEGIN
+    _start := mdesc.mqual_pos;
+    _last  := mdesc.mqual_pos + mdesc.mqual_cnt - 1;
+    _last_pos := mdesc.mresqual_pos;
+    END
+ELSE
+    BEGIN
+    _start := mdesc.mresqual_pos;
+    _last  := mdesc.mresqual_pos + mdesc.mresqual_cnt - 1;
+    _last_pos := mdesc.mqual_pos;
+    END;
+(*ENDIF*) 
+REPEAT
+    _pos := _start;
+    IF  ( _start > 0 )
+    THEN
+        BEGIN
+        (* PTS 1123956 E.Z. *)
+        trans.trError_gg00 := e_ok;
+        WHILE _pos <= _last DO
+            BEGIN
+            _first_prim := _pos;
+            WHILE ((_pos < _last) AND
+                  NOT ( mdesc.mst_addr^[ _pos ].etype in
+                  (* loop to *)
+                  [ st_jump_true, st_jump_false,
+                  st_subquery, st_get_subquery, st_output, st_rec_output,
+                  st_output_build_rec, st_func ] )) DO
+                _pos := succ(_pos);
+            (*ENDWHILE*) 
+            IF  ( mdesc.mst_addr^[_pos].etype in [ st_subquery, st_get_subquery ] )
+            THEN
+                BEGIN
+                IF  ( mdesc.mst_addr^[_pos].etype = st_subquery ) AND
+                    ( mdesc.mst_addr^[_pos].eop = op_get_sub_value )
+                THEN
+                    (* st_subquery --> st_value *)
+                    k71sub_value_get( trans, mdesc.mst_addr^[_pos],
+                          @(datapart.mbp_buf), datapartsize )
+                ELSE
+                    BEGIN
+                    (* get subquery file ID *)
+                    SAPDB_PascalMove ('VKB720',   7,    
+                          datapartsize, sizeof(_htree_id),
+                          @datapart.mbp_buf, mdesc.mst_addr^[ _pos ].epos,
+                          @_htree_id, 1, FILE_ID_MXGG00,
+                          trans.trError_gg00);
+                    a101_GetTempFileInstance (trans, _htree_id);
+&                   IFDEF TRACE
+                    t01site   (kb, 'result_site ', _htree_id.fileResultSite_gg00);
+                    t01treeid (kb, 'htree_id    ', _htree_id);
+&                   ENDIF
+                    IF  trans.trError_gg00 <> e_ok
+                    THEN
+                        (* break through while loop *)
+                        _pos := _last + 1
+                    ELSE
+                        BEGIN
+                        IF  ( mdesc.mst_addr^[_pos].etype = st_subquery ) AND
+                            (* make this routine idempotent *)
+                            (* see vak65 *)
+                            ( mdesc.mst_addr^[_pos].elen_var = - HASHVAL_MXGG04 - 4)
+                        THEN
+                            BEGIN
+                            (* set full key *)
+                            _k.len := KEY_MXSP00;
+                            _k.k   := b01fullkey;
+                            _set_result.bd_key_check_len := 0;
+                            _set_result.bd_max_rec_cnt   := 1;
+                            _set_result.bd_max_fill_len  := mxsp_buf;
+                            _set_result.bd_next          := true;
+                            _set_result.bd_drop_page     := false;
+                            _t_tree_pos.tpsPno_gg00 := NIL_PAGE_NO_GG00;
+                            b07cprev_record (trans, _htree_id, _k,
+                                  _set_result, _t_tree_pos, rec.buf);
+                            IF  (( trans.trError_gg00 = e_ok ) OR
+                                ( trans.trError_gg00 = e_key_not_found ))
+                            THEN
+                                BEGIN
+                                (* move tree id to data part, *)
+                                (* we have actual root!       *)
+                                SAPDB_PascalMove ('VKB720',   8,    
+                                      sizeof(_htree_id), datapartsize,
+                                      @_htree_id, 1,
+                                      @datapart.mbp_buf, mdesc.mst_addr^[ _pos ].epos,
+                                      FILE_ID_MXGG00,
+                                      trans.trError_gg00);
+                                mdesc.mst_addr^[ _pos ].elen_var :=
+                                      mdesc.mst_addr^[ _pos ].elen_var + rec.keylen;
+                                IF  (( mdesc.mst_addr^[ _pos ].ecol_tab[ 1 ] = chr(1) ) AND
+                                    ( mdesc.mst_addr^[ _pos ].ecol_tab[ 2 ] = chr(1)) )
+                                THEN (* EXISTS *)
+                                    BEGIN
+                                    mdesc.mst_addr^[ _pos ].etype := st_bool;
+                                    mdesc.mst_addr^[ _pos ].eop   := op_none;
+                                    mdesc.mst_addr^[ _pos ].epos  := cgg04_is_true
+                                    END
+                                ELSE
+                                    IF  ( rec.info[ 1 ] = chr(255) ) AND
+                                        (* make this routine idempotent *)
+                                        ( mdesc.mst_addr^[ _pos ].elen_var > 0 )
+                                    THEN
+                                        BEGIN
+                                        (* NULL value in record, kb71op_subquery() *)
+                                        mdesc.mst_addr^[ _pos ].elen_var :=
+                                              -mdesc.mst_addr^[ _pos ].elen_var
+                                        END;
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                BEGIN
+                                IF  ( trans.trError_gg00 = e_no_prev_record )
+                                THEN
+                                    BEGIN
+                                    FOR _i := _first_prim TO _pos - 1 DO
+                                        mdesc.mst_addr^[ _i ].etype := st_dummy;
+                                    (*ENDFOR*) 
+                                    mdesc.mst_addr^[ _pos ].etype := st_bool;
+                                    mdesc.mst_addr^[ _pos ].eop  := op_none;
+                                    (* ALL *)
+                                    mdesc.mst_addr^[ _pos ].epos := cgg04_is_true;
+                                    IF  mdesc.mst_addr^[ _pos ].ecol_tab[ 2 ] = chr(1)
+                                    THEN
+                                        (* ANY, EXISTS *)
+                                        mdesc.mst_addr^[ _pos ].epos := cgg04_is_false
+                                    ELSE
+                                        (* ecol_tab[2] = chr(0) *)
+                                        IF  mdesc.mst_addr^[_pos].ecol_tab[1] = chr(0)
+                                        THEN
+                                            (* neither ANY nor ALL ? *)
+                                            (* strictly  speaking a one tuple subquery *)
+                                            (* but these subquery have eop=op_get_sub_value *)
+                                            (* ecol_tab[1]=chr(0), ecol_tab[2]=chr(0)*)
+                                            mdesc.mst_addr^[_pos].epos := cgg04_is_undef;
+                                        (*ENDIF*) 
+                                    (*ENDIF*) 
+                                    IF  ( _pos < _last )
+                                    THEN
+                                        BEGIN
+                                        (* is term negated? *)
+                                        IF  ( mdesc.mst_addr^[ _pos + 1 ].eop = op_not )
+                                        THEN
+                                            BEGIN
+                                            mdesc.mst_addr^[ _pos + 1 ].eop := op_none;
+                                            IF  mdesc.mst_addr^[ _pos ].epos = cgg04_is_true
+                                            THEN
+                                                mdesc.mst_addr^[ _pos ].epos := cgg04_is_false
+                                            ELSE
+                                                IF  mdesc.mst_addr^[ _pos ].epos = cgg04_is_false
+                                                THEN
+                                                    mdesc.mst_addr^[ _pos ].epos := cgg04_is_true;
+                                                (*ENDIF*) 
+                                            (*ENDIF*) 
+                                            IF  mdesc.mst_addr^[_pos + 1].etype = st_op
+                                            THEN
+                                                mdesc.mst_addr^[ _pos + 1 ].etype := st_dummy
+                                            (*ENDIF*) 
+                                            END
+                                        (*ENDIF*) 
+                                        END;
+                                    (*ENDIF*) 
+                                    END;
+                                (*ENDIF*) 
+                                END;
+                            (*ENDIF*) 
+                            IF  ( trans.trError_gg00 <> e_move_error )
+                            THEN
+                                trans.trError_gg00 := e_ok
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            _pos := succ(_pos);
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    ;
+    (* now loop over next qualification part *)
+    IF  ( mdesc.mqual_pos < mdesc.mresqual_pos )
+    THEN
+        BEGIN
+        _start := mdesc.mresqual_pos;
+        _last  := mdesc.mresqual_pos + mdesc.mresqual_cnt - 1;
+        END
+    ELSE
+        BEGIN
+        _start := mdesc.mqual_pos;
+        _last  := mdesc.mqual_pos + mdesc.mqual_cnt - 1;
+        END;
+    (*ENDIF*) 
+UNTIL
+    ( _pos > _last_pos ) OR ( _start = 0 );
+(*ENDREPEAT*) 
+;
+(* avoid several calls *)
+mdesc.mstack_state := mdesc.mstack_state - [ ssSubquery_egg00 ];
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720apply_aggr_func (
+            VAR funct_fields : tgg00_AggrDescrRec;
+            VAR listkey      : tgg00_Lkey;
+            VAR lbuf         : tsp00_Buf;
+            one_list_only    : boolean;
+            VAR e            : tgg00_BasisError);
+ 
+VAR
+      _ix, _iy, _iz   : integer;
+      _f_len        : tsp00_Int2;
+      _f_pos        : tsp00_Int2;
+      _length       : integer;
+      _ret          : tsp00_NumError;
+      _l_key        : tsp00_Key;
+      _add_count    : tsp00_Int4;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (kb, 'prim count  ', funct_fields.agg_prim_key_cnt);
+&ENDIF
+SAPDB_PascalMove ('VKB720',   9,    
+      sizeof(listkey.k), sizeof(_l_key), @listkey.k, 1,
+      @_l_key, 1, listkey.len, e);
+IF  e = e_ok
+THEN
+    FOR _ix := 1 TO funct_fields.agg_cnt DO
+        WITH funct_fields, agg_field_descr[ _ix ] DO
+            IF  field_sum_flag
+            THEN
+                BEGIN
+                IF  (field_function in [ op_f_sum, op_f_avg ])
+                THEN
+                    _add_count := agg_prim_key_cnt
+                ELSE
+                    _add_count := 1;
+                (*ENDIF*) 
+                _f_pos := field_rec_pos;
+                IF  (field_rec_len = 0)
+                THEN
+                    _f_len := (listkey.len - _f_pos)
+                ELSE
+                    _f_len := field_rec_len - 1;
+                (*ENDIF*) 
+                IF  field_is_descen
+                THEN
+                    FOR _iy := _f_pos TO (_f_pos + _f_len) DO
+                        _l_key[ _iy ] :=
+                              chr (255 - ord (listkey.k[ _iy ]));
+                    (*ENDFOR*) 
+                (*ENDIF*) 
+                IF  (lbuf[ result_out_pos ] = csp_undef_byte) OR
+                    one_list_only
+                THEN
+                    BEGIN
+                    lbuf[ result_out_pos ]   := csp_defined_byte;
+                    lbuf[ result_out_pos+1 ] := cgg04_zero_exponent;
+                    END;
+                (*ENDIF*) 
+                _iz  := 1;
+                _ret := num_ok;
+                WHILE (_iz <= _add_count) AND (_ret = num_ok) DO
+                    BEGIN
+                    s51add (lbuf,
+                          result_out_pos+1, result_out_len-1,
+                          _l_key,
+                          _f_pos+1, _f_len,
+                          lbuf, result_out_pos+1,
+                          csp_fixed,
+                          csp_float_frac,
+                          _length, _ret);
+                    IF  _ret <> num_ok
+                    THEN
+                        BEGIN
+                        lbuf[ result_out_pos+1 ] := chr(255);
+                        _length := (csp_fixed + 1) DIV 2;
+                        FOR _iy := 1 TO _length DO
+                            lbuf[ result_out_pos+1+_iy ] :=
+                                  chr(153)
+                        (*ENDFOR*) 
+                        END;
+                    (*ENDIF*) 
+                    _iz := succ(_iz);
+                    END;
+                (*ENDWHILE*) 
+                END;
+            (*ENDIF*) 
+        (*ENDWITH*) 
+    (*ENDFOR*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720sel_first_part (
+            VAR m           : tgg00_MessBlock;
+            VAR selrec      : tgg07_select_param;
+            VAR selfields   : tgg00_SelectFieldsParam;
+            VAR gg_strategy : tgg07_StrategyInfo);
+ 
+VAR
+      _ix                : tsp00_Int2;
+      _start             : tsp00_Int2;
+      _stop              : tsp00_Int2;
+      _strat_col         : tsp00_Int2;
+      _tmp_key           : tgg00_Lkey;
+      _available         : tsp00_Int4;
+      _ok                : boolean;
+ 
+BEGIN
+IF  ( ssSubquery_egg00 in m.mb_qual^.mstack_state ) AND
+    ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    k720_test_subquery( m.mb_trns^, m.mb_data^, m.mb_data_size,
+          m.mb_qual^.mstack_desc,
+          selrec.selr_selectbuffer.buf_rec );
+(*ENDIF*) 
+g04init_select_fields( selfields, @m.mb_data^.mbp_buf, m.mb_data_size,
+      m.mb_work_st, m.mb_work_st_max, m.mb_workbuf, m.mb_workbuf_size,
+      m.mb_qual^.msqlmode, @m.mb_fieldlists );
+selfields.sfp_filler2         := false;
+selfields.sfp_bd_mess_type    := m.mb_type;
+selfields.sfp_acv_addr        := m.mb_trns^.trAcvPtr_gg00;   (* PTS 1121403 E.Z. *)
+selrec.selr.selr_resf_id.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+k720_initialize( m, selrec, gg_strategy, selfields.sfp_bd_use_stopkey );
+&ifdef trace
+t01qual( kb, m.mb_qual^ );
+&endif
+IF  gg_strategy.str_use_clusterIO
+THEN
+    BEGIN
+    _ok := true;
+    IF (m.mb_trns^.trClusterIOPtr_gg00 = NIL)
+    THEN
+        BEGIN
+        _available := 0;
+        vnewbuf (bd999GetDataIOBlockCount, _available, m.mb_trns^.trClusterIOPtr_gg00, _ok);
+        IF _ok 
+        THEN
+            m.mb_trns^.trClusterIOSize_gg00 := bd999GetDataIOBlockCount * bd999GetPageSize;
+        END;
+    IF  _ok 
+    THEN 
+        BEGIN
+        selfields.sfp_cluster_info.clust_pIOBuffer_gg00        := m.mb_trns^.trClusterIOPtr_gg00;
+        selfields.sfp_cluster_info.clust_BufferSize_gg00       := m.mb_trns^.trClusterIOSize_gg00;
+        selfields.sfp_cluster_info.clust_bDoClusteredRead_gg00 := true;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  gg_strategy.str_strategy in a70glob_fetch_strats
+THEN
+    selfields.sfp_result_wanted := false
+ELSE
+    selfields.sfp_result_wanted := true;
+(*ENDIF*) 
+IF  ((( gg_strategy.str_strategy in a70glob_key_fetch_strats ) AND
+    ( ksp_order_support_reverse in gg_strategy.str_key_in_range.
+    skir_strat_props )
+    OR
+    ( gg_strategy.str_strategy in a70glob_inv_fetch_strats ) AND
+    ( isp_order_support_reverse in gg_strategy.str_inv_in_range.
+    siir_strat_props )))
+THEN
+    BEGIN
+&   ifdef trace
+    t01sname(kb, 'reverse fetc' );
+&   endif
+    selfields.sfp_bd_mess2_type := mm_last;
+    IF  NOT g01ConsistentReadEnabled OR
+        (ksp_order_support_reverse in gg_strategy.str_key_in_range.skir_strat_props)
+    THEN
+        BEGIN
+        (* swap startkey stopkey *)
+        _tmp_key             := selrec.selr.selr_startkey;
+        selrec.selr.selr_startkey := selrec.selr.selr_stopkey;
+        selrec.selr.selr_stopkey  := _tmp_key;
+        selrec.selr.selr_reverse_fetch := true;
+        IF  ( selrec.selr.selr_startkey.len = 0 )
+        THEN
+            BEGIN
+            selrec.selr.selr_startkey.k   := b01fullkey;
+            IF  ftsPerm_egg00 in selrec.selr.selr_tree.fileType_gg00
+            THEN
+                selrec.selr.selr_startkey.len := PERM_KEY_MXSP00
+            ELSE
+                selrec.selr.selr_startkey.len := KEY_MXSP00;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+&   ifdef trace
+    (*ENDIF*) 
+    t01key (kb, 'selr_startke', selrec.selr.selr_startkey);
+    t01key (kb, 'selr_stopkey', selrec.selr.selr_stopkey);
+&   endif
+    END
+ELSE
+    BEGIN
+    IF  ( gg_strategy.str_strategy in [ strat_key_equal, strat_key_equal_fetch ])
+    THEN
+        selfields.sfp_bd_mess2_type := mm_direct
+    ELSE
+        selfields.sfp_bd_mess2_type := mm_first;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+&ifdef trace
+t01basis_error( kb,'trError     ', m.mb_trns^.trError_gg00 );
+&endif
+selfields.sfp_bd_inv_only := gg_strategy.str_qual_kind;
+(* PTS 1112079 E.Z. *)
+selfields.sfp_check_for_result := gg_strategy.str_search_first;
+;
+selrec.selr.selr_resrec_maxlen  := selfields.sfp_resrec_maxlen;
+selrec.selr.selr_file_to_drop   := false;
+;
+IF  ( m.mb_trns^.trError_gg00 = e_ok )
+THEN
+    BEGIN
+    IF  ( m.mb_type = m_update ) AND
+        ( gg_strategy.str_strategy in a70glob_inv_strats )
+    THEN
+        IF  ( selrec.selr.selr_intersect_id.fileName_gg00 = cgg_zero_fn )
+            OR
+            (( selrec.selr.selr_intersect_id.fileName_gg00 <> cgg_zero_fn ) AND
+            ( bd998IsTempFile (m.mb_trns^, selrec.selr.selr_intersect_id)
+            AND (bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_intersect_id)
+            <> ttfnKeyUpdate_egg00) ))
+        THEN
+            BEGIN
+            (* mmult_pos: descriptions of indexes columns to be updated *)
+            _start := m.mb_qual^.mmult_pos;
+            _stop  := m.mb_qual^.mmult_pos + m.mb_qual^.mmult_cnt;
+            _ix    := 0;
+            WHILE ( _ix <= gg_strategy.str_inv_in_range.siir_startcnt - 1 )
+                  AND
+                  ( NOT selrec.selr.selr_intern_dist ) DO
+                BEGIN
+                _strat_col :=
+                      abs( gg_strategy.str_inv_in_range.siir_invstart[ _ix ] );
+                IF  ( _strat_col > 0 )
+                THEN
+                    kb720check_upd( m, selrec, _strat_col, _start, _stop );
+                (*ENDIF*) 
+                _ix := succ( _ix );
+                END;
+            (*ENDWHILE*) 
+            _ix    := 0;
+            WHILE ( _ix <= gg_strategy.str_inv_in_range.siir_stopcnt - 1 ) AND
+                  ( NOT selrec.selr.selr_intern_dist ) DO
+                BEGIN
+                _strat_col := abs( gg_strategy.str_inv_in_range.siir_invstop[ _ix ] );
+                IF  ( _strat_col > 0 )
+                THEN
+                    kb720check_upd( m, selrec, _strat_col, _start, _stop );
+                (*ENDIF*) 
+                _ix := succ( _ix );
+                END;
+            (*ENDWHILE*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  (( gg_strategy.str_cnt_strat > 1 ) AND
+        ( selrec.selr.selr_distinct = no_distinct ) AND
+        ( m.mb_type <> m_delete ))
+        OR
+        selrec.selr.selr_intern_dist
+    THEN
+        BEGIN
+        (* there's no other distinct handling, so we must do it *)
+        a101_CreateGroupedTempFile (m.mb_trns^, selrec.selr.selr_distinct_id,
+              bd998GetExtendedTempFileType (m.mb_trns^,
+              selrec.selr.selr_distinct_id));
+        selrec.selr.selr_intern_dist := ( m.mb_trns^.trError_gg00 = e_ok );
+        END;
+    (*ENDIF*) 
+    IF  ( m.mb_trns^.trError_gg00   =  e_ok ) AND
+        ( m.mb_trns^.trIndex_gg00 = cgg_nil_transindex )
+    THEN
+        IF  NOT ( gg_strategy.str_strategy in [ strat_catalog ] )
+        THEN
+            m.mb_trns^.trError_gg00 := e_nil_transindex;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( m.mb_trns^.trError_gg00 = e_ok )
+    THEN
+        BEGIN
+        IF  NOT ( gg_strategy.str_strategy in a70glob_fetch_strats )
+            AND NOT
+            (
+            ( m.mb_type  IN [ m_update, m_delete      ] ) AND
+            ( m.mb_type2 = mm_qual )
+            )
+            AND NOT ( m.mb_type = m_insert_select )
+        THEN
+            BEGIN
+            IF  bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id) AND
+                ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+                = ttfnInto_egg00 )
+            THEN
+                BEGIN
+                IF  ( selrec.selr.selr_maxresult = 0 ) (* SELECT INTO *)
+                    AND
+                    ( gg_strategy.str_strategy <> strat_more_than_one )
+                    AND
+                    (
+                    (* SET function without GROUP BY *)
+                    (( m.mb_type2 = mm_with_functions ) AND
+                    ( selrec.selr.selr_res_keyl = RESCNT_MXGG04 ))
+                    OR
+                    (* no DISTINCT, no ORDER, key of result set is result counter *)
+                    ( NOT ( m.mb_type2 in [ mm_with_functions, mm_with_join ] ) AND
+                    ( selrec.selr.selr_distinct = no_distinct ))
+                    OR
+                    gg_strategy.str_corr_single
+                    )
+                THEN
+                    BEGIN
+                    selrec.selr.selr_one_result := true;
+&                   ifdef trace
+                    t01sname(kb, 'set one res1' );
+&                   endif
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                (* selr.selr_resf_id not a SELECT INTO file *)
+                BEGIN
+                IF  (( selrec.selr.selr_countresult = 0 ) OR
+                    selrec.selr.selr_UNION_ALL_append )
+                    AND
+                    ( selrec.selr.selr_resf_id.fileRoot_gg00 = NIL_PAGE_NO_GG00 )
+                    AND
+                    ( hsCreateFile_egg00 in selrec.selr.selr_resf_id.fileHandling_gg00 )
+                THEN
+                    BEGIN
+                    a101_CreateGroupedTempFile( m.mb_trns^,
+                          selrec.selr.selr_resf_id,
+                          bd998GetExtendedTempFileType (m.mb_trns^,
+                          selrec.selr.selr_resf_id));
+&                   IFDEF TRACE
+                    t01basis_error( kb,'trError     ', m.mb_trns^.trError_gg00 );
+&                   ENDIF
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( m.mb_trns^.trError_gg00 = e_ok )
+            THEN
+                selrec.selr.selr_file_to_drop := true;
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    ;
+    IF  ( m.mb_type   =  m_select )            AND
+        ( m.mb_type2 <> mm_first_join_select ) AND
+        ( m.mb_type2 <> mm_with_join )         AND
+        ( NOT bd998IsTempFile (m.mb_trns^, m.mb_qual^.mtree) ) AND
+        ( m.mb_trns^.trError_gg00 =  e_ok )                AND
+        (( hsTempLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00 ) OR
+        ( hsPermLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00 ))
+    THEN
+        BEGIN
+        k53perm_temp_lock( m.mb_trns^,
+              m_lock, lckTabShare_egg00,
+              m.mb_qual^.mtree.fileHandling_gg00 - [ hsCollisionTest_egg00 ],
+              m.mb_qual^.mtree.fileTabId_gg00,
+              selrec.selr.selr_invkey (* dummy *) );
+        ;
+        IF  ( m.mb_trns^.trError_gg00 = e_wait_for_lock_release )
+        THEN
+            k53wait( m.mb_trns^, m.mb_type, m.mb_type2 );
+        (*ENDIF*) 
+        IF  (
+            (( hsPermLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00 ) AND
+            NOT ( hsIntentExcl_egg00 in m.mb_qual^.mtree.fileHandling_gg00 ))
+            OR
+            ( hsCollisionTest_egg00 in m.mb_qual^.mtree.fileHandling_gg00 )
+            )
+        THEN
+            m.mb_qual^.mtree.fileHandling_gg00 :=
+                  m.mb_qual^.mtree.fileHandling_gg00 + [ hsWithoutLock_egg00 ];
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+selfields.sfp_act_cntresult := 1;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720sel_last_part (
+            VAR m           : tgg00_MessBlock;
+            VAR selrec      : tgg07_select_param;
+            VAR getrec      : tgg07_get_param;
+            VAR selfields   : tgg00_SelectFieldsParam;
+            VAR gg_strategy : tgg07_StrategyInfo);
+ 
+VAR
+      _aux_mresqual_pos  : tsp00_Int2;
+      _aux_mresqual_cnt  : tsp00_Int2;
+      _aux_mqual_pos     : tsp00_Int2;
+      _aux_mqual_cnt     : tsp00_Int2;
+      _aux_optimize_pos  : tsp00_Int2;
+      _rowno_reached     : boolean;
+      _res               : tsp00_NumError;
+      _aux_error         : tgg00_BasisError;
+      _set_result        : tgg00_BdSetResultRecord;
+      _ok                : boolean;
+ 
+BEGIN
+&ifdef trace
+t01messtype( kb, 'mb_type     ', m.mb_type );
+t01mess2type( kb, 'mb_type2    ', m.mb_type2 );
+&endif
+_rowno_reached := ( m.mb_trns^.trError_gg00 = e_enough_resultsets );
+IF  ( m.mb_trns^.trError_gg00 = e_enough_resultsets )
+THEN
+    BEGIN
+    m.mb_trns^.trError_gg00 := e_ok;
+    IF  ( gg_strategy.str_rowno >= cgg04_valid_rowno )
+    THEN
+        m.mb_trns^.trWarning_gg00 := m.mb_trns^.trWarning_gg00 +
+              [ warn0_exist, warn12_rowno_used ]
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( selrec.selr.selr_intern_dist )
+THEN
+    BEGIN
+    _aux_error := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFile( m.mb_trns^, selrec.selr.selr_distinct_id );
+    IF  ( _aux_error <> e_ok )
+    THEN
+        m.mb_trns^.trError_gg00 := _aux_error
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( m.mb_type = m_update ) AND ( m.mb_type2 = mm_qual ) AND
+    ( selrec.selr.selr_intersect_id.fileName_gg00 <> cgg_zero_fn )
+THEN
+    BEGIN
+    _aux_error := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFile (m.mb_trns^, selrec.selr.selr_intersect_id);
+    IF  ( _aux_error <> e_ok )
+    THEN
+        m.mb_trns^.trError_gg00 := _aux_error
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ((m.mb_type2 = mm_with_join) AND
+    getrec.gi_linkrec.kbjr_left_oj AND
+    NOT _rowno_reached )
+THEN
+    k74finish_l_outer_join (m, getrec, selrec);
+(*ENDIF*) 
+IF  (( m.mb_type2 = mm_with_functions ) OR selrec.selr.selr_join_with_func )
+THEN
+    BEGIN
+    IF  ( selrec.selr.selr_join_with_func )
+    THEN
+        BEGIN
+        _aux_mresqual_pos  := m.mb_qual^.mresqual_pos;
+        _aux_mresqual_cnt  := m.mb_qual^.mresqual_cnt;
+        _aux_mqual_pos     := m.mb_qual^.mqual_pos;
+        _aux_mqual_cnt     := m.mb_qual^.mqual_cnt;
+        _aux_optimize_pos  := m.mb_qual^.mst_optimize_pos;
+        ;
+        selrec.selr.selr_recl            := getrec.gi_result_info.n_res_rec_len;
+        selrec.selr.selr_keyl            := getrec.gi_result_info.n_key_len;
+        selfields.sfp_act_cntresult := selrec.selr.selr_countresult;
+        selrec.selr_selectbuffer.result.keylen := selrec.selr.selr_res_keyl;
+        m.mb_qual^.mst_optimize_pos  := 0;
+        m.mb_qual^.mqual_pos         := m.mb_qual^.mresqual_pos;
+        m.mb_qual^.mqual_cnt         := m.mb_qual^.mresqual_cnt;
+        m.mb_qual^.mresqual_pos      := 0;
+        m.mb_qual^.mresqual_cnt      := 0;
+        END;
+    (*ENDIF*) 
+    selrec.selr.selr_countresult := selrec.selr.selr_group_count;
+    IF  ( m.mb_trns^.trError_gg00 = e_ok )
+    THEN
+        BEGIN
+        IF  ( selrec.selr.selr_countresult > 0 )
+        THEN
+            BEGIN
+            IF  ( selrec.selr.selr_call_avg <> sfh_none)
+            THEN
+                k721do_avg ( m, selrec )
+            ELSE
+                BEGIN
+                IF  ( selrec.selr.selr_call_later_out )
+                THEN
+                    BEGIN
+                    IF  ( NOT selrec.selr.selr_one_result )
+                    THEN
+                        BEGIN
+                        selrec.selr.selr_invkey.len := RESCNT_MXGG04;
+                        selrec.selr.selr_invkey.k[1] := chr(0);
+                        selrec.selr.selr_invkey.k[2] := chr(0);
+                        selrec.selr.selr_invkey.k[3] := chr(0);
+                        selrec.selr.selr_invkey.k[4] := chr(1);
+                        b07cget_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                              selrec.selr.selr_invkey, selrec.selr_selectbuffer.lbuf );
+                        IF  ( m.mb_trns^.trError_gg00 = e_key_not_found ) OR
+                            ( m.mb_trns^.trError_gg00 = e_ok )
+                        THEN
+                            BEGIN
+                            m.mb_trns^.trError_gg00 := e_ok;
+                            b07cdel_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                                  selrec.selr.selr_invkey );
+                            IF  ( m.mb_trns^.trError_gg00 = e_ok )
+                            THEN
+                                BEGIN
+                                k721call_later_output( m,
+                                      selrec.selr_selectbuffer.lbuf,
+                                      selrec.selr.selr_res_keyl );
+                                b07cadd_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                                      selrec.selr_selectbuffer.lbuf );
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        k721call_later_output( m, selrec.selr_selectbuffer.lbuf,
+                              selrec.selr.selr_res_keyl );
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            (* mm_with_functions and selr.selr_countresult = 0 *)
+            BEGIN
+            IF  ((( selrec.selr.selr_distinct <> no_distinct ) AND
+                ( selrec.selr.selr_res_keyl = RESCNT_MXGG04 + HASHVAL_MXGG04 ))
+                OR
+                ( selrec.selr.selr_call_later_out )
+                OR
+                ( selrec.selr.selr_res_keyl = RESCNT_MXGG04 )
+                OR
+                (( bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id)) AND
+                ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+                = ttfnSubquery_egg00 )))
+                (* an empty grouped table results in error 100 *)
+            THEN
+                BEGIN
+                k721null_result( m, selrec, selfields,
+                      selfields.sfp_act_cntresult - 1,
+                      selrec.selr.selr_call_later_out, selrec.selr.selr_res_keyl );
+                IF  ( m.mb_trns^.trError_gg00 = e_enough_resultsets )
+                THEN
+                    m.mb_trns^.trError_gg00 := e_ok;
+                (*ENDIF*) 
+                END
+            ELSE
+                selrec.selr.selr_one_result := false;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ( selrec.selr.selr_one_result AND
+            (( selrec.selr.selr_maxresult <> 0 ) OR ( gg_strategy.str_rowno = cgg04_subquery_one_record)) AND
+            ( m.mb_trns^.trError_gg00 = e_ok ))
+        THEN
+            b07cadd_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                  selrec.selr_selectbuffer.lbuf )
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    _aux_error := m.mb_trns^.trError_gg00;
+    IF  ( selrec.selr.selr_dis_file_cnt > 0 )
+    THEN
+        a101_DestroyGroupedTempFiles( m.mb_trns^, ttfnDistinct_egg00, -1, -1,
+              selrec.selr.selr_distinct_id.fileName_gg00 );
+    (*ENDIF*) 
+    IF  ( _aux_error <> e_ok )
+    THEN
+        m.mb_trns^.trError_gg00 := _aux_error;
+    (*ENDIF*) 
+    IF  ( selrec.selr.selr_join_with_func )
+    THEN
+        BEGIN
+        m.mb_qual^.mresqual_pos     := _aux_mresqual_pos;
+        m.mb_qual^.mresqual_cnt     := _aux_mresqual_cnt;
+        m.mb_qual^.mqual_pos        := _aux_mqual_pos;
+        m.mb_qual^.mqual_cnt        := _aux_mqual_cnt;
+        m.mb_qual^.mst_optimize_pos := _aux_optimize_pos
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( selrec.selr.selr_write_rownum AND ( selrec.selr.selr_countresult > 0 ) AND
+    ( m.mb_trns^.trError_gg00 = e_ok ))
+THEN
+    BEGIN
+    IF  ( m.mb_type2 = mm_with_join )
+    THEN
+        k74rowno_position( m, getrec, selrec )
+    ELSE
+        k721do_rowno( m, selrec );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 = e_ok ) AND ( m.mb_type2 <> mm_with_join )
+THEN
+    BEGIN
+    IF  NOT ( gg_strategy.str_strategy in a70glob_fetch_strats )
+    THEN
+        BEGIN
+        IF  ( m.mb_type = m_select ) AND (selrec.selr.selr_res_keyl > RESCNT_MXGG04) (* PTS 1113927 *)
+        THEN
+            b73cmds_count( iins_sorts_rows_ins, selrec.selr.selr_countresult );
+        (*ENDIF*) 
+        IF  (( selrec.selr.selr_maxresult <> 0 ) (* no SELECT INTO *)
+            OR ((selrec.selr.selr_maxresult = 0 ) AND
+            NOT selrec.selr.selr_finding_poss AND NOT gg_strategy.str_selinto) (* rowno < 1 *)
+            OR (( selrec.selr.selr_maxresult = 0 ) AND ( m.mb_type = m_update ))
+            OR ( selrec.selr.selr_subquery )) (*Subquery*)
+        THEN
+            BEGIN
+            IF  ( m.mb_type <> m_update ) OR
+                ( m.mb_qual_len  < MB_PART1_HEAD_MXGG00 + MB_PART1_RETURN_MXGG00 )
+            THEN
+                m.mb_qual_len  := MB_PART1_HEAD_MXGG00 + MB_PART1_RETURN_MXGG00;
+            (*ENDIF*) 
+            IF  ( m.mb_qual^.mtrigger_cnt > 0 )
+            THEN
+                k62return_trigger( m )
+            ELSE
+                BEGIN
+                IF  ( m.mb_type <> m_insert_select )
+                THEN
+                    BEGIN
+                    selrec.selr.selr_resf_id.fileResultSite_gg00 := cgg_zero_c2;
+                    m.mb_qual^.mr_restree      := selrec.selr.selr_resf_id;
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( selrec.selr.selr_UNION_ALL_append )
+            THEN
+                BEGIN
+                selrec.selr.selr_key_cnt_offs :=
+                      selrec.selr.selr_key_cnt_offs + selrec.selr.selr_countresult;
+&               ifdef TRACE
+                t01p2int4 (kb, 'countresult ', selrec.selr.selr_countresult
+                      ,        'key_cnt_offs', selrec.selr.selr_key_cnt_offs);
+&               endif
+                s41p4int( m.mb_qual^.mr_keycnt, 2,
+                      selrec.selr.selr_key_cnt_offs, _res );
+                m.mb_qual^.mr_keycnt[ 1 ] := csp_defined_byte;
+                IF  ( so_INTERSECT in selrec.selr.selr_set_operator )
+                THEN
+                    BEGIN
+                    IF  ( m.mb_trns^.trError_gg00 = e_ok )
+                    THEN
+                        b01move_filecontent( m.mb_trns^,
+                              selrec.selr.selr_intersect_id, selrec.selr.selr_resf_id );
+                    (*ENDIF*) 
+                    _aux_error := m.mb_trns^.trError_gg00;
+                    a101_DestroyGroupedTempFile( m.mb_trns^,
+                          selrec.selr.selr_intersect_id );
+                    IF  ( _aux_error <> e_ok )
+                    THEN
+                        m.mb_trns^.trError_gg00 := _aux_error;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( selrec.selr.selr_trunc_part2 )
+            THEN
+                m.mb_data_len  := 0;
+            (*ENDIF*) 
+            IF  (( selrec.selr.selr_countresult = 0)        AND
+                (* PTS 1113493 E.Z. *)
+                ( bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id) ) AND
+                ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+                = ttfnJoinResult_egg00 ) AND
+                ( hsDropFile_egg00 in selrec.selr.selr_resf_id.fileHandling_gg00  ))
+            THEN
+                (* destroy file in case of empty join result *)
+                a101_DestroyGroupedTempFile( m.mb_trns^,
+                      selrec.selr.selr_resf_id );
+            (*ENDIF*) 
+            IF  ( m.mb_trns^.trError_gg00 = e_ok ) AND
+                ( m.mb_type <> m_return_result )
+            THEN
+                BEGIN
+                CASE m.mb_type OF
+                    m_select :
+                        m.mb_type2 := mm_file;
+                    m_insert_select :
+                        BEGIN
+                        IF  m.mb_data^.mbp_info.rb_into_temp
+                        THEN
+                            BEGIN
+                            (* PTS 1119177 E.Z. *)
+                            m.mb_data_len := cgg_rec_key_offset +
+                                  sizeof (tgg00_Surrogate) + 2;
+                            m.mb_type2 := mm_key
+                            END
+                        ELSE
+                            m.mb_type2 := mm_nil;
+                        (*ENDIF*) 
+                        (* PTS 1118423 E.Z. *)
+                        m.mb_qual^.mr_first_serial := selfields.sfp_first_serial;
+                        m.mb_qual^.mr_last_serial  := selfields.sfp_last_serial;
+                        END;
+                    OTHERWISE
+                        m.mb_type2 := mm_nil;
+                    END;
+                (*ENDCASE*) 
+                m.mb_type   := m_return_result;
+                m.mb_struct := mbs_result;
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            (*
+                  (( selrec.selr.selr_maxresult = 0 )
+                  AND (( selrec.selr.selr_maxresult <> 0 ) OR ( m.mb_type <> m_update ))
+                  AND ( gg_strategy.str_rowno <> cgg04_subquery_one_record ))
+                  *)
+            BEGIN
+            m.mb_qual_len                       := MB_PART1_HEAD_MXGG00 + MB_PART1_RETURN_MXGG00;
+            m.mb_qual^.mr_restree               := selrec.selr.selr_resf_id;
+            a101_GetLogicalFilename (m.mb_trns^, m.mb_qual^.mr_restree);
+            IF  ( selrec.selr.selr_one_result )
+            THEN
+                BEGIN
+                IF  ( selrec.selr.selr_countresult = 0 )
+                THEN
+                    BEGIN
+                    IF  ( NOT gg_strategy.str_corr_single )
+                    THEN
+                        m.mb_trns^.trError_gg00 := e_no_next_record;
+                    (*ENDIF*) 
+                    m.mb_data_len  := 0
+                    END
+                ELSE
+                    BEGIN
+&                   ifdef trace
+                    t01name( kb, 'lbuf --> mb_data  ' );
+&                   endif
+                    SAPDB_PascalMove ('VKB720',  10,    
+                          sizeof(selrec.selr_selectbuffer.lbuf), m.mb_data_size,
+                          @selrec.selr_selectbuffer.lbuf, 1, @m.mb_data^.mbp_4kbuf,
+                          1, selrec.selr.selr_recl, m.mb_trns^.trError_gg00);
+                    m.mb_struct    := mbs_result;
+                    m.mb_type      := m_return_result;
+                    m.mb_type2     := mm_nil;
+                    m.mb_data_len  := selrec.selr.selr_recl
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                (* more than one record *)
+                BEGIN
+                IF  ( selrec.selr.selr_countresult > 0 )
+                THEN
+                    BEGIN
+                    selrec.selr.selr_tree_pos.tpsPno_gg00 := NIL_PAGE_NO_GG00;
+                    selrec.selr.selr_invkey.len       := 0;
+                    _set_result.bd_key_check_len := 0;
+                    _set_result.bd_max_rec_cnt   := 1;
+                    _set_result.bd_max_fill_len  := mxsp_buf;
+                    _set_result.bd_next          := true;
+                    _set_result.bd_drop_page     := false;
+                    ;
+                    b07cnext_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                          selrec.selr.selr_invkey, _set_result, selrec.selr.selr_tree_pos,
+                          m.mb_data^.mbp_buf );
+                    IF  ( m.mb_trns^.trError_gg00 = e_key_not_found ) OR
+                        ( m.mb_trns^.trError_gg00 = e_ok )
+                    THEN
+                        BEGIN
+                        m.mb_struct   := mbs_result;
+                        m.mb_type     := m_return_result;
+                        m.mb_type2    := mm_nil;
+                        m.mb_data_len := selrec.selr.selr_recl;
+                        selrec.selr.selr_invkey.len := m.mb_data^.mbp_keylen;
+                        SAPDB_PascalMove ('VKB720',  11,    
+                              m.mb_data_size, sizeof(selrec.selr.selr_invkey.k),
+                              @m.mb_data^.mbp_buf, cgg_rec_key_offset+1,
+                              @selrec.selr.selr_invkey.k, 1, selrec.selr.selr_invkey.len,
+                              m.mb_trns^.trError_gg00);
+                        IF  ( m.mb_trns^.trError_gg00 <> e_move_error )
+                        THEN
+                            BEGIN
+                            b07cdel_record( m.mb_trns^, selrec.selr.selr_resf_id,
+                                  selrec.selr.selr_invkey );
+                            m.mb_trns^.trError_gg00 := e_ok;
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        m.mb_data_len  := 0;
+                        END;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    IF  ( NOT gg_strategy.str_corr_single )
+                    THEN
+                        m.mb_trns^.trError_gg00 := e_no_next_record;
+                    (*ENDIF*) 
+                    m.mb_struct   := mbs_result;
+                    m.mb_type     := m_return_result;
+                    m.mb_type2    := mm_nil;
+                    m.mb_data_len := 0;
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        s41p4int( m.mb_qual^.mr_resnum, 2, selrec.selr.selr_countresult, _res );
+        m.mb_qual^.mr_resnum[ 1 ] := csp_defined_byte;
+        m.mb_qual^.mr_pagecnt     :=
+              m.mb_trns^.trRteCommPtr_gg00^.file_record_cnt;
+        m.mb_qual^.mr_res_build   := true;
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  bd998IsExtendedTempFile (m.mb_trns^, selrec.selr.selr_tree) AND
+    ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_tree)
+    = ttfnComplexSelect_egg00 )
+THEN
+    BEGIN
+    _aux_error := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFile( m.mb_trns^, selrec.selr.selr_tree );
+    IF  ( _aux_error <> e_ok )
+    THEN
+        m.mb_trns^.trError_gg00 := _aux_error
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( selrec.selr.selr_mbtype =  m_insert_select )
+    AND bd998IsExtendedTempFile (m.mb_trns^, selrec.selr.selr_tree)
+    AND
+    ( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_tree)
+    = ttfnInternResult_egg00 )
+THEN
+    BEGIN
+    _aux_error := m.mb_trns^.trError_gg00;
+    a101_DestroyGroupedTempFile( m.mb_trns^, selrec.selr.selr_tree );
+    IF  ( _aux_error <> e_ok )
+    THEN
+        m.mb_trns^.trError_gg00 := _aux_error
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( m.mb_trns^.trError_gg00 <> e_ok )
+THEN
+    BEGIN
+    IF  ( m.mb_trns^.trError_gg00 = e_key_not_found )
+    THEN
+        (* may happen if index-tree and prim-tree *)
+        (* are inconsistent, perhaps because of   *)
+        (* swapped bits                           *)
+        m.mb_trns^.trError_gg00 := e_primkey_not_found;
+    (*ENDIF*) 
+    _aux_error   := m.mb_trns^.trError_gg00;
+    m.mb_qual_len := 0;
+    m.mb_data_len := 0;
+    IF  ((selrec.selr.selr_resf_id.fileRoot_gg00 <> NIL_PAGE_NO_GG00) AND
+        selrec.selr.selr_file_to_drop)
+    THEN
+        IF  (
+            (
+            NOT
+            ( gg_strategy.str_strategy in a70glob_fetch_strats )
+            AND NOT
+            (
+            ( m.mb_type  IN [ m_update, m_delete      ] ) AND
+            ( m.mb_type2 = mm_qual )
+            )
+            AND NOT ( m.mb_type = m_insert_select )
+            )
+            OR
+            ( _aux_error = e_too_many_resultsets )
+            )
+            AND
+            ( bd998IsTempFile (m.mb_trns^, selrec.selr.selr_resf_id) )
+        THEN
+            IF  (( bd998GetExtendedTempFileType (m.mb_trns^, selrec.selr.selr_resf_id)
+                <> ttfnInto_egg00 ) AND
+                (* PTS 1113493 E.Z. *)
+                ( m.mb_type2 <> mm_with_join ))
+            THEN
+                a101_DestroyGroupedTempFile( m.mb_trns^, selrec.selr.selr_resf_id )
+            ELSE
+                IF  ( NOT selrec.selr.selr_one_result )
+                THEN
+                    b01empty_file( m.mb_trns^, selrec.selr.selr_resf_id );
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    m.mb_trns^.trError_gg00 := _aux_error
+    END;
+(*ENDIF*) 
+IF  ( selfields.sfp_cluster_info.clust_pIOBuffer_gg00 <> NIL )
+THEN
+    BEGIN
+    selfields.sfp_cluster_info.clust_bDoClusteredRead_gg00 := false;
+    selfields.sfp_cluster_info.clust_pIOBuffer_gg00        := NIL;
+    selfields.sfp_cluster_info.clust_BufferSize_gg00       := 0;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb720check_upd (
+            VAR m           : tgg00_MessBlock;
+            VAR selrec      : tgg07_select_param;
+            VAR strat_col   : tsp00_Int2;
+            VAR start       : tsp00_Int2;
+            VAR stop        : tsp00_Int2);
+ 
+VAR
+      _curr_col : tsp00_Int2;
+ 
+BEGIN
+(* *)
+_curr_col := start;
+WHILE ( NOT selrec.selr.selr_intern_dist ) AND ( _curr_col < stop ) DO
+    IF  ( m.mb_st^[ _curr_col ].etype = m.mb_st^[ strat_col ].etype ) AND
+        ( m.mb_st^[ _curr_col ].epos  = m.mb_st^[ strat_col ].epos ) AND
+        ( m.mb_st^[ _curr_col ].elen_var = m.mb_st^[ strat_col ].elen_var )
+    THEN
+        selrec.selr.selr_intern_dist := true
+    ELSE
+        _curr_col := _curr_col + 1
+    (*ENDIF*) 
+(*ENDWHILE*) 
+END;
+ 
+&ifdef trace
+(*------------------------------*) 
+ 
+PROCEDURE
+      k720trace_selrec (
+            VAR m      : tgg00_MessBlock;
+            VAR selrec : tgg07_select_param);
+ 
+BEGIN
+IF  t01trace (kb)
+THEN
+    WITH selrec DO
+        BEGIN
+        t01treeid (kb, 'selr_resf_id', selr.selr_resf_id        );
+        t01treeid (kb, 'selr_inv_id ', selr.selr_inv_id         );
+        t01treeid (kb, 'selr_distinc', selr.selr_distinct_id    );
+        t01treeid (kb, 'selr_interse', selr.selr_intersect_id   );
+        t01p2int4 (kb, 'countresult ', selr.selr_countresult
+              ,        'maxresult   ', selr.selr_maxresult      );
+        t01int4   (kb, 'group_count ', selr.selr_group_count    );
+        t01p2int4 (kb, 'tree pos   P', selr.selr_tree_pos.tpsPno_gg00
+              ,        'tree pos   I', selr.selr_tree_pos.tpsIndex_gg00  );
+        t01p2int4 (kb, 'rescec maxle', selr.selr_resrec_maxlen
+              , 'act cntreslt', selr.selr_act_cntresult         );
+        t01p2int4 (kb, 'keyl        ', selr.selr_keyl
+              ,        'recl        ', selr.selr_recl           );
+        t01int4   (kb, 'res keyl    ', selr.selr_res_keyl       );
+        t01int4   (kb, 'dis file cnt', selr.selr_dis_file_cnt   );
+        t01p2int4 (kb, 'distinct    ', ord (selr.selr_distinct)
+              , 'rowno       ', selr.selr_rowno                 );
+        t01int4   (kb, 'key cnt offs', selr.selr_key_cnt_offs   );
+        t01bool2  (kb, 'distinct_byt', selr.selr_distinct_bytes
+              ,        'union       ', selr.selr_union          );
+        t01bool2  (kb, 'one_result  ', selr.selr_one_result
+              ,        'subquery    ', selr.selr_subquery       );
+        t01bool2  (kb, 'intern_dist ', selr.selr_intern_dist
+              ,        'is nokey    ', selr.selr_key_props = kp_nokey);
+        t01bool2  (kb, 'intern_dist ', selr.selr_intern_dist
+              ,        'isclusterkey', selr.selr_key_props = kp_clusterKey);
+        t01bool2  (kb, 'count all   ', selr.selr_count_all
+              ,        'count bd    ', selr.selr_count_bd       );
+        t01bool2  (kb, 'write rownum', selr.selr_write_rownum
+              ,        'finding poss', selr.selr_finding_poss   );
+        t01bool2  (kb, 'UNION_ALL_ap', selr.selr_UNION_ALL_append
+              ,        'reverse fetc', selr.selr_reverse_fetch  );
+        t01bool2  (kb, 'is union    ', so_UNION in selr.selr_set_operator
+              ,        'is except   ', so_EXCEPT in selr.selr_set_operator );
+        t01bool2  (kb, 'is intersect', so_INTERSECT in selr.selr_set_operator
+              ,        'is all      ', so_ALL_mod in selr.selr_set_operator );
+        t01bool2  (kb, 'no wran8 sor', selr.selr_no_warn8_sort
+              ,        'oracle selin', selr.selr_oracle_selinto );
+        t01bool2  (kb, 'all recursiv', selr.selr_all_recursive
+              ,        'call later o', selr.selr_call_later_out );
+        t01int4   (kb, 'call AVG    ', ord(selr.selr_call_avg));
+        t01bool2  (kb, 'file to drop', selr.selr_file_to_drop
+              ,        'trunc part2 ', selr.selr_trunc_part2    );
+        IF  ( m.mb_type2 in [ mm_with_join, mm_join_with_last_tab ])
+        THEN
+            BEGIN
+            t01treeid (kb, 'selr_id_oute', selr.selr_id_outer_join  );
+            t01int4   (kb, 'l_endpos    ', selr.selr_l_endpos       );
+            t01p2int4 (kb, 'first_jlen  ', selr.selr_first_jlen
+                  ,        'l_defbyte_po', selr.selr_l_defbyte_pos  );
+            t01bool2  (kb, 'join w func ', selr.selr_join_with_func
+                  ,        'last join   ', selr.selr_last_join  );
+            END;
+        (*ENDIF*) 
+        END
+    (*ENDWITH*) 
+(*ENDIF*) 
+END;
+ 
+&endif
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

@@ -1,0 +1,173 @@
+#
+# =====================================================
+# @(#) WA                        7.4        2000-10-13
+# =====================================================
+# Created in  7.4:
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+def install (session,options):
+    """Installing tables for WebAgent
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    #ADIS #1001953/1002033
+    requireSysdba (session)
+
+    switchToSchema (session, 'SYSDBFILESYSTEM')
+
+    #----------------------------------------------------------------------------
+    # Create tables for database filesystem
+    #----------------------------------------------------------------------------
+    
+    #----------------------------------------------------------------------------
+    # Create table container
+    #----------------------------------------------------------------------------
+    if not existsTable (session, "SYSDBFILESYSTEM.CONTAINER"):
+        stopIfSqlNotOK (session, """
+            CREATE TABLE CONTAINER 
+            ( 
+             ViewOwner              SYSID,
+             ContainerId            CHAR (8) BYTE NOT NULL DEFAULT STAMP,
+             Inode                  CHAR (8) BYTE NOT NULL, 
+             Data                   LONG BYTE, 
+             Size                   INT, 
+             Compressed             CHAR(1) ASCII, 
+             PRIMARY KEY (ContainerId),
+             CONSTRAINT CONTAINER_INDEX UNIQUE (Inode)
+            ) INTERNAL""")
+
+        if existsTable (session, "SYSDBA.WA_CONTAINER"):
+
+            stopIfSqlNotErr (session, 100, """INSERT CONTAINER SELECT * FROM SYSDBA.WA_CONTAINER""")
+            stopIfSqlNotOK (session, """DROP TABLE SYSDBA.WA_CONTAINER""")
+    else:
+
+        if (options.migrate):
+            stopIfSqlNotOK  (session, 'ALTER TABLE CONTAINER MODIFY (ViewOwner SYSID)')
+            
+    #----------------------------------------------------------------------------
+    # Create table inode
+    #----------------------------------------------------------------------------
+    if not existsTable (session, "SYSDBFILESYSTEM.INODE"):
+        stopIfSqlNotOK (session, """
+         CREATE TABLE INODE 
+          ( 
+             ViewOwner              SYSID,
+             PartitionId            INT,
+             InodeId                CHAR (8) BYTE DEFAULT STAMP, 
+             ParentDirectory        CHAR (8) BYTE, 
+             Name                   CHAR(245)       NOT NULL, 
+             Type                   CHAR(4)  ASCII, 
+             Protection             CHAR(9)  ASCII, 
+             Owner                  CHAR(16), 
+             UGroup                 CHAR(16), 
+             CreationDate           DATE, 
+             CreationTime           TIME, 
+             ModificationDate       DATE, 
+             ModificationTime       TIME, 
+             Container              CHAR (8) BYTE, 
+             LinkInode              CHAR (8) BYTE, 
+             Size                   INT, 
+             PRIMARY KEY (PartitionId,InodeId), 
+             CONSTRAINT INODE_INDEX_1 UNIQUE (ViewOwner,ParentDirectory, Name),
+             CONSTRAINT INODE_INDEX_2 UNIQUE (Container) 
+            ) INTERNAL""")
+
+        if existsTable (session, "SYSDBA.WA_INODE"):
+
+            stopIfSqlNotErr (session, 100, """INSERT INODE SELECT * FROM SYSDBA.WA_INODE""")
+            stopIfSqlNotOK (session, """DROP TABLE SYSDBA.WA_INODE""")
+
+    else:
+        if (options.migrate):
+            stopIfSqlNotOK  (session, 'ALTER TABLE INODE MODIFY (ViewOwner SYSID)')
+
+    #----------------------------------------------------------------------------
+    # alter dbfs tables
+    #----------------------------------------------------------------------------
+    # This kind of foreign key definition is restricted in SAP DB 7.4
+    # The referential delete on index is not implemented (Thomas Anhaus)
+    # WebAgent tries to delete all referential depending data entries
+    #stopIfSqlNotOK (session, "ALTER TABLE CONTAINER FOREIGN KEY (Inode) REFERENCES INODE (InodeId)  ON DELETE CASCADE")
+    #stopIfSqlNotOK (session, "ALTER TABLE INODE FOREIGN KEY (LinkInode) REFERENCES INODE (InodeId)  ON DELETE CASCADE")
+
+    stopIfSqlNotOK (session, "COMMENT ON TABLE SYSDBFILESYSTEM.INODE IS 'Inode describes a UNIX-like directory  structure.'")
+
+
+    #----------------------------------------------------------------------------
+    # Create the view of dbfs container
+    #----------------------------------------------------------------------------
+    dropView (session, "MY_CONTAINER")
+    stopIfSqlNotOK (session, """
+            CREATE VIEW MY_CONTAINER AS
+            SELECT  *
+            FROM    SYSDBFILESYSTEM.CONTAINER
+            WHERE   VIEWOWNER = USERGROUP
+        WITH CHECK OPTION INTERNAL""")
+
+    #----------------------------------------------------------------------------
+    # Create the view of dbfs inode
+    #----------------------------------------------------------------------------
+    dropView (session, "MY_INODE")
+    stopIfSqlNotOK (session, """
+            CREATE VIEW MY_INODE AS
+            SELECT  *
+            FROM    SYSDBFILESYSTEM.INODE
+            WHERE   VIEWOWNER = USERGROUP
+        WITH CHECK OPTION INTERNAL""")
+    #----------------------------------------------------------------------------
+    # Grant for the view MY_CONTAINER
+    #----------------------------------------------------------------------------
+    stopIfSqlNotOK (session, """
+            GRANT   SELECT, UPDATE, DELETE, INSERT
+            ON      MY_CONTAINER 
+            TO      PUBLIC""")
+
+    #----------------------------------------------------------------------------
+    # Grant for the view MY_INODE
+    #----------------------------------------------------------------------------
+    stopIfSqlNotOK (session, """
+            GRANT   SELECT, UPDATE, DELETE, INSERT
+            ON      MY_INODE
+            TO      PUBLIC""")
+
+    #----------------------------------------------------------------------------
+    # Commit the data definitions
+    #----------------------------------------------------------------------------
+
+    loaderCmd (session, 'COMMIT')
+
+    switchToDefaultSchema (session, options)
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

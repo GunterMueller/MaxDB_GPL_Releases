@@ -1,0 +1,873 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1994$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VOS94C$
+.tt 2 $$$
+.tt 3 $R.Roedling$NT Server Configuration$1997-08-01$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       NT_Server_Configuration
+=========
+.sp
+Purpose :
+    This small utility creates and removes
+    entries in the Service Control database.
+    These entries are needed by Windows NT for server
+    processes which should not be killed at logout.
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.R”dling
+.sp
+.cp 3
+Created : 1997-04-23
+.sp
+.cp 3
+Version :
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-08-01
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+#include           <stdarg.h>
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS94C : "
+#define MF__   MOD__"UNDEFINED"
+
+
+
+#define PARAM_KERNEL_VERSION     "KERNELVERSION"
+
+/*
+ *  MACROS
+ */
+#if defined (CTRLCOMP)
+  #undef MSGCD
+  #define MSGCD(_arg)
+#else
+  #undef MSG_ERR
+  #define MSG_ERR(_arg)
+#endif
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+typedef struct SERVERDB_PARAM_RECORD {
+  BOOL                  fTapeCompressEnabled;
+  ULONG                 ulWaitSec;
+  ULONG                 ulTWTermTimeout;
+  PATHNAME              szDBRoot;
+  PATHNAME              szAEDebug;
+  BOOL                  fDumpEnabled;
+  } SERVERDB_PARAM_REC;
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+static APIRET sql94_read_registry   ( PSZ                pszNodeName,
+                                      PSZ                pszServiceName,
+                                      SERVERDB_PARAM_REC *Params );
+
+static APIRET sql94_update_registry ( PSZ                pszNodeName,
+                                      PSZ                pszServiceName,
+                                      PSZ                pszServerDB,
+                                      SERVERDB_PARAM_REC *Params,
+                                      tsp9_rte_xerror    *xerror);
+
+static PSZ  sql94_version_from_param( PSZ     pszDBRoot,
+                                      PSZ     pszServerDB );
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+#if defined (CTRLCOMP)
+
+global VOID sqlxregisterdb (tsp9_cstr           dbname,
+                            tsp9_cstr           dbroot,
+                            tsp9_pgm_kind       pgmKind,
+                            tsp9_server_options options,
+                            tsp9_rte_xerror     *xerror)
+  {
+  #undef MF__
+  #define MF__ MOD__"sqlxregisterdb"
+  BOOL         fAutoStart    = FALSE;
+  ULONG        ulKernelType;
+
+  DBGPAS;
+
+  eo44initError (xerror);
+
+  if ( dbname == NULL)
+    {
+    if ( sql01c_get_serverdb ( & (PSZ)dbname  ) == FALSE )
+      {
+      if (xerror == NULL)
+        {
+        printf (SERVICE_USAGE);
+        DBGOUT;
+        EXITPROCESS(2);
+        }
+      else
+        {
+        eo44anyError (xerror, "No dbname given");
+        DBGOUT;
+        return;
+        }
+      }
+    }
+
+  if ( dbroot == NULL )
+    {
+    /*
+     * get DBROOT from Environment
+     */
+    if ( sql01c_get_dbroot (& (PSZ)dbroot) == FALSE )
+      {
+      MSG_ERR ((xerror, ERR_DBROOT_NOT_SET));
+      MSGCD ((ERR_DBROOT_NOT_SET));
+      DBGOUT;
+      if (xerror == NULL)
+        {
+        EXITPROCESS(2);
+        }
+      else
+        return;
+      }
+    }
+
+  switch ( pgmKind )
+    {
+    case csp9_quick_pgm:
+      ulKernelType = KERNEL_TYPE_QUICK; break;
+    case csp9_slow_pgm:
+      ulKernelType = KERNEL_TYPE_SLOW;  break;
+    default:
+      ulKernelType = KERNEL_TYPE_FAST;  break;
+    }
+
+
+  fAutoStart = (options & csp9_start_automatic) != 0;
+
+  sql94_service_entry ( UPDATE_ADABAS_SERVICE, ulKernelType,
+                        fAutoStart, NULL, (PSZ)dbroot,
+                        (PSZ)dbname, xerror );
+
+
+  return;
+  }
+
+/*------------------------------*/
+
+global VOID sqlxunregisterdb (tsp9_cstr         dbname,
+                              tsp9_pgm_kind     pgmKind,
+                              tsp9_rte_xerror*  xerror )
+  {
+  #undef MF__
+  #define MF__ MOD__"sqlxunregisterdb"
+  tsp9_pgm_kind       ulKernelType [3];
+  int                 count;
+  int                 i;
+  BOOLEAN             serviceRemoved = FALSE;
+  DBGPAS;
+
+  eo44initError (xerror);
+
+  if (pgmKind == csp9_any_pgm)
+    {
+    count = 3;
+    ulKernelType [0] = KERNEL_TYPE_FAST;
+    ulKernelType [1] = KERNEL_TYPE_QUICK;
+    ulKernelType [2] = KERNEL_TYPE_SLOW;
+    }
+  else
+    {
+    count = 1;
+    switch ( pgmKind )
+      {
+      case csp9_quick_pgm:
+        ulKernelType[0] = KERNEL_TYPE_QUICK; break;
+      case csp9_slow_pgm:
+        ulKernelType[0] = KERNEL_TYPE_SLOW;  break;
+      default:
+        ulKernelType[0] = KERNEL_TYPE_FAST;  break;
+      }
+    }
+
+  for (i = 0; i < count; ++i)
+    {
+    xerror->xe_native_error = UNDEF;
+
+    sql94_service_entry ( REMOVE_ADABAS_SERVICE, ulKernelType[i],
+                          FALSE, NULL, "", (PSZ)dbname, xerror );
+
+    if (xerror->xe_native_error == UNDEF)
+      serviceRemoved = TRUE;
+    }
+
+  return;
+  }
+
+#endif
+
+/*------------------------------*/
+
+APIRET sql94_service_entry ( ULONG           ulRequest,
+                             ULONG           ulKernelType,
+                             BOOL            fAutoStart,
+                             PSZ             pszNodeName,
+                             PSZ             pszDBRoot,
+                             PSZ             pszServerDB,
+                             tsp9_rte_xerror *xerror)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql94_service_entry"
+  CHAR                  szServiceDB[MX_DBNAME + 80];
+  CHAR                  szServDisplayDB[MX_DBNAME + 80];
+  CHAR                  szServiceGW[MX_DBNAME + 80];
+  CHAR                  szServDisplayGW[MX_DBNAME + 80];
+  PSZ                   pszService;
+  PSZ                   pszServDisplay;
+  PSZ                   pszExtPos;
+  CHAR                  szDB[MX_DBNAME + 2];
+  PATHNAME              szPgmName;
+  SC_HANDLE             hScM, hS;
+  ULONG                 ulStartOption;
+  APIRET                rc          = NO_ERROR;
+  static STARTUPINFO    StartupInfo = { sizeof(STARTUPINFO) };
+  PSECURITY_DESCRIPTOR  pSD         = NULL;
+  SERVERDB_PARAM_REC    Params      = { TRUE,
+                                        DEFAULT_TAPE_LOAD_RETRY_TIME,
+                                        DEFAULT_TW_TERMINATION_TIMEOUT,
+                                        "",
+                                        DR_WATSON_EXENAME,
+                                        FALSE };
+
+  DBGIN;
+
+  strncpy(szDB, pszServerDB, MX_DBNAME + 1);
+  pszServerDB = szDB;
+  CharUpperBuff(pszServerDB, strlen(pszServerDB));
+
+  CharUpperBuff(pszDBRoot, strlen(pszDBRoot));
+  lstrcpy(szPgmName, pszDBRoot);
+
+  // --- create program name
+  //
+  if ( pszDBRoot[strlen(pszDBRoot) - 1] != '\\' )
+    lstrcat(szPgmName, "\\");
+
+  switch ( ulKernelType )
+    {
+    case KERNEL_TYPE_FAST_ORA_GW:
+      strcat(szPgmName, DB_FAST_ORA_GATEWAY_FILE_NAME);
+      break;
+    case KERNEL_TYPE_SLOW_ORA_GW:
+      strcat(szPgmName, DB_SLOW_ORA_GATEWAY_FILE_NAME);
+      break;
+    case KERNEL_TYPE_QUICK:
+      strcat(szPgmName, DB_QUICK_KERN_FILE_NAME);
+      break;
+    case KERNEL_TYPE_SLOW:
+      strcat(szPgmName, DB_SLOW_KERN_FILE_NAME);
+      break;
+    default:
+      strcat(szPgmName, DB_FAST_KERN_FILE_NAME);
+      break;
+    }
+
+  // --- create service names
+  //
+  strcpy(szServiceGW,     SERVICE_ID_GW);
+  strcat(szServiceGW,     pszServerDB);
+  strcpy(szServDisplayGW, SERVICE_DISPLAY_STR_GW);
+  strcat(szServDisplayGW, pszServerDB);
+
+  strcpy(szServiceDB,     SERVICE_ID);
+  strcat(szServiceDB,     pszServerDB);
+  strcpy(szServDisplayDB, SERVICE_DISPLAY_STR);
+  strcat(szServDisplayDB, pszServerDB);
+
+  if (( ulKernelType == KERNEL_TYPE_FAST_ORA_GW ) ||
+      ( ulKernelType == KERNEL_TYPE_SLOW_ORA_GW ))
+    {
+    pszService     = szServiceGW;
+    pszServDisplay = szServDisplayGW;
+    }
+  else
+    {
+    pszService     = szServiceDB;
+    pszServDisplay = szServDisplayDB;
+    }
+
+  switch ( ulKernelType )
+    {
+    case KERNEL_TYPE_QUICK:
+      strcat(pszServDisplay, SERVICE_QUICK_EXT);
+      strcat(pszService,     SERVICE_QUICK_EXT);
+      break;
+
+    case KERNEL_TYPE_SLOW:
+    case KERNEL_TYPE_SLOW_ORA_GW:
+      strcat(pszServDisplay, SERVICE_SLOW_EXT);
+      strcat(pszService,     SERVICE_SLOW_EXT);
+      break;
+    }
+
+
+  if (hScM = OpenSCManager( pszNodeName, NULL, SC_MANAGER_ALL_ACCESS ))
+    {
+    // --- does a SERVERDB service with the same name exist!
+    //
+    if (( ulKernelType == KERNEL_TYPE_FAST_ORA_GW ) ||
+        ( ulKernelType == KERNEL_TYPE_SLOW_ORA_GW ))
+      {
+      pszExtPos = &szServiceDB[strlen(szServiceDB)];
+
+      if (!(hS = OpenService(hScM, szServiceDB, SERVICE_START)))
+        {
+        strcpy(pszExtPos, SERVICE_QUICK_EXT);
+        if (!(hS = OpenService(hScM, szServiceDB, SERVICE_START)))
+          {
+          strcpy(pszExtPos, SERVICE_SLOW_EXT);
+          hS = OpenService(hScM, szServiceDB, SERVICE_START);
+          }
+        }
+      if ( hS )
+        {
+        CloseServiceHandle(hS);
+        CloseServiceHandle(hScM);
+
+        MSG_ERR ((xerror,INFO_SERVERDB_SERVICE_AL_INST));
+        MSGCD((INFO_SERVERDB_SERVICE_AL_INST));
+
+        DBGOUT;
+        return (ERROR_SERVICE_EXISTS);
+         }
+      }
+
+    // --- does the service exist!
+    //
+    if ( ulRequest == UPDATE_ADABAS_SERVICE )
+      {
+      if (hS = OpenService(hScM, pszService, SERVICE_START))
+        CloseServiceHandle(hS);
+      else if ( GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST )
+        ulRequest = CREATE_ADABAS_SERVICE;
+      }
+
+    if ( ulRequest == UPDATE_ADABAS_SERVICE )
+      {
+      sql94_read_registry ( pszNodeName, pszService, &Params );
+
+      if ( strcmp( pszDBRoot, Params.szDBRoot ) )
+        {
+        MSG_ERR ((xerror, INFO_UPDATING_SERVICE, pszServDisplay ));
+        MSGCD ((INFO_UPDATING_SERVICE, pszServDisplay ));
+
+
+        strcpy ( Params.szDBRoot, pszDBRoot);
+
+        rc = sql94_update_registry ( pszNodeName, pszService,
+                                     pszServerDB, &Params,
+                                     xerror );
+        if ( rc == NO_ERROR )
+          {
+          if ( hS = OpenService(hScM, pszService, SERVICE_CHANGE_CONFIG) )
+            {
+            if (ChangeServiceConfig ( hS, SERVICE_NO_CHANGE,
+                                      SERVICE_NO_CHANGE, SERVICE_NO_CHANGE,
+                                      szPgmName, NULL, NULL, NULL, NULL, NULL,
+                                      pszServDisplay ) == FALSE )
+              {
+              rc = GetLastError();
+              }
+
+            if ( !CloseServiceHandle(hS) && rc == NO_ERROR )
+              rc = GetLastError();
+            }
+          }
+        }
+      }
+    else if ( ulRequest == REMOVE_ADABAS_SERVICE )
+      {
+      if ( hS = OpenService(hScM, pszService, DELETE) )
+        {
+        if ( !DeleteService(hS) )
+          rc = GetLastError();
+
+        if ( !CloseServiceHandle(hS) && rc == NO_ERROR )
+          rc = GetLastError();
+        }
+      else
+        rc = GetLastError();
+      }
+
+
+    if (( ulRequest == CREATE_ADABAS_SERVICE  ) && ( rc == NO_ERROR ))
+      {
+      if (hS = OpenService(hScM, pszService, SERVICE_START ))
+        {
+        CloseServiceHandle(hS);
+        rc = ERROR_SERVICE_EXISTS;
+        }
+      else
+        {
+        rc = GetLastError();
+
+        if (rc == ERROR_SERVICE_DOES_NOT_EXIST)
+          {
+          rc = NO_ERROR;
+
+          if ( fAutoStart )
+            ulStartOption = SERVICE_AUTO_START;
+          else
+            ulStartOption = SERVICE_DEMAND_START;
+
+          if (hS = CreateService(hScM, pszService, pszServDisplay,
+                                 SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
+                                 ulStartOption, SERVICE_ERROR_NORMAL,
+                                 szPgmName, NULL, NULL, NULL, NULL, NULL))
+            {
+            rc = sql49c_alloc_and_init_service_SD ( &pSD, hS );
+
+            if ( (rc == NO_ERROR ) && ( pSD != NULL ))
+              {
+              if (!SetServiceObjectSecurity( hS,
+                                             DACL_SECURITY_INFORMATION,
+                                             pSD ))
+                {
+                rc = GetLastError ();
+                }
+              }
+
+            if (!CloseServiceHandle(hS) && rc == NO_ERROR)
+              rc = GetLastError();
+
+            if (rc == NO_ERROR )
+              {
+              strcpy ( Params.szDBRoot, pszDBRoot);
+
+              rc = sql94_update_registry ( pszNodeName, pszService,
+                                            pszServerDB, &Params,
+                                            xerror );
+              }
+
+            if ( rc != NO_ERROR )
+              {
+              if ( hS = OpenService(hScM, pszService, DELETE) )
+                {
+                DeleteService(hS);
+                CloseServiceHandle(hS);
+                }
+              }
+            }
+          else
+            rc = GetLastError();
+          }
+        }
+      }
+
+    if (!CloseServiceHandle(hScM) && rc == NO_ERROR)
+      rc = GetLastError();
+    }
+  else
+    rc = GetLastError();
+
+  switch (rc)
+    {
+    case NO_ERROR:                        DBGOUT;
+                                          return (rc);
+    case ERROR_SERVICE_DATABASE_LOCKED:   MSG_ERR ((xerror,ERR_SERVICE_DB_LOCKED));
+                                          MSGCD(( ERR_SERVICE_DB_LOCKED ));
+                                          break;
+    case ERROR_SERVICE_EXISTS:            MSG_ERR ((xerror,INFO_SERVICE_ALREADY_INST, pszServDisplay));
+                                          MSGCD((INFO_SERVICE_ALREADY_INST, pszServDisplay));
+                                          break;
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:            MSG_ERR ((xerror,INFO_SERVICE_NOT_INST_CORR));
+                                          MSGCD((INFO_SERVICE_NOT_INST_CORR));
+                                          break;
+    case ERROR_SERVICE_DOES_NOT_EXIST:    MSG_ERR ((xerror,INFO_SERVICE_NOT_INSTALLED, pszServDisplay));
+                                          MSGCD((INFO_SERVICE_NOT_INSTALLED, pszServDisplay));
+                                          break;
+    case ERROR_SERVICE_MARKED_FOR_DELETE: MSG_ERR ((xerror,INFO_SERVICE_DELETE_MARKED));
+                                          MSGCD((INFO_SERVICE_DELETE_MARKED));
+                                          break;
+    case RPC_S_SERVER_UNAVAILABLE:        MSG_ERR ((xerror,ERR_SERVER_NODE_UNKNOWN, pszNodeName));
+                                          MSGCD((ERR_SERVER_NODE_UNKNOWN, pszNodeName));
+                                          break;
+    case ERROR_ACCESS_DENIED:             MSG_ERR ((xerror,ERR_CREAT_SERVICE_NO_ACCESS));
+                                          MSGCD((ERR_CREAT_SERVICE_NO_ACCESS));
+                                          break;
+    default:                              MSG_ERR ((xerror,ERR_SERVICE_ERROR, rc));
+                                          MSGCD((ERR_SERVICE_ERROR, rc));
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static APIRET sql94_read_registry ( PSZ                pszNodeName,
+                                    PSZ                pszServiceName,
+                                    SERVERDB_PARAM_REC *Params )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql94_read_registry"
+  APIRET              rc  = NO_ERROR;
+  PATHNAME            szKey;
+  REG_ENTRY_REC       RegistryEntries[6];
+  ULONG               ulValues  = 0;
+
+  DBGIN;
+
+  strcpy ( szKey, pszServiceName );
+  strcat ( szKey, "\\"REG_SK_SERVICE_PARAM );
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_DBROOT;
+  RegistryEntries[ulValues].pValue       = Params->szDBRoot;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(Params->szDBRoot);
+  RegistryEntries[ulValues].ulValueType  = REG_SZ;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TAPE_COMPRESS;
+  RegistryEntries[ulValues].pValue       = &Params->fTapeCompressEnabled;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TAPE_LOAD_RETRY_TIME;
+  RegistryEntries[ulValues].pValue       = &Params->ulWaitSec;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TW_TERM_TIMEOUT;
+  RegistryEntries[ulValues].pValue       = &Params->ulTWTermTimeout;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_AEDEBUG;
+  RegistryEntries[ulValues].pValue       = Params->szAEDebug;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(Params->szAEDebug);
+  RegistryEntries[ulValues].ulValueType  = REG_SZ;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_DUMP_ENABLED;
+  RegistryEntries[ulValues].pValue       = &Params->fDumpEnabled;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+
+  // --- check array size
+  RTE_ASSERT( sizeof (RegistryEntries)/sizeof(RegistryEntries[0]) < ulValues,
+             (IERR_ASSERT, MF__, __LINE__));
+
+  rc = sql50_reg_get_service_values ( pszNodeName, szKey,
+                                      ulValues, RegistryEntries );
+
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+static APIRET sql94_update_registry ( PSZ                pszNodeName,
+                                      PSZ                pszServiceName,
+                                      PSZ                pszServerDB,
+                                      SERVERDB_PARAM_REC *Params,
+                                      tsp9_rte_xerror    *xerror)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql94_update_registry"
+  APIRET              rc  = NO_ERROR;
+  PATHNAME            szKey;
+  REG_ENTRY_REC       RegistryEntries[9];
+  ULONG               ulValues  = 0;
+  ULONG               dwTypesSupported;
+  PATHNAME            szMsgFile;
+  C40C                szRTEVersion;
+  RTE_VERSION_ID      RTEVersionID;
+  PSZ                 pszKernelVersion = NULL;
+
+  DBGIN;
+
+  strcpy ( szKey, pszServiceName );
+  strcat ( szKey, "\\"REG_SK_SERVICE_PARAM );
+
+  strcpy ( szRTEVersion, sql02_get_RTE_version_string() );
+  RegistryEntries[ulValues].pszValueName = REG_VN_VERSION;
+  RegistryEntries[ulValues].pValue       = szRTEVersion;
+  RegistryEntries[ulValues].ulValueSize  = strlen(szRTEVersion);
+  RegistryEntries[ulValues].ulValueType  = REG_SZ;
+  ulValues++;
+
+  sql02_get_RTE_version ( &RTEVersionID );
+  RegistryEntries[ulValues].pszValueName = REG_VN_VERSION_ID;
+  RegistryEntries[ulValues].pValue       = &RTEVersionID;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(RTEVersionID);
+  RegistryEntries[ulValues].ulValueType  = REG_BINARY;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_DBROOT;
+  RegistryEntries[ulValues].pValue       = Params->szDBRoot;
+  RegistryEntries[ulValues].ulValueSize  = strlen(Params->szDBRoot);
+  RegistryEntries[ulValues].ulValueType  = REG_SZ;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TAPE_COMPRESS;
+  RegistryEntries[ulValues].pValue       = &Params->fTapeCompressEnabled;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TAPE_LOAD_RETRY_TIME;
+  RegistryEntries[ulValues].pValue       = &Params->ulWaitSec;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_TW_TERM_TIMEOUT;
+  RegistryEntries[ulValues].pValue       = &Params->ulTWTermTimeout;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_AEDEBUG;
+  RegistryEntries[ulValues].pValue       = Params->szAEDebug;
+  RegistryEntries[ulValues].ulValueSize  = strlen(Params->szAEDebug);
+  RegistryEntries[ulValues].ulValueType  = REG_SZ;
+  ulValues++;
+
+  RegistryEntries[ulValues].pszValueName = REG_VN_DUMP_ENABLED;
+  RegistryEntries[ulValues].pValue       = &Params->fDumpEnabled;
+  RegistryEntries[ulValues].ulValueSize  = sizeof(DWORD);
+  RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+  ulValues++;
+
+  pszKernelVersion = sql94_version_from_param ( Params->szDBRoot,
+                                                pszServerDB );
+
+  if ( pszKernelVersion != NULL )
+    {
+    RegistryEntries[ulValues].pszValueName = REG_VN_KERNEL_VERSION;
+    RegistryEntries[ulValues].pValue       = pszKernelVersion;
+    RegistryEntries[ulValues].ulValueSize  = strlen(pszKernelVersion);
+    RegistryEntries[ulValues].ulValueType  = REG_SZ;
+    ulValues++;
+    }
+  else
+    sql50_reg_del_service_value ( pszNodeName, szKey, REG_VN_KERNEL_VERSION );
+
+  // --- check array size
+  RTE_ASSERT( sizeof (RegistryEntries)/sizeof(RegistryEntries[0]) < ulValues,
+             (IERR_ASSERT, MF__, __LINE__));
+
+  rc = sql50_reg_put_service_values ( pszNodeName, szKey, ulValues,
+                                      RegistryEntries );
+
+  if ( rc == NO_ERROR )
+    {
+    strcpy ( szKey, REG_SK_EVENT_LOG );
+    strcat ( szKey, "\\" );
+    strcat ( szKey, KERNEL_DIAG_ID );
+
+    dwTypesSupported = EVENTLOG_ERROR_TYPE   |
+                       EVENTLOG_WARNING_TYPE |
+                       EVENTLOG_INFORMATION_TYPE;
+
+
+    sql01c_build_pgm_path ( Params->szDBRoot, szMsgFile ) ;
+    strcat ( szMsgFile, REG_MSG_FILE );
+
+    ulValues  = 0;
+
+    RegistryEntries[ulValues].pszValueName = REG_VN_MSG_FILE;
+    RegistryEntries[ulValues].pValue       = szMsgFile;
+    RegistryEntries[ulValues].ulValueSize  = strlen(szMsgFile) + 1;
+    RegistryEntries[ulValues].ulValueType  = REG_EXPAND_SZ;
+    ulValues++;
+
+    RegistryEntries[ulValues].pszValueName = REG_VN_EV_TYPES;
+    RegistryEntries[ulValues].pValue       = &dwTypesSupported;
+    RegistryEntries[ulValues].ulValueSize  = sizeof (DWORD);
+    RegistryEntries[ulValues].ulValueType  = REG_DWORD;
+    ulValues++;
+
+    // --- check array size
+    RTE_ASSERT( sizeof (RegistryEntries)/sizeof(RegistryEntries[0]) < ulValues,
+               (IERR_ASSERT, MF__, __LINE__));
+
+    rc = sql50_reg_put_service_values ( pszNodeName, szKey, ulValues,
+                                        RegistryEntries );
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+static PSZ sql94_version_from_param ( PSZ   pszDBRoot,
+                                      PSZ   pszServerDB )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql94_version_from_param"
+  SQL_DBNAME              server_db;
+  INT4                    xp_fd;
+  XP_KEY_TYPE             xp_key;
+  XP_VALUE_REC            xp_value;
+  ERRORTEXT               errtext;
+  INT1                    xp_ret;
+  BOOLEAN                 ok;
+  PSZ                     pszKernelVersion = NULL;
+  C40C                    szKernelVersion;
+
+  DBGPAS;
+
+  sql47c_ctop ( server_db, pszServerDB, sizeof (SQL_DBNAME) );
+  sql47c_ctop ( xp_key,    PARAM_KERNEL_VERSION, sizeof (XP_KEY_TYPE ) );
+
+  // --- display no error messages
+  sql60_disable_message_output ();
+
+  sql11c_OpenXParam ( pszDBRoot, server_db, &xp_fd,  errtext, XP_OPEN_REC, &ok);
+
+  if ( ok )
+    {
+    sql11c_GetXParam ( xp_fd , xp_key , &xp_value , errtext , &xp_ret );
+
+    if ( xp_ret == XP_OK )
+      {
+      switch ( xp_value.xp_value_t )
+        {
+        case XP_C40_TYPE    : sql47c_ptoc ( szKernelVersion,
+                                            xp_value.xp_type.xp_c40, 40 );
+                              pszKernelVersion = szKernelVersion;
+                              break;
+        }
+
+      }
+    sql11c_CloseXParam ( xp_fd , !XP_FLUSH, errtext , & ok );
+    }
+
+  sql60_enable_message_output();
+
+  return pszKernelVersion;
+  }
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+.PA

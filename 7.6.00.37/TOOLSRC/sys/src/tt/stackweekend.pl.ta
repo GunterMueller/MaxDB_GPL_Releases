@@ -1,0 +1,159 @@
+# @(#)  stackweekend   1998-06-09   kern   admin
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Basename;
+use File::Copy;
+use File::Find;
+use ToolLib;
+use ICopy;
+use Cwd;
+
+
+	if ( !$SERVERDB ) { $NAME=$DBNAME } else { $NAME=$SERVERDB }
+
+	# Ermittlung des Stackbedarfs des Kerns, anhand der Singleusertests.
+	#
+
+	local $WOCHENENDE="true";
+	local $SPEED	= "$OWN/test/kern/sut/stack";
+	local $LISTE	= "STACK.liste";
+	local $SAVE	= "$OWN/test/kern/sut/stack-save";
+	local $DATE =	"0"x(2-length((localtime)[3])).(localtime)[3].
+					"0"x(2-length(((localtime)[4])+1)).((localtime)[4]+1); #DDMM
+
+	local $OldDir = cwd();
+	chdir($SUT) || warn "Can't change to directory $SUT: $!\n";
+
+	# Aktivieren der Stackmessung:
+	# Abschalten des default Vtrace und Einschalten von order standard.
+	# Letzteres schreibt den Header und den Anfang des Var_parts
+	# eines Kernauftrags in den Vtrace. 
+
+    $AllStack= "$TEST/kern/allstack.prt";
+	local @ARGV = ( "-u", "XRESTORE.cmd" );
+	do "$TOOL/bin/imf$TOOLEXT";
+	if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+	copy("XRESTORE.cmd", "XRESTORE.orig");
+	open(FILE_IN, "XRESTORE.orig") || warn "Can't open (input|output|append): $!\n";
+	open(FILE_OUT, ">XRESTORE.cmd") || warn "Can't open (input|output|append): $!\n";
+	while(<FILE_IN>)
+	{
+		s/^\*\*//;
+		print FILE_OUT $_;
+	} #while
+	close(FILE_IN);
+	close(FILE_OUT);
+	unlink "$LISTE";
+	unlink <*.prot>;
+	unlink <*.vprot>;
+	unlink <*.sort>;
+	unlink <*.core>;
+	unlink <*.dump>;
+
+	print "\n\n===============================================================\n";
+	print "               MESSUNG DES STACKVERBRAUCHS\n";
+	print "===============================================================\n\n";
+
+    open(FILE_OUT, ">$AllStack") || warn "Can't open $AllStack(output): $!\n";
+	print FILE_OUT "XINITDB\n";
+	opendir(DIR, ".");
+	local @Inp = map  { ($_) = /(.*)\.vdnts/ } grep /^[A-VZ].*\.vdnts/i ,readdir(DIR);
+	closedir(DIR);
+	foreach $SUTFILE ( @Inp )
+	{ 
+       print FILE_OUT "$SUTFILE\n";
+    }
+	print FILE_OUT "YINIT\n";
+	opendir(DIR, ".");
+    @Inp = map  { ($_) = /(.*)\.vdnts/ } grep /^[Y].*\.vdnts/i ,readdir(DIR);
+	closedir(DIR);
+	foreach $SUTFILE ( @Inp )
+	{ 
+       print FILE_OUT "$SUTFILE\n";
+    }		
+	close(FILE_OUT);
+
+	local @ARGV = ( "-u", "vta01/STACKCHK" );
+	do "$TOOL/bin/imf$TOOLEXT";
+	if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+	local @ARGV = ( "-u", "slowknl" );
+	do "$TOOL/bin/ims$TOOLEXT";
+	if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+	#local @ARGV = ( "slow", "slowci", "$SERVERDB", @AllStack );
+	#do "$TOOL/bin/sutstack$TOOLEXT";
+	#if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+	open(FILE_IN, "$AllStack") || warn "Can't open $AllStack(input): $!\n";
+	local @AllStack = <FILE_IN>;
+	close(FILE_IN);
+	chop (@AllStack);
+	map { $_ .= ".vdnts" } @AllStack;
+
+	local @ARGV = ( "slow", "slowci.exe", "$SERVERDB", @AllStack );
+	do "$TOOL/bin/sutstack$TOOLEXT";
+	if ( $@ ) { warn "Error while executing sutstack$TOOLEXT: $@"; }
+
+	if ( -d $SPEED ) { unlink $SPEED }
+	system("mkdir $SPEED");
+	if ( ! -d $SAVE ) { system("mkdir $SAVE") }
+
+	# Anlegen einer Sicherheitskopie fuer das Testfile, welches den
+	# groessten Stackverbrauch hat, damit die historische Entwicklung
+	# des Stackverbrauchs ueber einen laengeren Zeitraum beobachtet
+	# werden kann.
+
+	#local $mtime1 = (stat("$NAME.sort"))[9];
+	#local $mtime2 = (stat("$NAME.vprot"))[9];
+	#copy("$NAME}.sort", "$SAVE/$NAME.s$DATE");
+	#copy("$NAME.vprot", "$SAVE/$NAME.v$DATE");
+	#utime($mtime1, $mtime1, "$SAVE/$NAME.s$DATE");
+	#utime($mtime2, $mtime2, "$SAVE/$NAME.v$DATE");
+
+	# Der Stackverbrauch jedes einzelnen Befehls wird in einer Liste
+	# gespeichert. Die Dateien mit dem Suffix 'sort' enthalten den 
+	# Stackverbrauch fuer jeden Befehl des entsprechenden Testfiles.
+	print "\n>>>  Jetzt wird Stacksort aufgerufen\n";
+
+    system ("cat $SPEED/*.sort > $SPEED/allstack");
+    if ( $@ ) { warn "Error while executing  cat $SPEED/*.sort: $@"; }
+
+	#open(FILE_IN, "$SPEED/*.sort") || warn "Can't open $SPEED/*.sort (input): $!\n";
+	#open(FILE_OUT, ">$SPEED/allstack") || warn "Can't open $SPEED/allstack (output): $!\n";
+	#print FILE_OUT <FILE_IN>;
+	#close(FILE_OUT); close(FILE_IN);
+	system("$TOOL/Posix/sort", "-r -o $SPEED/stack_all", "$SPEED/allstack");
+
+	# Die Stackmessung wieder abschalten.
+	local @ARGV = ( "-u", "vta01" );
+	do "$TOOL/bin/imf$TOOLEXT";
+	if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+	local @ARGV = ( "slowknl" );
+	do "$TOOL/bin/ims$TOOLEXT";
+	if ( $@ ) { warn "Error while executing ims$TOOLEXT: $@"; }
+	local @ARGV = ( "-u", "XRESTORE.cmd" );
+	do "$TOOL/bin/imf$TOOLEXT";
+	if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+	chdir($OldDir) || warn "Can't change to directory $OldDir: $!\n";

@@ -1,0 +1,399 @@
+*
+* BOOL TEST FALL
+*
+*
+* CREATE 
+*
+CREATE TABLE boolerror ( check char(5) ) !
+CREATE TABLE boolerror ( constraint char(5) ) !
+CREATE TABLE boolerror ( a char check char(5) ) !
+CREATE TABLE boolerror ( b BOOLEAN DEFAULT 1 ) !
+CREATE TABLE bool
+ ( c char ( 10),
+   b1 BOOLEAN DEFAULT TRUE,
+   b2 BOOLEAN DEFAULT FALSE,
+   b3 BOOLEAN ) !
+CREATE TABLE bool1 ( b boolean check b, 
+                 a char check a in ('a','z') )!
+*
+* DOMAIN 
+*
+CREATE DOMAIN CHARDOM CHAR CONSTRAINT CHARDOM !
+CREATE DOMAIN CHARDOM CHAR CONSTRAINT CHARDOM IS TRUE !
+CREATE DOMAIN BOOLDOM BOOLEAN CONSTRAINT BOOLDOM !
+file sel_domain !
+file sel_domaindef ( BOOLDOM !
+CREATE TABLE D ( B BOOLDOM )!
+file sel_cols_tab ( D ! 
+INSERT INTO D SET B = FALSE!
+INSERT INTO D SET B = NULL!
+INSERT INTO D SET B = TRUE!
+SELECT * FROM D!
+FETCH!
+*
+file sel_cols_tab ( BOOL !
+*
+* INSERT BEFEHLE
+*
+INSERT INTO bool SET b1 = TRUE , c = 'aaaa'!
+INSERT INTO bool VALUES ('bbbb', FALSE, TRUE, NULL) !
+INSERT INTO bool SET b1 = FALSE , c =  'cccc' !
+INSERT INTO bool (b1, c) VALUES (FALSE, 'dddd') !
+INSERT INTO bool (c) VALUES ('eeee') !
+SELECT * FROM BOOL !
+FETCH !
+*
+* CREATE AS SELECT
+*
+CREATE TABLE bool2 AS SELECT * FROM bool !
+SELECT * FROM BOOL2 !
+FETCH !
+*
+* CREATE LIKE UND INSERT SELECT
+*
+CREATE TABLE BOOL3 LIKE BOOL2 !
+INSERT INTO BOOL3 SELECT * FROM BOOL !
+SELECT * FROM BOOL3 !
+FETCH !
+*
+* ALTER TABLE 
+*
+ALTER TABLE BOOL3 DROP B3 !
+ALTER TABLE BOOL3 ADD (B300 BOOLEAN) !
+ALTER TABLE BOOL3 COLUMN B300 BOOLEAN !
+ALTER TABLE BOOL3 COLUMN B300 INTEGER !
+UPDATE BOOL3 SET B300 = TRUE !
+ALTER TABLE BOOL3 ADD CONSTRAINT B300 !
+ALTER TABLE BOOL3 ADD CONSTRAINT c !
+INSERT INTO BOOL3 SET B300 = FALSE !
+INSERT INTO BOOL3 SET B300 = TRUE !
+SELECT * FROM BOOL3 !
+FETCH !
+*
+* VIEWS
+*
+CREATE VIEW vb1 AS SELECT * FROM bool !
+file sel_view ( VB1 !
+SELECT * from vb1 !
+FETCH !
+CREATE VIEW vb2 AS SELECT * FROM bool where b3 is NULL !
+file sel_view ( VB2 !
+SELECT * from vb2 !
+FETCH !
+CREATE VIEW vb3 AS SELECT * FROM bool where b1 is TRUE !
+file sel_view ( VB3 !
+SELECT * from vb3 !
+FETCH !
+CREATE VIEW vb4 AS SELECT * FROM bool where NOT b1 !
+file sel_view ( VB4 !
+SELECT * from vb4 !
+FETCH !
+*
+* DIVERSE SELECTS
+*
+SELECT * FROM bool WHERE b1 !
+FETCH !
+SELECT * FROM bool WHERE b1 AND NOT b2 !
+FETCH !
+SELECT * FROM bool WHERE (b1 AND NOT b2) OR (NOT b1 AND b2) !
+FETCH !
+SELECT * FROM bool WHERE c !
+FETCH !
+SELECT * FROM bool WHERE b1 = TRUE !
+FETCH !
+SELECT * FROM bool WHERE c = TRUE !
+FETCH !
+SELECT * FROM bool WHERE b1 is FALSE!
+FETCH !
+SELECT * FROM bool WHERE b1 is not TRUE!
+FETCH !
+SELECT * FROM bool WHERE NOT b1 !
+FETCH !
+SELECT * FROM bool WHERE TRUE IS TRUE !
+FETCH !
+SELECT * FROM bool WHERE FALSE IS FALSE !
+FETCH !
+SELECT * FROM bool WHERE FALSE IS TRUE !
+FETCH !
+SELECT * FROM bool WHERE TRUE !
+FETCH !
+SELECT * FROM bool WHERE FALSE !
+FETCH !
+SELECT * FROM bool WHERE TRUE AND FALSE !
+FETCH !
+SELECT * FROM bool WHERE TRUE OR FALSE !
+FETCH !
+SELECT * FROM bool ORDER BY b1, b2, c!
+FETCH !
+SELECT TRUE, FALSE FROM BOOL !
+FETCH !
+SELECT * FROM BOOL WHERE b1 IN ( NULL, TRUE, 1 ) !
+FETCH !
+SELECT * FROM BOOL WHERE b1 IN ( NULL, TRUE ) !
+FETCH !
+SELECT * FROM BOOL WHERE (b1 AND b2)!
+FETCH!
+SELECT * FROM BOOL WHERE (b1 IS TRUE AND b2 IS TRUE)!
+FETCH!
+SELECT * FROM BOOL WHERE ((b1) AND b2)!
+FETCH!
+SELECT * FROM BOOL WHERE (b1 AND b2 IS TRUE)!
+FETCH!
+SELECT * FROM BOOL WHERE b1 AND NOT b2 OR NOT b1 AND b2!
+FETCH!
+SELECT * FROM BOOL WHERE ((b1 AND NOT b2) OR (NOT b1 AND b2))!
+FETCH!
+SELECT * FROM BOOL WHERE (((b1) AND (NOT b2)) OR (NOT b1 AND b2))!
+FETCH!
+SELECT * FROM BOOL WHERE (((b1 IS TRUE) AND (NOT b2)) OR (NOT b1 AND b2))
+                AND  b1  AND (NOT b2)) OR (NOT b1 AND b2))!
+FETCH!
+SELECT * FROM BOOL WHERE b1 IN
+ ( select b1 from bool where c = 'aaaa' ) !
+FETCH !
+SELECT COUNT(b1) FROM BOOL !
+FETCH !
+SELECT MAX(b1) FROM BOOL !
+FETCH !
+SELECT b1 FROM BOOL GROUP BY b1 !
+FETCH !
+SELECT * FROM bool !
+DESCRIBE !
+FETCH !
+SELECT B1, B2, B3 INTO :B1, :B2, :B3 FROM BOOL WHERE C = 'aaaa' !
+SELECT * FROM BOOL !
+FETCH !
+SELECT * FROM BOOL WHERE B1  !
+FETCH !
+SELECT * FROM BOOL WHERE ((B1))  !
+FETCH !
+SELECT * FROM BOOL WHERE NOT B1  !
+FETCH !
+SELECT * FROM BOOL WHERE (B1 AND NOT B2) !
+FETCH !
+SELECT * FROM BOOL WHERE (NOT B1) !
+FETCH !
+SELECT * FROM BOOL WHERE (((B1) AND (NOT B2)) OR (NOT B1 AND B2))!
+FETCH !
+SELECT * FROM BOOL WHERE B1 and 5 < 8 !
+FETCH !
+SELECT * FROM ( SELECT * FROM BOOL WHERE B1) !
+FETCH !
+SELECT * FROM BOOL 
+WHERE (b2,b1) = ((b1,b2))!
+FETCH !
+SELECT * FROM BOOL 
+WHERE (b2,b1) = ((FALSE,TRUE))!
+FETCH !
+SELECT * FROM BOOL
+WHERE (b2,b1) in ((FALSE,TRUE), (TRUE,FALSE))!
+FETCH !
+*
+* DIVERSE UPDATES
+*
+UPDATE bool SET b1 = FALSE WHERE b1 !
+SELECT * FROM bool !
+FETCH !
+UPDATE bool SET b1 = TRUE !
+SELECT * FROM bool !
+FETCH !
+*
+* JOINS
+*
+CREATE TABLE J1 ( B1 BOOLEAN, T1 SMALLINT ) !
+CREATE TABLE J2 ( B2 BOOLEAN, T2 SMALLINT ) !
+INSERT INTO J1 VALUES ( TRUE , 1 ) !
+INSERT INTO J1 VALUES ( FALSE, 2 ) !
+INSERT INTO J2 VALUES ( TRUE , 2 ) !
+INSERT INTO J2 VALUES ( FALSE, 1 ) !
+SELECT B1, T1, T2, B2  FROM J1, J2 WHERE B1 = B2 !
+FETCH!
+*
+* UNIONS
+*
+CREATE TABLE U1 ( B1 BOOLEAN, T1 SMALLINT ) !
+CREATE TABLE U2 ( B2 BOOLEAN, T2 SMALLINT ) !
+INSERT INTO U1 VALUES ( TRUE , 1 ) !
+INSERT INTO U1 VALUES ( FALSE, 2 ) !
+INSERT INTO U2 VALUES ( TRUE , 2 ) !
+INSERT INTO U2 VALUES ( FALSE, 1 ) !
+SELECT * FROM U1 UNION
+SELECT * FROM U2 WHERE B2 !
+FETCH!
+*
+* FOREIGN KEY
+*
+CREATE TABLE F1 (
+  B1 BOOLEAN KEY,
+  T1 SMALLINT )!
+CREATE TABLE F2 ( 
+  B2 BOOLEAN DEFAULT false,
+  T2 SMALLINT,
+  FOREIGN KEY FK2 (B2) REFERENCES F1 (B1) ON DELETE SET DEFAULT )!
+INSERT INTO F1 VALUES ( TRUE , 1 ) !
+INSERT INTO F1 VALUES ( FALSE, 2 ) !
+INSERT INTO F2 VALUES ( TRUE , 1 ) !
+INSERT INTO F2 VALUES ( FALSE, 2 ) !
+SELECT * FROM F2 !
+FETCH !
+DELETE F1 WHERE B1 IS TRUE !
+SELECT * FROM F2 !
+FETCH !
+*
+* CORRELATED SUBQUERY
+*
+CREATE TABLE c1 (nr1 smallint, ort char(10), b1 boolean) !
+CREATE TABLE c2 (nr2 smallint, preis int, b2 boolean ) !
+INSERT INTO c1 VALUES ( 1, 'Berlin', TRUE) !
+INSERT INTO c1 VALUES ( 2, 'Berlin', TRUE) !
+INSERT INTO c1 VALUES ( 3, 'Berlin', TRUE) !
+INSERT INTO c1 VALUES ( 4, 'Berlin', FALSE) !
+INSERT INTO c1 VALUES ( 5, 'Berlin', FALSE) !
+INSERT INTO c1 VALUES ( 6, 'Hamburg', FALSE ) !
+INSERT INTO c1 VALUES ( 7, 'Hamburg', FALSE ) !
+INSERT INTO c1 VALUES ( 8, 'Hamburg', FALSE ) !
+INSERT INTO c1 VALUES ( 9, 'Mainz', NULL ) !
+INSERT INTO c1 VALUES ( 10, 'Mainz', TRUE ) !
+INSERT INTO c1 VALUES ( 11, 'Mainz', FALSE ) !
+INSERT INTO c2 VALUES ( 1, 100, TRUE ) !
+INSERT INTO c2 VALUES ( 2, 200, FALSE ) !
+INSERT INTO c2 VALUES ( 3, 300, NULL ) !
+INSERT INTO c2 VALUES ( 4, 400, TRUE ) !
+INSERT INTO c2 VALUES ( 5, 500, FALSE ) !
+INSERT INTO c2 VALUES ( 6, 600, NULL ) !
+INSERT INTO c2 VALUES ( 7, 700, TRUE ) !
+INSERT INTO c2 VALUES ( 8, 800, FALSE ) !
+INSERT INTO c2 VALUES ( 9, 900, NULL ) !
+INSERT INTO c2 VALUES ( 10, 1000, TRUE ) !
+INSERT INTO c2 VALUES ( 11, 1100, FALSE ) !
+SELECT b2, ort
+FROM   c1 x, c2
+WHERE  x.nr1 = nr2
+  AND  c2.nr2 < ( SELECT count(b1)
+                 FROM   c1, c2
+                 WHERE  c1.nr1 = c2.nr2
+                   AND  c1.ort = x.ort) !
+FETCH !
+SELECT b2, ort
+FROM   c1 x, c2
+WHERE  x.nr1 = nr2
+  AND  c2.nr2 < ( SELECT count(b2)
+                 FROM   c2
+                 WHERE  x.b1 = c2.b2)!
+FETCH !
+SELECT * 
+FROM   c1 x
+WHERE  b1 = (SELECT b1
+             FROM   c1
+             WHERE  c1.nr1 = x.nr1) !
+FETCH !
+*
+* FUNKTIONEN (NUM/CHR)
+*
+CREATE TABLE FUNC (b1 boolean, b2 boolean, c char, cb char byte, i int)!
+INSERT INTO FUNC VALUES ( TRUE, FALSE, '1', x'01', 1) !
+SELECT * FROM FUNC !
+FETCH !
+SELECT NUM (B1), NUM(B2), NUM(C), NUM(CB), NUM(I) FROM FUNC!
+SELECT NUM (B1), NUM(B2), NUM(C),  NUM(I) FROM FUNC!
+FETCH !
+SELECT CHR (B1), CHR(B2), CHR(C), CHR(CB), CHR(I) FROM FUNC!
+SELECT CHR (B1), CHR(B2), CHR(C), CHR(I) FROM FUNC!
+FETCH !
+*
+* PARSE EXECUTE TRENNUNG
+*
+PARS_THEN_EX !
+*
+* INSERT BEFEHLE
+*
+DATA!
+INSERT INTO bool SET b1 = :a, c = :b!
+b 1  01
+c 10 'ffff'
+
+INSERT INTO bool VALUES (:a, :b, :c, :d) !
+c 10 'gggg'
+b 1  00
+b 1  01
+b 1  
+
+INSERT INTO bool SET b1 = :a , c = :b !
+b 1  00
+c 10 'hhhh'
+
+INSERT INTO bool (b1, c) VALUES (:a, :b) !
+b 1  00
+c 10 'iiii'
+
+INSERT INTO bool (c) VALUES (:a) !
+c 10 'jjjj'
+
+INSERT INTO bool SET b1 = :a, c = :b!
+b 1  07
+c 10 'kkkk'
+
+INSERT INTO bool SET b1 = :a, c = :b!
+b 1  ff
+c 10 'kkkk'
+
+INSERT INTO bool SET b1 = :a, c = :b!
+b 1  dd
+c 10 'kkkk'
+
+INSERT INTO bool SELECT 'kkkk', :a, TRUE, FALSE FROM DUAL !
+b 1 01
+
+NODATA !
+
+SELECT * FROM BOOL !
+FETCH !
+*
+* SELECT
+*
+DATA!
+SELECT * FROM BOOL WHERE b1 IN ( TRUE, :a ) !
+b 1 00
+
+NODATA!
+FETCH !
+
+SELECT B1, B2, B3 INTO :B1, :B2, :B3 FROM BOOL WHERE C = 'aaaa' !
+*
+* UPDATE
+*
+DATA!
+UPDATE bool SET b1 = :a WHERE b1 IS TRUE !
+b 1 00
+
+NODATA!
+
+SELECT * FROM bool !
+FETCH !
+*
+* ENDE
+*
+pars_execute!
+ROLLBACK WORK RELEASE !
+* PTS 1131922-4 !
+file connect ( kern test !
+create table t ( a int primary key ) !
+insert t values (1)!
+insert t values (2)!
+insert t values (3)!
+insert t values (4)!
+insert t values (5)!
+alter table t add deleted boolean!
+update t set deleted = false !
+update t set deleted = true where a = 3!
+select * from t !
+fetch!
+select * from t where not deleted !
+fetch!
+select * from t where deleted = false!
+fetch !
+select * from t where deleted !
+fetch!
+select * from t where deleted = true!
+fetch !
+rollback release !

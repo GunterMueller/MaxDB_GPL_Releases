@@ -1,0 +1,198 @@
+#!/usr/bin/perl
+# gnup2c         run GNU p2t for syntax check
+#
+# @(#)gnup2c	1998-05-04
+#
+# translate packed pascal module to c
+#
+# KEEPFLG       optional keep intermediate files flag
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package gnup2c;
+use Env;
+use File::Basename;
+use Carp;
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("gnup2c called with @ARGV\n");
+
+sub do_iview {
+    my ($module) = @_;
+    my ($output, $lines, $fname);
+
+    $output = `"$TOOLSHELL $TOOL/bin/iview$TOOLEXT -e 0 $module"`;
+    @lines = split /^/m, $output;
+    foreach $_ (@lines) {
+        if (/(.*): local source/) {
+            $fname = $1;
+            break;
+        }
+        if (/copied to (.*)$/) {
+            $fname = $1;
+            # don't break as there may be a local source afterwards
+        }
+    }
+    if ($fname eq "") {
+        croak "Cannot find $module";
+    }
+    return $fname;
+}
+
+sub is_include {
+    my ($module) = @_;
+    my ($result);
+    if ($module =~ /^g/) {
+        $result = 1;
+    }
+    elsif ($module =~ /^v[a-z]*00/) {
+        $result = 1;
+    }
+    else {
+        $result = 0;
+    }
+    return $result;
+}
+
+sub touch_geo001x {
+    if (! -r "$TOOL\incl\geo001x.h") {
+        open (GEO001X, ">$TOOL\incl\geo001x.h");
+        close (GEO001X);
+    }
+}
+
+sub readAll {
+    my ($fname) = @_;
+    my ($result, $page);
+    open INFILE, "<$fname";
+    while (read INFILE, $page, 4096 * 4) {
+        $result .= $page;
+    }
+    close INFILE;
+    return $result;
+}
+
+sub reorderIncludes {
+    my ($base, $infile) = @_;
+    my ($source, $useString, $usePos, $useEnd, $incString, $incPos);
+    
+    $source = &readAll ($infile);
+    # find %include .use
+    $useString = "%include $base.use";
+    $usePos = index $source, $useString;
+    # find %include .inc
+    $incString = "%include $base.inc";
+    $incPos = index $source, $incString;
+    if (($usePos < 0) || ($incPos < 0)) {
+        print "newp2c::reorderIncludes: could not find positions, file unchanged\n";
+        return;
+    }
+    # build new string
+    $useEnd = $usePos + length ($useString);
+    $source = substr ($source, 0, $usePos) . substr ($source, $useEnd, $incPos - $useEnd)
+        . "$useString\n" . substr ($source, $incPos);
+    # write to file
+    open OUTFILE, ">$infile";
+    print OUTFILE $source;
+    close OUTFILE;
+}
+
+$USAGE = "usage: gnup2c.pl [-k] [-I Includedirs] source\n";
+
+$INCLUDEDIRS="$TOOL/incl ";
+$ERRORFILE=0;
+
+while ($_ = $ARGV[0], /^-/) {
+    shift;
+    last if /^--$/;
+
+    if (/^-e$/ ) { $ERRORFILE=1; next }
+
+    if (/^-k$/ ) { @KEEPFLG = "-k"; next }
+
+    if (/^-I$/ ) { $INCLUDEDIRS="$INCLUDEDIRS $_"; shift; next }
+
+} #while
+
+if ( @ARGV != 1 ) { croak "$USAGE"; exit 1 }
+
+$SOURCE = $ARGV[0];
+
+@TMPFILES = ("$SOURCE.inc", "$SOURCE.use", "$SOURCE.pas", "$SOURCE.usec",
+   "$SOURCE.cpp", "$SOURCE.h", "$SOURCE.err");
+unlink @TMPFILES;
+
+$LAYER = substr $SOURCE, 1, 2;
+
+# get description
+$DESCRIPTION = &do_iview ("$LAYER.com");
+
+# iview source
+$FULLSOURCE = &do_iview ($SOURCE);
+
+# call entpacker.exe
+$CMD = "$TOOL/pgm/entpacker.exe -l25 -e+ -d $DESCRIPTION -p $TOOL/pgm/entpack.PMT $FULLSOURCE";
+$RC = system ($CMD);
+if ($RC != 0) {
+    # croak "Error when calling '$CMD'";
+}
+
+$IS_INCLUDE = &is_include ($SOURCE);
+
+# call gnup2c
+
+if ($IS_INCLUDE) {
+    $INFILE = "$SOURCE.inc";
+    $OUTFILE = "$SOURCE.h";
+}
+else {
+    $INFILE = "$SOURCE.pas";
+    $OUTFILE = "$SOURCE.cpp";
+    $ENV{"P2C_HOME"} = "$TOOL/lib";
+    #&reorderIncludes ($SOURCE, $INFILE);
+    if ($ERRORFILE)
+    {
+        $CMD = "$TOOL/pgm/gnup2c.exe -q -o $OUTFILE $INFILE > $SOURCE.err";
+    }
+    else{
+        $CMD = "$TOOL/pgm/gnup2c.exe -q -o $OUTFILE $INFILE";
+    }
+    $RC = system ($CMD);
+    if ($RC != 0) {
+        # croak "Error when calling '$CMD'";
+    }
+    else{
+        if ( -z "$SOURCE.err" ) {unlink ("$SOURCE.err")}
+    }
+}
+# remove temporary files
+
+if (!@KEEPFLG) {
+    if ($IS_INCLUDE) {
+        @TMPFILES = grep !/.inc/, @TMPFILES;
+    }
+    unlink @TMPFILES;
+}
+
+__END__
+
+
+Hier können lange Kommentare stehen

@@ -1,0 +1,208 @@
+# @(#) send_mail   1997-11-24
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+# Nach dem Sutlauf wird an alle Entwickler eine Fertigmeldung
+# gesendet, damit diese die ihnen zugeordneten Testfiles durch-
+# schauen koennen. (22.April 94)
+use Env;
+use File::Copy;
+use Mail::Sendmail;
+
+require "hostname.pl";
+
+
+@PoorSutGroup = (
+   D024851, 
+   D024852, 
+   D024855, 
+   D025084, 
+   D025251, 
+   D026414, 
+   D026415, 
+   D022609,
+   D025082
+ );
+
+#Urlaub#   D025087, 
+
+
+$host = hostname ();
+
+local $day  = shift;
+local $core;
+
+
+
+$Msg = scalar localtime();
+
+$Msg .= "\n\nDie Testergebnisse auf der $host warten\n";
+$Msg .= "darauf von Dir durchgeschaut zu werden!\n\n";
+
+$Msg .= "\nSie liefen mit folgenden Kernen:\n\n";
+
+$Msg .= "\nkernel.exe   vom ";   
+$Msg .= scalar localtime((stat("$DBROOT/pgm/kernel.exe"))[9]);
+
+$Msg .= "\nquickknl.exe vom "; 
+$Msg .= scalar localtime((stat("$DBROOT/pgm/quickknl.exe"))[9]);
+
+$Msg .= "\nslowknl.exe  vom ";  
+$Msg .= scalar localtime((stat("$DBROOT/pgm/slowknl.exe"))[9]);
+
+
+if ( $day =~ /Mon|Wed/i ) {
+    
+    @CheckDirs = ("$SUT/slow", "$SUT/quick");
+}
+elsif ( $day =~ /Tue|Thu/i ) {
+
+    @CheckDirs = ("$SUT/slow", "$SUT/fast");
+
+}
+else 
+{
+    @CheckDirs = ("$SUT/slow", "$SUT/quick", "$SUT/quick", "$SUT/fast", 
+                  "$SUT/lvl_0", "$SUT/lvl_15", "$SUT/lvl_2", "$SUT/lvl_3");
+
+    if ( $OWN =~ /V72/i )
+    {
+	@CheckDirs = (@CheckDirs, "$SUT/uni", "$SUT/dbuni", "$SUT/xciuni");
+    }
+}
+
+@CheckDirs = ("$SUT/slow") if ( $OWN =~ /V72/i );
+
+$core   = core_exists (\@CheckDirs);
+$syserr = syserr_exists (\@CheckDirs);
+
+
+local @Prot;
+opendir(DIR_IN, "$WRK/fast/prot") || warn "Can't open dir : $!";
+@Prot = grep /.*\.chk/, readdir(DIR_IN);
+closedir(DIR_IN);
+map {
+  local $mtime = scalar localtime((stat("$WRK/fast/prot/$_"))[9]);
+  $_ = "$mtime ".$_
+} @Prot;
+
+
+if ( @Prot > 0 ) {
+
+  $Msg .= "\n\nTypencheckprobleme:\n\n";
+  foreach $CheckPrt ( @Prot ) {
+    $Msg .= "$CheckPrt\n"
+  }
+
+}
+
+$Msg .= "\nGruss Admin\n";
+
+
+$OWN =~ /.*(V\d+).*/i;
+
+$SUTSubject = sprintf "%-5s %s", uc($1), "SUT ist fertig!";
+$SUTSubject = "$SUTSubject (CORE)" if ( $core );  
+$SUTSubject = "$SUTSubject (SYSERR)" if ( $syserr );  
+$SUTSubject = "$SUTSubject (TYPENCHECK)" if ( @Prot > 0 );  
+
+
+foreach $PoorSutler (@PoorSutGroup) {
+
+    %mail = ( To    => $PoorSutler.'@exchange.sap.corp',
+            From    => $ENV{USERNAME}.'@sap.corp',
+            Message => $Msg,
+            Smtp    => 'mail.sap-ag.de',
+            Subject => $SUTSubject );
+
+    sendmail(%mail) or warn $Mail::Sendmail::error;
+
+}
+
+
+
+##################################################################
+# Funktion : core_exists
+#
+# Argumente :
+#   1. List der zu überprüfenden Directories
+#
+# Rückgabe :  wenn Core gefunden => 1
+#
+sub core_exists 
+{
+    local $Dirs = shift;
+
+    foreach $CheckDir ( @$Dirs )
+    {
+  
+	local @CoreFiles;
+	opendir(DIR_IN, $CheckDir) || warn "Can't open dir : $!";
+	@CoreFiles = grep /.*\.core/, readdir(DIR_IN);
+	closedir(DIR_IN);
+	
+	if ( @CoreFiles > 0 ) {
+	    
+	    $CoreExist = 1;
+	    $Msg .= "\n\nAchtung Core unter $CheckDir:\n\n";
+	    foreach $f ( @CoreFiles ) {
+		$Msg .= "$f\n"
+		}
+	    
+	}
+    }
+    
+    return($CoreExist);
+}
+
+##################################################################
+# Funktion : syserr_exists
+#
+# Argumente :
+#   1. List der zu überprüfenden Directories
+#
+# Rückgabe :  wenn *.syserr gefunden => 1
+#
+sub syserr_exists 
+{
+    local $Dirs = shift;
+
+    foreach $CheckDir ( @$Dirs )
+    {
+  
+	local @SysErrFiles;
+	opendir(DIR_IN, $CheckDir) || warn "Can't open dir : $!";
+	@SysErrFiles = grep /.*\.syserr/, readdir(DIR_IN);
+	closedir(DIR_IN);
+	
+	if ( @SysErrFiles > 0 ) {
+	    
+	    $SysErrExist = 1;
+	    $Msg .= "\n\nAchtung neue System Error unter $CheckDir:\n\n";
+	    foreach $f ( @SysErrFiles ) {
+		$Msg .= "$f\n"
+		}
+	    
+	}
+    }
+    
+    return($SysErrExist);
+}

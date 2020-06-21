@@ -1,0 +1,803 @@
+/*
+*****************************************************************************
+** SQL Datenbanksysteme GmbH
+**
+** Autor        : Harun Eren 
+**
+** Program      : setpos.c.OC
+**
+** Usage        : --
+** Option       : --
+**
+** Purpose      : Auto Test DLL, Test von SQLSetPos
+**
+** Date         : 23.01.96
+** l.aenderung  : 13:13pm 01-08-1997 (Harun)
+******************************************************************************
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+*/
+#include "winhead.h"
+
+/* ---------------------------------------------------------------------- */
+#define PROGNAME "setpos"
+#ifndef DEFAULTS
+#define USERNAME "SUPERDBA"
+#define PASSWORD "ADMIN"
+#define DBNODE   "prec:Z"
+
+#define ODBCUSER  "ODBC"
+#define ODBCPASSW "ODBC"
+#endif
+
+#define ODBCUSER1  "ODBC1"
+#define ODBCPASSW1 "ODBC1"
+#define ODBCTABLE  "ODBCTEST"
+#define ODBCSCRIPT "proc2inst"
+#define DBPROC1	   "INSERT_TEST"
+#define DBPROC2	   "SELECT_TEST"
+
+#define ERROR_CHECK(hstmtx)  \
+    if (rc != SQL_SUCCESS) {\
+	   SQLError(henv, hdbc, hstmtx, sqlstate, &esq_sql_code, error_txt,\
+		    len_error_txt, &used_error_txt);\
+	   SPRINTF(buffer," sqlstate: %s"CRLF, sqlstate);\
+           PRINTF(buffer);\
+	   SPRINTF(buffer," esq_sql_code: %ld"CRLF, esq_sql_code);\
+           PRINTF(buffer);\
+           switch (rc) {\
+		  case(1) :\ 
+			  break;\
+		  case(-1) :\ 
+			  break;\
+		  case(100) :\ 
+			  break;\
+		  default   :\ 
+			  exit(16); \
+			  break; } \
+	}
+
+ UCHAR sqlstate  [ 10 ];
+ SDWORD esq_sql_code;
+ UCHAR error_txt  [ 101 ] ;
+ SWORD len_error_txt = 100;
+ SWORD used_error_txt;
+ UCHAR buffer[1024];
+/* ----------------------------------------------------------------------- */
+
+#define TESTNAME "SQLSetPos"
+#define TABLE "SETPOS" 
+
+#define MAX_NAME_LEN	512
+#define MAX_STR_LEN	60
+#define MAX_ROWS	20
+#define MAX_CURSORNAME  18
+
+#define ROW_SIZE	8
+#define SETPOS0		0
+#define SETPOS1		2
+#define SETPOS2		4
+#define SETPOS3		6
+#define SETPOS4		8
+#define SETPOS5		5
+#define SETPOS6		7
+#define SETPOSC		3
+
+#define TESTUPD1	99
+#define TESTUPD2	"SQLSetPos (UPDATED) %d"
+
+#define TESTADD1	88
+#define TESTADD2	"SQLSetPos (ADD) %d"
+
+#define TXTCOPY "SQLSetPos String "
+
+/* ------------------------------------------------------------------------ */
+void DoPrintArrayPos(UCHAR fType[MAX_NAME_LEN], UDWORD crow, UDWORD rowpos,
+		     UWORD rgfRowStatus[ROW_SIZE], SWORD sNumber_rc[ROW_SIZE], 
+		     UCHAR szString_rc[ROW_SIZE][MAX_STR_LEN]);
+/*
+ -------------------------------------------------------------------------
+| DoSQLSetPos:
+|             
+|
+| Returns:
+|     Number of Errors or TEST_ABORTED
+ -------------------------------------------------------------------------
+*/
+int MAIN(int argc, char **argv)
+{
+	RETCODE                 rc;
+	SWORD                   sErr=0;
+/* ----------------------------------------------------------------------- */
+	HENV henv   = SQL_NULL_HENV;
+	HENV FAR * phenv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC FAR * phdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT FAR * phstmt;
+
+	HSTMT 		        hstmt_cur = SQL_NULL_HSTMT;
+/* ---------------------------------------------------------------------- */
+	UCHAR                   create[MAX_NAME_LEN];
+	UCHAR                   drop[MAX_NAME_LEN+1];
+	UCHAR                   insert[MAX_NAME_LEN+1];
+	UCHAR                   select[MAX_NAME_LEN+1];
+	UCHAR                   delete[MAX_NAME_LEN+1];
+	UCHAR                   buf[MAX_NAME_LEN+1];
+
+	UCHAR                   szCursorName[MAX_CURSORNAME+1];
+	SWORD			pcbCursor;
+	SWORD			cbCursorMax;
+	
+	UCHAR                   szString[MAX_STR_LEN];
+	SWORD			sNumber;
+	SQLLEN			cbNumber=SQL_NTS;
+	SQLLEN			cbString=SQL_NTS;
+
+	UCHAR			szString_rc[ROW_SIZE+1][MAX_STR_LEN];
+	SWORD			sNumber_rc[ROW_SIZE+1];
+	SQLLEN			cbNumber_rc[ROW_SIZE+1]={SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS};
+	SQLLEN			cbString_rc[ROW_SIZE+1]={SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS};
+
+	SQLUSMALLINT		rgfRowStatus[ROW_SIZE+1];
+
+	SQLROWOFFSET		irow, crow;
+	SWORD			cAbort=0;
+/* ---------------------------------------------------------------------har- */
+ SPRINTF(buffer, " %s running.\n", PROGNAME);
+ PRINTF(buffer);
+
+ phenv = (HENV FAR *) &henv;
+ phdbc = (HDBC FAR *) &hdbc;
+ phstmt = (HSTMT FAR *) &hstmt;
+
+ rc = SQLAllocEnv(phenv);
+ SPRINTF(buffer," SQLAllocEnv retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+	
+ rc = SQLAllocConnect(henv, phdbc);
+ SPRINTF(buffer," SQLAllocConnect retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+	
+ rc = SQLConnect(hdbc, DBNODE, SQL_NTS, ODBCUSER, SQL_NTS, ODBCPASSW, SQL_NTS );
+ SPRINTF(buffer," SQLConnect retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(NULL);
+
+ rc = SQLAllocStmt (hdbc, phstmt);
+ SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+ PRINTF(buffer);
+ ERROR_CHECK(hstmt);
+ 
+/* --- SQLSetPos -------------------------------------------------------- */
+	/* --- Create Table --------------------------------------------- */
+	STRCPY(create,"CREATE TABLE ");
+	STRCAT(create,TABLE); 
+	STRCAT(create," ( \"NUM\" SMALLINT, STRING CHAR(60)) ");
+	SPRINTF(buffer,"Create Stmt = '%s'"CRLF,create);
+	PRINTF(buffer);
+
+	rc = SQLExecDirect(hstmt, create, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	/* --- Insert Table --------------------------------------------- */
+	/* --- 1. ---*/
+	STRCPY(insert,"INSERT INTO ");STRCAT(insert,TABLE);
+	STRCAT(insert," VALUES (?, ?) ");
+	SPRINTF(buffer,"Insert Stmt = '%s'"CRLF,insert);
+	PRINTF(buffer);
+
+	rc = SQLPrepare(hstmt, insert, SQL_NTS);
+	SPRINTF(buffer," SQLPrepare retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_SHORT,
+			SQL_INTEGER, 0, 0, &sNumber, 0, &cbNumber);
+	SPRINTF(buffer," SQLBindParameter retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR,
+		SQL_CHAR, MAX_STR_LEN, 0, szString, MAX_STR_LEN, &cbString);
+	SPRINTF(buffer," SQLBindParameter retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	irow=1;
+	cbString=SQL_NTS; cbNumber=SQL_NTS;
+	SPRINTF(buffer,"Insert Values ->"CRLF);
+	PRINTF(buffer);
+	while (irow < MAX_ROWS+1) {
+		sNumber = irow;
+		STRCPY(szString,TXTCOPY);
+		SPRINTF(buf,"%d.",irow);
+		STRCAT(szString,buf);
+
+		rc = SQLExecute(hstmt);
+		SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+		/* PRINTF(buffer); */
+		ERROR_CHECK(hstmt);
+		irow++;
+	}
+	SPRINTF(buffer,"Insert into table (%s) -> %d. Values"CRLF,TABLE,irow-1);
+	PRINTF(buffer);
+
+	rc = SQLFreeStmt(hstmt, SQL_DROP);
+	SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(NULL);
+	/* --- Select Table --------------------------------------------- */
+	/* --- 1. --- */
+	rc = SQLAllocStmt(hdbc, phstmt);
+	SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	rc = SQLSetStmtOption(hstmt, SQL_CONCURRENCY, SQL_CONCUR_ROWVER);
+	SPRINTF(buffer," SQLSetStmtOption (SQL_CONCUR_ROWVER) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+	
+	rc = SQLSetStmtOption(hstmt, SQL_CURSOR_TYPE, SQL_CURSOR_DYNAMIC);
+	SPRINTF(buffer," SQLSetStmtOption (SQL_CURSOR_KEYSET_DRIVEN) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+	
+	rc = SQLSetStmtOption(hstmt, SQL_ROWSET_SIZE, ROW_SIZE);
+	SPRINTF(buffer," SQLSetStmtOption (ROW_SIZE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	STRCPY(select,"SELECT ");
+	STRCAT(select," \"NUM\", \"STRING\" ");
+	STRCAT(select," FROM ");
+	STRCAT(select,TABLE); 
+	SPRINTF(buffer,"Select Stmt= '%s'"CRLF,select);
+	PRINTF(buffer);
+
+	rc = SQLExecDirect(hstmt, select, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	if (rc == SQL_SUCCESS) {
+	   rc = SQLBindCol(hstmt, 1, SQL_C_SSHORT, &sNumber_rc, sizeof(SWORD), cbNumber_rc);
+	   SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+	   
+	   rc = SQLBindCol(hstmt, 2, SQL_C_CHAR, szString_rc, MAX_STR_LEN, cbString_rc);
+	   SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	/* ***** SQL_FETCH_NEXT *** ----------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_NEXT, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   SPRINTF(buffer, " List current rowset :"CRLF);
+	   PRINTF(buffer);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_NEXT", crow, 1, rgfRowStatus, 
+			        sNumber_rc, szString_rc);
+	   }
+	   
+/* ------ Test SQL_POSITION ------------------------------------------------- */
+	   SPRINTF(buffer," Test Option SQL_POSITION ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQLSetPos (SQL_POSITION) -> irow *** ------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS1);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS1, SQL_POSITION, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_POSITION) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_POSITION", crow, SETPOS1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQLSetPos (SQL_POSITION) -> all *** -------------------- */
+	   SPRINTF(buffer," -> Set position to row : ALL"CRLF);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS0, SQL_POSITION, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos  (SQL_POSITION) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_POSITION", crow, SETPOS0, rgfRowStatus, sNumber_rc,
+		             szString_rc);
+	   }
+/* ----- Test SQL_REFRESH --------------------------------------------------- */
+	   SPRINTF(buffer," Test Option SQL_REFRESH ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQLSetPos (SQL_REFRESH) -> irow *** -------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS2);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS2, SQL_REFRESH, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_REFRESH) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_REFRESH", crow, SETPOS2, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQLSetPos (SQL_REFRESH) -> all *** --------------------- */
+	   SPRINTF(buffer," -> Set position to row : ALL "CRLF);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS0, SQL_REFRESH, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_REFRESH) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_REFRESH", crow, SETPOS0, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 3.SQLSetPos (SQL_UPDATE) -> irow *** --------------------- */
+ 	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS3);
+	   PRINTF(buffer);
+
+	   sNumber_rc[SETPOS3-1] = TESTUPD1;
+	   sprintf(szString_rc[SETPOS3-1], TESTUPD2, sNumber_rc[SETPOS3-1]);	
+	   cbString_rc[SETPOS3-1]=STRLEN(szString_rc[SETPOS3-1]);
+	
+	   rc = SQLSetPos(hstmt, SETPOS3, SQL_UPDATE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_UPDATE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_UPDATE", crow, SETPOS3, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 4.SQLSetPos (SQL_REFRESH) -> irow *** -------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS3);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS3, SQL_REFRESH, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_REFRESH) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_REFRESH", crow, SETPOS3, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+
+/* ----- Test SQL_UPDATE ---------------------------------------------------- */
+	   SPRINTF(buffer," Test Option SQL_UPDATE ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQLSetPos (SQL_UPDATE) -> irow *** --------------------- */
+ 	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS3);
+	   PRINTF(buffer);
+
+	   sNumber_rc[SETPOS3-1] = TESTUPD1;
+	   sprintf(szString_rc[SETPOS3-1], TESTUPD2, sNumber_rc[SETPOS3-1]);	
+	   cbString_rc[SETPOS3-1]=STRLEN(szString_rc[SETPOS3-1]);
+
+	   rc = SQLSetPos(hstmt, SETPOS3, SQL_UPDATE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_UPDATE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_UPDATE", crow, SETPOS3, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQLSetPos (SQL_UPDATE) -> irow *** --------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS4);
+	   PRINTF(buffer);
+
+	   sNumber_rc[SETPOS4-1] = TESTUPD1-1;
+	   sprintf(szString_rc[SETPOS4-1], TESTUPD2, sNumber_rc[SETPOS4-1]);	
+	   cbString_rc[SETPOS4-1]=STRLEN(szString_rc[SETPOS4-1]);
+
+	   rc = SQLSetPos(hstmt, SETPOS4, SQL_UPDATE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_UPDATE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_UPDATE", crow, SETPOS4, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 3.SQLSetPos (SQL_UPDATE) -> all *** ---------------------- */
+	   /* ***** SQL_FETCH_NEXT *** ---------------------------------- */
+	   rc = SQLSetPos(hstmt, 1, SQL_POSITION, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_POSITION) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_NEXT, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_NEXT", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	   SPRINTF(buffer," -> Set position to row : ALL "CRLF);
+	   PRINTF(buffer);
+
+	   sNumber_rc[0]=TESTUPD1-2;sprintf(szString_rc[0], TESTUPD2, sNumber_rc[0]);cbString_rc[0]=STRLEN(szString_rc[0]);
+	   sNumber_rc[1]=TESTUPD1-3;sprintf(szString_rc[1], TESTUPD2, sNumber_rc[1]);cbString_rc[1]=STRLEN(szString_rc[1]);	
+	   sNumber_rc[2]=TESTUPD1-4;sprintf(szString_rc[2], TESTUPD2, sNumber_rc[2]);cbString_rc[2]=STRLEN(szString_rc[2]);	
+	   sNumber_rc[3]=TESTUPD1-5;sprintf(szString_rc[3], TESTUPD2, sNumber_rc[3]);cbString_rc[3]=STRLEN(szString_rc[3]);	
+	   sNumber_rc[4]=TESTUPD1-6;sprintf(szString_rc[4], TESTUPD2, sNumber_rc[4]);cbString_rc[4]=STRLEN(szString_rc[4]);	
+	   sNumber_rc[5]=TESTUPD1-7;sprintf(szString_rc[5], TESTUPD2, sNumber_rc[5]);cbString_rc[5]=STRLEN(szString_rc[5]);	
+	   sNumber_rc[6]=TESTUPD1-8;sprintf(szString_rc[6], TESTUPD2, sNumber_rc[6]);cbString_rc[6]=STRLEN(szString_rc[6]);	
+	   sNumber_rc[7]=TESTUPD1-9;sprintf(szString_rc[7], TESTUPD2, sNumber_rc[7]);cbString_rc[7]=STRLEN(szString_rc[7]);	
+
+	   rc = SQLSetPos(hstmt, SETPOS0, SQL_UPDATE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_UPDATE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_UPDATE", crow, SETPOS0, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+
+	   /* ***** SQL_FETCH_FIRST *** ---------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_FIRST, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_FIRST", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+
+/* ----- Test SQL_ADD ------------------------------------------------------- */
+	   SPRINTF(buffer," Test Option SQL_ADD ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQLSetPos (SQL_ADD) -> irow *** ------------------------ */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS5);
+	   PRINTF(buffer);
+
+	   cbString_rc[SETPOS5-1]=STRLEN(szString_rc[SETPOS5-1]);
+	   
+	   rc = SQLSetPos(hstmt, SETPOS5, SQL_ADD, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_ADD) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_ADD", crow, SETPOS5, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQLSetPos (SQL_ADD) -> irow *** ------------------------ */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS6);
+	   PRINTF(buffer);
+
+	   sNumber_rc[SETPOS6-1] = TESTADD1;
+	   sprintf(szString_rc[SETPOS6-1], TESTADD2, sNumber_rc[SETPOS6-1]);	
+	   cbString_rc[SETPOS6-1]=STRLEN(szString_rc[SETPOS6-1]);
+
+	   rc = SQLSetPos(hstmt, SETPOS6, SQL_ADD, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_ADD) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_ADD", crow, SETPOS6, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 3.SQLSetPos (SQL_ADD) -> rowsize+1 *** ------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,ROW_SIZE+1);
+	   PRINTF(buffer);
+
+	   sNumber_rc[ROW_SIZE] = TESTADD1-1;
+	   sprintf(szString_rc[ROW_SIZE], TESTADD2, sNumber_rc[ROW_SIZE]);	
+	   cbString_rc[ROW_SIZE]=STRLEN(szString_rc[ROW_SIZE]);
+
+	   rc = SQLSetPos(hstmt, ROW_SIZE+1, SQL_ADD, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_ADD) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_ADD", ROW_SIZE, ROW_SIZE+1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+/* ----- Test SQL_DELETE ---------------------------------------------------- */
+	   SPRINTF(buffer," Test Option SQL_DELETE ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQLSetPos (SQL_DELETE) -> irow *** --------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS1);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS1, SQL_DELETE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_DELETE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_DELETE", ROW_SIZE, SETPOS1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQLSetPos (SQL_DELETE) -> irow *** --------------------- */
+	   SPRINTF(buffer," -> Set position to row : %d"CRLF,SETPOS2);
+	   PRINTF(buffer);
+
+	   rc = SQLSetPos(hstmt, SETPOS2, SQL_DELETE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_DELETE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_DELETE", ROW_SIZE, SETPOS2, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 3.SQLSetPos (SQL_DELETE) -> all *** ---------------------- */
+	   /* ***** SQL_FETCH_LAST *** ---------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_LAST, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_LAST", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	   SPRINTF(buffer," -> Set position to row : ALL "CRLF);
+	   PRINTF(buffer);
+	   
+	   rc = SQLSetPos(hstmt, SETPOS0, SQL_DELETE, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_DELETE) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_DELETE", crow, SETPOS0, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+/* ----- Test rgfRowStatus -------------------------------------------------- */
+	   SPRINTF(buffer," Test rgfRowStatus ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQL_FETCH_FIRST *** ------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_FIRST, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("rgfRowStatus (FIRST)", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	/* ***** 2.SQL_FETCH_LAST *** ------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_LAST, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("rgfRowStatus (LAST)", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+/* ----- Test CURRENT OF CURSOR ------------------------------------------- */
+	   SPRINTF(buffer," Test CURRENT OF CURSOR ->"CRLF);
+	   PRINTF(buffer);
+	/* ***** 1.SQL_FETCH_FIRST *** ------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_FIRST, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   rc = SQLSetPos(hstmt, SETPOSC, SQL_POSITION, SQL_LOCK_NO_CHANGE);
+	   SPRINTF(buffer," SQLSetPos (SQL_POSITION) retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_POSTION", crow, SETPOSC, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+
+		cbCursorMax=MAX_CURSORNAME;
+		rc = SQLGetCursorName(hstmt, szCursorName, cbCursorMax, &pcbCursor);
+		SPRINTF(buffer," SQLGetCursorName retcode: %d"CRLF, rc);
+		PRINTF(buffer);
+		ERROR_CHECK(hstmt);
+
+		rc = SQLAllocStmt(hdbc, &hstmt_cur);
+		SPRINTF(buffer," SQLAllocStmt (Cursor) retcode: %d"CRLF, rc);
+		PRINTF(buffer);
+		ERROR_CHECK(hstmt_cur);
+
+		STRCPY(delete,"DELETE ");
+		STRCAT(delete,TABLE); 
+		STRCAT(delete," WHERE CURRENT OF ");
+		STRCAT(delete,szCursorName); 
+		SPRINTF(buffer,"\tDelete Stmt (Current of) = '%s'"CRLF,delete);
+		PRINTF(buffer);
+
+		rc = SQLExecDirect(hstmt_cur, delete, SQL_NTS);
+		SPRINTF(buffer," SQLExecDirect (Cursor) retcode: %d"CRLF, rc);
+		PRINTF(buffer);
+		ERROR_CHECK(hstmt_cur);
+
+		rc = SQLFreeStmt(hstmt_cur, SQL_DROP);
+		SPRINTF(buffer," SQLFreeStmt (Cursor) retcode: %d"CRLF, rc);
+		PRINTF(buffer);
+		ERROR_CHECK(NULL);
+	   }
+	/* -------------------------------------------------------------- */
+	}
+	rc = SQLFreeStmt(hstmt, SQL_DROP);
+	SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(NULL);
+
+/* ----- List all data -------------------------------------------------- */
+	SPRINTF(buffer," List all data from table : %s "CRLF,TABLE);
+	PRINTF(buffer);
+
+	rc = SQLAllocStmt(hdbc, phstmt);
+	SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	rc = SQLSetStmtOption(hstmt, SQL_ROWSET_SIZE, ROW_SIZE);
+	SPRINTF(buffer," SQLSetStmtOption retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	rc = SQLExecDirect(hstmt, select, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+	if (rc == SQL_SUCCESS) {
+	   rc = SQLBindCol(hstmt, 1, SQL_C_SSHORT, &sNumber_rc, sizeof(SWORD), cbNumber_rc);
+	   SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+	   rc = SQLBindCol(hstmt, 2, SQL_C_CHAR, szString_rc, MAX_STR_LEN, cbString_rc);
+	   SPRINTF(buffer," SQLBindCol retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   /* ***** SQL_FETCH_NEXT *** ------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_NEXT, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_NEXT", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	   /* ***** SQL_FETCH_NEXT *** ------------------------------------- */
+	   rc = SQLExtendedFetch(hstmt, SQL_FETCH_NEXT, 1, &crow, rgfRowStatus);
+	   SPRINTF(buffer," SQLExtendedFetch retcode: %d"CRLF, rc);
+	   PRINTF(buffer);
+	   ERROR_CHECK(hstmt);
+
+	   if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) {
+		DoPrintArrayPos("SQL_FETCH_NEXT", crow, 1, rgfRowStatus, 
+				sNumber_rc, szString_rc);
+	   }
+	}
+	/* --- Drop Table ----------------------------------------------- */
+	rc = SQLFreeStmt(hstmt, SQL_CLOSE);
+	SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+	
+	STRCPY(drop,"DROP TABLE "); 
+	STRCAT(drop,TABLE); 
+	SPRINTF(buffer,"Drop Stmt= '%s'"CRLF,drop);
+	PRINTF(buffer);
+
+	rc = SQLExecDirect(hstmt, drop, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ERROR_CHECK(hstmt);
+
+/* ------------------------------------------------------------------------- */
+  rc = SQLFreeStmt(hstmt, SQL_DROP);
+  SPRINTF(buffer," SQLFreeStmt retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLDisconnect(hdbc);
+  SPRINTF(buffer," SQLDisconnect retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLFreeConnect(hdbc);
+  SPRINTF(buffer," SQLFreeConnect retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+	
+  rc = SQLFreeEnv(henv);
+  SPRINTF(buffer," SQLFreeEnv retcode: %d"CRLF, rc);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  SPRINTF(buffer,""CRLF);
+  PRINTF(buffer);
+  SPRINTF(buffer," %s ending"CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  return(0);	
+}
+/* ------------------------------------------------------------------------- */
+void DoPrintArrayPos(UCHAR fType[MAX_NAME_LEN], UDWORD crow, UDWORD rowpos,
+		     UWORD rgfRowStatus[ROW_SIZE], SWORD sNumber_rc[ROW_SIZE], 
+		     UCHAR szString_rc[ROW_SIZE][MAX_STR_LEN])
+{
+ UDWORD			 irow;
+
+ SPRINTF(buffer, " %s -> Rows : %d. Cursor position: %d"CRLF, 
+         fType, crow, rowpos);
+ PRINTF(buffer);
+ STRCPY(buffer, " Row | RowStatus | Number | String"CRLF);
+ PRINTF(buffer);
+ 
+ for (irow=0; irow < crow; irow++) {
+	SPRINTF(buffer," %d.   %d",irow+1,rgfRowStatus[irow]);
+	switch(rgfRowStatus[irow]) {
+		case SQL_ROW_SUCCESS : STRCAT(buffer,"-(SUCCESS) "); break;
+		case SQL_ROW_ERROR   : STRCAT(buffer,"-(ERROR)   "); break;
+		case SQL_ROW_NOROW   : STRCAT(buffer,"-(NOROW)   "); break;
+		case SQL_ROW_ADDED   : STRCAT(buffer,"-(ADDED)   "); break;
+		case SQL_ROW_UPDATED : STRCAT(buffer,"-(UPDATED) "); break;
+		case SQL_ROW_DELETED : STRCAT(buffer,"-(DELETED) "); break;
+		default              : STRCAT(buffer,"-()        ");	
+	}	
+	PRINTF(buffer);
+	if (rgfRowStatus[irow] != SQL_ROW_NOROW && 
+	    rgfRowStatus[irow] != SQL_ROW_ERROR) {
+	    SPRINTF(buffer,"   %d      %s", sNumber_rc[irow],szString_rc[irow]);
+	    PRINTF(buffer);
+	    if ((irow+1 == rowpos) || (rowpos == 0)) {
+		     STRCPY(buffer,"  <--");
+		     PRINTF(buffer);
+	    }
+	}
+	STRCPY(buffer," "CRLF);
+	PRINTF(buffer);
+ }
+ return;
+}
+/* ------------------------------------------------------------------------- */

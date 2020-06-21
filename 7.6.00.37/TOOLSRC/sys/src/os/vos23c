@@ -1,0 +1,1045 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$vos23c$
+.tt 2 $$$
+.tt 3 $R.Roedling$TCP/IP connectivity$1997-05-26$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : TCP/IP_connectivity
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1992-11-10
+.sp
+.cp 3
+Version : 1994-01-27
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-05-26
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+/*
+ * MODULE - (TCP/IP) communication
+ */
+
+/*
+ * INCLUDE FILES
+ */
+#if defined(_WIN32)
+ #include          <winerror.h>
+#else
+ #include          <nerrno.h>
+#endif
+
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS23C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define LINGER_TIME  15
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+ULONG sql23c_connect_server  ( PTCPIP_CONNECT_INFO_REC pTCPIPConnInfo,
+                               ERRORTEXT               pErrText );
+
+ULONG sql23c_get_server_addr ( PTCPIP_CONNECT_INFO_REC pTCPIPConnInfo,
+                               ERRORTEXT               pErrText );
+
+ULONG sql23c_info_request    ( PTCPIP_CONNECT_INFO_REC pTCPIPConnInfo,
+                               ERRORTEXT               pErrText );
+
+VOID sql23c_init_conn_info   ( PTCPIP_CONNECT_INFO_REC pTCPIPConnInfo,
+                               PCONNECT_PARAM_REC      pConnParam );
+
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+ULONG sql23c_connect ( PCONNECT_PARAM_REC       pConnParam,
+                       PTCPIP_CONNECT_INFO_REC  pTCPIPConnInfo,
+                       ERRORTEXT                pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_connect"
+  LONG                            rc = NO_ERROR;
+  CONPKT_PARAM_REC                ConPktParamRec;
+  ULONG                           ulCommState;
+  ULONG                           ulCnt;
+  PCHAR                           pCommPackets;
+
+  DBGIN;
+
+  // --- initialize the connect information record
+  sql23c_init_conn_info ( pTCPIPConnInfo, pConnParam );
+
+  //
+  // ---  get address of the server socket
+  //
+  rc =  sql23c_get_server_addr ( pTCPIPConnInfo, pErrText );
+
+  if ( rc != NO_ERROR )
+    return ( SQLNOTOK );
+
+  // --- Get a socket address for the requested session, and the
+  //     packet sizes!
+  //
+  if (pConnParam->ulServiceType != SQL_CONTROL)
+    {
+    ulCommState = sql23c_info_request ( pTCPIPConnInfo, pErrText );
+
+    if ( ulCommState != SQLOK )
+      return ( ulCommState );
+    }
+  else
+    {
+    // packet sizes are fixed, no info request necessary
+    pTCPIPConnInfo->ulPacketSize = csp9_ctrl_packet_size;
+    pTCPIPConnInfo->ulMinReplySize = 100;
+    pTCPIPConnInfo->ulMaxDataLen = pTCPIPConnInfo->ulPacketSize
+        - (2 * RTE_HEADER_SIZE);
+    }
+
+  //
+  // ---  connect to server socket
+  //
+  pTCPIPConnInfo->ulMaxSegmentSize = pTCPIPConnInfo->ulPacketSize;
+  pTCPIPConnInfo->ulMinSegmentSize = 1024;
+
+  ulCommState = sql23c_connect_server ( pTCPIPConnInfo, pErrText );
+
+  if ( ulCommState  != SQLOK )
+    return ( ulCommState );
+
+  /*
+   *  send connect packet
+   */
+  switch ( pTCPIPConnInfo->ulServiceType )
+    {
+    case SQL_DISTRIBUTION :
+      ConPktParamRec.ulMessClass  = RSQL_KERN_CONN_REQUEST;
+      break;
+
+    case SQL_CONTROL :
+      ConPktParamRec.ulMessClass  = RSQL_CTRL_CONN_REQUEST;
+      break;
+
+    default:
+      ConPktParamRec.ulMessClass  = RSQL_USER_CONN_REQUEST;
+      break;
+    }
+
+  ConPktParamRec.sd                  = pTCPIPConnInfo->sd;
+  ConPktParamRec.ulSenderRef         = pTCPIPConnInfo->ulClientRef;
+  ConPktParamRec.ulReceiverRef       = (ULONG)UNDEF;
+  ConPktParamRec.ulServiceType       = pTCPIPConnInfo->ulServiceType;
+  ConPktParamRec.ulMaxSegmentSize    = pTCPIPConnInfo->ulMaxSegmentSize;
+  ConPktParamRec.ulPacketSize        = pTCPIPConnInfo->ulPacketSize;
+  ConPktParamRec.ulMaxDataLen        = pTCPIPConnInfo->ulMaxDataLen;
+  ConPktParamRec.ulMinReplySize      = pTCPIPConnInfo->ulMinReplySize;
+  ConPktParamRec.ulSwapType          = (ULONG)UNDEF;
+  ConPktParamRec.szSenderServerDB[0] = '\0';
+  ConPktParamRec.pidSenderPID        = pTCPIPConnInfo->pidClientPID;
+  ConPktParamRec.usServicePort       = pTCPIPConnInfo->usServicePort;
+  ConPktParamRec.ulCommState         = SQLOK;
+  ConPktParamRec.fAcknowledge        = pConnParam->fAcknowledge;
+  strcpy ( ConPktParamRec.szReceiverServerDB, pTCPIPConnInfo->szServerDB );
+  ConPktParamRec.szServerDBRoot [0]  = '\0';
+  ConPktParamRec.szServerPgm [0]     = '\0';
+  if (ConPktParamRec.ulServiceType == SQL_CONTROL)
+    {
+    if (pConnParam->pszServerPgm != NULL) 
+      {
+      strcpy ( ConPktParamRec.szServerPgm, pConnParam->pszServerPgm);
+      }
+    if (pConnParam->pszServerDBRoot != NULL) 
+      {
+      strcpy ( ConPktParamRec.szServerDBRoot, pConnParam->pszServerDBRoot);
+      }
+    }
+
+  ulCommState = sql42c_send_conpkt ( &ConPktParamRec, pErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  //
+  // ---  receive server reply
+  //
+  ulCommState = sql42c_recv_conpkt ( &ConPktParamRec, pErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  if ( ConPktParamRec.ulMaxSegmentSize > pTCPIPConnInfo->ulMaxSegmentSize )
+    {
+    MSGD (( ERR_INCORRECT_MAXSEGMENTSIZE, ConPktParamRec.ulMaxSegmentSize ));
+    sql46c_build_error_string ( pErrText, ERRMSG_COM_ILL_MAXSEGMENTSIZE, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  pTCPIPConnInfo->ulServerRef = ConPktParamRec.ulSenderRef;
+  pTCPIPConnInfo->ulSwapType  = ConPktParamRec.ulSwapType;
+
+  if ( pTCPIPConnInfo->ulServiceType != SQL_DISTRIBUTION )
+    {
+    rc = ALLOC_MEM( (PPVOID)&pCommPackets,
+                    pTCPIPConnInfo->ulPacketCnt * pTCPIPConnInfo->ulPacketSize );
+
+    if ( rc != NO_ERROR )
+      {
+      sql40c_socket_close ( pTCPIPConnInfo->sd );
+      pTCPIPConnInfo->sd = UNDEF;
+
+      sql46c_build_error_string ( pErrText, ERRMSG_ALLOC_MEMORY, rc );
+      DBGOUT;
+      return ( SQLNOTOK );
+      }
+    }
+
+  // --- set output parameter
+  //
+  pConnParam->ulPacketSize      = pTCPIPConnInfo->ulPacketSize;
+  pConnParam->ulMaxDataLen      = pTCPIPConnInfo->ulMaxDataLen;
+  pConnParam->ulMinReplySize    = pTCPIPConnInfo->ulMinReplySize;
+  pConnParam->ulServerRef       = pTCPIPConnInfo->ulServerRef;
+
+  if ( pTCPIPConnInfo->ulServiceType != SQL_DISTRIBUTION )
+    {
+    for ( ulCnt = 0; ulCnt < pTCPIPConnInfo->ulPacketCnt; ulCnt++ )
+      {
+      pTCPIPConnInfo->pCommPacketList[ulCnt] = (PCOMM_PACKET_REC)pCommPackets;
+      pConnParam->pCommPacketList[ulCnt]     = (PCOMM_PACKET_REC)pCommPackets;
+
+      pCommPackets += pTCPIPConnInfo->ulPacketSize;
+      }
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+ULONG sql23c_release ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                       ERRORTEXT                  pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_release"
+  APIRET rc;
+  ULONG  ulMessClass;
+
+  DBGPAS;
+
+  if ( pTCPIPConnInfo->sd != UNDEF )
+    {
+    switch ( pTCPIPConnInfo->ulServiceType )
+      {
+      case SQL_DISTRIBUTION :
+        ulMessClass = RSQL_KERN_RELEASE_REQUEST;
+        break;
+
+      case SQL_CONTROL :
+        ulMessClass = RSQL_USER_RELEASE_REQUEST;
+        break;
+
+      default:
+        ulMessClass = RSQL_USER_RELEASE_REQUEST;
+        break;
+      }
+
+    sql42c_send_relpkt( pTCPIPConnInfo->sd,
+                        pTCPIPConnInfo->ulClientRef,
+                        pTCPIPConnInfo->ulServerRef,
+                        ulMessClass,
+                        SQLOK );
+
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+    }
+
+  if (( pTCPIPConnInfo->pCommPacketList[0] != NULL ) &&
+      ( pTCPIPConnInfo->ulServiceType      != SQL_DISTRIBUTION ))
+    {
+    rc = FREE_MEM ( pTCPIPConnInfo->pCommPacketList[0] );
+
+    if ( rc != NO_ERROR )
+      {
+      sql46c_build_error_string ( pErrText, ERRMSG_COM_CANT_FREE_MEM, rc );
+      return ( SQLNOTOK );
+      }
+
+    pTCPIPConnInfo->pCommPacketList[0] = NULL;
+    }
+
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+ULONG sql23c_request ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                       ULONG                      ulCmdPacket,
+                       ULONG                      ulCmdDataLen,
+                       ERRORTEXT                  pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_request"
+  ULONG                           ulCommState;
+  PCOMM_PACKET_REC                pCommPacket = NULL;
+  ULONG                           ulMessClass;
+
+  DBGIN;
+
+  if ( pTCPIPConnInfo->ulServiceType == SQL_DISTRIBUTION )
+    ulMessClass = RSQL_KERN_DATA_REQUEST;
+  else
+    ulMessClass = RSQL_USER_DATA_REQUEST;
+
+  pCommPacket                     = pTCPIPConnInfo->pCommPacketList[ulCmdPacket];
+  pTCPIPConnInfo->ulCurrentPacket = ulCmdPacket;
+  pTCPIPConnInfo->ulCmdDataLen    = ulCmdDataLen;
+
+  ulCommState = sql42c_send_packet ( pTCPIPConnInfo->sd,
+                                     pTCPIPConnInfo->ulMaxSegmentSize,
+                                     pCommPacket,
+                                     ulCmdDataLen,
+                                     pTCPIPConnInfo->ulClientRef,
+                                     pTCPIPConnInfo->ulServerRef,
+                                     ulMessClass,
+                                     SQLOK,
+                                     pErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+ULONG sql23c_replyavailable ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                              ERRORTEXT                  pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_replyavailable"
+  fd_set                         SDMask;
+  APIRET                         rc   = NO_ERROR;
+  INT                            SDCount;
+
+  DBGIN;
+
+  FD_ZERO ( &SDMask );
+  FD_SET  ( pTCPIPConnInfo->sd, &SDMask );
+
+  for ( ;; )
+    {
+    SDCount = pTCPIPConnInfo->sd + 1;
+
+    rc = sql40c_select ( &SDCount, (PVOID)&SDMask,
+                         NULL, NULL, 0 );
+
+    if ( rc == ERROR_TIMEOUT )
+      {
+      DBGOUT;
+      return ( SQLWOULDBLOCK );
+      }
+    else if ( rc == EINTR )
+      {
+      continue;
+      }
+    else if ( rc != NO_ERROR )
+      {
+      MSGD (( ERR_SOCKET_SELECT_ERR, rc ));
+      sql46c_build_error_string ( pErrText,
+                                  ERRMSG_COM_SOCKET_SELECT_ERROR, rc );
+      DBGOUT;
+      return ( SQLNOTOK );
+      }
+
+    break;
+    }
+
+
+  DBGOUT;
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+ULONG sql23c_receive ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                       PCOMM_PACKET_REC           *ppResPacket,
+                       PULONG                     pulResDataLen,
+                       ERRORTEXT                  pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_receive"
+  ULONG                          ulCommState;
+  PCOMM_PACKET_REC               pCmdCommPacket;
+  ULONG                          ulCurrentPacket;
+  ULONG                          ulSenderRef;
+  ULONG                          ulReceiverRef;
+  ULONG                          ulMessClass;
+
+  DBGIN;
+
+  ulCurrentPacket = pTCPIPConnInfo->ulCurrentPacket;
+  pCmdCommPacket  = pTCPIPConnInfo->pCommPacketList[ulCurrentPacket];
+  *ppResPacket    = (PCOMM_PACKET_REC) ((PCHAR)pCmdCommPacket->pDataPart +
+                                        pTCPIPConnInfo->ulCmdDataLen);
+
+  ulCommState = sql42c_recv_packet ( pTCPIPConnInfo->sd,
+                                     pTCPIPConnInfo->ulSwapType,
+                                     *ppResPacket,
+                                     pTCPIPConnInfo->ulMaxDataLen -
+                                     pTCPIPConnInfo->ulCmdDataLen,
+                                     pulResDataLen,
+                                     &ulSenderRef,
+                                     &ulReceiverRef,
+                                     &ulMessClass,
+                                     pErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  DBGOUT;
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+#if defined(SERVER)
+ ULONG sql23c_receive_ackn ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                             ERRORTEXT                  pErrText )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql23c_receive"
+   ULONG                     ulCommState;
+   ULONG                     ulSenderRef;
+   ULONG                     ulReceiverRef;
+   ULONG                     ulMessClass;
+
+   DBGIN;
+
+   ulCommState = sql42c_recv_header( pTCPIPConnInfo->sd,
+                                     pTCPIPConnInfo->ulSwapType,
+                                     &ulSenderRef,
+                                     &ulReceiverRef,
+                                     &ulMessClass,
+                                     pErrText );
+
+   if ( ulCommState != SQLOK )
+     {
+     DBGOUT;
+     return ( ulCommState );
+     }
+
+   DBGOUT;
+   return ( SQLOK );
+   }
+#endif
+
+/*------------------------------*/
+
+
+ULONG sql23c_cancel_dump ( PTCPIP_CONNECT_INFO_REC    pTCPIPConnInfo,
+                           ULONG                      ulReqType,
+                           ERRORTEXT                  pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_cancel_dump"
+  TCPIP_CONNECT_INFO_REC          TmpTCPIPConnInfo;
+  CONPKT_PARAM_REC                ConPktParamRec;
+  ULONG                           ulMessClass;
+  ULONG                           ulCommState;
+
+  DBGIN;
+
+  TmpTCPIPConnInfo = *pTCPIPConnInfo;
+
+   switch ( ulReqType )
+     {
+     case SQL_RTE_CANCEL:
+       ulMessClass = RSQL_USER_CANCEL_REQUEST;
+       break;
+
+     case SQL_RTE_DUMP:
+       ulMessClass = RSQL_DUMP_REQUEST;
+       break;
+
+     default:
+       MSGD (( ERR_PROTOCOL_ERROR, "REQUEST TYPE" ));
+       sql46c_build_error_string ( pErrText, ERRMSG_PROTOCOL_ERROR, 0 );
+       return ( SQLNOTOK );
+     }
+
+
+  //
+  // ---  get address of the server socket
+  //
+  ulCommState =  sql23c_get_server_addr ( &TmpTCPIPConnInfo, pErrText );
+
+  if ( ulCommState != SQLOK )
+    return ( ulCommState );
+
+  //
+  // --- connect to server socket
+  //
+  TmpTCPIPConnInfo.sd               = UNDEF;
+  TmpTCPIPConnInfo.ulMaxSegmentSize = sizeof(RTE_HEADER_REC) +
+                                      sizeof(RTE_CONNECT_PACKET_REC);
+  TmpTCPIPConnInfo.ulMinSegmentSize = sizeof(RTE_HEADER_REC);
+
+  ulCommState = sql23c_connect_server ( &TmpTCPIPConnInfo, pErrText );
+
+  if ( ulCommState != SQLOK )
+    return ( ulCommState );
+
+  //
+  // --- send cancel request
+  //
+  ConPktParamRec.sd                  = TmpTCPIPConnInfo.sd;
+  ConPktParamRec.ulMessClass         = ulMessClass;
+  ConPktParamRec.ulSenderRef         = TmpTCPIPConnInfo.ulClientRef;
+  ConPktParamRec.ulReceiverRef       = TmpTCPIPConnInfo.ulServerRef;
+  ConPktParamRec.ulServiceType       = TmpTCPIPConnInfo.ulServiceType;
+  ConPktParamRec.ulMaxSegmentSize    = TmpTCPIPConnInfo.ulMaxSegmentSize;
+  ConPktParamRec.ulPacketSize        = TmpTCPIPConnInfo.ulPacketSize;
+  ConPktParamRec.ulMaxDataLen        = TmpTCPIPConnInfo.ulMaxDataLen;
+  ConPktParamRec.ulMinReplySize      = TmpTCPIPConnInfo.ulMinReplySize;
+  ConPktParamRec.ulSwapType          = (ULONG)UNDEF;
+  ConPktParamRec.szSenderServerDB[0] = '\0';
+  ConPktParamRec.pidSenderPID        = TmpTCPIPConnInfo.pidClientPID;
+  ConPktParamRec.usServicePort       = TmpTCPIPConnInfo.usServicePort;
+  ConPktParamRec.ulCommState         = SQLOK;
+  ConPktParamRec.fAcknowledge        = FALSE;
+  strcpy ( ConPktParamRec.szReceiverServerDB, TmpTCPIPConnInfo.szServerDB );
+
+  ulCommState = sql42c_send_conpkt ( &ConPktParamRec, pErrText );
+
+
+  sql40c_socket_close ( TmpTCPIPConnInfo.sd );
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static ULONG sql23c_info_request ( PTCPIP_CONNECT_INFO_REC  pTCPIPConnInfo,
+                                   ERRORTEXT                pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_info_request"
+  ULONG                           ulCommState;
+  CONPKT_PARAM_REC                ConPktParamRec;
+  ULONG                           ulMyHeaderSize;
+  ULONG                           ulPeerHeaderSize;
+
+  DBGIN;
+
+  //
+  // ---  connect to server socket
+  //
+  pTCPIPConnInfo->ulMaxSegmentSize = sizeof(RTE_HEADER_REC) +
+                                     sizeof(RTE_CONNECT_PACKET_REC);
+  pTCPIPConnInfo->ulMinSegmentSize = sizeof(RTE_HEADER_REC);
+
+  ulCommState = sql23c_connect_server ( pTCPIPConnInfo, pErrText );
+
+  if ( ulCommState != SQLOK )
+    return ( ulCommState );
+
+  /*
+   *  send connect packet
+   */
+  ConPktParamRec.sd                  = pTCPIPConnInfo->sd;
+  ConPktParamRec.ulMessClass         = RSQL_INFO_REQUEST;
+  ConPktParamRec.ulSenderRef         = pTCPIPConnInfo->ulClientRef;
+  ConPktParamRec.ulReceiverRef       = (ULONG)UNDEF;
+  ConPktParamRec.ulServiceType       = pTCPIPConnInfo->ulServiceType;
+  ConPktParamRec.ulMaxSegmentSize    = pTCPIPConnInfo->ulMaxSegmentSize;
+  ConPktParamRec.ulPacketSize        = pTCPIPConnInfo->ulPacketSize;
+  ConPktParamRec.ulMaxDataLen        = pTCPIPConnInfo->ulMaxDataLen;
+  ConPktParamRec.ulMinReplySize      = pTCPIPConnInfo->ulMinReplySize;
+  ConPktParamRec.ulSwapType          = (ULONG)UNDEF;
+  ConPktParamRec.szSenderServerDB[0] = '\0';
+  ConPktParamRec.pidSenderPID        = pTCPIPConnInfo->pidClientPID;
+  ConPktParamRec.usServicePort       = pTCPIPConnInfo->usServicePort;
+  ConPktParamRec.ulCommState         = SQLOK;
+  ConPktParamRec.fAcknowledge        = FALSE;
+  strcpy ( ConPktParamRec.szReceiverServerDB, pTCPIPConnInfo->szServerDB );
+
+  ulCommState = sql42c_send_conpkt ( &ConPktParamRec, pErrText );
+
+
+  if ( ulCommState != SQLOK )
+    {
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  //
+  // ---  receive server reply
+  //
+  ulCommState = sql42c_recv_conpkt ( &ConPktParamRec, pErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  sql40c_socket_close ( pTCPIPConnInfo->sd );
+  pTCPIPConnInfo->sd = UNDEF;
+
+  if ( ConPktParamRec.ulMessClass != RSQL_INFO_REPLY )
+    {
+    MSGD (( ERR_WRONG_MESSCLASS_REPL, ConPktParamRec.ulMessClass ));
+    sql46c_build_error_string ( pErrText, ERRMSG_PROTOCOL_ERROR, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  if ( ConPktParamRec.ulServiceType != pTCPIPConnInfo->ulServiceType )
+    {
+    MSGD (( ERR_PROTOCOL_ERROR, "SERVICE" ));
+    sql46c_build_error_string ( pErrText, ERRMSG_PROTOCOL_ERROR, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  if ( strcmp ( pTCPIPConnInfo->szServerDB,
+                ConPktParamRec.szSenderServerDB ) )
+    {
+    MSGD (( ERR_PROTOCOL_ERROR, "SERVERDB" ));
+    sql46c_build_error_string ( pErrText, ERRMSG_PROTOCOL_ERROR, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  ulPeerHeaderSize = ConPktParamRec.ulPacketSize -
+                     ConPktParamRec.ulMaxDataLen;
+  ulMyHeaderSize   = (sizeof(RTE_HEADER_REC) * 2);
+
+  if ( ulPeerHeaderSize < ulMyHeaderSize )
+    {
+    ConPktParamRec.ulMaxDataLen -= ulMyHeaderSize - ulPeerHeaderSize;
+    }
+
+  if ( ConPktParamRec.usServicePort != 0 )
+    pTCPIPConnInfo->usServicePort = ConPktParamRec.usServicePort;
+
+  pTCPIPConnInfo->ulPacketSize    = ConPktParamRec.ulPacketSize;
+  pTCPIPConnInfo->ulMaxDataLen    = ConPktParamRec.ulMaxDataLen;
+  pTCPIPConnInfo->ulMinReplySize  = ConPktParamRec.ulMinReplySize;
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql23c_get_server_addr ( PTCPIP_CONNECT_INFO_REC  pTCPIPConnInfo,
+                                      ERRORTEXT                pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_get_server_addr"
+  LONG                            rc;
+  CHAR                            szErrText[sizeof(ERRORTEXT) + 1];
+
+  DBGIN;
+
+  rc = sql43c_get_service_by_name ( SOCKET_SERVICE_SQL6,
+                                    &pTCPIPConnInfo->usServicePort );
+
+  if ( rc != NO_ERROR )
+    {
+    strcpy  ( szErrText, ERRMSG_MISSING_TCP_SERVICE_ENTRY );
+    strncat ( szErrText, SOCKET_SERVICE_SQL6,
+              sizeof(szErrText) -
+              strlen(szErrText) -
+              sizeof(SOCKET_SERVICE_SQL6) - 1 );
+    szErrText[sizeof(szErrText)] = '\0';
+
+    MSGD (( ERR_SERV_BY_NAME_ERROR, SOCKET_SERVICE_SQL6 ));
+    sql46c_build_error_string ( pErrText, szErrText, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  memset ( pTCPIPConnInfo->ucName, 0, sizeof ( pTCPIPConnInfo->ucName ));
+
+  rc = sql43c_get_host_by_name ( pTCPIPConnInfo->szServerNode,
+                                 pTCPIPConnInfo->ucName,
+                                 sizeof( pTCPIPConnInfo->ucName ));
+
+  if ( rc != NO_ERROR )
+    {
+    sql46c_build_error_string ( pErrText, ERRMSG_GET_HOST_BY_NAME_ERR, 0 );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  DBGOUT;
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+
+static ULONG sql23c_connect_server ( PTCPIP_CONNECT_INFO_REC  pTCPIPConnInfo,
+                                     ERRORTEXT                pErrText )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_connect_server"
+  LONG                            rc;
+
+  DBGIN;
+
+  //
+  // --- create active socket to connect to server
+  //
+  rc = sql40c_stream_socket ( &pTCPIPConnInfo->sd );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGD (( ERR_CANT_CREATE_SOCKET, rc ));
+    sql46c_build_error_string ( pErrText, ERRMSG_CANT_CREATE_SOCKET, rc );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+
+  //
+  // --- set send buffer size
+  //
+  rc = sql40c_set_send_buffer_size ( pTCPIPConnInfo->sd,
+                                     &pTCPIPConnInfo->ulMaxSegmentSize,
+                                     pTCPIPConnInfo->ulMinSegmentSize );
+
+  if ( rc != NO_ERROR )
+    {
+    if ( rc == SOCENOBUFS )
+      {
+      MSGD (( ERR_OUT_OF_SOCK_BUF_MEM, "SNDBUF" ));
+      sql46c_build_error_string ( pErrText, ERRMSG_OUT_OF_SOCK_BUF_MEM, 0 );
+      }
+    else
+      {
+      MSGD (( ERR_CANT_SET_BUF_SIZE, "SNDBUF", rc ));
+      sql46c_build_error_string ( pErrText, ERRMSG_CANT_SET_BUF_SIZE, rc );
+      }
+
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  //
+  // --- set receive buffer size
+  //
+  rc = sql40c_set_recv_buffer_size ( pTCPIPConnInfo->sd,
+                                     &pTCPIPConnInfo->ulMaxSegmentSize,
+                                     pTCPIPConnInfo->ulMinSegmentSize );
+
+  if ( rc != NO_ERROR )
+    {
+    if ( rc == SOCENOBUFS )
+      {
+      MSGD (( ERR_OUT_OF_SOCK_BUF_MEM, "RCVBUF" ));
+      sql46c_build_error_string ( pErrText, ERRMSG_OUT_OF_SOCK_BUF_MEM, 0 );
+      }
+    else
+      {
+      MSGD (( ERR_CANT_SET_BUF_SIZE, "RCVBUF", rc ));
+      sql46c_build_error_string ( pErrText, ERRMSG_CANT_SET_BUF_SIZE, rc );
+      }
+
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  //
+  // --- Connect to server socket.
+  //
+  rc = sql40c_connect ( pTCPIPConnInfo->sd,
+                        pTCPIPConnInfo->usServicePort,
+                        pTCPIPConnInfo->ucName,
+                        sizeof (pTCPIPConnInfo->ucName));
+
+  if ( rc != NO_ERROR )
+    {
+    sql40c_socket_close ( pTCPIPConnInfo->sd );
+    pTCPIPConnInfo->sd = UNDEF;
+
+    if ( rc == SOCECONNREFUSED )
+      {
+      MSGD (( ERR_XSERVER_NOT_ACTIVE, rc ));
+      sql46c_build_error_string ( pErrText, ERRMSG_XSERVER_NOT_ACTIVE, 0 );
+      DBGOUT;
+      return ( SQLSTART_REQUIRED );
+      }
+    else
+      {
+      MSGD (( ERR_REQ_SOCKET_CONNECT, rc ));
+      sql46c_build_error_string ( pErrText, ERRMSG_REQ_SOCKET_CONNECT, rc );
+      DBGOUT;
+      return ( SQLNOTOK );
+      }
+    }
+
+  rc =  sql40c_keep_alive ( pTCPIPConnInfo->sd );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGD (( ERR_KEEP_ALIVE, rc ));
+    sql46c_build_error_string ( pErrText, ERRMSG_KEEP_ALIVE, rc );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  rc =  sql40c_linger ( pTCPIPConnInfo->sd, TRUE, LINGER_TIME );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGCD (( ERR_LINGER, rc ))
+    sql46c_build_error_string ( pErrText, ERRMSG_LINGER, rc );
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+
+  DBGOUT;
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+static VOID sql23c_init_conn_info ( PTCPIP_CONNECT_INFO_REC  pTCPIPConnInfo,
+                                    PCONNECT_PARAM_REC       pConnParam )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql23c_init_conn_info"
+  ULONG          ulCnt;
+
+  DBGPAS;
+
+  pTCPIPConnInfo->sd                 = UNDEF;
+  pTCPIPConnInfo->SwapType           = UNDEF;
+  pTCPIPConnInfo->ucName[0]          = '\0';
+  pTCPIPConnInfo->usServicePort      = (USHORT)UNDEF;
+
+  if ( pConnParam == NULL )
+    {
+    pTCPIPConnInfo->pidClientPID     = (PID)UNDEF;
+    pTCPIPConnInfo->szServerDB[0]    = '\0';
+    pTCPIPConnInfo->szServerNode[0]  = '\0';
+    pTCPIPConnInfo->ulPacketCnt      = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulServerRef      = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulClientRef      = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulServiceType    = (ULONG)UNDEF;
+
+    pTCPIPConnInfo->ulCurrentPacket  = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulCmdDataLen     = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulPacketCnt      = 0;
+
+    pTCPIPConnInfo->ulPacketSize     = 0;
+    pTCPIPConnInfo->ulMaxDataLen     = 0;
+    pTCPIPConnInfo->ulMinReplySize   = (ULONG)UNDEF;
+
+    pTCPIPConnInfo->ulMaxSegmentSize = (ULONG)UNDEF;
+    }
+  else
+    {
+    pTCPIPConnInfo->pidClientPID     = pConnParam->pidClientPID;
+    pTCPIPConnInfo->ulServerRef      = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulClientRef      = pConnParam->ulClientRef;
+    pTCPIPConnInfo->ulServiceType    = pConnParam->ulServiceType;
+
+    pTCPIPConnInfo->ulCurrentPacket  = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulCmdDataLen     = (ULONG)UNDEF;
+    pTCPIPConnInfo->ulPacketCnt      = pConnParam->ulPacketCnt;
+
+    pTCPIPConnInfo->ulPacketSize     = pConnParam->ulPacketSize;
+    pTCPIPConnInfo->ulMaxDataLen     = pConnParam->ulMaxDataLen;
+    pTCPIPConnInfo->ulMinReplySize   = (ULONG)UNDEF;
+
+    pTCPIPConnInfo->ulMaxSegmentSize = (ULONG)UNDEF;
+
+    if ( pConnParam->pszServerNode )
+      strcpy ( pTCPIPConnInfo->szServerNode, pConnParam->pszServerNode );
+    else
+      pTCPIPConnInfo->szServerNode[0]  = '\0';
+
+    strcpy ( pTCPIPConnInfo->szServerDB,   pConnParam->pszServerDB );
+
+    if ( pTCPIPConnInfo->ulServiceType == SQL_DISTRIBUTION )
+      {
+      for ( ulCnt = 0; ulCnt < pTCPIPConnInfo->ulPacketCnt; ulCnt++ )
+        {
+        pTCPIPConnInfo->pCommPacketList[ulCnt] =
+            pConnParam->pCommPacketList[ulCnt];
+        }
+      }
+    }
+
+  return;
+  }
+
+
+/*
+ * =============================== END ========================================
+ */
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************

@@ -1,0 +1,1775 @@
+.CM *ID* VCT45    VDN      changed on 1992-06-25-14.38.03 by KERN      *
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1995$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VCT45$
+.tt 2 $$$
+.tt 3 $J.B/F.S/C.N$Conditional Compiling Routines$1995-05-02$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : CCT-Routines
+=========
+.sp
+Purpose : Handling of conditional compiling directives
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              c45initcond ;
+ 
+        PROCEDURE
+              c45initscript;
+ 
+        PROCEDURE
+              c45process_cond_directive ( VAR dir_line   : tsp_line ;
+                    VAR length     : tsp_int4  ;
+                    VAR error      : tct_errortext );
+ 
+        PROCEDURE
+              c45store_symbols ( VAR symbol_name  : tct_token ;
+                    VAR symbol_value : tct_token ;
+                    VAR symbol_count : integer ;
+                    VAR error        : tct_errortext );
+ 
+        PROCEDURE
+              c45delete_symbols ( VAR symbol_name  : tct_token ;
+                    VAR symbol_count : integer ;
+                    VAR error        : tct_errortext );
+ 
+        FUNCTION
+              c45suppress_on : boolean;
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              String_utilities : VCT02;
+ 
+        VAR
+              c02lbracket : tsp_c2;
+              c02rbracket : tsp_c2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Miniscript_Filehandling : VCT44;
+ 
+        VAR
+              c44errfile        : tsp_int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-10 : VSP10;
+ 
+        PROCEDURE
+              s10mv (size1   : tsp_int4;
+                    size2    : tsp_int4;
+                    VAR val1 : tsp_name;
+                    p1       : tsp_int4;
+                    VAR val2 : shortstring;
+                    p2       : tsp_int4;
+                    cnt      : tsp_int4);
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              s10mv;
+ 
+              tsp_moveobj tsp_name
+              tsp_moveobj shortstring
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : J. Br?uhe / Frank Stra?zenburg / C. Nemack
+.sp
+.cp 3
+Created : 1987-12-10
+.sp
+Version : 1995-05-02
+.cp 3
+Release :  6.1.1 	 Date : 1995-05-02
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      error_line_count     = '* LNO : ' ;
+      blank_c3             = '   ';
+      blank_token          = bsp_c8;
+      blankerror           =
+            '                                                            ' ;
+      semy                 = 59;
+      max_cond             = 15 ;
+      max_syms             = 100;
+      f_ill_and_opera      = 'Unknown AND operator                    ' ;
+      f_ill_beg_delim      = 'Illegal start delimiter                 ' ;
+      f_ill_def_inst       = 'Illegal "&def" parameter                ' ;
+      f_ill_def_undef_inst = 'Illegal "&def" or "&undef" parameter    ' ;
+      f_ill_end_delim      = 'Illegal end delimiter                   ' ;
+      f_ill_endif_num      = 'Too many "&endif" statements            ' ;
+      f_ill_if_num         = 'Too many "&if" statements               ' ;
+      f_ill_nest           = 'Illegal nested : &if-&else-&endif       ' ;
+      f_ill_opera          = 'Illegal operator in "&" statement       ' ;
+      f_ill_set_opera      = 'Unknown SET operator                    ' ;
+      f_ill_undef_inst     = 'Illegal "&undef" parameter              ' ;
+      f_internal_error_1   = 'INTERNAL ERROR  1  !!!!!!!!!!!!!        ' ;
+      f_inv_token          = 'Undefined symbol in "&" expression      ' ;
+      f_miss_opera         = 'Missing operator in "&if" expression    ' ;
+      f_miss_val           = 'Missing value in "&if" expression       ' ;
+      f_no_symb_declared   = 'No symbol name defined                  ' ;
+      f_too_few_symb       = 'Symbol table underflow !!               ' ;
+      f_too_many_symb      = 'Symbol table overflow !!                ' ;
+      f_undef_sym          = 'Undefined symbol in "$" expr.:          ' ;
+      f_value_not_found    = 'Value not found                         ' ;
+ 
+TYPE
+      shortstring = tsp_c40;
+      delim       = SET OF char;
+      d_type      = ( d_none , d_define , d_undef , d_ifdef , d_ifndef ,
+            d_if , d_else , d_endif , d_err ) ;
+ 
+      one_cond    = RECORD
+            co_visible , co_suppress , co_else : boolean ;
+      END;
+ 
+      cond_list   = ARRAY [  1 .. max_cond  ] OF one_cond ;
+ 
+      one_sym     = RECORD
+            s_name  : tct_token ;
+            s_value : tct_token ;
+      END;
+ 
+      sym_list    = ARRAY [  1 .. max_syms  ] OF one_sym ;
+ 
+VAR
+      c45delimiter    : delim ;
+      c45indelimit    : delim ;
+      c45condstack    : cond_list ;
+      c45numcond      : integer ;
+      c45symsnum      : integer ;
+      c45allsyms      : sym_list ;
+      c45linesuppress : boolean ;
+      c45script       : boolean;
+      c45count_line   : tsp_int4 ;
+      c45error_text   : tct_errortext ;
+&     ifdef test
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      zwrite (ln : tct_line);
+ 
+VAR
+      i : integer;
+ 
+BEGIN
+write (ln.len:2,'>');
+FOR i := 1 TO ln.len DO
+    write (ln.l[ i ]);
+(*ENDFOR*) 
+writeln ('<');
+END;
+ 
+&endif
+(*------------------------------*) 
+ 
+PROCEDURE
+      c45initscript;
+ 
+BEGIN
+c45script := true
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c45initcond ;
+ 
+VAR
+      empty_sym : one_sym ;
+      i         : integer ;
+ 
+BEGIN
+c45linesuppress  := false ;
+c45script := false;
+c45count_line := 0 ;
+WITH empty_sym DO
+    BEGIN
+    s_name  := blank_token ;
+    s_value := blank_token ;
+    END ;
+(*ENDWITH*) 
+FOR i := 1 TO max_syms DO
+    c45allsyms [  i  ] := empty_sym ;
+(*ENDFOR*) 
+c45symsnum   := 0 ;
+c45numcond   := 0 ;
+c45indelimit := [  cct_l_sq_bracket, cct_r_sq_bracket,
+      cct_l_parenth, cct_period, cct_r_parenth  ];
+c45delimiter := [  cct_l_sq_bracket, cct_r_sq_bracket, bsp_c1,
+      cct_l_parenth, cct_r_parenth, cct_period, cct_komma,
+      cct_colon, cct_dollar, cct_asterisk, cct_equal, chr (semy ) ] ;
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c45store_symbols ( VAR symbol_name  : tct_token ;
+            VAR symbol_value : tct_token ;
+            VAR symbol_count : integer ;
+            VAR error        : tct_errortext );
+ 
+VAR
+      i           : integer ;
+      err         : boolean ;
+      upp_s_name  : tct_token ;
+      upp_s_value : tct_token ;
+ 
+BEGIN
+error := blankerror ;
+IF  ( symbol_name <> blank_token )
+THEN
+    BEGIN
+    IF  c45symsnum < max_syms
+    THEN
+        BEGIN
+        upp_s_name  := blank_token ;
+        upp_s_value := blank_token ;
+        FOR i := 1 TO mxct_token DO
+            BEGIN
+            upp_s_name [  i  ]  := s60uppcase ( symbol_name [  i  ] ) ;
+            upp_s_value [  i  ] := s60uppcase ( symbol_value [  i  ] ) ;
+            END ;
+        (*ENDFOR*) 
+        store_sym ( upp_s_name , upp_s_value , err ) ;
+        symbol_count := c45symsnum ;
+        END
+    ELSE
+        BEGIN
+        wr_error ( f_too_many_symb , false ) ;
+        error        := c45error_text ;
+        symbol_count := - 1 ;
+        END ;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    wr_error ( f_no_symb_declared , false ) ;
+    symbol_count := - 1 ;
+    error        := c45error_text ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c45delete_symbols ( VAR symbol_name  : tct_token ;
+            VAR symbol_count : integer ;
+            VAR error        : tct_errortext );
+ 
+VAR
+      i          : integer ;
+      err        : boolean ;
+      upp_s_name : tct_token ;
+ 
+BEGIN
+error := blankerror ;
+IF  ( symbol_name <> blank_token )
+THEN
+    BEGIN
+    IF  c45symsnum <= 0
+    THEN
+        BEGIN
+        wr_error ( f_too_few_symb , false ) ;
+        error        := c45error_text ;
+        symbol_count := - 1 ;
+        END
+    ELSE
+        BEGIN
+        upp_s_name := blank_token ;
+        FOR i := 1 TO mxct_token DO
+            BEGIN
+            upp_s_name [  i  ] := s60uppcase ( symbol_name [  i  ] ) ;
+            END ;
+        (*ENDFOR*) 
+        delete_sym ( upp_s_name , err ) ;
+        symbol_count := c45symsnum ;
+        END ;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    wr_error ( f_no_symb_declared , false ) ;
+    symbol_count := - 1 ;
+    error        := c45error_text ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      c45process_cond_directive ( VAR dir_line : tsp_line ;
+            VAR length   : tsp_int4  ;
+            VAR error    : tct_errortext );
+ 
+VAR
+      tmp_len   : tsp_int4 ;
+      dir_pos   : tsp_int4 ;
+      dir_name  : tsp_name ;
+      directive : d_type ;
+      inln      : tct_line ;
+      err       : boolean ;
+      suppress  : boolean ;
+ 
+BEGIN
+err           := false ;
+error         := blankerror ;
+c45count_line := succ ( c45count_line ) ;
+dir_pos       := 1 ;
+inln.l        := dir_line ;
+inln.len      := length ;
+tmp_len       := length ;
+get_first_name ( inln , dir_pos , dir_name );
+name_to_dir ( dir_name , directive , inln , dir_pos );
+CASE directive OF
+    d_none :
+        BEGIN
+        IF  c45linesuppress
+        THEN
+            length := 0
+        ELSE
+            length := tmp_len ;
+        (*ENDIF*) 
+        END ;
+    d_err :
+        BEGIN
+        cond_err ( suppress , err );
+        c45linesuppress := suppress ;
+        error         := c45error_text ;
+        length        := - tmp_len ;
+        END ;
+    d_define , d_undef :
+        BEGIN
+        cond_define ( inln , dir_pos , suppress , directive , err );
+        c45linesuppress := suppress ;
+        length        := 0 ;
+        IF  err
+        THEN
+            BEGIN
+            length := - tmp_len ;
+            error  := c45error_text ;
+            END ;
+        (*ENDIF*) 
+        END ;
+    d_ifdef , d_ifndef , d_if :
+        BEGIN
+        cond_if ( inln , dir_pos , suppress , directive , err );
+        c45linesuppress := suppress ;
+        length        := 0 ;
+        IF  err
+        THEN
+            BEGIN
+            length := - tmp_len ;
+            error  := c45error_text ;
+            END ;
+        (*ENDIF*) 
+        END ;
+    d_else :
+        BEGIN
+        cond_else ( inln , dir_pos , suppress , err );
+        c45linesuppress := suppress ;
+        length        := 0 ;
+        IF  err
+        THEN
+            BEGIN
+            length := - tmp_len ;
+            error  := c45error_text ;
+            END ;
+        (*ENDIF*) 
+        END ;
+    d_endif :
+        BEGIN
+        cond_endif ( inln , dir_pos , suppress , err );
+        c45linesuppress := suppress ;
+        length        := 0 ;
+        IF  err
+        THEN
+            BEGIN
+            length := - tmp_len ;
+            error  := c45error_text ;
+            END ;
+        (*ENDIF*) 
+        END ;
+    END ;
+(*ENDCASE*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      cond_if (input_line : tct_line ;
+            VAR dir_pos   : tsp_int4 ;
+            VAR suppress  : boolean ;
+            directive     : d_type ;
+            VAR err       : boolean );
+ 
+VAR
+      visible : boolean ;
+      tmp_res : boolean ;
+ 
+BEGIN
+err := false ;
+IF  c45numcond = 0
+THEN
+    visible := true
+ELSE
+    visible := NOT c45condstack [  c45numcond  ] . co_suppress ;
+(*ENDIF*) 
+IF  c45numcond < max_cond
+THEN
+    BEGIN
+    c45numcond := succ ( c45numcond );
+    WITH c45condstack [  c45numcond  ] DO
+        BEGIN
+        co_visible  := visible ;
+        co_suppress := NOT visible ;
+        tmp_res     := NOT visible ;
+        CASE directive OF
+            d_if :
+                con_if_eval (input_line , dir_pos , tmp_res , err );
+            d_ifdef :
+                con_def_eval (input_line , dir_pos , tmp_res , err );
+            d_ifndef :
+                con_ndef_eval (input_line , dir_pos , tmp_res , err );
+            OTHERWISE
+                BEGIN
+                wr_error ( f_internal_error_1 , true ) ;
+                err := true ;
+                END ;
+            END ;
+        (*ENDCASE*) 
+        IF  visible
+        THEN
+            co_suppress := tmp_res ;
+        (*ENDIF*) 
+        co_else  := false ;
+        suppress := co_suppress ;
+        END
+    (*ENDWITH*) 
+    END
+ELSE
+    BEGIN
+    err := true ;
+    wr_error ( f_ill_if_num , true );
+    suppress := true ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      cond_else (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR err        : boolean );
+ 
+BEGIN
+err := false ;
+IF  c45numcond > 0
+THEN
+    WITH c45condstack [  c45numcond  ] DO
+        IF  co_else
+        THEN
+            BEGIN
+            err := true ;
+            wr_error ( f_ill_nest ,true ) ;
+            suppress := true ;
+            END
+        ELSE
+            BEGIN
+            co_else := true ;
+            IF  co_visible
+            THEN
+                co_suppress := NOT co_suppress ;
+            (*ENDIF*) 
+            suppress := co_suppress ;
+            END
+        (*ENDIF*) 
+    (*ENDWITH*) 
+ELSE
+    BEGIN
+    err := true ;
+    wr_error ( f_ill_nest ,true );
+    suppress := true ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      cond_endif (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR err        : boolean );
+ 
+BEGIN
+err      := false ;
+suppress := false ;
+IF  c45numcond > 0
+THEN
+    BEGIN
+    c45numcond := pred ( c45numcond );
+    IF  c45numcond > 0
+    THEN
+        suppress := c45condstack [  c45numcond  ] . co_suppress ;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    err := true ;
+    wr_error ( f_ill_endif_num ,true );
+    suppress := true ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      con_if_eval (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR err        : boolean );
+ 
+VAR
+      operator     : char ;
+      and_operator : tsp_c3 ;
+      and_ok       : boolean;
+ 
+BEGIN
+err    := false ;
+and_ok := true ;
+&ifdef test
+writeln ('vct45 - con_if_eval =======================================');
+zwrite (input_line);
+writeln ('dir_pos  ', dir_pos);
+writeln ('suppress ', ord(suppress));
+writeln ('err      ', ord(err     ));
+&endif
+WHILE ( NOT suppress ) AND ( and_ok ) DO
+    BEGIN
+    part_con_if_eval (input_line , dir_pos , suppress , err );
+    IF  (( NOT suppress ) AND ( dir_pos < input_line.len - 3 ))
+    THEN
+        BEGIN
+        operator := bsp_c1;
+        REPEAT
+            operator := input_line .l [ dir_pos  ];
+            dir_pos  := succ (dir_pos );
+        UNTIL
+            (operator <> bsp_c1 ) OR (dir_pos > input_line .len );
+        (*ENDREPEAT*) 
+        IF  ( operator = 'A' ) OR ( operator = 'a' )
+        THEN
+            BEGIN
+            and_operator         := blank_c3 ;
+            and_operator [  1  ] := operator ;
+            and_operator [  2  ] := input_line.l[  dir_pos  ] ;
+            and_operator [  3  ] := input_line.l[  dir_pos + 1  ] ;
+            dir_pos              := dir_pos + 2 ;
+            IF  ( and_operator = 'AND' ) OR ( and_operator = 'and' )
+            THEN
+                and_ok := true
+            ELSE
+                BEGIN
+                and_ok := false ;
+                err    := true ;
+                wr_error ( f_ill_and_opera , true );
+                suppress := true ;
+                END ;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            and_ok := false ;
+            END ;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        and_ok := false ;
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDWHILE*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      part_con_if_eval (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR err        : boolean );
+ 
+VAR
+      operator     : char ;
+      in_operator  : tsp_c2 ;
+      beg_delim    : tsp_c2 ;
+      end_delim    : tsp_c2 ;
+      deli         : tsp_c2 ;
+      val_found    : boolean ;
+      is_eval      : boolean ;
+      in_val_ok    : boolean ;
+      delim_found  : boolean;
+      sym_l_val    : tct_token ;
+      sym_r_val    : tct_token ;
+ 
+BEGIN
+err := false ;
+fetch_val (input_line, dir_pos, suppress, sym_l_val, val_found, err );
+IF  val_found
+THEN
+    BEGIN
+    REPEAT
+        operator := input_line .l [ dir_pos  ];
+        dir_pos  := succ (dir_pos );
+    UNTIL
+        (operator <> bsp_c1 ) OR (dir_pos > input_line .len );
+    (*ENDREPEAT*) 
+    IF  operator <> bsp_c1
+    THEN
+        BEGIN
+        IF  operator = cct_equal
+        THEN
+            BEGIN
+            fetch_val ( input_line , dir_pos , suppress ,
+                  sym_r_val , val_found , err );
+            IF  val_found
+            THEN
+                suppress := NOT (sym_l_val = sym_r_val );
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            IF  ( operator = 'I' ) OR ( operator = 'i' )
+            THEN
+                BEGIN
+                in_operator [  1  ] := operator ;
+                in_operator [  2  ] := input_line .l [  dir_pos  ] ;
+                dir_pos := succ ( dir_pos ) ;
+                IF  ( in_operator = 'IN' ) OR ( in_operator = 'in' )
+                THEN
+                    BEGIN
+                    get_beg_end_delimiter ( input_line , dir_pos ,
+                          beg_delim , end_delim , delim_found );
+                    IF  delim_found
+                    THEN
+                        BEGIN
+                        IF  end_delim <> '**'
+                        THEN
+                            BEGIN
+                            in_val_ok := false ;
+                            is_eval   := false ;
+                            REPEAT
+                                fetch_in_val ( input_line , dir_pos ,
+                                      suppress , sym_r_val , val_found ,
+                                      deli , delim_found ,
+                                      err ) ;
+                                IF  ( val_found ) AND ( NOT is_eval )
+                                THEN
+                                    BEGIN
+                                    in_val_ok := true ;
+                                    IF  sym_l_val = sym_r_val
+                                    THEN
+                                        is_eval := true ;
+                                    (*ENDIF*) 
+                                    END ;
+                                (*ENDIF*) 
+                            UNTIL
+                                ( deli = end_delim ) OR
+                                ( dir_pos > input_line.len ) ;
+                            (*ENDREPEAT*) 
+                            suppress := NOT is_eval ;
+                            IF  ( deli <> end_delim )
+                            THEN
+                                BEGIN
+                                err := true ;
+                                wr_error ( f_ill_end_delim , true );
+                                suppress := true ;
+                                END ;
+                            (*ENDIF*) 
+                            IF  ( NOT in_val_ok )
+                            THEN
+                                BEGIN
+                                err := true ;
+                                wr_error ( f_miss_val , true );
+                                suppress := true ;
+                                END ;
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            BEGIN
+                            err := true ;
+                            wr_error ( f_ill_beg_delim , true ) ;
+                            suppress := true ;
+                            END ;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        err := true ;
+                        wr_error ( f_ill_beg_delim , true );
+                        suppress := true ;
+                        END ;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    err := true ;
+                    wr_error ( f_ill_set_opera , true );
+                    suppress := true ;
+                    END ;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                err := true ;
+                wr_error ( f_ill_opera , true );
+                suppress := true ;
+                END ;
+            (*ENDIF*) 
+            END ;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        err := true ;
+        wr_error ( f_miss_opera , true );
+        suppress := true ;
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      con_def_eval (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR err        : boolean );
+ 
+VAR
+      i           : integer ;
+      sym_defined : boolean ;
+      tmp_name    : tsp_name ;
+      sym_name    : tct_token ;
+      sym_val     : tct_token ;
+ 
+BEGIN
+get_name (input_line , dir_pos , tmp_name );
+name_to_token (tmp_name , sym_name , err );
+fetch_sym (sym_name , sym_defined , sym_val );
+suppress := NOT sym_defined AND NOT c45script;
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      con_ndef_eval (     input_line : tct_line ;
+            VAR dir_pos : tsp_int4 ;
+            VAR suppress : boolean ;
+            VAR err      : boolean );
+ 
+VAR
+      i : integer ;
+      sym_defined : boolean ;
+      tmp_name : tsp_name ;
+      sym_name , sym_val : tct_token ;
+ 
+BEGIN
+get_name (input_line , dir_pos , tmp_name );
+name_to_token (tmp_name , sym_name , err );
+fetch_sym (sym_name , sym_defined , sym_val );
+suppress := sym_defined AND NOT c45script;
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      cond_define (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            directive  : d_type ;
+            VAR err        : boolean  );
+ 
+VAR
+      i           : integer ;
+      tmp_char    : char ;
+      sym_defined : boolean ;
+      val_ok      : boolean ;
+      tmp_name    : tsp_name ;
+      sym_l_name  : tct_token ;
+      sym_tmp     : tct_token ;
+      sym_r_val   : tct_token ;
+ 
+BEGIN
+err := false ;
+val_ok := true ;
+IF  c45numcond = 0
+THEN
+    suppress := false
+ELSE
+    suppress := c45condstack [  c45numcond  ] . co_suppress ;
+(*ENDIF*) 
+IF  NOT suppress
+THEN
+    BEGIN
+    get_name (input_line , dir_pos , tmp_name );
+    name_to_token (tmp_name , sym_l_name , err );
+    IF  ( sym_l_name <> blank_token )    AND
+        ( sym_l_name <> cct_c_mach )  AND
+        ( sym_l_name <> cct_c_comp ) AND
+        ( sym_l_name <> cct_c_os )
+    THEN
+        BEGIN
+        REPEAT
+            tmp_char := input_line .l [ dir_pos  ];
+            dir_pos := succ (dir_pos );
+        UNTIL
+            (tmp_char <> bsp_c1 ) OR (dir_pos > input_line .len );
+        (*ENDREPEAT*) 
+        IF  directive = d_define
+        THEN
+            BEGIN
+            IF  tmp_char = cct_dollar
+            THEN
+                BEGIN
+                get_name (input_line , dir_pos , tmp_name );
+                name_to_token (tmp_name , sym_tmp , err );
+                fetch_sym (sym_tmp , sym_defined , sym_r_val );
+                IF  (NOT sym_defined ) AND (NOT suppress )
+                THEN
+                    BEGIN
+                    err := true ;
+                    wr_error ( f_ill_def_inst , true );
+                    val_ok := false ;
+                    END ;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                dir_pos := pred (dir_pos );
+                get_name (input_line , dir_pos , tmp_name );
+                name_to_token (tmp_name , sym_r_val , err );
+                IF  ( sym_r_val = blank_token )
+                THEN
+                    BEGIN
+                    err := true ;
+                    wr_error ( f_ill_def_inst , true );
+                    val_ok := false ;
+                    END ;
+                (*ENDIF*) 
+                END ;
+            (*ENDIF*) 
+            IF  val_ok
+            THEN
+                store_sym ( sym_l_name , sym_r_val , err );
+            (*ENDIF*) 
+            END
+        ELSE
+            delete_sym ( sym_l_name , err );
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        err := true ;
+        wr_error ( f_ill_def_undef_inst , true );
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      cond_err ( VAR suppress : boolean ;
+            VAR err      : boolean );
+ 
+BEGIN
+IF  c45numcond = 0
+THEN
+    suppress := false
+ELSE
+    suppress := c45condstack [  c45numcond  ] . co_suppress ;
+(*ENDIF*) 
+err := true ;
+wr_error ( f_ill_opera , true );
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      name_to_token (     tmp_nam : tsp_name ;
+            VAR tmp_sym : tct_token ;
+            VAR err     : boolean       );
+ 
+VAR
+      i : integer ;
+ 
+BEGIN
+err := false ;
+FOR i := 1 TO mxct_token DO
+    tmp_sym [ i  ] := tmp_nam [ i  ];
+(*ENDFOR*) 
+IF  tmp_nam [ succ (mxct_token ) ] <> bsp_c1
+THEN
+    BEGIN
+    err := true ;
+    wr_error ( f_inv_token , true );
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      name_to_dir (tmp_nam : tsp_name ;
+            VAR directive : d_type ;
+            inln          : tct_line ;
+            VAR dir_pos   : tsp_int4 );
+ 
+VAR
+      i         : integer ;
+      dir_name  : tsp_name ;
+ 
+BEGIN
+IF  tmp_nam [  1  ] = cct_ampersand
+THEN
+    IF  tmp_nam = '&                 '
+    THEN
+        BEGIN
+        get_name ( inln , dir_pos , dir_name );
+        IF  dir_name = 'ENDIF             '
+        THEN
+            directive := d_endif
+        ELSE
+            IF  dir_name = 'IF                '
+            THEN
+                directive := d_if
+            ELSE
+                IF  dir_name = 'IFDEF             '
+                THEN
+                    directive := d_ifdef
+                ELSE
+                    IF  dir_name = 'IFNDEF            '
+                    THEN
+                        directive := d_ifndef
+                    ELSE
+                        IF  dir_name = 'ELSE              '
+                        THEN
+                            directive := d_else
+                        ELSE
+                            IF  dir_name = 'DEFINE            '
+                            THEN
+                                directive := d_define
+                            ELSE
+                                IF  dir_name = 'UNDEF             '
+                                THEN
+                                    directive := d_undef
+                                ELSE
+                                    directive := d_err ;
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  tmp_nam = '&ENDIF            '
+        THEN
+            directive := d_endif
+        ELSE
+            IF  tmp_nam = '&IF               '
+            THEN
+                directive := d_if
+            ELSE
+                IF  tmp_nam = '&IFDEF            '
+                THEN
+                    directive := d_ifdef
+                ELSE
+                    IF  tmp_nam = '&IFNDEF           '
+                    THEN
+                        directive := d_ifndef
+                    ELSE
+                        IF  tmp_nam = '&ELSE             '
+                        THEN
+                            directive := d_else
+                        ELSE
+                            IF  tmp_nam = '&DEFINE           '
+                            THEN
+                                directive := d_define
+                            ELSE
+                                IF  tmp_nam = '&UNDEF            '
+                                THEN
+                                    directive := d_undef
+                                ELSE
+                                    directive := d_err
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+ELSE
+    directive := d_none ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      fetch_val (     input_line : tct_line ;
+            VAR dir_pos    : tsp_int4 ;
+            VAR suppress   : boolean ;
+            VAR val        : tct_token ;
+            VAR found      : boolean ;
+            VAR err        : boolean );
+ 
+VAR
+      tmp_char : char ;
+      tmp_name : tsp_name ;
+      sym_tmp  : tct_token ;
+      help_c40 : shortstring;
+ 
+BEGIN
+err := false ;
+REPEAT
+    tmp_char := input_line .l [ dir_pos  ];
+    dir_pos  := succ (dir_pos );
+UNTIL
+    (tmp_char <> bsp_c1 ) OR (dir_pos > input_line .len );
+(*ENDREPEAT*) 
+IF  tmp_char = cct_dollar
+THEN
+    BEGIN
+    get_name (input_line , dir_pos , tmp_name );
+    name_to_token (tmp_name , sym_tmp , err );
+&   ifdef test
+    writeln('c45 fetch_val: tmp_name = ', tmp_name);
+&   endif
+    fetch_sym (sym_tmp , found , val );
+    IF  ((sym_tmp = cct_c_trace) AND (NOT found))
+    THEN
+        BEGIN
+        found    := true;
+        suppress := true;
+        END
+    ELSE
+        IF  (NOT found ) AND (NOT suppress ) AND NOT c45script
+        THEN
+            BEGIN
+&           ifdef test
+            writeln('c45 fetch_val:', f_undef_sym, tmp_name);
+            zwrite(input_line);
+&           endif
+            help_c40 := f_undef_sym;
+            s10mv ( mxsp_name, mxsp_c40, tmp_name, 1,
+                  help_c40, 32, 9 );
+            wr_error ( help_c40 , true );
+            err      := true ;
+            suppress := true ;
+            END ;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    IF  tmp_char <> bsp_c1
+    THEN
+        BEGIN
+        IF  tmp_char IN c45delimiter
+        THEN
+            REPEAT
+                tmp_char := input_line .l [ dir_pos  ];
+                dir_pos  := succ (dir_pos );
+            UNTIL
+                ( NOT ( tmp_char IN c45delimiter )) OR
+                ( dir_pos > input_line .len )        OR
+                ( tmp_char = bsp_c1 ) ;
+            (*ENDREPEAT*) 
+        (*ENDIF*) 
+        dir_pos := pred (dir_pos );
+        IF  (dir_pos <= mxsp_line) AND
+            (NOT (input_line.l[ dir_pos ] IN c45delimiter))
+        THEN
+            BEGIN
+            get_name (input_line , dir_pos , tmp_name );
+            name_to_token (tmp_name , val , err );
+            found := true ;
+            END
+        ELSE
+            BEGIN
+            wr_error ( f_miss_val ,true );
+            err      := true ;
+            suppress := true ;
+            found    := false ;
+            END ;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        wr_error ( f_miss_val ,true );
+        err      := true ;
+        suppress := true ;
+        found    := false ;
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      fetch_in_val (input_line : tct_line ;
+            VAR dir_pos     : tsp_int4 ;
+            suppress        : boolean ;
+            VAR val         : tct_token ;
+            VAR value_found : boolean ;
+            VAR delimit     : tsp_c2 ;
+            VAR deli_found  : boolean ;
+            VAR err         : boolean );
+ 
+VAR
+      tmp_char : char ;
+      tmp_name : tsp_name ;
+      sym_tmp  : tct_token ;
+      i        : integer ;
+      a        : integer ;
+      e        : integer ;
+ 
+BEGIN
+value_found     := false ;
+deli_found      := false ;
+delimit [  1  ] := bsp_c1;
+delimit [  2  ] := bsp_c1;
+val             := blank_token ;
+tmp_name        := bsp_name ;
+WITH input_line DO
+    BEGIN
+    REPEAT
+        tmp_char := l[ dir_pos  ];
+        dir_pos  := succ (dir_pos );
+    UNTIL
+        ( NOT ( tmp_char IN c45delimiter )) OR
+        ( tmp_char IN c45indelimit )       OR
+        ( dir_pos >  len) ;
+    (*ENDREPEAT*) 
+    dir_pos := pred (dir_pos );
+    e       := 0 ;
+    i       := dir_pos ;
+    a       := i ;
+    IF  ( tmp_char IN c45indelimit )
+    THEN
+        BEGIN
+        IF  (l[  i  ] = cct_r_parenth)
+        THEN
+            i := i - 1 ;
+        (*ENDIF*) 
+        REPEAT
+            e := succ ( e ) ;
+            IF  l[ i ]  IN c45indelimit
+            THEN
+                delimit [  e  ] := l[  i  ] ;
+            (*ENDIF*) 
+            i := i + 1
+        UNTIL
+            ( e = 2 ) OR ( i > len) OR
+            ( delimit [  1  ] = cct_hyphen ) OR
+            ( delimit [  1  ] = cct_r_sq_bracket );
+        (*ENDREPEAT*) 
+        IF     ( delimit = c02lbracket )
+            OR ( delimit = c02rbracket )
+            OR
+            (   ( delimit [  1  ] = cct_l_sq_bracket )
+            AND ( delimit [  2  ] = bsp_c1 ) )
+            OR
+            (   ( delimit [  1  ] = cct_r_sq_bracket )
+            AND ( delimit [  2  ] = bsp_c1 ) )
+        THEN
+            BEGIN
+            deli_found := true ;
+            dir_pos    := i ;
+            END
+        ELSE
+            IF  ( delimit [  2  ] = cct_period )
+            THEN
+                BEGIN
+                IF  (l[ i ] = cct_r_parenth)
+                THEN
+                    BEGIN
+                    delimit [  1  ] := delimit [  2  ] ;
+                    delimit [  2  ] := l[ i ] ;
+                    deli_found      := true ;
+                    dir_pos         := i + 1 ;
+                    END
+                ELSE
+                    IF  (l[ i ] <> cct_r_parenth)
+                    THEN
+                        BEGIN
+                        delimit [  1  ] := bsp_c1 ;
+                        delimit [  2  ] := bsp_c1 ;
+                        deli_found      := false ;
+                        dir_pos         := i ;
+                        END ;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END
+            ELSE
+                IF  ( delimit [  2  ] = cct_r_sq_bracket )
+                THEN
+                    BEGIN
+                    delimit [  1  ] := delimit [  2  ] ;
+                    delimit [  2  ] := bsp_c1 ;
+                    deli_found      := true ;
+                    dir_pos         := i ;
+                    END
+                ELSE
+                    IF  ( delimit [  2  ] = cct_r_parenth )
+                    THEN
+                        BEGIN
+                        deli_found := false ;
+                        dir_pos    := i ;
+                        END
+                    ELSE
+                        BEGIN
+                        deli_found := false ;
+                        dir_pos    := i - 1 ;
+                        END ;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        REPEAT
+            IF  l[ i  ]  IN c45delimiter
+            THEN
+                e := i - 1 ;
+            (*ENDIF*) 
+            i := i + 1
+        UNTIL
+            (e <> 0 ) OR (i > len);
+        (*ENDREPEAT*) 
+        IF  e = 0
+        THEN
+            e := len;
+        (*ENDIF*) 
+        dir_pos := e + 1 ;
+        IF  e - a >= mxsp_name
+        THEN
+            e := a + mxsp_name - 1 ;
+        (*ENDIF*) 
+        FOR i := a TO e  DO
+            tmp_name [  i - a + 1  ]  := s60uppcase (l[ i ]) ;
+        (*ENDFOR*) 
+        name_to_token (tmp_name , val , err );
+        value_found := true ;
+        END ;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      get_first_name (inln : tct_line ;
+            VAR pos : integer ;
+            VAR nam : tsp_name );
+ 
+CONST
+      script_cc = '%';
+ 
+VAR
+      i : integer ;
+      a : integer ;
+      e : integer ;
+ 
+BEGIN
+WITH inln DO
+    BEGIN
+    nam := bsp_name ;
+    a   := pos ;
+    e   := 0 ;
+    i   := 1 ;
+    IF  ((l[ i ] = cct_ampersand ) AND NOT c45script) OR
+        ((l[ i ] = script_cc) AND c45script)
+    THEN
+        BEGIN
+        REPEAT
+            IF  l[ i ]  IN c45delimiter
+            THEN
+                e := i - 1 ;
+            (*ENDIF*) 
+            i := i + 1
+        UNTIL
+            (e <> 0 ) OR (i > len);
+        (*ENDREPEAT*) 
+        IF  e = 0
+        THEN
+            e := len;
+        (*ENDIF*) 
+        pos := e + 1 ;
+        IF  e - a >= mxsp_name
+        THEN
+            e := a + mxsp_name - 1 ;
+        (*ENDIF*) 
+        FOR i := a TO e  DO
+            nam [  i  ]  := s60uppcase (l[ i ]) ;
+        (*ENDFOR*) 
+        IF  nam[ a ] = script_cc
+        THEN
+            nam[ a ] := cct_ampersand;
+        (*ENDIF*) 
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      get_name (inln : tct_line ;
+            VAR pos : integer ;
+            VAR nam : tsp_name );
+ 
+VAR
+      i : integer ;
+      a : integer ;
+      e : integer ;
+ 
+BEGIN
+WITH inln DO
+    BEGIN
+    nam := bsp_name ;
+    a := 0 ;
+    e := 0 ;
+    i := pos ;
+    REPEAT
+        IF  (l[ i ] <> bsp_c1)
+        THEN
+            a := i ;
+        (*ENDIF*) 
+        i := i + 1
+    UNTIL
+        (a <> 0 ) OR (i > len);
+    (*ENDREPEAT*) 
+    IF  a <> 0
+    THEN
+        BEGIN
+        IF  (i <= mxsp_line)
+        THEN
+            REPEAT
+                IF  l[ i ]  IN c45delimiter
+                THEN
+                    e := i - 1 ;
+                (*ENDIF*) 
+                i := i + 1
+            UNTIL
+                (e <> 0 ) OR (i > len);
+            (*ENDREPEAT*) 
+        (*ENDIF*) 
+        IF  e = 0
+        THEN
+            e := len;
+        (*ENDIF*) 
+        pos := e + 1 ;
+        IF  e - a >= mxsp_name
+        THEN
+            e := a + mxsp_name - 1 ;
+        (*ENDIF*) 
+        FOR i := a TO e  DO
+            nam [  i - a + 1  ]  := s60uppcase (l[ i ]) ;
+        (*ENDFOR*) 
+        END ;
+    (*ENDIF*) 
+    END ;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      get_beg_end_delimiter (    inln       : tct_line ;
+            VAR pos        : integer ;
+            VAR begin_deli : tsp_c2 ;
+            VAR end_deli   : tsp_c2 ;
+            VAR delimit_ok : boolean );
+ 
+VAR
+      i : integer ;
+      a : integer ;
+      e : integer ;
+ 
+BEGIN
+delimit_ok := false ;
+end_deli   := '**' ;
+WITH inln DO
+    BEGIN
+    begin_deli [  1  ] := bsp_c1;
+    begin_deli [  2  ] := bsp_c1;
+    a := 0 ;
+    e := 0 ;
+    i := pos ;
+    REPEAT
+        IF  l[ i ] <> bsp_c1
+        THEN
+            a := i ;
+        (*ENDIF*) 
+        i := i + 1
+    UNTIL
+        (a <> 0 ) OR (i > len);
+    (*ENDREPEAT*) 
+    IF  a <> 0
+    THEN
+        BEGIN
+        i := i - 1 ;
+        REPEAT
+            e := succ ( e ) ;
+            IF  l[ i ]  IN c45indelimit
+            THEN
+                begin_deli [  e  ] := l[ i ] ;
+            (*ENDIF*) 
+            i := i + 1
+        UNTIL
+            ( e = 2 ) OR ( i > len)
+            OR ( begin_deli [  1  ] = cct_l_sq_bracket )
+            OR ( begin_deli [  1  ] = cct_r_sq_bracket );
+        (*ENDREPEAT*) 
+        IF  ( begin_deli = c02lbracket )
+            OR
+            (   ( begin_deli [  1  ] = cct_l_sq_bracket )
+            AND ( begin_deli [  2  ] = bsp_c1 ))
+        THEN
+            BEGIN
+            delimit_ok := true ;
+            pos        := i ;
+            IF  begin_deli = c02lbracket
+            THEN
+                end_deli := c02rbracket
+            ELSE
+                IF      (begin_deli [  1  ] = cct_l_sq_bracket)
+                    AND (begin_deli [  2  ] = bsp_c1)
+                THEN
+                    BEGIN
+                    end_deli [  1  ] := cct_r_sq_bracket;
+                    end_deli [  2  ] := bsp_c1;
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END ;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      wr_error ( contents : shortstring ;
+            print_nr : boolean );
+ 
+VAR
+      i     : integer ;
+      j     : integer ;
+      m     : integer ;
+      n     : integer ;
+      err_l : tct_token ;
+ 
+BEGIN
+err_l         := error_line_count ;
+c45error_text := blankerror ;
+FOR  i := 1 TO 40 DO
+    c45error_text [  i  ] := contents [  i  ] ;
+(*ENDFOR*) 
+IF  print_nr
+THEN
+    BEGIN
+    j := 40 ;
+    FOR  i := 1 TO mxct_token DO
+        c45error_text [  j + i  ] := err_l [  i  ]  ;
+    (*ENDFOR*) 
+    j := j + mxct_token ;
+    i := mxct_errtxt ;
+    n := c45count_line ;
+    WHILE ( i > j ) AND  ( n  > 0 ) DO
+        BEGIN
+        c45error_text [  i  ] := chr ( ( n MOD 10 ) + ord ( '0' ) ) ;
+        n := n DIV 10 ;
+        i := pred ( i ) ;
+        END ;
+    (*ENDWHILE*) 
+    END ;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      store_sym (     sym_name : tct_token ;
+            sym_val  : tct_token ;
+            VAR err : boolean );
+ 
+VAR
+      i : integer ;
+      j : integer ;
+ 
+BEGIN
+err := false ;
+find_sym ( sym_name , i );
+IF  i <> 0
+THEN
+    BEGIN
+    WITH c45allsyms [  i  ] DO
+        BEGIN
+        s_value := blank_token ;
+        j := 1 ;
+        WHILE ( j <= mxct_token )    AND
+              ( sym_val [  j  ] <> bsp_c1 )   AND
+              ( sym_val [  j  ] <> chr (0) ) DO
+            BEGIN
+            s_value [  j  ] := sym_val [ j ] ;
+            j := succ ( j ) ;
+            END ;
+        (*ENDWHILE*) 
+        END ;
+    (*ENDWITH*) 
+    END
+ELSE
+    IF  c45symsnum >= max_syms
+    THEN
+        BEGIN
+        wr_error ( f_too_many_symb , false ) ;
+        err := true ;
+        END
+    ELSE
+        BEGIN
+        c45symsnum := succ ( c45symsnum );
+        WITH c45allsyms [  c45symsnum  ] DO
+            BEGIN
+            s_name := blank_token ;
+            j := 1 ;
+            WHILE ( j <= mxct_token )     AND
+                  ( sym_name [  j  ] <> bsp_c1 )   AND
+                  ( sym_name [  j  ] <> chr (0) ) DO
+                BEGIN
+                s_name [  j  ] := sym_name [ j ] ;
+                j := succ ( j ) ;
+                END ;
+            (*ENDWHILE*) 
+            s_value := blank_token ;
+            j := 1 ;
+            WHILE ( j <= mxct_token )    AND
+                  ( sym_val [  j  ] <> bsp_c1 )   AND
+                  ( sym_val [  j  ] <> chr (0) ) DO
+                BEGIN
+                s_value [  j  ] := sym_val [ j ] ;
+                j := succ ( j ) ;
+                END ;
+            (*ENDWHILE*) 
+            END ;
+        (*ENDWITH*) 
+        END ;
+    (*ENDIF*) 
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      delete_sym (     sym_name : tct_token ;
+            VAR err      : boolean );
+ 
+VAR
+      i : integer ;
+ 
+BEGIN
+err := false ;
+find_sym ( sym_name , i );
+IF  i <> 0
+THEN
+    BEGIN
+    c45allsyms [  i  ] . s_value := blank_token ;
+    c45allsyms [  i  ] . s_name  := blank_token ;
+    c45symsnum := pred ( c45symsnum );
+    END;
+(*ENDIF*) 
+IF  i = 0
+THEN
+    BEGIN
+    err := true ;
+    wr_error ( f_ill_undef_inst , true ) ;
+    END;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      fetch_sym ( sym_name : tct_token ;
+            VAR found : boolean ;
+            VAR sym_val : tct_token );
+ 
+VAR
+      i : integer ;
+ 
+BEGIN
+found   := false ;
+sym_val := blank_token ;
+find_sym ( sym_name , i );
+IF  i <> 0
+THEN
+    BEGIN
+    found   := true ;
+    sym_val := c45allsyms [ i  ] . s_value ;
+    END ;
+(*ENDIF*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      find_sym ( sym_name : tct_token ;
+            VAR index : integer );
+ 
+VAR
+      i : integer ;
+ 
+BEGIN
+i     := 0 ;
+index := 0 ;
+WHILE ( index = 0 ) AND ( i < c45symsnum ) DO
+    BEGIN
+    i := succ (i );
+    IF  c45allsyms [ i  ] . s_name = sym_name
+    THEN
+        index := i
+    (*ENDIF*) 
+    END ;
+(*ENDWHILE*) 
+END ;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      s60uppcase (c : char): char;
+ 
+BEGIN
+IF  c in [  'a'..'i','j'..'r','s'..'z'  ]
+THEN
+    s60uppcase := chr (ord(c) + ord('A') - ord('a'))
+ELSE
+    s60uppcase := c
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      c45suppress_on : boolean;
+ 
+BEGIN
+c45suppress_on := c45linesuppress;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :        528
+*-PRETTY-*  lines of code :       1603        PRETTY  3.09 
+*-PRETTY-*  lines in file :       1753         1992-11-23 
+.PA 

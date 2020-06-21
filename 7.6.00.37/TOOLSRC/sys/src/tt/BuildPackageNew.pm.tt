@@ -1,0 +1,597 @@
+#! /usr/bin/perl
+#
+# $Header: //sapdb/TOOLSRC/develop/sys/src/tt/BuildPackageNew.pm.tt#21 $
+# $DateTime: 2002/04/25 11:10:12 $
+# $Change: 19899 $
+#
+# Desc: tool to build several sap db packages
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+package BuildPackageNew;
+
+use Getopt::Long;
+use GetFilesFromCDImages; # needed for XML stuff -> getting PCR 32/64 bit
+
+sub start{
+	local @ARGV=@_;
+	my @argbuf = @ARGV;
+	my %opt_ctrl=(
+			'h' => \$opt_help,
+			'help' => \$opt_help,
+			'profile=s' => \$opt_profile,
+			'package=s' => \$opt_package,
+			'format=s' => \$opt_format,
+			'ignore_errors' => \$opt_ignore_errors,
+			'single_pcr' => \$opt_single_pcr,
+			'finalize' => \$opt_finalize
+	);
+	
+	Getopt::Long::Configure ('no_pass_through');
+	if(!GetOptions(%opt_ctrl) or $opt_help){
+		msg ("Usage: buildPackage [-h] [-profile <profile>] [-package <package list>] [-format tgz|sar] [-finalize]\n\n");
+		exit 0;
+	}
+	
+	# tiny helper functions
+	sub timestamp{
+		my($sec,$min,$hour,$day,$mon,$year)=localtime(time);
+		$mon++;
+		$sec="0$sec" if(length($sec)==1);
+		$min="0$min" if(length($min)==1);
+		$hour="0$hour" if(length($hour)==1);
+		$day="0$day" if(length($day)==1);
+		$mon="0$mon" if(length($mon)==1);
+		$year=$year+1900;
+		return "$year$mon$day$hour$min$sec";
+	}
+
+	-d "$ENV{'WRK'}/fast/install" or makedir("$ENV{'WRK'}/fast/install");
+	my $count = '';
+	while(1){
+		$logfilename="$ENV{'WRK'}/fast/install/buildpackage_".timestamp.$count.'.log';
+		-f $logfilename or last;
+		$count++ unless $count eq ''; 
+		$count = 0 if $count eq '';
+	}
+	open(LOG, ">$logfilename") || err ("cannot create logfile\n");
+	msg("call: ".join(' ',@argbuf)."\n");
+	sub err{
+		my ($text)=@_;
+		if($opt_ignore_errors){
+			print STDERR "ERR: $text";
+			print LOG "ERR: $text";
+		}
+		else{
+			print LOG "ERR: $text";
+			close(LOG);
+			die("ERR: $text");
+		}
+	}
+
+	sub msg{
+		my ($text)=@_;
+		print LOG $text;	
+		print $text;
+	}
+
+	sub existInList{
+		my ($packname,@packages)=@_;
+		foreach my $hrPack (@packages){
+			$packname eq ${%$hrPack}{'name'} and return 1; 
+		}
+		return 0;
+	}
+	
+	
+
+	my $wrk=$ENV{'WRK'};
+	$wrk=~s/\\/\//g;
+	my $own=$ENV{'OWN'};
+	$own=~s/\\/\//g;
+	my $relver=$ENV{'RELVER'};
+	my $rel = $relver;
+	$rel=~s/R//;
+	my $bit = '32';
+	$bit = '64' if (exists $ENV{'BIT64'} or $^O =~ /osf/i);
+	my $correction_level=$ENV{'CORRECTION_LEVEL'};
+	my $cor = $correction_level;
+	$cor = "0$correction_level" if length($correction_level) == 1;
+	my $buildpraefix=$ENV{'BUILDPRAEFIX'};
+	my $bui = $buildpraefix;
+	$bui = "0$buildpraefix" if length($buildpraefix) == 1;
+	my $release = $relver;
+	$release =~ s/R(\d)(\d)/$1\.$2/;
+	my ($maj,$min) = ($1,$2);
+	$release="$release.$correction_level.$buildpraefix";
+	my $buildroot="$wrk/fast/install/buildroot";
+	my $install = "$wrk/fast/install";
+	my $packpath="$install/packages";
+	my $temp= "$install/tmp";
+	my $usr="$own/usr";
+	
+	#sub copyPCR{
+	#	BuildPackageOld::OldPCR();
+	#}	
+
+
+	my @packages;
+	
+	#define replacements -> for replacing strings in signature file and package script
+	
+	my $soext;
+	my $exext;
+
+	if($^O =~ /mswin/i ){
+		$soext = '.dll';
+		$exext = '.exe';	
+	}
+	elsif($^O =~ /hpux/i){
+		$soext = '.sl';
+	}
+	else{
+		$soext = '.so';
+	}
+	
+	my %replacements = (
+		'§RELEASE' => "$maj.$min.$cor.$bui",
+		'§PACKVERS' => "$rel$cor", # used for names/pathes of PCR and SDK packages 
+		'§BIT' => $bit,
+		'§SOEXT' => $soext,
+		'§EXEXT' => $exext
+	);
+	
+	if($ENV{'RELVER'} eq 'R72'){
+		my $tmp = $cor;
+		$tmp =~ s/^0//;
+		$replacements{'§PACKVERS'} = $rel.$tmp."0";
+	}
+	
+	#define profiles -> contain package names
+	my %profiles=(
+			
+			'Server' => ['Base','Server Utilities','Database Kernel',"PCR $rel$cor"],
+			
+			#'Client' =>  ['Base',"PCR $rel$cor"],
+			
+			'Runtime For SAP AS' => ['Base',"PCR $rel$cor"],
+			#'Runtime For SAP AS' => ['Base',"PCR $rel$cor",'JDBC'],
+			
+			'Web' => ['Base','Webtools'],
+			
+			'DB Analizer' => ['Base','DB Analizer'],
+			
+			'Develop' => ['Base',"PCR $rel$cor","SDK $rel$cor",'ODBC','JDBC','Perl Driver','Python Driver']
+	);
+
+
+	my %profile_in_name = (
+		
+			'Runtime For SAP AS' => 'as_runtime'
+	
+		);
+
+	
+	
+	#define packages
+	my @allpackages=(
+		{
+			'name' => 'Base',
+			'subdir' => 'base',
+			'script' => 'instbase',
+			'archive' => 'SAPDBBAS.TGZ',
+			'filelist' => 'base.lst'	
+		},
+		{
+			'name' => 'Server Utilities',
+			'subdir' => 'utils',
+			'script' => 'instutils',
+			'archive' => 'SAPDBUTL.TGZ',
+			'filelist' => 'utils.lst'	
+		},
+		{
+			'name' => 'Database Kernel',
+			'subdir' => 'kernel',
+			'script' => 'instsrv',
+			'archive' => 'SAPDBKRN.TGZ',
+			'filelist' => 'kernel.lst'	
+		},
+		{
+			'name' => "PCR $rel$cor",
+			'subdir' => 'pcr',
+			'script' => 'instpcr',
+			'archive' => "PCR$rel$cor.TGZ",
+			'filelist' => 'pcr.lst',
+			'specialFunc' => \&copyPCR
+		},
+		
+		{
+			'name' => 'DB Analizer',
+			'subdir' => 'dba',
+			'script' => 'instdba',
+			'archive' => 'SAPDBA.TGZ',
+			'filelist' => 'dba.lst'	
+		},
+		{
+			'name' => "SDK $rel$cor",
+			'subdir' => 'sdk',
+			'script' => 'instsdk',
+			'archive' => "SDK$rel$cor.TGZ",
+			'filelist' => 'sdk.lst'	
+		},
+		{
+			'name' => 'Webtools',
+			'subdir' => 'web',
+			'script' => 'instweb',
+			'archive' => 'SAPDBWEB.TGZ',
+			'filelist' => 'web.lst'	
+		},
+		{
+			'name' => 'ODBC',
+			'subdir' => 'odbc',
+			'script' => 'instodbc',
+			'archive' => 'SAPODBC.TGZ',
+			'filelist' => 'odbc.lst'	
+		},	
+		{
+			'name' => 'JDBC',
+			'subdir' => 'jdbc',
+			'script' => 'instjdbc',
+			'archive' => 'SAPJDBC.TGZ',
+			'filelist' => 'jdbc.lst',
+			'FileMappings' => $^O =~ /mswin/i ? {"runtime/$rel$cor/pgm/sapdbcbin.dll" => 'pgm/sapdbcbin.dll','runtime/jar/sapdbc.jar' => 'misc/sapdbc.jar'} : {'runtime/jar/sapdbc.jar' => 'misc/sapdbc.jar'} 	 	
+		},
+		{
+			'name' => 'Perl Driver',
+			'subdir' => 'perl',
+			'script' => 'instperl',
+			'archive' => 'SAPDBPL.TGZ',
+			'filelist' => 'perl.lst'
+		},
+		{
+			'name' => 'Python Driver',
+			'subdir' => 'python',
+			'script' => 'instpy',
+			'archive' => 'SAPDBPY.TGZ',
+			'filelist' => 'python.lst'	
+		}
+	
+	);
+	
+	
+	# select packages to build
+	# with profile option
+	
+	if($opt_profile){
+		my @profiles = split(',',$opt_profile);
+		foreach my $profile (@profiles){
+			exists $profiles{$profile} or err ("no such profile: \"".$profile."\"\n");
+			my @prof_pack;
+			foreach my $pack (@{$profiles{$profile}}){
+				my $found = 0;
+				foreach my $packref (@allpackages){
+					if($pack eq ${%$packref}{'name'}){
+						$found=1;
+						existInList($pack,@packages) and last;
+						push @packages,$packref;
+						last;
+					}
+				}
+				if($found){
+					push @prof_pack,$pack;
+				}
+				else{
+					err("no such package: \"$pack\"\n");
+				}
+			}
+			msg ("found for \"$profile\":\n");
+			foreach my $packnam (@prof_pack){
+				msg ("\t$packnam\n");
+			}
+			msg ("\n");
+		}
+		
+		
+	
+	}
+
+	# select packages to build
+	# with package option
+
+	if($opt_package){
+		my @packs = split(',',$opt_package);
+		foreach my $pack (@packs){
+			my $found = 0;
+			foreach my $packref (@allpackages){
+				if($pack eq ${%$packref}{'name'}){
+					push @packages,$packref;
+						$found=1;
+					last;
+				}
+			}
+			$found || err("no such package: \"$pack\"\n");
+		}
+	}
+	
+	# select all packages to build if no option set
+	if($#packages == -1){
+		@packages=@allpackages;
+	}
+	
+	
+	# print out packages
+	msg ("try to build following packages: \n");
+	foreach $hrPack (@packages){
+		msg ("\t".${%$hrPack}{'name'}."\n");
+	}
+	msg ("\n"); 
+
+
+
+	# test needed files:
+	my $include_pcr = 0;
+	foreach my $package (@packages){
+		foreach my $file (${%$package}{'filelist'},${%$package}{'script'},'PACKAGEDATA'){
+			-f $packpath.'/'.${%$package}{'subdir'}.'/'.$file || err($packpath.'/'.${%$package}{'subdir'}.'/'.$file.' [package "'.${%$package}{'name'}."\"] not found\n");
+		}
+		$include_pcr = 1 if ${%$package}{'name'} =~ /^PCR/;
+	}
+
+	my @oldpcr_packages = (); 
+	
+	if($include_pcr && !$opt_single_pcr){
+		# copy pcr packages
+		GetFilesFromCDImages::setErrMsgHandler(\&err);
+		GetFilesFromCDImages::setMsgHandler(\&msg);
+		my @files = grep {/\.TGZ$/} getFiles($release,$own);
+		push(@oldpcr_packages,@files)
+	}
+	
+	# build packages
+	foreach my $package (@packages){
+	
+		# make sure that there is no old stuff 
+		`rm -rf $buildroot`;
+		-d $buildroot and err("cannot remove buildroot\n");
+		`mkdir -p $buildroot`;
+		-d $buildroot or err("cannot create buildroot\n");
+		
+		# copy and change script and signature 
+		foreach my $file (${%$package}{'script'},'PACKAGEDATA'){
+			open(IN,$packpath.'/'.${%$package}{'subdir'}.'/'.$file) or err('cannot open '.$packpath.'/'.${%$package}{'subdir'}."/$file\n");
+			open (OUT,">$buildroot/$file") or err("cannot create $buildroot/$file\n");
+			while(<IN>){
+				chomp;
+				foreach my $string (keys(%replacements)){
+					s/$string/$replacements{$string}/g;
+				}
+				print OUT "$_\n" or err("cannot write into $buildroot/$file\n");
+			}
+			close(IN);
+			close(OUT);	
+		}
+	
+		
+		# call special package function if exists, at the moment only for pcr packages needed
+		#exists ${%$package}{'specialFunc'} and &{${%$package}{'specialFunc'}}($package); 
+
+		# copy files, generate md5sums and change filelist (attach checksums)
+		open(IN,$packpath.'/'.${%$package}{'subdir'}.'/'.${%$package}{'filelist'}) or err('cannot open '.$packpath.'/'.${%$package}{'subdir'}.'/'.${%$package}{'filelist'}."\n");
+		open(OUT,">$buildroot/".${%$package}{'filelist'}) or err("cannot create $buildroot/".${%$package}{'filelist'}."\n");
+		while(<IN>){
+			chomp;
+			/^#/ && next;
+			
+			my $src = $_;
+			if(exists ${%{${%$package}{'FileMappings'}}}{$_}){
+				$src = ${%{${%$package}{'FileMappings'}}}{$_};
+			}
+			$src = "$usr/$src";
+			
+			my $dst="$buildroot/$_";
+			my $dir = $dst;
+			$dir=~s/\/[^\/]*$//;
+			-d $dir or `mkdir -p $dir`;
+			-d $dir or err("cannot create directory $dir\n");
+			if($^O=~/mswin/i){
+				my $winsrc = $src;
+				my $windst = $dst;
+				$winsrc=~s/\//\\/g;
+				$windst=~s/\//\\/g;
+				`copy $winsrc $windst`;
+			}
+			else{
+				`cp -p $src $dst`;
+			}
+			-f $dst or err("cannot copy $src -> $dst\n");
+			my $md5sum=`md5sum $dst`;
+			$md5sum=~s/\s.*$//;
+			$md5sum=~/^[a-f0-9]{32}$/ or err("cannot get md5sum of $dst\n");
+			print OUT "\"$_\" $md5sum\n" or err("cannot write into $buildroot/".${%$package}{'filelist'}."\n");
+		}
+		close(IN);
+		close(OUT);
+		chdir("$buildroot") or err("cannot change into directory $buildroot\n");
+		my $tarname="$install/".${%$package}{'archive'};
+		
+		
+		# generate list of files and folders to pack -> sequencing is important for performance of installer
+		my $packlist = 'PACKAGEDATA '.${%$package}{'script'}.' ' .${%$package}{'filelist'};
+		opendir(DH,'.') || err("cannot open directory: $!\n");
+		my @content = readdir(DH);
+		close(DH);
+		foreach (@content){
+			(/^PACKAGEDATA$/ or /^${%$package}{'script'}$/ or /^${%$package}{'filelist'}$/ or /^\.{1,2}$/) and next;
+			$packlist="$packlist $_"; 
+		}
+		
+		# pack archive
+		msg ("pack archive $tarname\n"); 
+		#print "COMMAND: tar -cvpzf $tarname $packlist\n";
+		if($^O =~ /mswin/i){
+			`tar -cvp $packlist | gzip -c -9 >$tarname`;
+		}
+		else{
+			`gtar -cvpzf $tarname $packlist`;
+		}
+		$? == 0 or err("tar error while packing \"".${%$package}{'name'}."\"\n");
+		-f $tarname or err("no archive \"$tarname\" produced\n");
+		chdir('..'); # leave buildroot
+	}
+
+	exit 0 unless $opt_profile;
+	
+	# pack main package
+	if($^O=~/.*win32.*/i){
+		$ARCH='i386';
+		$ARCH='ia64' if exists $ENV{'BIT64'};
+		$OS="win";
+	}
+	elsif($^O=~/linux/i){
+		$ARCH="i386";
+		$OS="linux";
+	}
+	elsif($^O=~/.*aix.*/i){
+		$ARCH="ppc";
+		
+		my $outtext = `oslevel`;
+		if($outtext =~ /^5/){
+			$OS = 'aix5';
+		}
+		else{
+			$OS="aix";
+		}
+	}
+	elsif($^O=~/.*solaris.*/i){
+		$ARCH="sparc";
+		$OS="sun";
+	}
+	elsif($^O=~/.*osf.*/i){
+		$ARCH="alpha";
+		$OS="true64";
+	}
+	elsif($^O=~/.*hp.*/i){
+		$ARCH="hppa";
+		$OS="hpux";
+	}
+	elsif($^O=~/svr4/i){
+		$ARCH="mips";
+		$OS="reliant";
+	}
+	my $PACKNAME = $opt_profile;
+	if(exists $profile_in_name{$opt_profile}){
+		$PACKNAME = $profile_in_name{$opt_profile};
+	}
+
+	$PACKNAME =~ tr/[A-Z]/[a-z]/;
+	my $REL4NAME = $release;
+	$REL4NAME =~ s/\./_/g;
+	my $BIT;
+	if(exists $ENV{'BIT64'} or $^O=~/.*osf.*/i){
+		$BIT = '64bit';
+	}
+	else{
+		$BIT = '32bit';
+	}
+	
+	$packagename="sapdb-$PACKNAME-$OS-$BIT-$ARCH-$REL4NAME";
+	
+	my $packages;
+	foreach my $package (@packages){
+		$packages .= ' '.${%$package}{'archive'};
+    }
+
+	my $ext='tgz';
+	my $exec_ext;
+	$exec_ext = '.exe' if ($^O =~ /mswin/i);
+	my $errtxt;
+	if($opt_format eq 'sar'){
+		$ext='sar';
+		chdir($install) or err("cannot change into dir $install\n");
+		$packagename="$install/$packagename.$ext";
+		my $cmd = "SAPCAR -cvf $packagename SDBRUN$exec_ext SDBINST$exec_ext ";
+		$cmd .= "SDBUPD$exec_ext " if($packages =~ /SAPDBKRN.TGZ/);
+		$cmd .= "SDBINST.TGZ $packages ".join(' ',@oldpcr_packages); 
+		if($^O =~ /mswin/i){
+			$cmd .= exists $ENV{'BIT64'} ? ' perl56.dll' : ' perl.dll';
+		}
+		msg("exexute: $cmd\n");
+		$errtxt = `$cmd 2>&1`;
+		$? == 0 || err("sapcar error: $!\n");
+	}
+	else{
+		$packagename="$install/$packagename.$ext";
+		my $tar = 'gtar';
+		$tar = 'tar' if $^O =~ /mswin/i;
+		my $cmd = "$tar -cvpzf $packagename SDBRUN$exec_ext SDBINST$exec_ext "; 
+		$cmd .= "SDBUPD$exec_ext " if($packages =~ /SAPDBKRN.TGZ/);
+		$cmd .= "SDBINST.TGZ $packages ".join(' ',@oldpcr_packages); 
+		
+		if($^O =~ /mswin/i){
+			$cmd .= exists $ENV{'BIT64'} ? ' perl56.dll' : ' perl.dll';
+		}
+		msg("exexute: $cmd\n");
+		$errtxt = `$cmd 2>&1`;
+		$? == 0 || err("tar error: $!\n");
+	
+	} 
+	if(-f $packagename){
+		msg ("packed $packagename successfully\n");
+	}
+	else{
+		msg ("cannot pack mainpackage: $errtxt\n");
+	}
+	if($opt_finalize){
+		msg("copy $packagename.$ext to CD-Images\n");
+		my $release = $ENV{'RELVER'};
+		$release =~ s/R//;
+		my $cor = $ENV{'CORRECTION_LEVEL'};
+		my $build = $ENV{'BUILD_PRAEFIX'};
+		$cor = "0$cor" if length ($cor) == 1;
+		$build = "0$build" if lengst($build) == 1;
+		$release .= "$cor$build";
+		my $ospath;
+		if(exists $ENV{'BIT64'} or $^O =~ /osf/i){
+			$ospath = $GetFilesFromCDImages::OS64;
+		}
+		else{
+			$ospath = $GetFilesFromCDImages::OS32;
+		}
+		my $cmd;
+		if($^O =~ /mswin/i){
+			$cmd = "copy $packagename.$ext \\\\$GetFilesFromCDImages::image_server\\DB_REL\\$release\\$ospath\\$packagename.$ext";
+		}
+		else{
+			$cmd = "rem cp $packagename.$ext $GetFilesFromCDImages::image_server:d:/DB_REL/$release/$ospath/$packagename.$ext";
+		}
+		$errtext = `$cmd 2>&1`;
+		$? == 0 || err("cannot copy archive to CD-Images: $errtext");
+	}
+}
+
+close(LOG);
+1;
+
+
+
+
+
+

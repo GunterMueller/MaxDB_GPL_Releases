@@ -1,0 +1,994 @@
+# @(#)  xknl-nacht   1999-04-15   kern   admin
+#
+# Nachtlauf fuer den KERN mit Uebersetzen, Check, Tests
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Basename;
+use File::Copy;
+use File::Find;
+use ICopy;
+use Cwd;
+use Mail::Sendmail;
+use ToolLib;
+if ( $@ ) { warn "Error while executing sutvars$TOOLEXT: $@"; }
+warn "Use this tool in ADABAS Developer Studio!\n" unless $OWN;
+
+
+# Soll alle Meldungen sofort schreiben!
+$|=1;
+
+
+print "\nJOB BEGIN ", scalar localtime(),"\n";
+
+# ermitteln ob Wochenende ist
+$WOCHENENDE = ("true","false","false","false","false","true","true")[(localtime)[6]];
+print "Wochenende: $WOCHENENDE \n";
+
+    system("$TOOL/bin/syncinfo");
+    open(IN, "<$OWN/syncinfo.dat");
+    while (<IN>) {
+       print $_ if (/<maxchangenr>.*/);
+    }
+    close (IN);
+
+#---------------------------------- c l e a r --------------------------
+
+print "\nCLEAR BEGIN: ", scalar localtime(),"\n";
+
+unlink "$OWN/.compile-fast";
+unlink "$OWN/.com-end-quick";
+unlink "$OWN/.com-end-slow";
+unlink "$OWN/.compile-end";
+unlink "$OWN/.copy";
+
+unlink "$OWN/.lock.knl-tag";
+
+# obsolete:
+# print "\n... aufraeumen in $TMP :\n";
+# system("$TOOL/Posix/find $TMP -mtime +4 -exec $TOOL/Posix/rm -rf {} ;");
+# print;
+
+print "\n... aufraeumen in $WRK\n";
+unlink <$WRK/slow/tmp/*>;
+unlink <$WRK/quick/tmp/*>;
+unlink <$WRK/fast/tmp/*>;
+find (\&such,"$WRK/slow/prot","$WRK/quick/prot","$WRK/fast/prot");
+
+print;
+
+
+
+#---------------------------------- s t a m p --------------------------
+
+print "\nSTAMP BEGIN: ", scalar localtime(),"\n";
+
+my $rc;
+
+if ( $OWN =~ /V72|V73|V74|V75|V76|V80/i ) {
+	$SUTTODAY = "YES";
+	$rc = new_files($WOCHENENDE);
+} else {
+	if (($RELVER eq "R71") && ($CORRECTION_LEVEL eq "4")) {
+		$SUTTODAY = "NO";
+		$WOCHENENDE = "false";
+		$rc = 0;
+	} else {
+		$rc = today_stamp();
+	}
+}
+print "Returncode von today_stamp: $rc \n";
+print "SutToday: $SUTTODAY \n";
+
+
+
+#------------------------------    compile modules     -------------
+
+print "\nCOMPILE BEGIN: ", scalar localtime(),"\n";
+
+if  ( ! $rc ) {
+
+    if ( $WOCHENENDE eq "true" ) {
+        print "\nWochenende, also wird $WRK $OWN/usr/[bin,incl,pgm] geloescht!!\n";
+        deltree("$WRK");
+        deltree("$OWN/usr/bin");
+        deltree("$OWN/usr/incl");
+        deltree("$OWN/usr/pgm");
+    #   system("$TOOL/Posix/find $WRK -exec $TOOL/Posix/rm -f {} ;");
+    }
+
+    print;
+    print "+++++ Erzeugen der Programme +++++\n";
+    print;
+
+    unlink "$OWN/usr/pgm/kernel.exe.old";
+    unlink "$OWN/usr/pgm/quickknl.exe.old";
+    unlink "$OWN/usr/pgm/slowknl.exe.old";
+    rename ("$OWN/usr/pgm/kernel.exe","$OWN/usr/pgm/kernel.exe.old");
+    rename ("$OWN/usr/pgm/quickknl.exe","$OWN/usr/pgm/quickknl.exe.old");
+    rename ("$OWN/usr/pgm/slowknl.exe","$OWN/usr/pgm/slowknl.exe.old");
+
+
+    if ( $OWN =~ /V80/i ) {
+
+        # no make for V80 yet
+
+    } else {  # all releases but V80
+
+        if ( $OWN =~ /V71|V72|V73|V74|V75|V76/i ){
+            local @ARGV = ( "dcom" );
+            do "$TOOL/bin/imf$TOOLEXT";
+            if ( $@ ) {
+                warn "Error while executing imq$TOOLEXT: $@ \n";
+            }
+        }
+
+        local @ARGV = ( "-d ".basename($OWN), "-tnacht" );
+        do "$TOOL/adminbin/knl-tag$TOOLEXT";
+        if ( $@ ) { warn "Error while executing knl-tag$TOOLEXT: $@"; }
+
+
+        system("$TOOL/Posix/touch $OWN/.compile-end");
+        if ( ! -f "$OWN/sperre" ) {
+            ($HILFE)=$OWN=~/(.*)\\[a-z]+$/i;
+            unlink "$HILFE/.rel";
+        }
+
+
+        if (( $OWN =~ /V74/i ) && ($CORRECTION_LEVEL eq "3")) {
+
+            local @ARGV = ( "-U" , "srvinst" );
+            do "$TOOL/bin/imf$TOOLEXT";
+            system("$PERL/bin/perl.exe $TOOL/bin/BuildPackage.pl -profile Server -format sar");
+            
+#           no package copy anymore (h.b. 26.09.02)
+#
+#           system("copy C:\\SAPDevelop\\V74\\develop\\sys\\wrk\\fast\\install\\SAPDB74* C:\\SAPDevelop\\V74\\develop\\lastPackage");
+#           system("copy C:\\SAPDevelop\\V74\\develop\\lastPackage\\SAPDB7403_* \\\\ls0106\\lc\\SapdbDevPackage\\NT\\i386\\lastPackage");
+
+
+        }
+
+    }
+
+#------------------------------ t e s t ----------------------------
+
+    print "\nTEST BEGIN: ", scalar localtime(),"\n";
+
+    if ( $WOCHENENDE eq "true" || $SUTTODAY eq "YES" ) {
+
+        if ( $OWN =~ /V80/i ) {
+
+            local @ARGV = ( "jtest" );
+            do "$TOOL/bin/imf$TOOLEXT";
+
+            print "\n START of ComponentTest: ", scalar localtime(),"\n\n";
+            chdir("$TEST/jtest");
+
+            system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl ComponentTest");
+
+        } else { # releases != V80
+
+            clear_sut();
+
+            CASE: {
+
+                if( $OWN =~ /V61|V62/i ) {
+
+                    local @ARGV = ( "sut" );
+                    do "$TOOL/bin/imf$TOOLEXT";
+                    if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+                    sut_test("slow");
+                    sut_test("fast");
+
+                    sut_stack($WOCHENENDE);
+
+                    send_sut_mail();
+
+                    last CASE;
+                }
+
+
+                if ( $OWN =~ /V71|V72|V73|V74|V75|V76/i ) {
+
+                    local @ARGV = ( "sut" );
+                    do "$TOOL/bin/imf$TOOLEXT";
+                    if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+                    if ( $OWN =~ /V72|V73/i ) { # WARNING A.M. # only temporary change test sequence in 7.4 sut <-> jtest
+
+                        local @ARGV = ( "alltest" );
+                        do "$TOOL/bin/imf$TOOLEXT";
+
+                        if ( $OWN =~ /V72/i ) {
+
+                            print "\n START of Lctest-Night: ", scalar localtime(),"\n\n";
+                            chdir("$TEST/jtest");
+
+                            if ( $WOCHENENDE eq "true" ) {
+                                system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 -d $LCDB -G FORCE lctest_weekend");
+                            } else {
+                                system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 -d $LCDB -G FORCE lctest_night");
+                            }
+
+                            print "\n STOP  of Lctest-Night: ", scalar localtime(),"\n\n";
+
+                        }
+
+                        print "\n START of OLTP-Test: ", scalar localtime(),"\n\n";
+                        chdir("$TEST/jtest");
+                        if (($RELVER eq "R73") && ($CORRECTION_LEVEL ge "1")) {
+
+                            print "\n START of MAKE: ", scalar localtime(),"\n\n";
+                            local @ARGV = ( "cpc" );
+                            do "$TOOL/bin/imf$TOOLEXT";
+                            local @ARGV = ( "jtest" );
+                            do "$TOOL/bin/imf$TOOLEXT";
+                            print "\n STOP  of MAKE: ", scalar localtime(),"\n\n";
+                            system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 -d $OLTPDB -G FORCE -R $HELPDBROOT ifatest");
+                        } else {
+                            system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 -d $OLTPDB -G FORCE oltptest");
+                        }
+                        print "\n STOP  of OLTP-Test: ", scalar localtime(),"\n\n";
+
+                        unless (($RELVER eq "R73") && ($CORRECTION_LEVEL eq "1")) {
+
+                             print "\n START of DBM-Test: ", scalar localtime(),"\n\n";
+                             system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 DBMTest");
+                             print "\n STOP  of DBM-Test: ", scalar localtime(),"\n\n";
+
+                        }
+
+                    }
+
+                    if (($RELVER eq "R73") && ($CORRECTION_LEVEL eq "1")) {
+
+                        # no SUT for 73.01 yet
+
+                    } else {
+
+                        sut_test("slow");
+
+                    }
+
+                    if ( $OWN =~ /V74|V75|V76/i ) { # WARNING A.M. # only temporary change test sequence in 7.4 sut <-> jtest
+
+
+                        local @ARGV = ( "alltest" );
+                        do "$TOOL/bin/imf$TOOLEXT";
+
+# Wunsch von Elke. FSt
+#                        if ( $OWN =~ /V74|V75|V76/i ) {
+#
+#                            if ( $WOCHENENDE eq "true" ) {
+#                                print "\n START of Lctest-Night: ", scalar localtime(),"\n\n";
+#                                chdir("$TEST/jtest");
+#
+#                                system("$PERL/bin/perl.exe $TEST/jtest/jtrun.pl -monitor -scheduled -bits 32 -d $LCDB -G FORCE lctest_weekend");
+#
+#                                print "\n STOP  of Lctest-Night: ", scalar localtime(),"\n\n";
+#                            } 
+#                        }
+                    }
+
+                    if (($RELVER eq "R73") && ($CORRECTION_LEVEL eq "1")) {
+
+                        # no SUT for 73.01 yet
+
+                    } else {
+
+                         if ( $WOCHENENDE eq "true" ) {
+                             sut_test("quick");
+                             sut_test("fast");
+                         }
+
+# Wunsch von Elke. FSt
+#                         sut_stack($WOCHENENDE);
+
+                         if ( ( $WOCHENENDE eq "true" ) && ( $OWN =~ /V73|V74|V75|V76/i ) ) {
+
+#                             if (($CORRECTION_LEVEL ne "1") && ($CORRECTION_LEVEL ne "2" ) ) {
+                             if ( ($CORRECTION_LEVEL ne "1") || ( $OWN =~ /V75|V76/i ) ){
+
+                                 # Unciode Tests
+                                 local @ARGV = ( "sutuni" );
+                                 do "$TOOL/bin/imf$TOOLEXT";
+                                 if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+                                 $ENV{'DBUNICODE'} = "yes";
+                                 sut_test("fast");
+
+                                 $ENV{'DEFCODE'} = "UNICODE";
+                                 sut_test("fast");
+
+                                 $ENV{'DBUNICODE'} = "xci";
+                                 delete $ENV{'DEFCODE'};
+                                 sut_test("fast");
+
+                                 $ENV{'DEFCODE'} = "UNICODE";
+                                 sut_test("fast");
+
+                                 # aufraeumen
+                                 delete $ENV{'DBUNICODE'};
+                                 delete $ENV{'DEFCODE'};
+                                 local @ARGV = ( "XINITDB" );
+                                 do "$TOOL/bin/sutf$TOOLEXT";
+                                 if ( $@ ) { warn "Error while executing sutf$TOOLEXT: $@"; }
+                                 local @ARGV = ( "YINIT" );
+                                 do "$TOOL/bin/sutf$TOOLEXT";
+                                 if ( $@ ) { warn "Error while executing sutf$TOOLEXT: $@"; }
+                             }
+                         }
+
+                         send_sut_mail();
+
+                    }
+
+                last CASE;
+                }
+
+            } #CASE
+
+
+
+            #---------------   t c c     -------------------
+
+            print "\nTCC BEGIN: ", scalar localtime(),"\n";
+
+            do "$TOOL/bin/knl-tcc$TOOLEXT";
+            if ( $@ ) { warn "Error while executing knl-tcc$TOOLEXT: $@"; }
+
+            send_tcc_mail();
+
+            #---------------   x r e f     -------------------
+
+            print "\nXREF BEGIN: ", scalar localtime(),"\n";
+
+            do "$TOOL/adminbin/knlxref$TOOLEXT";
+            if ( $@ ) { warn "Error while executing knlxref$TOOLEXT: $@"; }
+
+        }
+    }
+} else {
+
+
+    system("$TOOL/Posix/touch $OWN/.compile-end");
+    system("$TOOL/Posix/touch $OWN/.com-end-quick");
+    system("$TOOL/Posix/touch $OWN/.com-end-slow");
+    system("$TOOL/Posix/touch $OWN/.sut-end");
+    print;
+    print "\n... es gibt nichts zu tun fuer \$OWN. \n";
+}
+
+
+#---------------------------------- E N D E ----------------------------
+print "\nJOB END ", scalar localtime(), "\n";
+
+
+###########################################################################
+sub clear_sut {
+
+    unlink <$SUT/xload*>;
+    unlink <$SUT/vtrace*.dat>;
+    unlink <$SUT/knl*>;
+    unlink <$SUT/*.prot>;
+    unlink <$SUT/*.pdiff>;
+    unlink <$SUT/*core>;
+    unlink <$SUT/*dump>;
+
+    local $AllSut="$OWN/test/kern/allsut.prt";
+    open(ALLSUT, $AllSut)      || warn "WARNING:   Can't open $AllSut (input): $!\n";
+    open(OLD, ">>$AllSut.old") || warn "WARNING:   Can't open $AllSut.old (output): $!\n";
+    print OLD <ALLSUT>;
+    close(OLD);
+    close(ALLSUT);
+    unlink "$AllSut";
+}
+
+###########################################################################
+sub such
+{
+    $F = basename("$File::Find::name");
+
+    if ( -f $F && $F !~ /^[as]/ ) {
+        unlink "$File::Find::name";
+    }
+}
+
+###########################################################################
+sub today_stamp {
+
+# Stempeln der Module, die auf den Server geschrieben wurden.
+#
+# Wurde am Freitag etwas auf den Server geschrieben und nicht noch
+# am selben Tag der Nachtlauf aktiviert, dann muss man die Historie
+# der iput Kommandos betrachten, damit die Sourcen gestempelt, pretty-
+# gefahren werden usw.
+#
+# Zusätzlich wird die globale Variable $SUTTODAY gesetzt.
+
+
+    $SUTTODAY = "NO";
+    $SUTTODAY ="YES" if ($WOCHENENDE eq "true");
+
+
+    $RELEASE = "$1.$2" if ( $ENV{RELVER} =~ /R(\d)(\d)/ );
+
+    local $TOUCH = "0"x(2-length(((localtime)[4])+1)).((localtime)[4]+1).
+	"0"x(2-length((localtime)[3])).(localtime)[3]; # MMDD
+
+    local $HEUTE = "$TMP/src-of-$TOUCH";
+    local $DESC_HEUTE = "$TMP/desc-of-$TOUCH";
+    local $Datum = (localtime)[6];
+    local $Tag;
+
+    if ( $Datum == 0 ) {
+	    put_source(2, $HEUTE);
+    	put_desc(2, $DESC_HEUTE);
+    	$TOUCH = determine_touch(2);
+	    $Tag  = 2;
+    } elsif ( $Datum == 6 ) {
+    	put_source(1, $HEUTE);
+    	put_desc(1, $DESC_HEUTE);
+	    $TOUCH = determine_touch(1);
+    	$Tag  = 1;
+    } else {
+    	put_source(0, $HEUTE);
+    	put_desc(0, $DESC_HEUTE);
+    	$Tag = 0;
+    }
+
+    $TOUCH .= "1901";
+    if ( -s $DESC_HEUTE ) { print "\nStempeln der Descriptions ...\n" }
+
+    print "HEUTE: $HEUTE      DESC_HEUTE: $DESC_HEUTE \n";
+
+    if ( -s $HEUTE ) {
+
+	    print "\n... stamp today changed modules with $RELEASE, touch them to $TOUCH.\n";
+
+    	open(HEUTE, $HEUTE) || warn "Can't open $HEUTE (input): $!\n";
+	    local @HEUTE;
+    	while(<HEUTE>) {
+	        chomp;
+	        push @HEUTE, $_ unless /^\s*$/;
+    	}
+	    close(HEUTE);
+
+    	@HEUTE = grep {
+	        local($path, $file) = ICopy::GetFilePath($_, 0, 0, 1);
+	        $_ = $file;
+    	} @HEUTE;
+
+    	foreach $F ( @HEUTE ) {
+
+	        local($LAYER) = $F =~ m!src[/\\]([a-z]+)!i;
+    	
+            if ( $LAYER =~ /^(ab|cn|dx|kx|Resource|rx|su|jt|pf|po|pw|px|py|pz|
+			      vb|vs|wb|wd|win|ws|r3|tk|tt|wx|xx|zz)$/i ) {
+
+                if ( $LAYER !~ /^(su)$/i ) {
+                    $SUTTODAY   = "YES";
+                }
+
+                print "... touched, but not stamped: ", $F,"\n";
+                system("$TOOL/Posix/touch", "-m $TOUCH $F");
+
+            } else {
+
+                $SUTTODAY   = "YES";
+                if ( ($LAYER!~/^en$/i) && ($LAYER!~/^os$/i) && ($LAYER!~/^ad$/i)
+                	 && (  $LAYER!~/^eo$/i) && ($LAYER!~/^jk$/i) && ($LAYER!~/^ni$/i)
+                	 && (  $LAYER!~/^pa$/i) && ($LAYER!~/^pc$/i) && ($LAYER!~/^pi$/i)
+                	 && (  basename($F) !~/[a-z]$/i ) && (  basename($F) !~/[A-Z]$/i )
+                	 && (  $LAYER!~/^pr$/i) && ($LAYER!~/^pu$/i) && ($LAYER!~/^ox$/i) ) {
+
+                    # C-Module werden nicht pretty gefahren!
+
+                    local @ARGV = ( basename($F) );
+                    do "$TOOL/bin/ipretty$TOOLEXT";
+                    if ( $@ ) { warn "Error while executing ipretty$TOOLEXT: $@"; }
+                }
+
+                if ( ( basename($F) !~/\.[a-z]$/i ) && ( basename($F) !~/\.[a-z][a-z]$/i )
+                     && (   basename($F) !~/\.[a-z][a-z][a-z]$/i ) ) {
+
+                    print basename($F),"   ";
+                    local @ARGV = ( $RELEASE, "$OWN/$F" );
+                    do "$TOOL/adminbin/stampl$TOOLEXT";
+                    if ( $@ ) { warn "Error while executing stampl$TOOLEXT: $@"; }
+                }
+
+                system("$TOOL/Posix/touch", "-m $TOUCH $OWN/$F");
+            }
+        }
+
+        return 0;
+
+    } else {
+
+        print "... nothing to stamp today for release", $RELEASE, "...";
+        unlink "$HEUTE";
+
+        if ( "$WOCHENENDE" eq "true" && ($OWN =~ /V61|V62|V71|V72|V73|V74|V75|V76|V80/i) ) {
+        	put_source(5, $HEUTE);
+            if ( -s $HEUTE ) {
+                print "... but it's weekend and an important release!";
+                return 0;
+            } else {
+                print "and nothing happens the last seven days!";
+            }
+        }
+
+        return 1;
+    }
+
+    return 1;
+}
+
+###########################################################################
+sub put_source {
+
+    local($diffdays, $outfile) = @_;
+
+    open(FILE_OUT, ">$outfile.tmp") || warn "Can't open $outfile.tmp (output): $!\n";
+    open(PIPE_IN, "$TOOLSHELL $TOOL/bin/istat$TOOLEXT -j $diffdays -au|")
+	    || warn "Can't open Pipe $TOOL/bin/istat: $!\n";
+
+    while(<PIPE_IN>) {
+	    if ( !m#((fast|quick|slow)[/\\][^ \s]+)# ) {
+	         m#([a-zA-Z][^ \s]+)#;
+    	     print FILE_OUT $1 ,"\n";
+	    }
+    }
+
+    close(PIPE_IN);
+    close(FILE_OUT);
+
+    system("$TOOL/Posix/sort -u -o $outfile $outfile.tmp");
+    unlink("$outfile.tmp");
+}
+
+###########################################################################
+sub put_desc {
+
+    local($diffdays, $outfile) = @_;
+
+    open(FILE_OUT, ">$outfile.tmp") || warn "Can't open $outfile.tmp (output): $!\n";
+    open(PIPE_IN, "$TOOLSHELL $TOOL/bin/istat$TOOLEXT -j $diffdays -au|")
+	    || warn "Can't open Pipe $TOOL/bin/istat: $!\n";
+
+    while(<PIPE_IN>) {
+	    if ( m!((fast|quick|slow)[/\\][^ \s]+)! ) {
+	        print FILE_OUT $1 ,"\n";
+    	}
+    }
+
+    close(PIPE_IN);
+    close(FILE_OUT);
+
+    system("$TOOL/Posix/sort -u -o $outfile $outfile.tmp");
+    unlink("$outfile.tmp");
+}
+
+###########################################################################
+sub determine_touch {
+
+    local $Zurueck = shift;
+    # Bestimmung des aktuellen Datums.
+    local $Tag  = (localtime)[3];
+    local $Monat= (localtime)[4]; $Monat++;
+
+    # Berechnung des Datums der zu loeschenden Files.
+
+    if ( $Tag < $Zurueck ) {
+	
+        $Tag = $Tag-$Zurueck;
+
+    } else {
+    	
+        local $Rest = $Zurueck-$Tag;
+	
+        if ( $Monat == 1 ) { $Monat = 12 } else { $Monat-- }
+
+    	if ( $Monat =~ /^(1|3|5|7|8|10|12)$/ ) {
+	        $Tag = 31-$Rest;
+	    } elsif ( $Monat =~ /^(4|6|9|11)$/ ) {
+	        $Tag = 30-$Rest;
+	    } elsif ( $Monat == 2 ) {
+	        $Tag  = 28 - $Rest;
+	    }
+
+    }
+    $Tag   = "0$Tag"   if length($Tag)   == 1;
+    $Monat = "0$Monat" if length($Monat) == 1;
+    return "$Monat$Tag";
+
+}
+
+
+###########################################################################
+sub sut_test {
+
+# Die Funktionbekommt ein Parameter. Der bestimmt welcher Kern
+# zum Testen benutzt werden soll (slow/quick/fast).
+
+    print "\n\n\n=== BEGIN sut_test ",scalar localtime(),"\n";
+
+    local $Speed = shift;
+
+    if ( !$SERVERDB ) { $NAME=$DBNAME } else { $NAME=$SERVERDB }
+
+    print "===    VAR SERVERDB : $SERVERDB \n";
+    print "===    VAR NAME     : $NAME \n";
+    print "===    VAR DBNAMEi  : $DBNAME \n";
+    print "===    VAR Speed    : $Speed \n";
+
+    local $OldDir = cwd();
+    chdir($SUT) || warn "Can't change to directory $SUT: $!\n";
+
+    # Zuerst wird das Rundirectory von alten Protokollen befreit!
+    sut_remove();
+
+    mkdir("$Speed", 0) unless -d "$Speed";
+
+    # Dann werden die Commandfiles XRESTORE, XINITALL und CONNECT restauriert!
+    local @ARGV = ( "-u" , "XRESTORE.cmd" , "XINITALL.cmd" , "CONNECT.cmd" );
+    do "$TOOL/bin/imf$TOOLEXT";
+    if ( $@ ) { warn "Error while executing imf$TOOLEXT: $@"; }
+
+    sut_init();
+
+    local @ARGV = ( $Speed, "slowci", $NAME );
+    do "$TOOL/bin/sutall$TOOLEXT";
+    if ( $@ ) { warn "Error while executing sutall$TOOLEXT: $@"; }
+
+    sut_init();
+
+    chdir( $OldDir ) || warn "Can't change to directory $OldDir: $!\n";
+
+    print "=== END   sut_test ",scalar localtime(),"\n";
+    #system ("$PYTHON/python $TOOL/bin/qaccSUT.py $OWN/test/kern/sutall.prt");
+}
+
+###########################################################################
+sub sut_init {
+
+    if( $OWN =~ /V7/i ) {
+        print "=== STOP of a former running database === \n";
+        system("$INSTROOT/pgm/dbmcli -u superdba,colduser -d $SERVERDB db_stop");
+	}
+    system ("$PERL/bin/perl.exe $TOOL/bin/sutparam$TOOLEXT -d $SERVERDB");
+    if( $OWN =~ /V61/i ) {
+        system("$DBROOT/pgm/putparam $SERVERDB  MAXSERVERDB 2");
+    } else {
+        if ( $OWN =~ /V62|V71/i ) {
+            system("$DBROOT/pgm/putparam $SERVERDB _MAXSERVERDB 1");
+            system("$DBROOT/pgm/putparam $SERVERDB _UNICODE     NO");
+            system("$DBROOT/pgm/putparam $SERVERDB SESSION_TIMEOUT 900");
+            system("$DBROOT/pgm/putparam $SERVERDB LOCK_TIMEOUT    360");
+            system("$DBROOT/pgm/putparam $SERVERDB REQUEST_TIMEOUT 180");
+        }
+    }
+}
+
+###########################################################################
+sub sut_remove {
+
+# Stueckweises loeschen von Testergebnissen da dieses SCO Unix
+# sonst die Meldung 'arg list too long' ausgiebt.
+    unlink <*.prot>;
+    unlink <*.vprot>;
+    unlink <*.sort>;
+    unlink <*.core>;
+    unlink <*.dump>;
+    unlink <*.rtedump>;
+    unlink <*.syserr>;
+    unlink <*.pdiff>;
+}
+
+###########################################################################
+sub sut_stack {
+
+# Ermittlung des Stackbedarfs des Kerns, anhand der Singleusertests.
+#
+    local $WOCHENENDE=shift;
+
+    if ( !$SERVERDB ) { $NAME=$DBNAME } else { $NAME=$SERVERDB }
+
+    print "===    VAR SERVERDB : $SERVERDB \n";
+    print "===    VAR NAME     : $NAME \n";
+    print "===    VAR DBNAME   : $DBNAME \n";
+
+    if ($WOCHENENDE eq "true") {
+        local @ARGV = ( "-a", "-d", $NAME );
+        do "$TOOL/bin/stacktest$TOOLEXT";
+    } else {
+        local @ARGV = ( "-d", $NAME );
+        do "$TOOL/bin/stacktest$TOOLEXT";
+    }
+}
+
+###########################################################################
+sub send_sut_mail {
+
+    require "hostname.pl";
+    local $host = hostname ();
+
+    local $Msg;
+    $Msg = scalar localtime();
+    $Msg .= "\n\nDie Testergebnisse auf der $host warten\n";
+    $Msg .= "darauf von Dir durchgeschaut zu werden!\n\n";
+    $Msg .= "\nSie liefen mit folgenden Kernen:\n\n";
+    $Msg .= "\nkernel.exe   vom ";
+    $Msg .= scalar localtime((stat("$OWN/usr/pgm/kernel.exe"))[9]);
+    $Msg .= "\nquickknl.exe vom ";
+    $Msg .= scalar localtime((stat("$OWN/usr/pgm/quickknl.exe"))[9]);
+    $Msg .= "\nslowknl.exe  vom ";
+    $Msg .= scalar localtime((stat("$OWN/usr/pgm/slowknl.exe"))[9]);
+
+
+    local @CheckDirs = ("$SUT/slow", "$SUT/quick", "$SUT/fast");
+    if ( $OWN =~ /V73/i ) {
+    	@CheckDirs = (@CheckDirs, "$SUT/uni", "$SUT/dbuni", "$SUT/xciuni");
+    }
+
+    local $core   = core_exists (\@CheckDirs);
+    local $syserr = syserr_exists (\@CheckDirs);
+
+    $Msg .= "\n\nGruss Admin\n";
+
+    $OWN =~ /.*(V\d+).*(c_\d+).*/i || $OWN =~ /.*(V\d+).*/i;
+    my $rel = $1 if ($RELVER =~ /R(\d+)/);
+    local $SUTSubject = sprintf "%-5s %-5s %s", $rel, "CL $CORRECTION_LEVEL", "SUT ist fertig!";
+    $SUTSubject = "$SUTSubject (CORE)" if ( $core );
+    $SUTSubject = "$SUTSubject (SYSERR)" if ( $syserr );
+
+
+    local @PoorSutGroup;
+    get_mail_list ("$TOOL/bin/sutmail",\@PoorSutGroup);
+
+    map {
+        $_ .= '@sap.com'
+    } @PoorSutGroup;
+    local $SutTo = join ',', @PoorSutGroup;
+
+   	local %mail = ( To    => $SutTo,
+    	  From    => $ENV{USERNAME}.'@sap.corp',
+	      Message => $Msg,
+          Smtp    => 'mail.sap.corp',
+	      Subject => $SUTSubject );
+
+	my $mail_ok = 0;
+	for (1..45)
+	{
+   		if (sendmail(%mail))
+   		{
+   			$mail_ok = 1;
+   			last;
+   		}
+   		sleep (60);
+	}
+	
+	warn $Mail::Sendmail::error unless ($mail_ok);
+
+}
+
+##################################################################
+sub core_exists
+{
+    local $Dirs = shift;
+    local $CheckDir;
+
+    foreach $CheckDir ( @$Dirs )
+{
+
+    local @CoreFiles;
+    opendir(DIR_IN, $CheckDir) || warn "Can't open dir $CheckDir: $!";
+    @CoreFiles = grep /.*\.core/, readdir(DIR_IN);
+    closedir(DIR_IN);
+
+    if ( @CoreFiles > 0 ) {
+
+	$CoreExist = 1;
+	$Msg .= "\n\nAchtung Core unter $CheckDir:\n\n";
+	foreach $f ( @CoreFiles ) {
+	    $Msg .= "$f\n"
+	    }
+
+    }
+}
+
+return($CoreExist);
+}
+
+##################################################################
+sub syserr_exists
+{
+    local $Dirs = shift;
+    local $CheckDir;
+
+    foreach $CheckDir ( @$Dirs )
+{
+
+    local @SysErrFiles;
+    opendir(DIR_IN, $CheckDir) || warn "Can't open dir $CheckDir: $!";
+    @SysErrFiles = grep /.*\.syserr/, readdir(DIR_IN);
+    closedir(DIR_IN);
+
+    if ( @SysErrFiles > 0 ) {
+
+	$SysErrExist = 1;
+	$Msg .= "\n\nAchtung neue System Error unter $CheckDir:\n\n";
+	foreach $f ( @SysErrFiles ) {
+	    $Msg .= "$f\n"
+	    }
+
+    }
+}
+
+return($SysErrExist);
+}
+
+###########################################################################
+sub send_tcc_mail {
+
+    $OWN =~ /.*(V\d+).*/i;
+    local $localOwn = $1;
+
+    local $TccMsg;
+    $TccMsg = scalar localtime();
+    $TccMsg .= "\n\nTypencheck Probleme in $localOwn CL $CORRECTION_LEVEL !\n\n";
+
+    local @TccProt;
+    opendir(DIR_IN, "$WRK/fast/prot") || warn "Can't open dir : $!";
+    @TccProt = grep /.*\.chk/, readdir(DIR_IN);
+    closedir(DIR_IN);
+    map {
+	local $mtime = scalar localtime((stat("$WRK/fast/prot/$_"))[9]);
+	$_ = "$mtime ".$_
+	} @TccProt;
+
+
+    if ( @TccProt > 0 ) {
+
+    	$TccMsg .= "\n\nModul(e):\n\n";
+
+        foreach $CheckPrt ( @TccProt ) {
+	        $TccMsg .= "$CheckPrt\n";
+    	}
+
+        $TccMsg .= "\nGruss Admin\n";
+
+        local $TccSubject = "Typencheck Probleme in $localOwn CL $CORRECTION_LEVEL !";
+
+        local @PoorTccGroup;
+        get_mail_list ("$TOOL/bin/tccmail", \@PoorTccGroup);
+
+        map {
+            $_ .= '@sap.com'
+        } @PoorTccGroup;
+        local $TccTo = join ',', @PoorTccGroup;
+
+       	local %mail = ( To    => $TccTo,
+	       	  From    => $ENV{USERNAME}.'@sap.corp',
+	          Message => $TccMsg,
+              Smtp    => 'mail.sap.corp',
+       		  Subject => $TccSubject );
+
+		my $mail_ok = 0;
+		
+		for (1..45)
+		{
+	    	if (sendmail(%mail))
+	    	{
+	    		$mail_ok = 1;
+	    		last;
+	    	}
+	    	sleep (60);
+	    }
+	    
+	    warn $Mail::Sendmail::error unless ($mail_ok);
+
+    }
+}
+
+############################
+
+sub deltree{
+        my ($dir) = @_;
+        -d $dir || return 0;
+        opendir(DH,$dir) || return 0;
+        my @content = readdir(DH);
+        close(DH);
+
+        my @files = grep { -f "$dir/$_" } @content;
+        my @dirs = grep { -d "$dir/$_" && ! /^\.{1,2}$/} @content;
+
+        foreach (@dirs){
+                -l "$dir/$_" and next;
+                deltree("$dir/$_") || return 0;
+        }
+        foreach (@files){
+                -l "$dir/$_" and next;
+		    -f "$dir/$_" and (unlink("$dir/$_") or print ("cannot delete $dir/$_\n") and return 0);
+        }
+        rmdir($dir) or print("cannot delete $dir\n") and return 0;
+        return 1;
+}
+
+###########################################################################
+sub get_mail_list {
+
+    local $inputfile  = shift;
+    local $r_maillist = shift;
+
+    open (MAILLIST,"<$inputfile") or warn "can't open $inputfile";
+    @$r_maillist = <MAILLIST>;
+    close MAILLIST;
+    map {
+        chomp;
+        s/(^.*?)#.*/$1/;
+    } @$r_maillist;
+    @$r_maillist = grep !/^\s*$/, @$r_maillist;
+
+}
+
+###########################################################################
+sub new_files () {
+   
+    my ( $is_weekend ) = @_;
+    
+    use FileHandle;
+
+    my ( $fh, $date, @p4out, @desc, @src, @localtime );
+
+    if ( $is_weekend eq "true" ) {
+        @localtime = localtime (time - 15 * 24 * 3600);
+    } else {
+        @localtime = localtime (time);
+    } 
+    $date = sprintf ("%04d/%02d/%02d", $localtime[5] + 1900, $localtime[4] + 1, $localtime[3]); 
+
+    $fh = new FileHandle;
+
+    if ($fh->open("p4 changes -s submitted $ENV{DEPOT}/.../desc/...\@$date,now |")) {
+        @p4out = <$fh>;
+        $fh->close;
+    }
+    @desc = grep !/implicit/ , @p4out; 
+    print "desc found:\n@desc\n" if ( @desc );
+    
+    if ($fh->open("p4 changes -s submitted $ENV{DEPOT}/.../src/...\@$date,now |")) {
+        @p4out = <$fh>; 
+        $fh->close;
+    }
+    @src = grep !/implicit/ , @p4out; 
+    print "source found:\n@src\n" if ( @src );
+
+    return 0 if ( @desc or @src );
+
+    return 1;
+
+}
+__END__

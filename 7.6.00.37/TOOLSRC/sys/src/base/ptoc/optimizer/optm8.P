@@ -1,0 +1,196 @@
+(* @(#)optimizer/optm8.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm8.p *)
+
+   (* this module contains the procedures that perform these two specific *)
+   (* optimizations :                                                     *)
+   (* 1-  transform a(exp+const) into a+const(exp)                        *)
+   (* 2-  transform v:= v op e  into  add e to v, or, subt e from v       *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/csg.h"
+#include "../common/_shifts.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm5.h"
+
+
+(* export *)
+
+#include "../optimizer/optm8.h"
+
+
+(* privates *)
+(* initial *)
+(* routines *)
+
+   function constant
+      (NodeIndex: HdgRange;
+       var literal: integer)
+      : boolean;
+      (* this function checks for a literal and, if found, returns it. *)
+
+   begin
+      if (MajorOperator = node) and (MinorOperator = LitOp) then begin
+         literal := Node1parameter;
+         constant := true;
+      end
+      else begin
+         constant := false;
+      end  (* if *);
+   end  (*constant*);
+
+
+   procedure SetExpression
+      (NodeIndex,
+       SubExp: HdgRange);
+   begin
+      (* set unary operand *)
+      Unary1operand := SubExp;
+   end  (* SetExpression *);
+
+
+   function variables
+      (NodeIndex: HdgRange)
+      : SymbolTableRange;
+      (* this function checks for a variable and returns it if it is found. *)
+
+   begin
+      if (MajorOperator = node) and (MinorOperator = IdOp) then begin
+         variables := Node1parameter;
+      end
+      else begin
+         variables := -1;
+      end  (* if *);
+   end  (*variables*);
+
+
+   function SkipConvert
+      (NodeIndex: HdgRange)
+      : HdgRange;
+
+   begin
+{
+      if MinorOperator = ConvertOp then begin
+         SkipConvert := Unary1operand;
+      end
+      else begin
+         SkipConvert := NodeIndex;
+      end;
+}
+      SkipConvert := NodeIndex;
+   end  (* SkipConvert *);
+
+
+   function SpecialBinary
+      (lhs,
+       rhs: HdgRange;
+       var new_op: OpcodeRange;
+       var new_rhs: HdgRange)
+      : boolean;
+
+      (* this function checks for the binary expression in v1 := v2 op e.  *)
+      (* if v2 is found to be equal to v1 then the binary operator, op, is *)
+      (* returned and e replaces v2 op e.                                  *)
+
+   var
+      NodeIndex: HdgRange;
+      op: OpcodeRange;
+
+   begin
+      NodeIndex := SkipConvert (rhs);
+      if MajorOperator = BinaryExp then begin
+         op := MinorOperator;
+         case op of
+            AddOp,
+            SubtOp,
+            MultOp,
+            DivOp,
+            ModOp,
+            ModuloOp,
+            ShlOp,
+            ShrOp,
+            BAndOp,
+            BXorOp,
+            BOrOp: begin
+               NodeIndex := SkipConvert (Bin1operand);
+               if MinorOperator = LoadOp then begin
+                  if identical (lhs, Unary1operand) then begin
+                     NodeIndex := SkipConvert (rhs);
+                     new_op := op;
+                     new_rhs := Bin2operand;
+                     SpecialBinary := true;
+                  end
+                  else begin
+                     SpecialBinary := false;
+                  end;
+               end
+               else begin
+                  SpecialBinary := false;
+               end;
+            end;
+
+            otherwise begin
+               SpecialBinary := false;
+            end;
+
+         end  (* case *);
+      end
+      else begin
+         SpecialBinary := false;
+      end;
+   end  (* SpecialBinary *);
+
+
+   procedure OptLongStmnt;
+
+      (* this procedure performs the following optimization :    *)
+      (*       v := v op e                                       *)
+      (*       becomes                                           *)
+      (*       v op = e                                          *)
+
+   var
+      new_op: OpcodeRange;
+      new_rsh: HdgRange;
+
+   begin
+      if MinorOperator = StoreOp then begin
+         if
+            SpecialBinary (Ls1operand, Ls2operand, new_op, new_rsh)
+         then begin
+         (* found v := v op e *)
+            SetMinor (NodeIndex, PrefixOp);
+            Ls2parameter := new_op;
+            Ls2operand := new_rsh;
+            LongStmntOpt := LongStmntOpt + 1;
+         end;
+      end  (* if *);
+   end  (*OptLongStmnt*);

@@ -1,0 +1,241 @@
+#! /usr/bin/perl
+
+#	Script zur weitgehenden Konvertierung der Stored Procedures von MS-SQL zu SAPDB
+#
+#	Die Namen der Eingabedateien und weiter Parameter sind weiter unten
+#	in einem Parameterblock festgelegt.
+#	Das Script gibt die konvertierten Prozeduren auf STDOUT aus.
+#
+#	Die Zielstellung für dieses Programm ist NICHT eine vollständig
+#	automatisierte Konvertierung der SPs!!!
+#
+#	Dieses Script beschränkt sich darauf, die SPs von MS-SQL so aufzubereiten,
+#	dass die Grundstruktur entsprechender SPs für SAPDB entsteht.
+#	Auf dieser Grundstruktur lässt sich dann ein Prozess manueller
+#	Programmierarbeit aufsetzen.
+#
+#	Wenn im Verlauf der manuellen Arbeit an den SPs Erkenntnisse zu Tage
+#	gefördert werden, die eine Änderung in dem Script erfordern, kann
+#	hoffentlich mit Hilfe von diff/patch bzw. CVS ein entsprechender Prozess
+#	zur Konsolidierung aufgesetzt werden.
+# change history: 
+#
+#       2002-08-19 burkhard.diesing@sap.com
+#           Changes for finding identifier (PROC[EDURE])
+#           Ignore case of identifier (AS)
+#
+#	Paramterblock:
+
+$tableDefFile = 'Tables.dist';		# Name der Datei, in der die Tabellendefinitionen zu finden sind
+$spDefFile = 'StoredProcs.dist';	# Name der Datei, in der die Definition der SPs im MS-SQL Format zu finden sind
+$dbOwner = 'dbo' ;			# Name des Tabelleneigentümers
+
+use Getopt::Std;
+if (!getopts ('p:t:u:h') || $opt_h ) {
+   print <DATA>;
+   exit;
+}
+if ($opt_p) {
+  $spDefFile = $opt_p;
+}
+if ($opt_t) {
+  $tableDefFile = $opt_t;
+}
+if ($opt_u) {
+  $dbOwner = $opt_u;
+}
+
+#	Änderungen nach dieser Zeile sind bei der normalen Verwendung des Scriptes nicht vorgesehen.
+
+
+
+
+#	Zur Vorbereitung der eigentlichen Arbeit wird hier ein Hash mit
+#	den Namen aller in der VDB vorhandenen Tabellen erzeugt.
+open TABLES, $tableDefFile;
+
+while (<TABLES>) {
+  ($tablename) = m/CREATE\s*TABLE\s*\"{0,1}$dbOwner\"{0,1}\.\"{0,1}(\w*)\"{0,1}\s*$/;
+  if ($tablename ne "") { $tables{$tablename}++; }
+}
+
+close TABLES;
+
+
+$kopf = 0;
+$var = 0;
+$block = 0;
+$sqlstmnt = 0;
+$cursor = 0;
+
+open SPDEF, $spDefFile;
+while (<SPDEF>) {
+
+#	CR + CR/LF von jeder Zeile abschneiden
+#  chop;
+  chop;
+
+#	Wir wollen Stored Procedures konvertieren. Die MS-SQL Procs werden mit
+#	CREATE PROCEDURE angelegt, SAPDB versteht CREADE DBPROC. Ausserdem muss
+#	die Deklaration der Parameter umgebaut werden. Falls die SP ein Result
+#	Set zurückgeben soll, muss bei SAPDB ausserdem ein CURSOR gebaut werden.
+  if (/^CREATE .*PROC.* /i ) {
+  	$kopf = 1;
+        $paramlist = 0;
+	($procName) = m/^CREATE .*PROC.* (\w*).*$/i;
+	print "\n/* Beginn Stored Procedure $procName */\n/* */\n";
+	if ( ($procName =~ m/Auskunft/) || ($procName =~ m/Abrufen/) ) {
+		$cursor = 1;
+	} else {
+		$cursor = 0;
+	}
+	print "CREATE DBPROC $procName\n\t\t\n";
+	}
+#	Mit AS ist die Deklaration der Parameter abgeschlossen. Hier wird erforderlichenfalls
+#	der CURSOR benannt.
+#	Ab jetzt befinden wir uns im ROUTINE Teil un müssen für SPADB alle Statements in der Liste
+#	mit einem Semikolon abschliessen. Damit das besser aussieht, wird das Zeilenende von hier an
+#	als Erstes Zeichen ausgegeben.
+  elsif (/^AS/i)		 {
+  	$kopf = 0;
+	if ($cursor > 0) { print "\t\t)\n\t\tRETURNS CURSOR\nAS\n\nSET \$CURSOR = 'C_00';\n"; }
+	else { 
+          if ($paramlist) {
+            print ")\n";
+          }
+          print "\t\t\nAS";
+        }
+	}
+#	Bei MS-SQL werden die Statements mit GO abgeschlossen. Damit wissen wir, dass hier
+#	die Definition der SP abgeschlossen ist.
+  elsif (/^GO/)		 {
+	$sqlstmnt = 0;
+	print ";\n/* */\n/* Ende Stored Procedure $procName */\n\n\n\n\n";
+	}
+#	Die automatischen Kommentare werden einfach weggeworfen...
+  elsif (/^\/\*\*/)		 {
+	}
+#	...ebenso leere Zeilen
+  elsif (/^\s*$/)		 {
+	}
+#	Innerhalb des Kopfes mit der Parameterdeklaration muss für SAPDB die Übergaberichtung
+#	angegeben werden, und zwar vor dem Variablennamen. Ausserdem müssen ein paar
+#	Datentypen substituiert werden.
+  elsif ($kopf > 0)	
+	 {
+	($white,$varname,$datatype,$rest) = m/^(\s*)@(\w*)\s+([\w()]*) ?(.*)$/ ;
+        if (!$paramlist && $varname ne "") {
+          print "(\n";
+          $paramlist = 1;
+        }
+	$direction = "IN";
+	if ($rest =~ s/OUTPUT//)	{ $direction = "OUT";	}
+	$datatype =~ s/bit/boolean/ ;
+	$datatype =~ s/text/long/ ;
+	$datatype =~ s/tinyint/smallint/ ;
+	$datatype =~ s/datetime/timestamp/ ;
+	print $white . "$direction $varname $datatype$rest\n";
+	}
+#	Im Körper der SP müssen eine ganze Reihe von Änderungen gemacht werden,
+#	die leider nur zum Teil von einem einfachen Script wie diesem durchgeführt
+#	werden können.
+  else			 {
+#	Es gibt jede Menge Funktionen im Transact SQL von Microsoft, für die es
+#	in der SAPDB kein Äquivalent gibt. Zum Glück lassen sich aber auch eine
+#	grosse Zahl von TSQL Funktionen in ähnliche von SAPDB abbilden. Hier werden
+#	einige der bei den SPs der VDB vom BKartA häufig verwendeten Konstrukte in
+#	Äquivalente Ausdrücke umgebaut.
+	s/exec (\w*) (.*)/call \1 (\2)/ig;
+	s/exec (\w*)/call \1/ig;
+        s/with .*encryption/\/\*\1\*\//ig;
+        s/(--.*)/\/\*\1\*\//ig;
+	s/(set nocount on)/\/\*\1\*\//ig;
+	s/CONVERT\(varchar\((\d+)\), *([\w.]+)\)/CHR(\2,\1)/ig;
+	s/CONVERT\(varchar\(10\), *([\w.]+), *104\)/CHAR(\1,EUR)/ig;
+	s/CONVERT\(varchar\(10\), *([\w.]+), *4\)/LFILL(SUBSTR(CHAR(\1,EUR),1,6)||SUBSTR(CHAR(\1,EUR),9,2),' ',10)/ig;
+	s/CONVERT\(varchar\(8\), *([\w.]+), *4\)/SUBSTR(CHAR(\1,EUR),1,6)||SUBSTR(CHAR(\1,EUR),9,2)/ig;
+	s/CASE WHEN (.*) is not null THEN .* ELSE 0 END/VALUE(\1,0) \1/ig;
+	s/CASE WHEN GG = 0 THEN ', o.GG'  END/DECODE(GG,FALSE,', o.GG')/ig;
+	s/CASE WHEN Fax = 1 THEN ', Fax' END/DECODE(Fax,TRUE,', Fax')/ig;
+#	Um die Statements mit einem Semikolon abschliessen zu können, wird hier versucht,
+#	jeweils den Anfang des nächsten Statements zu erkennen und daraufhin das
+#	vorhergehende abzuschliessen. Bei geschachtelten Statements ist das falsch, das
+#	kann aber von diesem einfachen Script nicht erkannt werden. Hier ist also sicher
+#	noch Handarbeit nötig...
+
+	if (/^\s*BEGIN/i) { $block++;	}
+	if (/^\s*END/i) {
+		$block--;
+		$sqlstmnt = 0;
+		print ";";
+		}
+	if (/^\s*SELECT/i) {
+		if($sqlstmnt > 0) {
+			print ";";
+			}
+		if($cursor > 0) {
+#	Wenn eine SP unter SAPDB ein Result Set liefern soll müssen wir intern mit
+#	Cursor arbeiten. Hier wird ganz plump jedes SELECT in einer Proc die wir
+#	Anhand des Namens Auskunft oder Abrufen in dieser Rubrik einordnen durch
+#	mit dem entsprechenden CURSOR versehen. Das erfordert sicher noch Nacharbeit
+#	per Hand.
+			s/SELECT/DECLARE :\$CURSOR CURSOR FOR SELECT/;
+			}
+		$sqlstmnt = 1;
+		}
+	if (/^\s*UPDATE/i) {
+		if($sqlstmnt > 0) {
+			print ";";
+			}
+		$sqlstmnt = 1;
+		}
+	if (/^\s*INSERT/i) {
+		if($sqlstmnt > 0) {
+			print ";";
+			}
+		$sqlstmnt = 1;
+		}
+	if (/^\s*DELETE/i) {
+		if($sqlstmnt > 0) {
+			print ";";
+			}
+		$sqlstmnt = 1;
+		}
+	if ($sqlstmnt > 0) {
+		s/@/:/g;
+		s/\+/||/g;
+	} else {
+		s/@//g;
+	}
+#	Die SAPDB erwartet bei der Ansprache von Tabellen in SPs die vollständige
+#	Qualifizierung inklusive Eigentümer. Hier wird deshalb bei jedem Vorkommen
+#	eines Tabellennamen im Körper der SP der Owner davor gesetzt. Das ist relativ
+#	Plump, es wird sicher noch mit der Hand nachgearbeitet werden müssen...
+	foreach $tablename (keys %tables) {
+		if ((m/$tablename$/)||(m/$tablename[\W]/)) {
+			s/$tablename$/$dbOwner.$tablename/g;
+			s/$tablename([\W])/$dbOwner.$tablename\1/g;
+		}
+	}
+  	print "\n" . $_ ;
+	}
+}
+
+close SPDEF;
+
+__DATA__
+
+ USAGE: KonverStoredProcs [-h | [-p procdef] [-t tabledef -u owner]
+
+        Convert a MS SQLServer stored procedure to SAPDB procedure syntax. 
+        Manual editing of the converted result are neccessary.
+        The results are written to stdout.
+
+ OPTIONS:    -h           prints this help.
+             -p procdef   MS SQLServer stored procedure definition file.
+                          (default StoredPros.dist)
+             -t tabledef  SAPDB table definition file.
+                          (default Tables.dist)
+             -u owner     OWNER of tables in the table definition file.
+                          (default 'dbo')
+

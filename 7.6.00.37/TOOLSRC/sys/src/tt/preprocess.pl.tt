@@ -1,0 +1,138 @@
+#!/usr/bin/perl
+# compc         *** internal script (called by vmake !)
+#
+# @(#)compc			1997-11-18
+#
+# compile C / C++ / CLE-Pascal / Fortran / lpipascal / SINIX Pascal-XT
+#
+# CCFLAGS       optional c compiler flags
+# KEEPFLG       optional keep intermediate files flag
+#
+# 1997-02-06 GG: Output-Extension wird auf .cpp gemappt, falls .cpp Input ist
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Basename;
+use File::Copy;
+use Carp;
+use Cwd;
+# Get CC, CCFLAGS, OPTIMIZE, CCMODEANSI, CCMODELINT, CCMODENORM
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("preprocess called with @ARGV\n");
+
+$USAGE="usage: preprocess [cc-flags] source\n";
+
+# Assume C-compiler
+@CCMODE = @CCMODENORM;
+$PREPROCESS_ONLY = 0;
+@PP_FLAGS;
+@INCLUDES=();
+
+# ignore warnings CTS 1102757
+$CC_IGNORE = "";
+my($cc) =""; # CTS 1103181
+
+while ($_ = $ARGV[0], /^[-+]/) {
+    shift;
+
+&if $OSSPEC in [ WIN32 ] 
+    s/\"/\\\"/g;   # CTS 1103620
+&endif
+
+    last if /^--$/;
+
+    # CTS 1110663 
+    if (/^-optdebug=1/ ) 
+    { 
+        $FOR_DEBUG=1; 
+        push @CCFLAGS, @DEBUG_FLAGS;
+        warn "Warning: compile with debug flag, but it's a productive make!\n" 
+            if $ENV{RELSTAT} =~ /^prod/i;
+        next; 
+    }
+    if (/^-I(.*)$/)   { push @INCLUDES, "-I$1"; next }
+    
+    if (/^-.*/ ) { push @CCFLAGS, $_; next }
+
+	# some options on HP/UX starting with '+', 
+	# caused by a vmake feature/bug we get '=1' at the end, but we do not want this at all
+	if (/^\+(.*)=1/ ) { push @CCFLAGS, $1; next }
+	# &gar: options with + without '=1' (since vmake 9.5.6 without automatic '=1')
+	if (/^\+.*/ ) { push @CCFLAGS, $_; next }
+    
+} #while
+
+if ( @ARGV != 1 ) { print $USAGE;  exit 1; }
+
+$SOURCE=$ARGV[0];
+($BASE, $SOURCEPATH, $EXT) = fileparse($SOURCE, '\..*');
+# for full path for MS DevStudio
+# $SOURCEPATH=cwd()."\\" if ( $SOURCEPATH =~ /\.\\/);
+
+
+# $CURR_VERSION wird von 'VMAKE' bereitgestellt und darf in
+# der Umgebung nicht gesetzt sein
+$CURR_VERSION = uc($CURR_VERSION);
+
+# CTS 1109050
+if (($RELVER lt "R74") || ($RELVER eq "RTOOL"))  
+{
+push @CCFLAGS, "-D$CURR_VERSION=$CURR_VERSION";
+push @CCFLAGS, "-DQUICK=QUICK" if ( $CURR_VERSION eq "SLOW");
+}
+
+push @CCFLAGS, "-DSAPDB_$CURR_VERSION";
+push @CCFLAGS, "-DSAPDB_QUICK" if ($CURR_VERSION eq "SLOW");
+
+
+push @CCFLAGS, @OPTIMIZE ;  # CTS 1108431
+
+$FILENAME="$BASE$EXT";
+
+# copy to tmp
+if ( $SOURCE ne "$FILENAME" ) { copy $SOURCE, "$FILENAME" }
+
+
+unlink "${BASE}_pp.c";
+rename "$FILENAME", "${BASE}_pp.c";
+
+
+@PPCMD = ($CXX);
+push @PPCMD, @INCLUDES, @CCFLAGS;
+push @PPCMD, @PP_FLAGS; # preprocessor flags
+push @PPCMD, @DEFINES;
+push @PPCMD, "${BASE}_pp.c";
+&if $OSSPEC = LINUX
+push @PPCMD, "-o", "${BASE}_pp.i";
+&endif
+print "@PPCMD \n" if ($ENV{NOQUIET});
+ToolTrace( "Calling @PPCMD\n" );
+system("@PPCMD") == 0
+   or die "Error whiv mfile executing \"@PPCMD\"\n".
+           "message: $!\n";
+rename "${BASE}_pp.i", "$FILENAME";
+
+
+__END__
+
+Hier können lange Kommentare stehen

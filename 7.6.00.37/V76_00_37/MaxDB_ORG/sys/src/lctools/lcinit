@@ -1,0 +1,887 @@
+#!/bin/sh
+#
+#set -x
+#
+# **********************************************************
+# *           liveCache Initialization                     *
+# **********************************************************
+# *                                                        *
+# *    lcinit <lc_name> <parameter> [debug] [<userflags>]  *
+# *                                                        *
+# **********************************************************
+
+usage () {
+  echo
+  echo 'USAGE: LCINIT db_name <parameter> [debug] [<userflags>]'
+  echo
+  echo '       parameter :                               '
+  echo '                     init     [debug]            '
+  echo '                     restart  [debug]            '
+  echo '                     register [debug]            '
+  echo '                     slow                        '
+  echo '                     shutdown                    '
+  echo '                     stop                        '
+  echo '       userflags :                               '
+  echo '                     -e    unicode | ascii       '
+  echo '                     -uDBM user,pwd              '
+  echo '                     -uDBA user,pwd              '
+  echo '                     -uSQL user,pwd              '
+  echo
+}
+
+# ==========================================================
+# get INSTROOT of this installation
+# ==========================================================
+get_instroot () {
+    inst_root=`$DBMCLI dbm_version INSTROOT`
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        # use $DBROOT
+        INSTROOT=$DBROOT
+    else
+        INSTROOT=`echo $inst_root | awk '{split($0,a," "); print a[2]}'`
+        # echo $INSTROOT
+    fi
+
+    if [ ! -d $INSTROOT ]
+    then
+        errorexit "ERROR : $INSTROOT does not exist"
+    fi
+}
+
+
+# ==========================================================
+# get RUNDIRECTORY of this instance
+# ==========================================================
+get_rundir () {
+    run_dir=`$DBMCLI param_directget RUNDIRECTORY 2>&1`
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        errorexit "ERROR : cannot get RUNDIRECTORY: $run_dir"
+    else
+        RUNDIRECTORY=`echo $run_dir | grep RUNDIRECTORY | sed -e 's/.*RUNDIRECTORY[^\/]*//'`
+    fi
+
+    if [ ! -d $RUNDIRECTORY ]
+    then
+        errorexit "ERROR : RUNDIRECTORY $RUNDIRECTORY does not exist"
+    fi
+}
+
+# ==========================================================
+# get MCOD flag
+# ==========================================================
+get_mcod () {
+    mcod_flag=`$DBMCLI param_directget MCOD`
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        MCOD=NO
+    elif [ `echo $mcod_flag | grep "YES" | wc -l ` -gt 0 ] 
+    then
+        MCOD=YES
+    else
+        MCOD=NO
+    fi
+}
+
+# ==========================================================
+# check state of the database
+# ==========================================================
+check_state () {
+    dbstate=`$DBMCLI db_state`
+    echo $dbstate >> $LOGFILE
+
+    if [ `echo $dbstate | grep "WARM" | wc -l ` -gt 0 ] 
+    then
+        STATE=ONLINE
+    elif [ `echo $dbstate | grep "ONLINE" | wc -l ` -gt 0 ] 
+    then
+        STATE=ONLINE
+    elif [ `echo $dbstate | grep "COLD" | wc -l ` -gt 0 ]
+    then
+        STATE=ADMIN
+    elif [ `echo $dbstate | grep "ADMIN" | wc -l ` -gt 0 ]
+    then
+        STATE=ADMIN
+    else
+        STATE=OFFLINE
+    fi
+}
+
+# ==========================================================
+# check version of the database
+# ==========================================================
+check_version () {
+    dbvers=`$DBMCLI dbm_version BUILD`
+    echo
+    echo $dbvers | tee -a $LOGFILE
+    echo
+}
+
+# ==========================================================
+# check type (liveCache or OLTP)
+# ==========================================================
+check_dbtype () {
+    db_type=`$DBMCLI param_directget INSTANCE_TYPE`
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        DBTYPE=DB
+    elif [ `echo $db_type | grep "LVC" | wc -l ` -gt 0 ] 
+    then
+        DBTYPE=LVC
+    else
+        DBTYPE=DB
+    fi
+}
+
+# ==========================================================
+# start database into ADMIN mode
+# ==========================================================
+start_lc_admin () {
+    echo Starting $LC $2 into ADMIN | tee -a $LOGFILE
+
+    $DBMCLI db_admin $1 >> $LOGFILE
+    rc=$?
+
+    if [ $rc = 0 ]
+    then
+        STATE=ADMIN
+    else
+        end_error
+    fi
+}
+
+# ==========================================================
+# restart of the database
+# ==========================================================
+start_lc_online () {
+    echo Starting $LC $2 into ONLINE | tee -a $LOGFILE
+
+    $DBMCLI db_online $1 >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        echo
+        echo restart not possible \(please check knldiag\) | tee -a $LOGFILE
+        end_error
+    fi
+}
+
+# ==========================================================
+# restart the database
+# ==========================================================
+restart_lc () {
+    echo Restarting $LC  $2 | tee -a $LOGFILE
+
+    $DBMCLI db_restart $1 >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        end_error
+    fi
+}
+
+# ==========================================================
+# stop the database
+# ==========================================================
+stop_lc () {
+    echo Stopping $LC  | tee -a $LOGFILE
+
+    $DBMCLI $1 >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        end_error
+    fi
+}
+
+# ==========================================================
+# ACTIVATE SERVERDB
+# ==========================================================
+activate_serverdb () {
+    echo Starting ACTIVATE SERVERDB | tee -a $LOGFILE
+
+    $DBMCLI -uUTL -c db_activate $dba_user,$dba_pwd >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        end_error
+    fi
+}
+
+# ==========================================================
+# loading SYSTEM TABLES
+# ==========================================================
+load_sys_tables () {
+    echo Loading SYSTEM TABLES | tee -a $LOGFILE
+
+    $DBMCLI -c load_systab >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        end_error
+    fi
+}
+
+# ==========================================================
+# creating SAP user 
+# ==========================================================
+create_user () {
+
+    sap_pwd=temporary
+    if [ $encoding = "default" ]
+    then
+      echo Creating user $sap_user| tee -a $LOGFILE
+
+      $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute \
+              create user $sap_user password $sap_pwd dba not exclusive >> $LOGFILE
+      rc=$?
+
+      if [ $rc != 0 ]
+      then
+          end_error
+      fi
+    else
+      echo Creating user $sap_user with defaultcode $encoding| tee -a $LOGFILE
+
+      $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute \
+              create user $sap_user password $sap_pwd dba not exclusive defaultcode $encoding >> $LOGFILE
+      rc=$?
+
+      if [ $rc != 0 ]
+      then
+          end_error
+      fi
+    fi
+
+}
+
+# ==========================================================
+# disconnecting SAP user 
+# ==========================================================
+disconnect_user () {
+
+  echo Disconnecting user $sap_user| tee -a $LOGFILE
+
+  proc_list=`$DBMCLI -uSQL $dba_user,$dba_pwd sql_execute select process from transactions where upper\(username\) = upper\(\'$sap_user\'\)`
+  rc=$?
+  if [ $rc = 0 ]
+  then
+    for p in `echo $proc_list`; do
+        if [ "$p" != "OK" -a "$p" != "END" ] 
+        then
+            $DBMCLI db_cons kill $p >> $LOGFILE
+        fi
+    done
+  fi
+}
+
+# ==========================================================
+# checking SAP user 
+# ==========================================================
+check_user () {
+
+  echo Checking user $sap_user| tee -a $LOGFILE
+
+  $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute select \*  from users where upper\(username\) = upper\(\'$sap_user\'\) >> $LOGFILE
+  rc=$?
+
+  if [ $rc != 0 ]
+  then
+      SAPUSER=NO
+  else
+      SAPUSER=YES
+  fi
+}
+
+# ==========================================================
+# disable SAP user 
+# ==========================================================
+disable_user () {
+
+  echo Disable user $sap_user| tee -a $LOGFILE
+
+  sap_pwd=temporary
+  $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute alter password $sap_user $sap_pwd >> $LOGFILE
+  rc=$?
+
+  if [ $rc != 0 ]
+  then
+      end_error
+  fi
+}
+
+# ==========================================================
+# enable SAP user 
+# ==========================================================
+enable_user () {
+
+  sap_pwd=$sap_orgpwd
+  echo Enable user $sap_user | tee -a $LOGFILE
+  $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute alter password $sap_user $sap_pwd >> $LOGFILE
+  rc=$?
+  if [ $rc != 0 ]
+  then
+      end_error
+  fi
+
+  $DBMCLI -uSQL $dba_user,$dba_pwd user_sap $sap_user,$sap_pwd >> $LOGFILE
+  rc=$?
+  if [ $rc != 0 ]
+  then
+      end_error
+  fi
+}
+
+# ==========================================================
+# cleanup OMS structures
+# ==========================================================
+cleanup_OMS () {
+    
+    $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute select \* from dbprocedures where DBPROCNAME = \'OMS_CLEANUP_AFTER_INIT\'  >> $LOGFILE
+    rc=$?
+
+    if [ $rc = 0 ]
+    then
+        echo Cleanup OMS structures | tee -a $LOGFILE
+        $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute  call OMS_CLEANUP_AFTER_INIT >> $LOGFILE
+        rc=$?
+        if [ $rc != 0 ]
+        then
+            end_error
+        fi
+    fi
+}
+
+# ==========================================================
+# dropping SAP user 
+# ==========================================================
+drop_user () {
+
+  echo Dropping user $sap_user| tee -a $LOGFILE
+
+  $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute drop user $sap_user >> $LOGFILE
+  rc=$?
+
+  if [ $rc != 0 ]
+  then
+      end_error
+  fi
+}
+
+# ==========================================================
+# dropping LVC schemas
+# ==========================================================
+drop_schemas () {
+
+  if [ $DBTYPE = "LVC" ]
+  then
+      echo Dropping schemas| tee -a $LOGFILE
+
+      $DBMCLI -uSQL $dba_user,$dba_pwd sql_execute \
+              call drop_schemas >> $LOGFILE
+      rc=$?
+
+      if [ $rc != 0 ]
+      then
+          end_error
+      fi
+  fi
+}
+
+# ==========================================================
+# creation of COM routines
+# ==========================================================
+create_COM () {
+    echo Creating liveCache application procedures | tee -a $LOGFILE
+
+    $DBMCLI load_lcapps $sap_user,$sap_pwd >> $LOGFILE
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        end_error
+    fi
+}
+
+# ==========================================================
+# reset COM routines
+# ==========================================================
+reset_COM () {
+    
+    $DBMCLI -uSQL $sap_user,$sap_pwd sql_execute select \* from dbprocedures where DBPROCNAME = \'SAPAPO_RESET_GLOBALS\'  >> $LOGFILE
+    rc=$?
+
+    if [ $rc = 0 ]
+    then
+        echo Calling reset procedure | tee -a $LOGFILE
+        $DBMCLI -uSQL $sap_user,$sap_pwd sql_execute  call SAPAPO_RESET_GLOBALS >> $LOGFILE
+        rc=$?
+        if [ $rc != 0 ]
+        then
+            end_error
+        fi
+    fi
+}
+
+# ==========================================================
+# nothing todo
+# ==========================================================
+nothing_todo () {
+    echo
+    echo $DBTEXT $LC is already $STATE | tee -a $LOGFILE
+    save_history
+    exit 0
+}
+
+# ==========================================================
+# save logfile into a history file
+# ==========================================================
+save_history () {
+    echo '------------------------------------------------------------' >> $LOGFILE
+    echo `date` >> $LOGFILE
+    echo '************************** END *****************************' >> $LOGFILE
+
+    cat $LOGFILE >> $HISFILE
+}
+
+
+# ==========================================================
+# call user exit function (script param1 param2)
+# ==========================================================
+call_user_exit () {
+    if [ -x $1 ]
+    then
+        echo
+        echo Calling $1 $2 $3 | tee -a $LOGFILE
+        $1 $2 $3
+        echo
+    fi
+}
+
+# ==========================================================
+# inform the cluster software
+# mode : starting, stopping
+# action : req, ok, error
+# ==========================================================
+cluster_info () {
+    if [ $CLUST_MODE != "NO_INFO" ]
+    then
+        call_user_exit $LCCLUSTER $CLUST_MODE $1
+    fi
+}
+
+# ==========================================================
+# errorexit
+# ==========================================================
+errorexit () {
+    echo $1
+    exit 1
+}
+
+# ==========================================================
+# end with error
+# ==========================================================
+end_error () {
+    cluster_info error
+    echo
+    echo ERROR : $DBTEXT $LC not $DONETXT \(see $LOGFILE\). | tee -a $LOGFILE
+    save_history
+    exit 1
+}
+
+# ==========================================================
+# end without error
+# ==========================================================
+end_ok () {
+    cluster_info ok
+    echo
+    echo $DBTEXT $LC successfully $DONETXT. | tee -a $LOGFILE
+    save_history
+    exit 0
+}
+
+#########################################################################
+#
+# main program
+#
+#########################################################################
+
+    if [ $# -gt 0 ] 
+    then
+        LC=$1
+    else
+        usage
+        errorexit ""
+    fi
+
+    OS=`uname`
+
+    mode=restart
+    debug=opt
+
+    #----------------------- internal user/pwd --------------------------
+
+    db_user=control
+    db_pwd=control
+    dba_user=superdba
+    dba_pwd=admin
+    sap_user=sapr3
+    sap_pwd=sap
+    sap_orgpwd=sap
+    encoding=default
+
+    #-----------------------check input parameters -----------------------
+
+    while [ $# -gt 1 ]; do
+        case $2 in
+
+            -uDBM)
+                db_user=`echo $3 | awk '{split($0,a,","); print a[1]}'`
+                db_pwd=`echo $3 | awk '{split($0,a,","); print a[2]}'`
+                shift;;
+
+            -uDBA)
+                dba_user=`echo $3 | awk '{split($0,a,","); print a[1]}'`
+                dba_pwd=`echo $3 | awk '{split($0,a,","); print a[2]}'`
+                shift;;
+
+            -uSQL)
+                sap_user=`echo $3 | awk '{split($0,a,","); print a[1]}'`
+                sap_pwd=`echo $3 | awk '{split($0,a,","); print a[2]}'`
+                sap_orgpwd=$sap_pwd
+                shift;;
+
+            -e)
+                encoding=$3
+                shift;;
+            debug)
+                debug=debug
+                ;;
+
+            *)
+                mode=$2
+                ;;
+        esac
+
+        shift
+    done
+
+    #-------------------------- dbmcli ----------------------------------
+
+    DBMCLI="dbmcli -d $LC -u $db_user,$db_pwd"
+
+    #------------------------ check database ----------------------------
+
+    dbstate=`$DBMCLI db_state`
+    rc=$?
+
+    if [ $rc != 0 ]
+    then
+        echo $dbstate
+        errorexit "ERROR : could not connect to $LC" 
+    fi
+
+    #---------------------- get installation directory ------------------
+
+    get_instroot
+
+    #---------------------- get rundirectory ----------------------------
+
+    get_rundir
+
+    #---------------------- MCOD FLAG -----------------------------------
+
+    get_mcod
+
+    #---------------------- check instance type -------------------------
+    
+    if [ $mode = "slow" -o $mode = "SLOW" ]
+    then
+      DBSPEED=-slow
+      TEXTDBSPEED="SLOW KERNEL"
+    else
+      if [ $debug = "debug" ]
+      then
+        DBSPEED=-test
+        TEXTDBSPEED="TEST KERNEL"
+      else
+        DBSPEED=
+        TEXTDBSPEED=
+      fi
+    fi
+    
+    #-------------------------- register tools --------------------------
+
+    REGCOM="$INSTROOT/bin/xregcomp -c"
+    LCCLUSTER="$INSTROOT/sap/lccluster"
+
+    #-------------------------- set location of his and log file --------
+    
+    LOGFILE=$RUNDIRECTORY/lcinit.log
+    HISFILE=$RUNDIRECTORY/lcinit.his
+
+    #---------------------- check instance type -------------------------
+
+    check_dbtype
+
+    if [ $DBTYPE = "LVC" ]
+    then
+        DBTEXT=liveCache
+    else
+        DBTEXT=Database
+    fi
+
+    #--------------------- cluster start/stop mode ----------------------
+
+    clust_start=starting
+    clust_stop=stopping
+    CLUST_MODE=NO_INFO
+
+    #----------------------- print out the header -----------------------
+
+    echo
+    echo '************************* START ****************************' > $LOGFILE
+    echo $DBTEXT $LC \($mode\) | tee -a $LOGFILE
+    echo `date` >> $LOGFILE
+    echo '------------------------------------------------------------' >> $LOGFILE
+    echo installation path: $INSTROOT >> $LOGFILE
+    echo operating system : $OS >> $LOGFILE
+    echo
+
+    #--------------------- check state of the database ------------------
+    check_state
+    echo The $DBTEXT state is $STATE
+    echo
+
+    $DBMCLI dbm_version BUILD | grep Build | tee -a $LOGFILE
+    echo
+    
+    #----------------------- init of the database -----------------------
+
+    if [ $mode = "init" -o $mode = "INIT" ]
+    then
+        DONETXT=initialized
+
+        if [ $MCOD = "NO" ]
+        then
+            # MCOD == NO initialisation
+            if [ $STATE != "OFFLINE" ]
+            then
+                CLUST_MODE=$clust_stop
+                cluster_info req
+
+                stop_lc db_stop
+
+                cluster_info ok
+            fi
+
+            CLUST_MODE=$clust_start
+            cluster_info req
+
+            start_lc_admin $DBSPEED $TEXTDBSPEED
+            check_version
+
+            activate_serverdb
+            load_sys_tables
+        else
+            # MCOD == YES initialisation
+            
+            if [ $STATE = "ADMIN" ]
+            then
+                CLUST_MODE=$clust_stop
+                cluster_info req
+                stop_lc db_stop
+                cluster_info ok
+                STATE=OFFLINE
+            fi
+        
+            if [ $STATE != "ONLINE" ]
+            then
+              CLUST_MODE=$clust_start
+              cluster_info req
+              start_lc_online $DBSPEED $TEXTDBSPEED
+            fi
+            
+            # check for sap user
+            check_user
+            
+            if [ $SAPUSER = "YES" ]
+            then
+              # disable user
+              disable_user
+            
+              # cancel tasks
+              disconnect_user
+              
+              # cleanup OMS structure
+              cleanup_OMS
+              
+              # drop schemas
+              drop_schemas
+              
+              # drop user
+              drop_user
+            fi
+           
+        fi
+
+        create_user
+
+        if [ $MCOD = "NO" ]
+        then
+            restart_lc $DBSPEED $TEXTDBSPEED
+        fi
+
+        # register COM routines
+        create_COM
+        
+        # reset COM routines
+        reset_COM
+        
+        # enable user
+        enable_user
+
+        end_ok
+    fi
+
+    #---------------------- restart of the database ---------------------
+
+    if [ $mode = "restart" -o $mode = "RESTART" -o $mode = "slow"  -o $mode = "SLOW" ]
+    then
+        DONETXT=restarted
+        if [ $STATE = "ONLINE" ]
+        then
+            nothing_todo
+        fi
+
+        if [ $STATE = "ADMIN" ]
+        then
+            CLUST_MODE=$clust_stop
+            cluster_info req
+            stop_lc db_stop
+            cluster_info ok
+            STATE=OFFLINE
+        fi
+            
+        CLUST_MODE=$clust_start
+        cluster_info req
+
+        if [ $STATE = "OFFLINE" ]
+        then
+          start_lc_admin  $DBSPEED $TEXTDBSPEED
+        fi
+
+        check_version
+
+        start_lc_online $DBSPEED $TEXTDBSPEED
+
+        create_COM
+
+        end_ok
+    fi
+
+    #------------------------- stop the database ------------------------
+
+    if [ $mode = "stop" -o $mode = "STOP" ]
+    then
+        DONETXT=stopped
+
+        if [ $STATE = "OFFLINE" ]
+        then
+            nothing_todo
+        fi
+        
+        if [ $STATE = "ONLINE" -a $MCOD = "YES" ]
+        then
+          echo
+          echo ERROR : Action not allowed for ALL-IN-ONE system | tee -a $LOGFILE
+          end_error
+        fi
+    
+        CLUST_MODE=$clust_stop
+        cluster_info req
+
+        check_version
+    
+        stop_lc db_stop
+
+        end_ok
+    fi
+
+    #----------------------- shutdown the database ----------------------
+
+    if [ $mode = "shutdown" -o $mode = "SHUTDOWN" ]
+    then
+        DONETXT=stopped
+
+        if [ $STATE = "OFFLINE" ]
+        then
+            nothing_todo
+        fi
+
+        if [ $STATE = "ONLINE" -a $MCOD = "YES" ]
+        then
+          echo
+          echo ERROR : Action not allowed for ALL-IN-ONE system | tee -a $LOGFILE
+          end_error
+        fi
+        
+        CLUST_MODE=$clust_stop
+        cluster_info req
+
+        check_version
+
+        stop_lc db_offline
+
+        end_ok
+    fi
+
+    #----------------------- register COM routines ----------------------
+
+    if [ $mode = "register" -o $mode = "REGISTER" ]
+    then
+        DONETXT=registered
+        
+        if [ $STATE = "ADMIN" ]
+        then
+            CLUST_MODE=$clust_stop
+            cluster_info req
+            stop_lc db_stop
+            cluster_info ok
+            STATE=OFFLINE
+        fi
+        
+        if [ $STATE != "ONLINE" ]
+        then
+            CLUST_MODE=$clust_start
+            cluster_info req
+
+            start_lc_online $DBSPEED $TEXTDBSPEED
+            check_version
+        else
+            CLUST_MODE=NO_INFO
+            check_version
+        fi
+
+        create_COM
+
+        end_ok
+    fi
+
+    exit 0
+
+#########################################################################

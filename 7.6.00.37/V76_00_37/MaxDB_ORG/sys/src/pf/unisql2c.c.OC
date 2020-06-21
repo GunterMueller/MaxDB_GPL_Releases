@@ -1,0 +1,992 @@
+/*!***************************************************************************
+
+  module:        o3sql2ctest.c
+
+  -------------------------------------------------------------------------
+
+  responsible:   Anton Arsenov
+
+  special area:  Unicode conversion tests
+
+  description:   Tests for converting from CHAR UNICODE, VARCHAR UNICODE, LONG VARCHAR UNICODE
+				 to:
+				 SQL_C_CHAR, SQL_C_BINARY, SQL_C_BIT
+				 SQL_C_SSHORT, SQL_C_USHORT, SQL_C_SHORT,
+				 SQL_C_SLONG, SQL_C_ULONG, SQL_S_LONG,
+				 SQL_C_STINYINT, SQL_C_UTINYINT, SQL_C_TINYINT,
+				 SQL_C_SBIGINT, SQL_C_UBIGINT,
+				 SQL_C_NUMERIC, SQL_C_TYPE_DATE,
+				 SQL_C_TYPE_TIME, SQL_C_TYPE_TIMESTAMP.
+
+  [optional tags]:
+
+  -------------------------------------------------------------------------
+
+  copyright:    Copyright (c) 2001-2005 SAP AG
+
+\if EMIT_LICENCE
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+\endif
+*****************************************************************************/
+#define _UNICODE
+#define _ODBC
+/*===========================================================================*
+ *  INCLUDES                                                                 *
+ *===========================================================================*/
+#include "uniutil.c"
+
+/*===========================================================================*
+ *  DEFINES                                                                  *
+ *===========================================================================*/
+
+#define TABNAME "SQL2CTAB"
+#define COLDEF "COLCHAR CHAR(128) UNICODE, COLVARCHAR VARCHAR(128) UNICODE, COLLONG LONG VARCHAR UNICODE"
+
+#define STRCHAR "Jackdaws love my big sphinkx of quartz. 1234567890"
+#define STRBINARY "ABCDEF"
+#define STRSSHORT -12345
+#define STRUSHORT 12345
+#define STRSHORT 12345
+#define STRSLONG -123456789
+#define STRULONG 123456789
+#define STRLONG 123456789
+#define STRFLOAT 1.2345
+#define STRDOUBLE 1.23456789
+#define STRSBIGINT -123456789
+#define STRUBIGINT 123456789
+#define STRSTINYINT -123
+#define STRUTINYINT 123
+#define STRTINYINT 123
+#define STRNUMERIC "-123456789E-4"
+#define STRBIT "1"
+
+#define STRBITRET '1'
+#define STRNUMRET "- V:34 34 153 190 28  P:12 S:0"
+/* #define STRTIMERET "22:47:52" */
+/* #define STRTIMESTAMPRET "1930-2-23 3:6:3.25448235" */
+/* #define STRDATERET "2130-11-02" */
+
+/*===========================================================================*
+ *  FUNCTIONS                                                                  *
+ *===========================================================================*/
+void PrintNumeric(SQL_NUMERIC_STRUCT *sns, UCHAR *str) {
+	UINT	i;
+	SQLCHAR buffer[O3UTIL_TEXT_BUFFER_LEN];
+	SQLCHAR *pChar = sns -> val;
+	
+	if ((sns -> sign) == 0)
+		STRCPY(str, "-");
+	else
+		STRCPY(str, "+");
+
+	STRCAT(str, " V:");
+	i=0;
+	while(pChar[i] != 0) {
+		SPRINTF(buffer, "%d ", pChar[i]);	
+		STRCAT(str, buffer);
+		i++;
+	}
+	STRCAT(str, " P:");
+	SPRINTF(buffer, "%d", sns -> precision);
+	STRCAT(str, buffer);
+	STRCAT(str, " S:");
+	SPRINTF(buffer, "%d", sns -> scale);
+	STRCAT(str, buffer);
+}
+
+void PrintTime(SQL_TIME_STRUCT *sts, UCHAR *str) {
+	SPRINTF(str,"%02d:%02d:%02d", sts -> hour, sts -> minute, sts -> second);
+}
+
+void PrintDate(SQL_DATE_STRUCT *sds, UCHAR *str) {
+	SPRINTF(str,"%04d-%02d-%02d", sds -> year, sds -> month, sds -> day);
+}
+
+void PrintTimeStamp(SQL_TIMESTAMP_STRUCT *sts, UCHAR *str) {
+	SPRINTF(str,"%04d-%02d-%02d %02d:%02d:%02d.%d", sts -> year, sts -> month, sts -> day, sts -> hour, sts -> minute, sts -> second, sts -> fraction);
+}
+
+int main(int argc, char **argv) {
+	HENV henv   = SQL_NULL_HENV;
+	HENV *phenv = &henv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC *phdbc = &hdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT *phstmt = &hstmt;
+	SQLLEN pcbValue;
+	RETCODE rc;
+
+	SQLCHAR insert[MAX_NAME_LEN+1];
+	SQLCHAR select[MAX_NAME_LEN+1];
+
+	SQLCHAR str1[] = "INSERT INTO ";
+	SQLCHAR str2[] = " VALUES(?, ?, ?)";
+	SQLCHAR str3[] = "SELECT * FROM ";
+	SQLCHAR str4[] = "";
+
+	SQLCHAR buffer[O3UTIL_TEXT_BUFFER_LEN];
+        SQLCHAR lbuf[128];
+
+        int len;
+
+        SQLCHAR STRTIMESTAMPRET[128];
+        SQLCHAR STRTIMERET[128];
+        SQLCHAR STRDATERET[128];
+	UINT i;
+
+	SQLWCHAR    par1[128];
+	SQLWCHAR	par2[128];
+	SQLWCHAR	par3[128];
+
+	SQLCHAR		buf1[128];
+	SQLCHAR		buf2[128];
+	SQLCHAR		buf3[128];
+
+	SQL_TIME_STRUCT			sts;
+	SQL_DATE_STRUCT			sds;
+	SQL_TIMESTAMP_STRUCT	stss;
+
+	SQLCHAR			inpCChar1[128];
+	SQLCHAR			inpCChar2[128];
+	SQLCHAR			inpCChar3[128];
+	SQLSMALLINT		inpCSShort1;
+	SQLSMALLINT		inpCSShort2;
+	SQLSMALLINT		inpCSShort3;
+    SQLUSMALLINT	inpCUShort1;
+	SQLUSMALLINT	inpCUShort2;
+	SQLUSMALLINT	inpCUShort3;
+	SQLSMALLINT		inpCShort1;
+	SQLSMALLINT		inpCShort2;
+	SQLSMALLINT		inpCShort3;
+	SQLINTEGER		inpCSLong1;
+	SQLINTEGER		inpCSLong2;
+	SQLINTEGER		inpCSLong3;
+	SQLUINTEGER		inpCULong1;
+	SQLUINTEGER		inpCULong2;
+	SQLUINTEGER		inpCULong3;
+	SQLINTEGER		inpCLong1;
+	SQLINTEGER		inpCLong2;
+	SQLINTEGER		inpCLong3;
+	SQLREAL			inpCFloat1;
+	SQLREAL			inpCFloat2;
+	SQLREAL			inpCFloat3;
+	SQLDOUBLE		inpCDouble1;
+	SQLDOUBLE		inpCDouble2;
+	SQLDOUBLE		inpCDouble3;
+	SQLBIGINT		inpCSBigint1;
+	SQLBIGINT		inpCSBigint2;
+	SQLBIGINT		inpCSBigint3;
+	SQLUBIGINT		inpCUBigint1;
+	SQLUBIGINT		inpCUBigint2;
+	SQLUBIGINT		inpCUBigint3;
+	SQLCHAR			inpCBit1 = 255;
+	SQLCHAR			inpCBit2 = 255;
+	SQLCHAR			inpCBit3 = 255;
+	SQLCHAR			inpCUTinyint1;
+	SQLCHAR			inpCUTinyint2;
+	SQLCHAR			inpCUTinyint3;
+	SQLSCHAR		inpCSTinyint1;
+	SQLSCHAR		inpCSTinyint2;
+	SQLSCHAR		inpCSTinyint3;
+	SQLCHAR			inpCTinyint1;
+	SQLCHAR			inpCTinyint2;
+	SQLCHAR			inpCTinyint3;
+	SQLCHAR			inpCBinary1[512];
+	SQLCHAR			inpCBinary2[512];
+	SQLCHAR			inpCBinary3[512];
+
+	SQL_TIME_STRUCT			inpsts1;
+	SQL_TIME_STRUCT			inpsts2;
+	SQL_TIME_STRUCT			inpsts3;
+	SQL_DATE_STRUCT			inpsds1;
+	SQL_DATE_STRUCT			inpsds2;
+	SQL_DATE_STRUCT			inpsds3;
+	SQL_TIMESTAMP_STRUCT	inpstss1;
+	SQL_TIMESTAMP_STRUCT	inpstss2;
+	SQL_TIMESTAMP_STRUCT	inpstss3;
+	SQL_NUMERIC_STRUCT		inpsns1;
+	SQL_NUMERIC_STRUCT		inpsns2;
+	SQL_NUMERIC_STRUCT		inpsns3;
+	
+	BOOL			okflag;
+
+	/* Connection to database and creation table rutine */
+	FullConnect(phenv, phdbc);
+    rc = SQLAllocStmt(hdbc, phstmt);
+    SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+    PRINTF(buffer);
+    ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	DropTestTable(hstmt, TABNAME);
+	CreateTestTable(hstmt, TABNAME, COLDEF);
+
+	/* Insert unicode data in to the table */
+	STRCPY(insert, str1);
+	STRCAT(insert, TABNAME);
+	STRCAT(insert, str2);
+	SPRINTF(buffer,"Insert Stmt = '%s'"CRLF, insert);
+	PRINTF(buffer);
+	rc = SQLPrepare(hstmt, insert, SQL_NTS);
+	SPRINTF(buffer," SQLPrepare retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR,
+							  SQL_WCHAR, 128, 0, par1, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR,
+							  SQL_WVARCHAR, 128, 0, par2, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = SQL_NTS;
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_WCHAR,
+							  SQL_WLONGVARCHAR, 128, 0, par3, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert string for convert to C_CHAR */
+	StringToWString(par1, 128, NULL, TRUE, STRCHAR, 128, NULL);
+	StringToWString(par2, 128, NULL, TRUE, STRCHAR, 128, NULL);
+	StringToWString(par3, 128, NULL, TRUE, STRCHAR, 128, NULL);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Insert strings for convert to C_SSHORT */
+	GetUnicodeSShort(par1, 128, STRSSHORT);
+	GetUnicodeSShort(par2, 128, STRSSHORT);
+	GetUnicodeSShort(par3, 128, STRSSHORT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_USHORT */
+	GetUnicodeUShort(par1, 128, STRUSHORT);
+	GetUnicodeUShort(par2, 128, STRUSHORT);
+	GetUnicodeUShort(par3, 128, STRUSHORT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_SHORT */
+	GetUnicodeSShort(par1, 128, STRSHORT);
+	GetUnicodeSShort(par2, 128, STRSHORT);
+	GetUnicodeSShort(par3, 128, STRSHORT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_SLONG */
+	GetUnicodeSLong(par1, 128, STRSLONG);
+	GetUnicodeSLong(par2, 128, STRSLONG);
+	GetUnicodeSLong(par3, 128, STRSLONG);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_ULONG */
+	GetUnicodeULong(par1, 128, STRULONG);
+	GetUnicodeULong(par2, 128, STRULONG);
+	GetUnicodeULong(par3, 128, STRULONG);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_LONG */
+	GetUnicodeSLong(par1, 128, STRLONG);
+	GetUnicodeSLong(par2, 128, STRLONG);
+	GetUnicodeSLong(par3, 128, STRLONG);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_FLOAT */
+	GetUnicodeFloat(par1, 128, STRFLOAT, 4);
+	GetUnicodeFloat(par2, 128, STRFLOAT, 4);
+	GetUnicodeFloat(par3, 128, STRFLOAT, 4);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_DOUBLE */
+	GetUnicodeDouble(par1, 128, STRDOUBLE, 8);
+	GetUnicodeDouble(par2, 128, STRDOUBLE, 8);
+	GetUnicodeDouble(par3, 128, STRDOUBLE, 8);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_SBIGINT */
+        /*
+	GetUnicodeSBigint(par1, 128, STRSBIGINT);
+	GetUnicodeSBigint(par2, 128, STRSBIGINT);
+	GetUnicodeSBigint(par3, 128, STRSBIGINT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        */
+	/* Insert strings for convert to C_UBIGINT */
+        /* NO bigint
+	GetUnicodeUBigint(par1, 128, STRUBIGINT);
+	GetUnicodeUBigint(par2, 128, STRUBIGINT);
+	GetUnicodeUBigint(par3, 128, STRUBIGINT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        */
+	/* Insert strings for convert to C_TIME */
+	GenerateSQLTime(&sts);
+	GetUnicodeTime(par1, 128, &sts);
+	GetUnicodeTime(par2, 128, &sts);
+	GetUnicodeTime(par3, 128, &sts);
+        PrintTime (&sts, STRTIMERET);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_DATE */
+	GenerateSQLDate(&sds);
+	GetUnicodeDate(par1, 128, &sds);
+	GetUnicodeDate(par2, 128, &sds);
+	GetUnicodeDate(par3, 128, &sds);
+        PrintDate (&sds, STRDATERET);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_TIMESTAMP */
+	GenerateSQLTimeStamp(&stss);
+	GetUnicodeTimeStamp(par1, 128, &stss);
+	GetUnicodeTimeStamp(par2, 128, &stss);
+	GetUnicodeTimeStamp(par3, 128, &stss);
+        PrintTimeStamp (&stss, STRTIMESTAMPRET);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_STINYINT */
+	GetUnicodeSTinyint(par1, 128, STRSTINYINT);
+	GetUnicodeSTinyint(par2, 128, STRSTINYINT);
+	GetUnicodeSTinyint(par3, 128, STRSTINYINT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_UTINYINT */
+	GetUnicodeUTinyint(par1, 128, STRUTINYINT);
+	GetUnicodeUTinyint(par2, 128, STRUTINYINT);
+	GetUnicodeUTinyint(par3, 128, STRUTINYINT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_TINYINT */
+	GetUnicodeSTinyint(par1, 128, STRTINYINT);
+	GetUnicodeSTinyint(par2, 128, STRTINYINT);
+	GetUnicodeSTinyint(par3, 128, STRTINYINT);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	/* Insert strings for convert to C_NUMERIC */
+	StringToWString(par1, 128, NULL, TRUE, STRNUMERIC, 128, NULL);
+	StringToWString(par2, 128, NULL, TRUE, STRNUMERIC, 128, NULL);
+	StringToWString(par3, 128, NULL, TRUE, STRNUMERIC, 128, NULL);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert string for convert to C_BYNARY */
+	StringToWString(par1, 128, NULL, TRUE, STRBINARY, 128, NULL);
+	StringToWString(par2, 128, NULL, TRUE, STRBINARY, 128, NULL);
+	StringToWString(par3, 128, NULL, TRUE, STRBINARY, 128, NULL);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert strings for convert to C_BIT */
+	/*
+	StringToWString(par1, 128, NULL, TRUE, STRBIT, 128, NULL);
+	StringToWString(par2, 128, NULL, TRUE, STRBIT, 128, NULL);
+	StringToWString(par3, 128, NULL, TRUE, STRBIT, 128, NULL);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	*/
+
+	/* Select date from the table and convert it to a numberic values */
+	STRCPY(select, str3);
+    STRCAT(select, TABNAME);
+	STRCAT(select, str4);
+	SPRINTF(buffer,"Select Stmt= '%s'"CRLF, select);
+	PRINTF(buffer);
+	rc = SQLExecDirect(hstmt, select, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as CHAR */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_CHAR, inpCChar1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_CHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_CHAR, inpCChar2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_CHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_CHAR, inpCChar3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_CHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Select data as SSHORT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_SSHORT, &inpCSShort1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_SSHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_SSHORT, &inpCSShort2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_SSHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_SSHORT, &inpCSShort3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_SSHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as USHORT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_USHORT, &inpCUShort1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_USHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_USHORT, &inpCUShort2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_USHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_USHORT, &inpCUShort3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_USHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as SHORT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_SHORT, &inpCShort1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_SHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_SHORT, &inpCShort2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_SHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_SHORT, &inpCShort3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_SHORT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as SLONG */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_SLONG, &inpCSLong1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_SLONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_SLONG, &inpCSLong2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_SLONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_SLONG, &inpCSLong3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_SLONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as ULONG */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_ULONG, &inpCULong1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_ULONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_ULONG, &inpCULong2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_ULONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_ULONG, &inpCULong3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_ULONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as LONG */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_LONG, &inpCLong1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_LONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_LONG, &inpCLong2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_LONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_LONG, &inpCLong3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_LONG) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as FLOAT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_FLOAT, &inpCFloat1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_FLOAT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_FLOAT, &inpCFloat2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_FLOAT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_FLOAT, &inpCFloat3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_FLOAT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as DOUBLE */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_DOUBLE, &inpCDouble1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_DOUBLE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_DOUBLE, &inpCDouble2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_DOUBLE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_DOUBLE, &inpCDouble3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_DOUBLE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Select data as SBIGINT */
+        /*
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_SBIGINT, &inpCSBigint1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_SBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_SBIGINT, &inpCSBigint2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_SBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_SBIGINT, &inpCSBigint3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_SBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        */
+
+	/* Select data as UBIGINT */
+        /*
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_UBIGINT, &inpCUBigint1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_UBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_UBIGINT, &inpCUBigint2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_UBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_UBIGINT, &inpCUBigint3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_UBIGINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        */
+
+	/* Select data as TIME */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_TYPE_TIME, &inpsts1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_TIME) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_TYPE_TIME, &inpsts2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_TIME) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_TYPE_TIME, &inpsts3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_TIME) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as DATE */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_TYPE_DATE, &inpsds1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_DATE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_TYPE_DATE, &inpsds2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_DATE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_TYPE_DATE, &inpsds3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_DATE) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as TIMESTAMP */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_TYPE_TIMESTAMP, &inpstss1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_TIMESTAMP) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_TYPE_TIMESTAMP, &inpstss2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_TIMESTAMP) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_TYPE_TIMESTAMP, &inpstss3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_TIMESTAMP) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	/* Select data as STINYINT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_STINYINT, &inpCSTinyint1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_STINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_STINYINT, &inpCSTinyint2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_STINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_STINYINT, &inpCSTinyint3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_STINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as UTINYINT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_UTINYINT, &inpCUTinyint1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_UTINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_UTINYINT, &inpCUTinyint2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_UTINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_UTINYINT, &inpCUTinyint3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_UTINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as TINYINT */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_TINYINT, &inpCTinyint1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_TINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_TINYINT, &inpCTinyint2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_TINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_TINYINT, &inpCTinyint3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_TINYINT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as NUMERIC */
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_NUMERIC, &inpsns1, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_NUMERIC) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_NUMERIC, &inpsns2, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_NUMERIC) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_NUMERIC, &inpsns3, 128, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_NUMERIC) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as BINARY */
+	MEMSET(inpCBinary1, 0, 512);
+	MEMSET(inpCBinary2, 0, 512);
+	MEMSET(inpCBinary3, 0, 512);
+
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 1, SQL_C_BINARY, inpCBinary1, 258, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_BINARY) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_BINARY, inpCBinary2, 258, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_BINARY) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_BINARY, inpCBinary3, 258, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_BINARY) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Select data as BIT */
+	/*
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	
+	rc = SQLGetData(hstmt, 1, SQL_C_BIT, &inpCBit1, 2, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WCHAR -> SQL_C_BIT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 2, SQL_C_BIT, &inpCBit2, 2, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WVARCHAR -> SQL_C_BIT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLGetData(hstmt, 3, SQL_C_BIT, &inpCBit3, 2, NULL);
+	SPRINTF(buffer," SQLGetData (SQL_WLONGVARCHAR -> SQL_C_BIT) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	*/
+
+	okflag = TRUE;
+	/* Printing results of test */
+	PRINTF("--------------------------------------------------------------------------------\n");
+	PRINTF("| TYPE\t\t| CHAR\t\t| VARCHAR\t| LONG VARCHAR\t|\n");
+	PRINTF("--------------------------------------------------------------------------------\n");
+	SPRINTF(buffer," C_STINYINT:\t%d\t\t%d\t\t%d"CRLF, inpCSTinyint1, inpCSTinyint2, inpCSTinyint3);
+	PRINTF(buffer);
+	if ((inpCSTinyint1 != STRSTINYINT)||(inpCSTinyint2 != STRSTINYINT)||(inpCSTinyint3 != STRSTINYINT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_UTINYINT:\t%d\t\t%d\t\t%d"CRLF, inpCUTinyint1, inpCUTinyint2, inpCUTinyint3);
+	PRINTF(buffer);
+	if ((inpCUTinyint1 != STRUTINYINT)||(inpCUTinyint2 != STRUTINYINT)||(inpCUTinyint3 != STRUTINYINT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_TINYINT:\t%d\t\t%d\t\t%d"CRLF, inpCTinyint1, inpCTinyint2, inpCTinyint3);
+	PRINTF(buffer);
+	if ((inpCTinyint1 != STRTINYINT)||(inpCTinyint2 != STRTINYINT)||(inpCTinyint3 != STRTINYINT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_SSHORT:\t%d\t\t%d\t\t%d"CRLF, inpCSShort1, inpCSShort2, inpCSShort3);
+	PRINTF(buffer);
+	if ((inpCSShort1 != STRSSHORT)||(inpCSShort2 != STRSSHORT)||(inpCSShort3 != STRSSHORT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_USHORT:\t%d\t\t%d\t\t%d"CRLF, inpCUShort1, inpCUShort2, inpCUShort3);
+	PRINTF(buffer);
+	if ((inpCUShort1 != STRUSHORT)||(inpCUShort2 != STRUSHORT)||(inpCUShort3 != STRUSHORT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_SHORT:\t%d\t\t%d\t\t%d"CRLF, inpCShort1, inpCShort2, inpCShort3);
+	PRINTF(buffer);
+	if ((inpCShort1 != STRSHORT)||(inpCShort2 != STRSHORT)||(inpCShort3 != STRSHORT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_SLONG:\t%d\t%d\t%d"CRLF, inpCSLong1, inpCSLong2, inpCSLong3);
+	PRINTF(buffer);
+	if ((inpCSLong1 != STRSLONG)||(inpCSLong2 != STRSLONG)||(inpCSLong3 != STRSLONG))
+		okflag = FALSE;
+	SPRINTF(buffer," C_ULONG:\t%d\t%d\t%d"CRLF, inpCULong1, inpCULong2, inpCULong3);
+	PRINTF(buffer);
+	if ((inpCULong1 != STRULONG)||(inpCULong2 != STRULONG)||(inpCULong3 != STRULONG))
+		okflag = FALSE;
+	SPRINTF(buffer," C_LONG:\t%d\t%d\t%d"CRLF, inpCLong1, inpCLong2, inpCLong3);
+	PRINTF(buffer);
+	if ((inpCLong1 != STRLONG)||(inpCLong2 != STRLONG)||(inpCLong3 != STRLONG))
+		okflag = FALSE;
+	/*
+	SPRINTF(buffer," C_SBIGINT:\t%ld\t%ld\t%ld\n", inpCSBigint1, STRSBIGINT, STRSBIGINT);
+	PRINTF(buffer);
+	if ((inpCSBigint1 != STRSBIGINT)||(inpCSBigint2 != STRSBIGINT)||(inpCSBigint3 != STRSBIGINT))
+		okflag = FALSE;
+	*/
+	/*
+	SPRINTF(buffer," C_UBIGINT:\t%d\t%d\t%d\n", inpCUBigint1, inpCUBigint2, inpCUBigint3);
+	PRINTF(buffer);
+	if ((inpCUBigint1 != STRUBIGINT)||(inpCUBigint2 != STRUBIGINT)||(inpCUBigint3 != STRUBIGINT))
+		okflag = FALSE;
+	*/
+
+	SPRINTF(buffer," C_FLOAT:\t%8f\t%8f\t%8f"CRLF, inpCFloat1, inpCFloat2, inpCFloat3);
+	PRINTF(buffer);
+	if ((inpCFloat1 != (SQLREAL)STRFLOAT)||(inpCFloat2 != (SQLREAL)STRFLOAT)||(inpCFloat3 != (SQLREAL)STRFLOAT))
+		okflag = FALSE;
+	SPRINTF(buffer," C_DOUBLE:\t");
+	PRINTF(buffer);
+        SPRINTF(lbuf,"%.8E", inpCDouble1);
+        len = strlen (lbuf);         /* some machine print exponent with 3 */
+        if (lbuf[len-3] == '0') {    /* digits, other with 2               */
+          lbuf[len-3] = lbuf[len-2];
+          lbuf[len-2] = lbuf[len-1];
+          lbuf[len-1] = lbuf[len];
+         }
+        SPRINTF(buffer, "%s\t", lbuf);
+	PRINTF(buffer);
+        SPRINTF(lbuf,"%.8E", inpCDouble2);
+        len = strlen (lbuf);         /* some machine print exponent with 3 */
+        if (lbuf[len-3] == '0') {    /* digits, other with 2               */
+          lbuf[len-3] = lbuf[len-2];
+          lbuf[len-2] = lbuf[len-1];
+          lbuf[len-1] = lbuf[len];
+         }
+        SPRINTF(buffer, "%s\t", lbuf);
+	PRINTF(buffer);
+        SPRINTF(lbuf,"%.8E", inpCDouble3);
+        len = strlen (lbuf);         /* some machine print exponent with 3 */
+        if (lbuf[len-3] == '0') {    /* digits, other with 2               */
+          lbuf[len-3] = lbuf[len-2];
+          lbuf[len-2] = lbuf[len-1];
+          lbuf[len-1] = lbuf[len];
+         }
+        SPRINTF(buffer, "%s\n", lbuf);
+	PRINTF(buffer);
+
+	if ((inpCDouble1 != (SQLDOUBLE)STRDOUBLE)||(inpCDouble2 != (SQLDOUBLE)STRDOUBLE)||(inpCDouble3 != (SQLDOUBLE)STRDOUBLE))
+		okflag = FALSE;
+	/*
+	SPRINTF(buffer," C_BIT:\t\t%c\t\t%c\t\t%c"CRLF, inpCBit1, inpCBit2, inpCBit3);
+	PRINTF(buffer);
+	if ((inpCBit1 != STRBITRET)||(inpCBit2 != STRBITRET)||(inpCBit2 != STRBITRET))
+		okflag = FALSE;
+	*/
+	SPRINTF(buffer,"\n C_CHAR:\n\t%s\n\t%s\n\t%s\n"CRLF, inpCChar1, inpCChar2, inpCChar3);
+	PRINTF(buffer);
+	if ((STRCMP(inpCChar1, STRCHAR) != 0)||(STRCMP(inpCChar2, STRCHAR) != 0)||(STRCMP(inpCChar3, STRCHAR) != 0))
+		okflag = FALSE;
+
+	SPRINTF(buffer,"\n C_BINARY:\n\t(%c)(%c)(%c)(%c)(%c)"CRLF, inpCBinary1[0]+inpCBinary1[1],
+                                                                   inpCBinary1[2]+inpCBinary1[3],
+                                                                   inpCBinary1[4]+inpCBinary1[5],
+                                                                   inpCBinary1[6]+inpCBinary1[7],
+                                                                   inpCBinary1[8]+inpCBinary1[9]);
+	PRINTF(buffer);
+	SPRINTF(buffer,"\t(%c)(%c)(%c)(%c)(%c)"CRLF, inpCBinary2[0]+inpCBinary2[1],
+                                                     inpCBinary2[2]+inpCBinary2[3],
+                                                     inpCBinary2[4]+inpCBinary2[5],
+                                                     inpCBinary2[6]+inpCBinary2[7],
+                                                     inpCBinary2[8]+inpCBinary2[9]);
+	PRINTF(buffer);
+	SPRINTF(buffer,"\t(%c)(%c)(%c)(%c)(%c)"CRLF, inpCBinary3[0]+inpCBinary3[1],
+                                                     inpCBinary3[2]+inpCBinary3[3],
+                                                     inpCBinary3[4]+inpCBinary3[5],
+                                                     inpCBinary3[6]+inpCBinary3[7],
+                                                     inpCBinary3[8]+inpCBinary3[9]);
+	PRINTF(buffer);
+	WStringToString(buf1, 128, NULL, TRUE, (SQLWCHAR *)inpCBinary1, 128, NULL);
+	WStringToString(buf2, 128, NULL, TRUE, (SQLWCHAR *)inpCBinary2, 128, NULL);
+	WStringToString(buf3, 128, NULL, TRUE, (SQLWCHAR *)inpCBinary3, 128, NULL);
+	if ((STRCMP(buf1, STRBINARY) != 0)||(STRCMP(buf2, STRBINARY) != 0)||(STRCMP(buf3, STRBINARY) != 0))
+		okflag = FALSE;
+	PrintNumeric(&inpsns1, buf1);
+	PrintNumeric(&inpsns2, buf2);
+	PrintNumeric(&inpsns3, buf3);
+	if ((STRCMP(buf1, STRNUMRET) != 0)||(STRCMP(buf2, STRNUMRET) != 0)||(STRCMP(buf3, STRNUMRET) != 0))
+		okflag = FALSE;
+	SPRINTF(buffer,"\n C_NUMERIC:\n\t%s\n\t%s\n\t%s\n"CRLF, buf1, buf2, buf3);
+	PRINTF(buffer);
+	PrintTime(&inpsts1, buf1);
+	PrintTime(&inpsts2, buf2);
+	PrintTime(&inpsts3, buf3);
+	if ((STRCMP(buf1, STRTIMERET) != 0)||(STRCMP(buf2, STRTIMERET) != 0)||(STRCMP(buf3, STRTIMERET) != 0))
+		okflag = FALSE;
+	SPRINTF(buffer,"\n C_TIME:\n\t%s\n\t%s\n\t%s\n"CRLF, buf1, buf2, buf3);
+	PRINTF(buffer);
+	PrintDate(&inpsds1, buf1);
+	PrintDate(&inpsds2, buf2);
+	PrintDate(&inpsds3, buf3);
+	if ((STRCMP(buf1, STRDATERET) != 0)||(STRCMP(buf2, STRDATERET) != 0)||(STRCMP(buf3, STRDATERET) != 0))
+		okflag = FALSE;
+	SPRINTF(buffer,"\n C_DATE:\n\t%s\n\t%s\n\t%s\n"CRLF, buf1, buf2, buf3);
+	PRINTF(buffer);
+	PrintTimeStamp(&inpstss1, buf1);
+	PrintTimeStamp(&inpstss2, buf2);
+	PrintTimeStamp(&inpstss3, buf3);
+	if ((strncmp(buf1, STRTIMESTAMPRET, strlen(STRTIMESTAMPRET)) != 0)||
+            (strncmp(buf2, STRTIMESTAMPRET, strlen(STRTIMESTAMPRET)) != 0)||
+            (strncmp(buf3, STRTIMESTAMPRET, strlen(STRTIMESTAMPRET)) != 0))
+		okflag = FALSE;
+	SPRINTF(buffer,"\n C_TIMESTAMP:\n\t%s\n\t%s\n\t%s\n"CRLF, buf1, buf2, buf3);
+	PRINTF(buffer);
+	
+	if (okflag == TRUE)
+		PRINTF("Test state: OK\n\n");
+	else
+		PRINTF("Test state: Failure\n\n");
+	FullDisconnect(phenv, phdbc);
+	return 0;
+}

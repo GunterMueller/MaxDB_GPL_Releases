@@ -1,0 +1,394 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+BEGIN
+{
+	$PERL5LIB="$ENV{TOOL}/lib/Perl";
+	push @INC, $PERL5LIB;
+	push @INC, "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+#	use lib "$ENV{TOOL}/lib/Perl", "$ENV{TOOL}/bin";
+}
+
+use Env;
+use igme;
+#######################
+sub checkdir {
+    if ( opendir(CHECKDIR,"@_") )
+    {
+	closedir(CHECKDIR);
+	return 1;
+    }
+    return 0;
+}
+
+#######################
+sub Usage {
+  print "Syntax:serial.pl User Remotehost Devpath Command\n";
+  print "User         is the remote user identification i.e. d027923\n";
+  print "Remotehost   is the remote ip Address i.e. 127.0.0.1\n";
+  print "Devpath      is the remote development path i.e. 'd:/V72//'\n";
+  print "             use 'X' if no additional path is wanted\n";
+  print "Command      is the command to be executed i.e. 'imf kernel'\n";
+  print "             IGME is a command prefix that sets IGME environment\n";
+  print "             BIT64 is a command prefix that sets 64BIT environment\n";
+}
+
+#################
+sub giveup() {
+	print LOGHISTORY "$User logged out at `date /T`\n";
+	exit;
+}
+
+#####################
+sub cleanup() {
+        unlink($OWNLOCK);
+        print LOGHISTORY "$User logged out at `date`\n";
+        exit;
+}
+#####################
+
+#sub TryLater() {
+#  print "remuser on $Hostname busy.\nTry again later or on other platform! Command running:\n";
+#  seek LOCKFILE, 0, 0;
+#  while (<LOCKFILE>) 
+#  {
+#    print $_;
+#  }
+  
+#  print LOGHISTORY "$User logged out at `date`\n";
+#  exit;
+#}
+#####################
+
+$| = 1;
+
+do "D:\\SAPDevelop\\Remuser\\remuserEnv_ia64.pl" || die "Cant execute local Env 'remuserEnv.pl'\n";
+
+chomp ( $Hostname = `hostname` );
+
+#
+# Argument parsing
+#
+if ( @ARGV < 3 ) {
+   Usage();
+   exit;
+}
+   
+$User=uc(shift);
+$Remotehost=lc(shift);
+$Devpath=shift;
+if ( $ARGV[0] eq BIT64 ) {
+     if ( $No64Bit == 1 )
+     {
+	print "64Bit not yet supported on this platform\n";
+	exit;
+     }
+     $ENV{BIT64}="1";
+     $Use64Bit="_64";
+     shift;
+} else {
+     delete $ENV{BIT64};
+     $Use64Bit="_32";
+}
+if ( $No64Bit == 1 )
+{
+     delete $ENV{BIT64};
+     $Use64Bit="";
+}
+if ( $No32Bit == 1 )
+{
+     $ENV{BIT64}="1";
+     $Use64Bit="";
+}
+
+if ( $ARGV[0] eq IGME ) {
+     shift;
+     $IgmeVersion=shift;
+} else {
+#
+# It does not make to much sense anymore to have a default here...
+#
+    print "Missing release information... Giving up\n";
+    exit;
+}
+
+
+my  $IgmeAPI = igme::api::new();
+if ( ! defined $IgmeAPI ) 
+{
+    print "Parsing profile information failed... Giving up\n";
+    exit;
+}
+
+
+if ( substr($IgmeVersion, 0, 4) eq "TOOL" ) 
+{
+    print "Tools are not supported by this machine... Giving up\n";
+    exit;
+} 
+else 
+{
+    $IgmePath=$IgmeVersion;
+#
+# Temporary solution for 7.3...
+#
+    if ( "$IgmeVersion" eq "7.3.00.develop" ) 
+    {
+        $IgmePath="73";
+    } 
+    elsif ( substr($IgmeVersion, 0, 3) eq "7.3" ) 
+    {
+        if ( substr($IgmeVersion, 4, 1) eq "0" ) 
+        {
+            $IgmePath=~s/7.3.0([0-9])\.develop/73$1/;
+        } 
+        else 
+        {
+            $IgmePath=~s/7.3.([0-9][0-9])\.develop/73$1/;
+        }
+    } 
+    else 
+    {
+#
+# 'normal' case
+#
+        local $IgmeRelease=substr($IgmeVersion, 0, 3);
+
+        $CurrentDevelopVersion="";
+
+        foreach ( $IgmeAPI->list() ) 
+        {
+            $currentEntry = substr($_, 0, 15);
+            if ( $currentEntry =~ /develop/ ) 
+            {
+	        if ( $currentEntry =~ /^$IgmeRelease/ ) 
+                {
+                    if ( $currentEntry gt $CurrentDevelopVersion ) 
+                    {
+                        $CurrentDevelopVersion = $currentEntry;
+                    }
+                }
+            }
+        }
+
+        if ( substr($IgmeVersion, 0, 10) eq substr($CurrentDevelopVersion, 0, 10) ) 
+        {
+            $IgmePath=~s/(.*)\.[0-9]*\.develop/$1/;
+        } 
+        else 
+        {
+#
+# Do to name restriction ( i.e. SUT740132 is too long for a database name )
+# the CommonOwn is reduced for completion level below 10 ...
+# If this is no longer wanted, this is the part to modify....
+#
+            if ( substr($IgmeVersion, 4, 1) eq "0" ) 
+            {
+                $IgmePath=~s/(.*)\.0([0-9])\.develop/$1$2/;
+            } 
+            else 
+            {
+                $IgmePath=~s/(.*)\.([0-9][0-9])\.develop/$1$2/;
+            }
+        }
+        $IgmePath=~s/\.//g;
+    }
+    $CommonOwn="$Releases/$IgmePath$Use64Bit";
+}
+$CommonOwn=~tr/./_/;
+
+
+$Command="@ARGV";
+$UserOwn.="\\$IgmePath$Use64Bit\_$User";
+
+#
+########################
+#
+print "$User logged in from $Remotehost using $Devpath\n";
+$Pid=$$;
+$LoginTime=`date /T`;
+open(LOGHISTORY,">>$Loghistory");
+print LOGHISTORY "$User logged in from $Remotehost at $LoginTime\n";
+
+$UsePerforce=undef;
+foreach my $line ( $IgmeAPI->cat($IgmeVersion) ) 
+{
+    if ( $line =~ /^depot:/ ) 
+    {
+        $UsePerforce="depot:";
+        last;
+    }
+}
+
+
+if ( $Devpath ne X ) 
+{
+#
+# Prepare a fresh $OWN...
+#
+    $TST="$Remotehost:$Devpath";
+
+    $OWN=$UserOwn;
+    $ENV{OWN}=$OWN;
+    if ( $Command eq "cleanup" ) 
+    {
+        print "Cleaning up on $Hostname\n";
+        system( "rm -rf $OWN" );
+        giveup();
+    } 
+    else 
+    {
+#
+# All releases using perforce, do not need source server in vmake path
+# Igme uses -x to let them be ignored...
+#
+        if ( "$UsePerforce" eq "depot:" ) 
+        {
+            @GMEARG = ( "-p", "$TST", "-x" );
+        } 
+        else 
+        {
+            @GMEARG = ( "-p", $CommonOwn.",".$TST);
+        }
+    }
+} 
+else 
+{
+#
+# Use common Version
+#
+
+    if ( $Command eq "cleanup" ) 
+    {
+#
+# A more user friendly message instead of sh:cleanup not found....
+#
+        print "You are trying to cleanup main area, which is very destructiv...\n";
+        print "remfree only supported for user area for this reason...\n";
+        giveup();
+    }
+#
+# Use common Version
+#
+    $OWN=$CommonOwn;
+    $ENV{OWN}=$OWN;
+    if ( "$UsePerforce" eq "depot:" ) 
+    {
+        @GMEARG = ( "-p", "$Releases/$IgmePath"."SRC//", "-x" );
+    } 
+    else 
+    {
+        @GMEARG = ();
+    }
+}
+
+if ( checkdir($OWN) == 0 ) 
+{
+  print "mkdir $OWN needed\n";
+  mkdir($OWN,0777);
+} 
+else 
+{
+  print "mkdir $OWN not needed\n";
+  mkdir($OWN,0777);
+}
+chdir($OWN);
+
+
+if ( $Command eq "xterm" ) 
+{
+  print "remterm not supported. Sorry...\n";
+  giveup();
+}
+
+$OWNLOCK="$OWN\\currentLogin";
+if ( open(LOCKFILE,"<$OWNLOCK") ) 
+{
+  print "remuser on $Hostname busy.\nTry again later or on other platform! Command running:\n";
+  while (<LOCKFILE>) 
+  {
+    print $_;
+  }
+
+  close(LOCKFILE);
+  giveup();
+}
+
+open(LOCKFILE,">$OWNLOCK");
+print LOCKFILE "Current User=$User Pid=$Pid logged in at $LoginTime";
+print LOCKFILE "Command:$Command\n";
+close(LOCKFILE);
+#
+
+print LOGHISTORY "Command:$Command\n";
+
+$ENV{DBROOT}="$OWN\\usr";
+$ENV{DEV_STUDIO}=$IgmeVersion;
+
+
+###################################
+#Setting the Development-Enviroment
+###################################
+push @GMEARG, $IgmeVersion, "-noobjcopy", "-o", $^O;
+%GME = $IgmeAPI->igme (@GMEARG);
+while (($key, $value) = each %GME) 
+{
+  if ($key eq "VMAKE_PATH") 
+  {
+    $OWN = $ENV{"OWN"};
+    $value =~ s/\$OWN/$OWN/;
+
+  }
+  $ENV{$key} = $value; 
+}
+
+require $Skeleton;
+
+#Temporarily
+$ENV{NoNI}="YES";
+###################################
+
+if ($Command =~ /^ip/)
+{
+	#Protocol
+	$Command =~ s/^ip(.)/ip$1\.pl/
+}
+elsif ($Command =~ /^im/)
+{
+	#vmake#	
+	$Command =~ s/^im(.)/im$1\.pl/
+}
+
+#my $logfile  =  "$ENV{'OWN'}/prot/make.log";
+#if (! -d $logfile_path)
+#{
+#    mkpath($logfile_path, 0775) || die "can't mkdir $logfile_path : $!";
+#}
+#open (STDOUT, ">> $logfile") || die "problems to write logfile: $logfile : $!";
+#open (STDERR, ">> $logfile") || die "problems to write logfile: $logfile : $!";
+
+
+system ("$PERL\\bin\\perl.exe $TOOL\\bin\\$Command");
+
+cleanup();
+
+

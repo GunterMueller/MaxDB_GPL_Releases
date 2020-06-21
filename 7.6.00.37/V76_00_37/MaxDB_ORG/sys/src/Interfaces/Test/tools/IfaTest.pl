@@ -1,0 +1,122 @@
+#!/usr/bin/perl
+#================================================================
+# module:    IfaTest.pl.tt
+#
+# responsible: Burkhard Diesing (D025086)
+# 
+# special area:   CPCDrv | Client | Connection Verwaltung
+# 
+# description: Starts a single Interface test. Needs DBNAME, DBNODE and
+#              Username/Password of the DBA User.
+#              The general testsuite comming from JAVA will call this script
+#              in loop to run all tests.
+# see:  
+# 
+# ===================================================================*/
+# 
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2001-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+use PCTestTools;
+use Env;
+use Getopt::Std;
+&if $OSSPEC in [ WIN32 ]
+    open(FILE_OUT, ">>$ENV{TEMP}/IfaTest.prot");
+&else
+    open(FILE_OUT, ">>/tmp/IfaTest.prot");
+&endif
+    print FILE_OUT "start @ARGV";
+    close(FILE_OUT);
+$Trace=1 if ($ENV{PCTOOL_TRACE});
+$Trace++ if ($Trace);
+
+sub errorUSAGE;
+
+$filename="IfaTest";
+# print usage info
+if (@ARGV < 1 || $ARGV[0]=~/-h/) { 
+    errorUSAGE;
+}
+
+# option -g all next argument are passing to pctest 
+if ($ARGV[0]=~/-g/ || $ENV{SAPDB_GET_ARG_FROM_ENV} ne "") {
+    shift if ($ARGV[0]=~/-g/);
+    if (@ARGV < 1) {
+	errorUSAGE;
+    }
+    $ENV{PROT_DIR}="";
+} else {
+    if(@ARGV < 4) {
+	errorUSAGE "To few arguments.";
+    }
+    $ENV{SERVERDB}=$ARGV[0]; shift;
+    $ENV{SERVERNODE}=$ARGV[0]; shift;
+    $ENV{SUPERUID}=$ARGV[0]; shift;
+    $ENV{SUPERPWD}=$ARGV[0]; shift;
+}
+
+# set LD_LIBRARY_PATH for ssl-libraries
+if (!defined $ENV{ISWDFNACHT}) {
+  $ENV{LD_LIBRARY_PATH}=$ENV{LD_LIBRARY_PATH} . ":$OWN/usr/lib";
+} else {
+  $ENV{LD_LIBRARY_PATH}=$ENV{LD_LIBRARY_PATH} . ":$INDEPLIB";
+}
+
+
+print "SERVERDB=$ENV{SERVERDB}" if ( $Trace );
+print "SERVERNODE=$ENV{SERVERNODE}" if ( $Trace );
+print "SUPERUID=$ENV{SUPERUID}" if ( $Trace );
+print "SUPERPWD=$ENV{SUPERPWD}" if ( $Trace );
+$RC =  PCTest::pctest( @ARGV );
+print (PCTest::date()." $filename ($RC)");
+&if $OSSPEC in [ WIN32 ]
+    open(FILE_OUT, ">>$ENV{TEMP}/IfaTest.prot");
+&else
+    open(FILE_OUT, ">>/tmp/IfaTest.prot");
+&endif
+    print FILE_OUT "end $RC";
+    close(FILE_OUT);
+exit $RC;
+
+sub errorUSAGE
+{
+    print "ERROR: $_[0]" if ($_[0] ne "");
+    print <DATA>;
+    exit -1;
+}
+
+__DATA__
+ USAGE: IfaTest [-h ] | [[ -g | <db_options> ] <test_options> ]
+
+        Starts one single interface test by passing testoption to the 
+        general testscript.
+
+ OPTIONS: -h         (prints this help)
+	
+	db_options := <dbname> <dbnode> <dba_user> <dba_pwd>
+        test_options  Testoption passing to the testscript.
+
+        -g         Gets options from environment. 
+                   Same as $SAPDB_GET_ARG_FROM_ENV is set.
+		
+        dbname     Name of instance.
+        dbnode     Hostname where the instance is running. 
+	dba_user   Name of the DBA user of the instance.
+	dba_pwd    Password of the DBA user.
+

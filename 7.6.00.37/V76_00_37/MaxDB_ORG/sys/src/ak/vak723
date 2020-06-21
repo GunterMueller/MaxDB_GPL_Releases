@@ -1,0 +1,1413 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-17
+*****************************************************
+modname : VAK723
+changed : 2000-11-17
+module  : Build_Strategy_Index_Only
+ 
+Author  : GertG / HolgerB
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : help module for "Index Only" strategy
+ 
+Define  :
+ 
+        PROCEDURE
+              a723only_index_stack (
+                    VAR mblock        : tgg00_MessBlock;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR b_err         : tgg00_BasisError);
+ 
+        PROCEDURE
+              a723analyse_used_cols (
+                    VAR acv           : tak_all_command_glob;
+                    VAR dmli          : tak_dml_info;
+                    VAR access_info   : tak70_strategy_record;
+                    VAR gg_strategy   : tgg07_StrategyInfo);
+ 
+.CM *-END-* define --------------------------------------
+ 
+Use     :
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06find_colinfo (
+                    base_ptr        : tak_sysbufferaddress;
+                    VAR stack_entry : tgg00_StackEntry;
+                    VAR colinfo_ptr : tak00_colinfo_ptr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Index : VAK24;
+ 
+        PROCEDURE
+              a24fnd_indexno (
+                    VAR acv            : tak_all_command_glob;
+                    VAR tabid          : tgg00_Surrogate;
+                    indexno            : integer;
+                    VAR index_scan_rec : tak_index_scan_record);
+ 
+        FUNCTION
+              a24IndexFieldCount(VAR index_def : tak_multindex) : integer;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_2 : VAK71;
+ 
+        PROCEDURE
+              a71search_thru_index (
+                    VAR acv        : tak_all_command_glob;
+                    VAR column     : tgg00_StackEntry;
+                    VAR index_def  : tak_multindex;
+                    VAR invfield   : tsp00_Int2);
+ 
+        PROCEDURE
+              a71update_strategy(
+                    VAR strat   : tgg07_StrategyInfo;
+                    offset      : tsp00_Int2;
+                    pos_upwards : tsp00_Int2);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_1 : VAK725;
+ 
+        PROCEDURE
+              a725output_involved_cols (
+                    debug   : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    ic_info : tak70_involved_columns);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_2 : VAK727;
+ 
+        PROCEDURE
+              a727trace_involved_cols (
+                    VAR transid : tgg00_TransContext;
+                    proc_name   : tsp00_Name;
+                    ic_info     : tak70_involved_columns;
+                    distinct    : boolean;
+                    inv_only    : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace    : tgg00_VtraceState;
+ 
+        FUNCTION
+              g01diag_minmax_optim : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Help_Procedures : VGG041;
+ 
+        PROCEDURE
+              g041int4_to_trace (
+                    VAR t  : tgg00_TransContext;
+                    name   : tsp00_Name;
+                    intval : tsp00_Int4);
+ 
+        PROCEDURE
+              g041c30_to_trace (
+                    VAR t : tgg00_TransContext;
+                    msg : tsp00_C30);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Record_Encapsulate_Procedures : VGG09;
+ 
+        PROCEDURE
+              g09ColStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_etype         : tgg00_StackEntryType;
+                    inp_epos          : tsp00_Int2;
+                    inp_elen_var      : tsp00_Int2;
+                    inp_tableno       : tsp00_Uint1);
+ 
+        PROCEDURE
+              g09IndexColStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_etype         : tgg00_StackEntryType;
+                    inp_epos          : tsp00_Int2;
+                    inp_eop           : tgg00_StackOpType;
+                    inp_elen_var      : tsp00_Int2;
+                    inp_tableno       : tsp00_Uint1);
+ 
+        PROCEDURE
+              g09OutStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_etype         : tgg00_StackEntryType;
+                    inp_eop           : tgg00_StackOpOutput;
+                    inp_resultpos     : tsp00_Int2;
+                    inp_resultlen     : tsp00_Int2);
+ 
+        PROCEDURE
+              g09OpStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_eop           : tgg00_StackOpType);
+ 
+        PROCEDURE
+              g09JumpStackentry (
+                    VAR NewStackEntry : tgg00_StackEntry;
+                    inp_etype         : tgg00_StackEntryType;
+                    inp_jumpcnt       : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    destin_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    destin         : tsp00_MoveObjPtr;
+                    destin_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01op_func (
+                    debug  : tgg00_Debug;
+                    nam    : tsp00_Sname;
+                    op     : tgg00_StackOpFunc);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR m         : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01stackentry (
+                    debug          : tgg00_Debug;
+                    VAR st         : tgg00_StackEntry;
+                    entry_index    : integer);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01sname (
+                    level : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01name (
+                    level : tgg00_Debug;
+                    nam : tsp00_Name);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+ 
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Description:
+ 
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a723only_index_stack (
+            VAR mblock        : tgg00_MessBlock;
+            VAR gg_strategy   : tgg07_StrategyInfo;
+            VAR b_err         : tgg00_BasisError);
+ 
+VAR
+      _mark_special_flag : boolean;
+      _etype             : tgg00_StackEntryType;
+      _eop               : tgg00_StackOpType;
+      _epos              : tsp00_Int2;
+      _elen_var          : tsp00_Int2;
+      _ecol_tab          : tsp00_C2;
+      _ix                : tsp00_Int2;
+      _iz                : tsp00_Int2;
+      _foundfield        : tsp00_Int2;
+      _out_pos           : tsp00_Int2;
+      _index_scan_rec    : tak_index_scan_record;
+      _index_def         : tak_multindex;
+ 
+      _acv_ptr  : RECORD
+            CASE integer OF
+                1 :
+                    (ptr  : tgg00_VoidPtr);
+                2 :
+                    (pacv : tak_acv_address);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01messblock( ak_strat,'ORIG STACK  ', mblock );
+&endif
+_acv_ptr.ptr := mblock.mb_trns^.trAcvPtr_gg00;
+b_err        := e_ok;
+a24fnd_indexno( _acv_ptr.pacv^, mblock.mb_qual^.mtree.fileTabId_gg00,
+      gg_strategy.str_inv_in_range.siir_indexno, _index_scan_rec );
+IF  ( _index_scan_rec.isr_buf <> NIL )
+THEN
+    BEGIN
+    _index_def := _index_scan_rec.isr_buf^.
+          smindex.indexdef[ _index_scan_rec.isr_index ];
+    _ix := mblock.mb_qual^.mqual_pos;
+    WHILE ( _ix <= ( mblock.mb_qual^.mqual_pos +
+          mblock.mb_qual^.mqual_cnt - 1 ) ) AND
+          ( b_err = e_ok ) DO
+        BEGIN
+&       ifdef trace
+        t01stackentry( ak_strat, mblock.mb_st^[ _ix ], _ix );
+&       endif
+        (* step over qualification stack entries *)
+        CASE mblock.mb_st^[ _ix ].etype OF
+            st_fixcol,
+            st_varcol,
+            st_varlongchar:
+                (* this have to be an index column *)
+                BEGIN
+                _out_pos     := 0;
+                a71search_thru_index ( _acv_ptr.pacv^, mblock.mb_st^[ _ix ],
+                      _index_def, _foundfield );
+                IF  ( _foundfield = 0 )
+                THEN
+                    b_err := e_old_fileversion
+                ELSE
+                    BEGIN
+                    IF  ( mblock.mb_st^[ _ix ].elen_var <>
+                        _index_def.icolstack[ _foundfield ].elen_var )
+                    THEN
+                        b_err := e_old_fileversion;
+                    (*ENDIF*) 
+                    IF  ( _foundfield <> a24IndexFieldCount( _index_def ))
+                    THEN
+                        _etype := st_fixinv
+                    ELSE
+                        _etype := st_varinv;
+                    (*ENDIF*) 
+                    _eop  := mblock.mb_st^[ _ix ].eop;
+                    _epos := 1;
+                    IF  ( _foundfield > 1 )
+                    THEN
+                        (* calc position in index record *)
+                        FOR _iz := 1 TO ( _foundfield - 1 ) DO
+                            _epos := _epos + _index_def.icolstack[ _iz ].elen_var;
+                        (*ENDFOR*) 
+                    (*ENDIF*) 
+                    IF  ( _index_def.icolstack[ _foundfield ].eop in
+                        [ op_order_desc, op_unique_desc ] )
+                    THEN
+                        BEGIN
+                        IF  ( NOT ( mblock.mb_st^[ _ix ].eop in
+                            [ op_order_desc, op_unique_desc ] ))
+                        THEN
+                            BEGIN
+                            (* remark descending *)
+                            _eop := _index_def.icolstack[ _foundfield ].eop;
+                            IF  ( NOT ( mblock.mb_st^[ _ix ].eop = op_none ))
+                            THEN
+                                ak723desc_change( mblock,
+                                      gg_strategy, _ix, b_err );
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        (* ascending ordered index             *)
+                        (* remove disturbing index information *)
+                        IF  ( mblock.mb_st^[ _ix ].eop in
+                            [ op_order_desc, op_unique_desc ] )
+                        THEN
+                            _eop := op_none;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    g09IndexColStackentry(
+                          mblock.mb_st^[ _ix ],
+                          _etype,
+                          _epos,
+                          _eop,
+                          _index_def.icolstack[ _foundfield ].elen_var,
+                          ord( mblock.mb_st^[ _ix ].ecol_tab[ 2 ] ));
+                    ;
+                    IF  ( mblock.mb_st^[ _ix + 1 ].etype in
+                        [ st_output, st_output_join ] )
+                    THEN
+                        BEGIN
+                        _epos := mblock.mb_st^[ _ix + 1 ].epos;
+                        IF  ( mblock.mb_st^[ _ix + 1 ].epos = 0 )
+                        THEN
+                            _epos := _out_pos;
+                        (*ENDIF*) 
+                        _elen_var := mblock.mb_st^[ _ix + 1 ].elen_var;
+                        IF  ( mblock.mb_st^[ _ix + 1 ].elen_var = 0 )
+                        THEN
+                            _elen_var :=
+                                  _index_def.icolstack[ _foundfield ].elen_var;
+                        (* for st_output_join ecol_tab contains info *)
+                        (*ENDIF*) 
+                        _ecol_tab := mblock.mb_st^[ _ix + 1 ].ecol_tab;
+                        g09OutStackentry(
+                              mblock.mb_st^[ _ix + 1 ],
+                              mblock.mb_st^[ _ix + 1 ].etype,
+                              mblock.mb_st^[ _ix + 1 ].eop_out,
+                              _epos,
+                              _elen_var );
+                        mblock.mb_st^[ _ix + 1 ].ecol_tab := _ecol_tab;
+                        _out_pos := mblock.mb_st^[ _ix + 1 ].epos +
+                              mblock.mb_st^[ _ix + 1 ].elen_var;
+                        _ix := succ( _ix );
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                _ix := succ( _ix );
+                END;
+            st_fixkey,
+            st_varkey :
+                BEGIN
+                a71search_thru_index ( _acv_ptr.pacv^, mblock.mb_st^[ _ix ],
+                      _index_def, _foundfield );
+                IF  ( _foundfield = 0 )
+                THEN
+                    (* this is a pure key column *)
+                    BEGIN
+                    IF  ( mblock.mb_st^[ _ix ].etype = st_fixkey )
+                    THEN
+                        _etype := st_fixprimkey
+                    ELSE
+                        _etype := st_varprimkey;
+                    (*ENDIF*) 
+                    _eop := mblock.mb_st^[ _ix ].eop;
+                    ;
+                    g09ColStackentry(
+                          mblock.mb_st^[ _ix ],
+                          _etype,
+                          mblock.mb_st^[ _ix ].epos,
+                          mblock.mb_st^[ _ix ].elen_var,
+                          ord( mblock.mb_st^[ _ix ].ecol_tab[ 2 ] ));
+                    ;
+                    mblock.mb_st^[ _ix ].eop := _eop;
+                    END
+                ELSE
+                    (* this key column is participant of an index *)
+                    BEGIN
+                    (* for g04one_limitkey, to find the   *)
+                    (* last keyfield, if field is inverted*)
+                    (* and is also the last keyfield      *)
+                    IF  mblock.mb_st^[ _ix ].etype = st_varkey
+                    THEN
+                        (* mark VARKEY_GG07 entry *)
+                        _mark_special_flag := true
+                    ELSE
+                        _mark_special_flag := false;
+                    (*ENDIF*) 
+                    _epos := 1;
+                    IF  ( _foundfield > 1 )
+                    THEN
+                        (* calc position in index record *)
+                        FOR _iz := 1 TO ( _foundfield - 1 ) DO
+                            BEGIN
+&                           ifdef trace
+                            t01int4( ak_strat, 'one elen_var',
+                                  _index_def.icolstack[ _iz ].elen_var );
+&                           endif
+                            _epos := _epos +
+                                  _index_def.icolstack[ _iz ].elen_var;
+                            END;
+                        (*ENDFOR*) 
+                    (*ENDIF*) 
+                    IF  ( _foundfield = a24IndexFieldCount( _index_def ))
+                    THEN
+                        BEGIN
+                        _etype    := st_varinv;
+                        _elen_var := _index_def.icolstack[ _foundfield ].elen_var;
+                        END
+                    ELSE
+                        BEGIN
+                        _etype    := st_fixinv;
+                        _elen_var := _index_def.icolstack[ _foundfield ].elen_var;
+                        END;
+                    (*ENDIF*) 
+                    _eop := mblock.mb_st^[ _ix ].eop;
+                    IF  ( _index_def.icolstack[ _foundfield ].eop in
+                        [ op_order_desc, op_unique_desc ] )
+                    THEN
+                        BEGIN
+                        IF  ( NOT ( mblock.mb_st^[ _ix ].eop in
+                            [ op_order_desc, op_unique_desc ] ))
+                        THEN
+                            BEGIN
+                            _eop := _index_def.icolstack[ _foundfield ].eop;
+                            IF  ( NOT ( mblock.mb_st^[ _ix ].eop = op_none ))
+                            THEN
+                                ak723desc_change( mblock,
+                                      gg_strategy, _ix, b_err );
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        IF  ( mblock.mb_st^[ _ix ].eop in
+                            [ op_order_desc, op_unique_desc ] )
+                        THEN
+                            _eop := op_none;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    g09IndexColStackentry(
+                          mblock.mb_st^[ _ix ],
+                          _etype,
+                          _epos,
+                          _eop,
+                          _elen_var,
+                          ord( mblock.mb_st^[ _ix ].ecol_tab[ 2 ] ));
+                    ;
+                    IF  ( _mark_special_flag )
+                    THEN
+                        mblock.mb_st^[ _ix ].ecol_tab[ 1 ] := VARKEY_GG07;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                _ix := succ( _ix );
+                END;
+            OTHERWISE
+                BEGIN
+                _ix := succ( _ix );
+                END
+            END;
+        (*ENDCASE*) 
+        END;
+    (*ENDWHILE*) 
+&   ifdef trace
+    t01messblock( ak_strat,'ONLY INV STA', mblock );
+&   endif
+    IF  ( b_err = e_ok )
+    THEN
+        BEGIN
+        gg_strategy.str_qual_kind := inv_only;
+        (* reset any given interpreter optimize info *)
+        (* because this isn't valid any more *)
+        mblock.mb_qual^.mst_optimize_pos := 0;
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    b_err := e_old_fileversion;
+(*ENDIF*) 
+;
+(* b_err : e_old_fileversion, e_too_many_mb_stackentries, e_move_error *)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak723desc_change (
+            VAR mblock        : tgg00_MessBlock;
+            VAR gg_strategy   : tgg07_StrategyInfo;
+            stpos             : tsp00_Int2;
+            b_err             : tgg00_BasisError);
+ 
+VAR
+      _i    : tsp00_Int2;
+ 
+BEGIN
+IF  ( mblock.mb_qual^.mfirst_free < mblock.mb_st_max )
+THEN
+    BEGIN
+    SAPDB_PascalOverlappingMove('VAK723',   1,    
+          mblock.mb_st_size, mblock.mb_st_size,
+          @mblock.mb_st^, stpos * STACK_ENTRY_MXGG00 + 1,
+          @mblock.mb_st^, ( stpos + 1 ) * STACK_ENTRY_MXGG00 + 1,
+          ( mblock.mb_qual^.mfirst_free - stpos ) * STACK_ENTRY_MXGG00,
+          b_err );
+    g09OpStackentry( mblock.mb_st^[ stpos + 1 ],
+          mblock.mb_st^[ stpos ].eop );
+    ;
+    (* update stack description *)
+    IF  (mblock.mb_qual^.mstack_desc.mcol_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mcol_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mcol_pos    :=
+              succ(mblock.mb_qual^.mstack_desc.mcol_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mmult_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mmult_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mmult_pos   :=
+              succ(mblock.mb_qual^.mstack_desc.mmult_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mview_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mview_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mview_pos   :=
+              succ(mblock.mb_qual^.mstack_desc.mview_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mupd_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mupd_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mupd_pos    :=
+              succ(mblock.mb_qual^.mstack_desc.mupd_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mlink_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mlink_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mlink_pos   :=
+              succ(mblock.mb_qual^.mstack_desc.mlink_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mstrat_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mstrat_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mstrat_pos  :=
+              succ(mblock.mb_qual^.mstack_desc.mstrat_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mstring_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mstring_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mstring_pos :=
+              succ(mblock.mb_qual^.mstack_desc.mstring_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mtrigger_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mtrigger_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mtrigger_pos:=
+              succ(mblock.mb_qual^.mstack_desc.mtrigger_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.minvqual_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.minvqual_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.minvqual_pos:=
+              succ(mblock.mb_qual^.mstack_desc.minvqual_pos);
+    (*ENDIF*) 
+    IF  (mblock.mb_qual^.mstack_desc.mresqual_cnt > 0) AND
+        (stpos < mblock.mb_qual^.mstack_desc.mresqual_pos)
+    THEN
+        mblock.mb_qual^.mstack_desc.mresqual_pos:=
+              succ(mblock.mb_qual^.mstack_desc.mresqual_pos);
+    (*ENDIF*) 
+    mblock.mb_qual^.mstack_desc.mfirst_free :=
+          succ(mblock.mb_qual^.mstack_desc.mfirst_free);
+    ;
+    mblock.mb_qual^.mqual_cnt := succ( mblock.mb_qual^.mqual_cnt );
+    ;
+    (* update jump positions *)
+    FOR _i := mblock.mb_qual^.mqual_pos TO stpos-1 DO
+        BEGIN
+        IF  ( mblock.mb_st^[ _i ].etype in
+            [ st_jump_output, st_jump_true, st_jump_false, st_jump_absolute] )
+            AND
+            ( stpos < _i + mblock.mb_st^[ _i ].epos - 1 )
+        THEN
+            mblock.mb_st^[ _i ].epos := succ(mblock.mb_st^[ _i ].epos);
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    ;
+    a71update_strategy( gg_strategy, 1, stpos );
+    END
+ELSE
+    b_err := e_too_many_mb_stackentries;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak723analyze_output (
+            VAR acv            : tak_all_command_glob;
+            VAR dmli           : tak_dml_info;
+            VAR access_info    : tak70_strategy_record;
+            VAR gg_strategy    : tgg07_StrategyInfo);
+ 
+TYPE
+      t_colfound = ( cf_none, cf_key, cf_inv, cf_key_inv );
+      t_optim_kind = ( ok_MIN_MAX, ok_aggr_func );
+ 
+VAR
+      _iz            : tsp00_Int2;
+      _stpos         : tsp00_Int2;
+      _stop          : tsp00_Int2;
+      _col_no        : tsp00_Int2;
+      _keycolcnt     : tsp00_Int2;
+      _keyseqcnt     : tsp00_Int2;
+      _col_found     : t_colfound;
+      _value_found   : boolean;
+      _funct_found   : boolean;
+      _only_key_outp : boolean;
+      _funct_cnt     : tsp00_Int2;
+      _col_ptr       : tak00_colinfo_ptr;
+      _key_pos       : ARRAY [ 1..cak_maxkeyfields ] OF tsp00_Int2;
+      _key_len       : ARRAY [ 1..cak_maxkeyfields ] OF tsp00_Int2;
+      _check_optim   : SET OF t_optim_kind; (* AGGR OR MIN/MAX optimization possible? *)
+      _auto_dist_pos : boolean;
+ 
+BEGIN
+_check_optim := [];
+_col_found   := cf_none;
+_col_no      := IS_UNDEFINED_GG07;
+_value_found := false;
+_funct_found := false;
+_only_key_outp:= true;
+_auto_dist_pos := true;
+_funct_cnt   := 0;
+_keycolcnt   := 0;
+_stpos := acv.a_mblock.mb_qual^.mqual_pos;
+IF  ( _stpos > 0 )
+    AND
+    ( acv.a_mblock.mb_qual^.mqual_cnt > 0 ) (* important !!*)
+    AND
+    ( acv.a_mblock.mb_st^[ _stpos ].etype = st_jump_output )
+THEN
+    BEGIN
+    (* stop on last output column *)
+    _stop      := _stpos + acv.a_mblock.mb_st^[ _stpos ].epos - 1;
+    _stpos     := succ( _stpos );
+    ;
+    IF  ( gg_strategy.str_distinc <> no_distinct )
+        AND
+        (* array commands(means more than one data for one parameter) *)
+        (* more than one SELECT in one result set (disticntness)      *)
+        NOT ( acv.a_precomp_info_byte in
+        [ csp1_p_mselect_found, csp1_p_for_upd_mselect_found,
+        csp1_p_reuse_mselect_found, csp1_p_reuse_upd_mselect_found ] )
+    THEN
+        BEGIN
+        (* initialize output key-sequence search *)
+        gg_strategy.str_out_keyseqlen := 0 ;
+        FOR _iz := 1 TO cak_maxkeyfields DO
+            BEGIN
+            _key_pos[ _iz ] := 0;
+            _key_len[ _iz ] := 0;
+            END;
+        (*ENDFOR*) 
+        END
+    ELSE
+        gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+    (*ENDIF*) 
+    IF  (( acv.a_mblock.mb_type2 = mm_with_functions ) AND ( NOT dmli.d_join )
+        AND ( acv.a_recursive_state = rs_no_recursive_select ))
+    THEN
+        BEGIN
+        _check_optim := _check_optim + [ ok_aggr_func ];
+        IF  (( NOT dmli.d_group ) AND g01diag_minmax_optim )
+        THEN
+            _check_optim := _check_optim + [ ok_MIN_MAX ];
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    _stop := _stpos;
+    (* e.g. DELETE *)
+    access_info.srec_query_prop.qps_switches :=
+          access_info.srec_query_prop.qps_switches + [ qp_inv_only_impossible ];
+    (* distinct optim not possible *)
+    gg_strategy.str_out_keyseqlen  := NOT_SEQUENCED_GG07;
+    END;
+(*ENDIF*) 
+WHILE ( _stpos < _stop ) DO
+    BEGIN
+    (* while looping check posibility of *)
+    (* DISTINCT and MIN/MAX optimization *)
+&   ifdef trace
+    t01stackentry( ak_strat, acv.a_mblock.mb_st^[ _stpos ], _stpos );
+&   endif
+    CASE acv.a_mblock.mb_st^[ _stpos ].etype  OF
+        st_fixkey, st_varkey,
+        st_fixcol, st_varcol,
+        st_varlongchar:
+            BEGIN
+            IF  ( _check_optim <> [] )
+            THEN
+                IF  ((( acv.a_mblock.mb_st^[ _stpos + 1 ].etype <> st_output ) AND
+                    ( _col_found <> cf_none )) OR
+                    ( acv.a_mblock.mb_st^[ _stpos ].eop <> op_none ))
+                THEN
+                    (* expression: more than one column per output *)
+                    _check_optim := [];
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  ( gg_strategy.str_distinc <> no_distinct ) AND
+                ( acv.a_mblock.mb_st^[ _stpos ].eop = op_none ) AND
+                ( acv.a_mblock.mb_st^[ _stpos ].etype in
+                [ st_fixkey, st_varkey ] )
+            THEN
+                BEGIN
+&               ifdef trace
+                t01sname( ak_strat, 'check key   ' );
+&               endif
+                (* work for SELECT DISTINCT optimization *)
+                _keyseqcnt := 1;
+                (* count key columns preceding found key column *)
+                WHILE ( _keyseqcnt <= _keycolcnt ) AND
+                      ( acv.a_mblock.mb_st^[ _stpos ].
+                      epos > _key_pos[ _keyseqcnt ] ) DO
+                    _keyseqcnt := succ( _keyseqcnt );
+                (*ENDWHILE*) 
+                (* if none preceding columns found ->   *)
+                (* _keyseqcnt = _keycolcnt + 1          *)
+                IF  ( _keycolcnt = 0 ) OR
+                    (* only count different columns *)
+                    ( _key_pos[ _keyseqcnt ] <> acv.a_mblock.
+                    mb_st^[ _stpos ].epos )
+                THEN
+                    BEGIN
+                    _keycolcnt := succ( _keycolcnt );
+                    _iz        := _keycolcnt;
+                    (* right shift for new entry *)
+                    WHILE ( _iz >= _keyseqcnt + 1 ) DO
+                        BEGIN
+                        _key_pos[ _iz ] :=
+                              _key_pos[ _iz - 1 ];
+                        _key_len[ _iz ] :=
+                              _key_len[ _iz - 1 ];
+                        _iz             := _iz - 1;
+                        END;
+                    (*ENDWHILE*) 
+                    _key_pos[ _iz ] :=
+                          acv.a_mblock.mb_st^[ _stpos ].epos;
+                    _key_len[ _iz ] :=
+                          acv.a_mblock.mb_st^[ _stpos ].elen_var;
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                _only_key_outp := false;
+            (*ENDIF*) 
+            a06find_colinfo( dmli.d_sparr.pbasep,
+                  acv.a_mblock.mb_st^[ _stpos ], _col_ptr );
+            IF  ( _col_ptr <> NIL )
+            THEN
+                BEGIN
+                IF  ( ctmulti in _col_ptr^.ccolpropset )
+                    OR
+                    ( ctkey in _col_ptr^.ccolpropset )
+                THEN
+                    BEGIN
+                    IF  (( _col_no <> IS_UNDEFINED_GG07 ) AND
+                        ( _col_no <> _col_ptr^.creccolno ))
+                    THEN
+                        _check_optim := _check_optim - [ ok_MIN_MAX ];
+                    (*ENDIF*) 
+                    _col_no := _col_ptr^.creccolno;
+                    IF  ( ctmulti in _col_ptr^.ccolpropset )
+                    THEN
+                        BEGIN
+                        (* access_info.srec_involved_cols.ic_i_outp_cols *)
+                        ak723put_colno( access_info,
+                              access_info.srec_involved_cols.ic_i_outp_cnt, _col_no,
+                              access_info.srec_involved_cols.ic_all_colbuf,
+                              0,
+                              MAX_COL_SEQUENCE_GG00 );
+                        _col_found := cf_inv;
+                        END;
+                    (*ENDIF*) 
+                    IF  ( ctkey in _col_ptr^.ccolpropset )
+                    THEN
+                        BEGIN
+                        (* access_info.srec_involved_cols.ic_k_outp_cols *)
+                        ak723put_colno( access_info,
+                              access_info.srec_involved_cols.ic_k_outp_cnt, _col_no,
+                              access_info.srec_involved_cols.ic_all_colbuf,
+                              MAX_COL_SEQUENCE_GG00 * 2,
+                              MAX_COLPOSARR_IDX_GG07 );
+                        IF  ( _col_found = cf_inv )
+                        THEN
+                            BEGIN
+                            _col_found := cf_key_inv;
+                            END
+                        ELSE
+                            _col_found := cf_key;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    (* none key/inv column found *)
+                    access_info.srec_query_prop.qps_switches :=
+                          access_info.srec_query_prop.qps_switches +
+                          [ qp_inv_only_impossible ];
+                    gg_strategy.str_out_keyseqlen  := NOT_SEQUENCED_GG07;
+                    ;
+                    _check_optim := [];
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+&               ifdef trace
+                t01stackentry( ak_strat, acv.a_mblock.mb_st^[ _stpos ], _stpos );
+&               endif
+                a07_b_put_error( acv, e_old_fileversion, 1 );
+                END;
+            (*ENDIF*) 
+            END;
+        st_func :
+            BEGIN
+&           ifdef trace
+            t01op_func( ak_strat, 'func found  ',
+                  acv.a_mblock.mb_st^[ _stpos ].eop_func );
+            t01bool( ak_strat, '_func_found ', _funct_found );
+            IF  ( _col_found = cf_key )
+            THEN
+                t01sname( ak_strat, 'key found   ' )
+            ELSE
+                IF  ( _col_found = cf_inv )
+                THEN
+                    t01sname( ak_strat, 'inv found   ' )
+                ELSE
+                    IF  ( _col_found = cf_key_inv )
+                    THEN
+                        t01sname( ak_strat, 'key/inv foun' )
+                    ELSE
+                        t01sname( ak_strat, 'no col found' );
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+&           endif
+            (* distinct optim not possible *)
+            gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+            _auto_dist_pos := false;
+            ;
+            IF  ( acv.a_mblock.mb_st^[ _stpos ].eop_func in
+                [ op_f_check_null, op_f_all_count ] )
+            THEN
+                BEGIN
+                IF  (( _col_found = cf_none ) AND NOT _funct_found )
+                THEN
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_st^[ _stpos ].eop_func =
+                        op_f_all_count )
+                    THEN
+                        _check_optim := _check_optim - [ ok_MIN_MAX ];
+                    (*ENDIF*) 
+                    _funct_found := true;
+                    _funct_cnt   := succ(_funct_cnt);
+                    IF  ( _funct_cnt > MAX_COL_SEQUENCE_GG00 )
+                    THEN
+                        _check_optim := _check_optim - [ ok_aggr_func ];
+                    (*ENDIF*) 
+                    _col_found   := cf_key_inv; (* any value *)
+                    END
+                ELSE
+                    _check_optim := [];
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  (( NOT _funct_found ) AND ( _col_found <> cf_none ))
+                THEN
+                    BEGIN
+                    _funct_found := true;
+                    _funct_cnt   := succ(_funct_cnt);
+                    IF  ( _funct_cnt > MAX_COL_SEQUENCE_GG00 )
+                    THEN
+                        _check_optim := _check_optim - [ ok_aggr_func ];
+                    (*ENDIF*) 
+                    CASE acv.a_mblock.mb_st^[ _stpos ].eop_func OF
+                        op_f_min, op_f_max :
+                            BEGIN
+                            CASE _col_found OF
+                                cf_key:
+                                    BEGIN
+                                    access_info.srec_query_prop.qps_switches :=
+                                          access_info.srec_query_prop.qps_switches +
+                                          [ qp_check_key_MIN_MAX_opt ];
+                                    (* aggregation optimization only possible *)
+                                    (* with index columns *)
+                                    _check_optim := _check_optim - [ ok_aggr_func ];
+                                    END;
+                                cf_inv:
+                                    access_info.srec_query_prop.qps_switches :=
+                                          access_info.srec_query_prop.qps_switches +
+                                          [ qp_check_inv_MIN_MAX_opt ];
+                                cf_key_inv:
+                                    access_info.srec_query_prop.qps_switches :=
+                                          access_info.srec_query_prop.qps_switches +
+                                          [ qp_check_key_MIN_MAX_opt, qp_check_inv_MIN_MAX_opt ];
+                                END;
+                            (*ENDCASE*) 
+                            END;
+                        op_f_sum, op_f_dis_sum,
+                        op_f_avg, op_f_dis_avg,
+                        op_f_count, op_f_dis_count :
+                            BEGIN
+                            _check_optim := _check_optim - [ ok_MIN_MAX ];
+                            IF  ( _col_found = cf_key )
+                            THEN
+                                (* aggregation optimization only possible *)
+                                (* with index columns *)
+                                _check_optim := _check_optim - [ ok_aggr_func ];
+                            (*ENDIF*) 
+                            END;
+                        op_f_none :
+                            BEGIN
+                            (* 'LASTFUNCTION' *)
+                            IF  ( _col_found <> cf_none )
+                            THEN
+                                _check_optim := [];
+                            (*ENDIF*) 
+                            END;
+                        OTHERWISE
+                            _check_optim := [];
+                        END;
+                    (*ENDCASE*) 
+                    END
+                ELSE
+                    IF  ( acv.a_mblock.mb_st^[ _stpos ].eop_func <> op_f_none )
+                    THEN
+                        _check_optim := [];
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        st_output :
+            BEGIN
+            IF  ( _col_found <> cf_none )
+            THEN
+                BEGIN
+                IF  ( _funct_found )
+                THEN
+                    BEGIN
+                    _col_found   := cf_none;
+                    _funct_found := false;
+                    END
+                ELSE
+                    (* _col_found NOT _funct_found *)
+                    (* i.e. GROUP BY column found        *)
+                    _check_optim := _check_optim - [ ok_MIN_MAX ];
+                (*ENDIF*) 
+                END
+            ELSE
+                (* NOT _col_found *)
+                BEGIN
+                IF  ( NOT ( _value_found ) ) AND
+                    ( acv.a_mblock.mb_st^[ _stpos ].eop_out <> op_o_output_later )
+                    THEN
+                        _check_optim := [];
+                    (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            _col_found   := cf_none;
+            _funct_found := false;
+            _value_found := false;
+            END;
+        st_value :
+            BEGIN
+            (* distinct optim not possible *)
+            gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+            ;
+            IF  ( NOT ( acv.a_mblock.mb_st^[ _stpos + 1 ].etype in
+                [ st_value, st_result, st_output ] ) )
+            THEN
+                _check_optim := []
+            ELSE
+                _value_found := true;
+            (*ENDIF*) 
+            END;
+        st_op,
+        st_result :
+            BEGIN
+            (* distinct optim not possible *)
+            gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+            (* sktip this entries for setting of _check_optim *)
+            _auto_dist_pos := false;
+            END;
+        OTHERWISE
+            BEGIN
+            (* distinct optim not possible *)
+            gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+            _check_optim := _check_optim - [ ok_MIN_MAX ];
+            _auto_dist_pos := false;
+&           ifdef trace
+            t01sname( ak_strat, 'knockout    ' );
+&           endif
+            END;
+        END;
+    (*ENDCASE*) 
+    _stpos := succ( _stpos );
+    END;
+(*ENDWHILE*) 
+IF  ( NOT ( ok_MIN_MAX in _check_optim )
+    OR
+    ( cs_keyscan in access_info.srec_config.cfg_switches )
+    OR
+    ( cs_indexscan in access_info.srec_config.cfg_switches ))
+THEN
+    access_info.srec_query_prop.qps_switches :=
+          access_info.srec_query_prop.qps_switches -
+          [ qp_check_key_MIN_MAX_opt, qp_check_inv_MIN_MAX_opt ];
+(*ENDIF*) 
+IF  ( ok_aggr_func in _check_optim )
+THEN
+    access_info.srec_query_prop.qps_switches :=
+          access_info.srec_query_prop.qps_switches + [ qp_aggr_optim_poss ];
+(*ENDIF*) 
+IF  ( gg_strategy.str_out_keyseqlen = 0 ) AND ( _keycolcnt > 0 )
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4( ak_strat, 'key col cnt ', _keycolcnt );
+    FOR _iz := 1 TO _keycolcnt DO
+        BEGIN
+        t01int4( ak_strat, 'key_pos[ x ]', _key_pos[ _iz ] );
+        t01int4( ak_strat, 'key_len[ x ]', _key_len[ _iz ] );
+        END;
+    (*ENDFOR*) 
+&   endif
+    (* work for SELECT DISTINCT optimization *)
+    _iz        := 1;
+    _keyseqcnt := 1;
+    WHILE ( _iz <= _keycolcnt ) AND
+          ( gg_strategy.str_out_keyseqlen <> NOT_SEQUENCED_GG07 ) DO
+        BEGIN
+        IF  ( _key_pos[ _iz ] = _keyseqcnt )
+        THEN
+            BEGIN
+            gg_strategy.str_out_keyseqlen :=
+                  gg_strategy.str_out_keyseqlen + _key_len[ _iz ];
+            (* length of fields of 1..n Keys *)
+            _keyseqcnt := _keyseqcnt + _key_len[ _iz ];
+            _iz        := succ( _iz );
+            END
+        ELSE
+            BEGIN
+            (* no Optim. of Key-fields *)
+            gg_strategy.str_out_keyseqlen := NOT_SEQUENCED_GG07;
+&           ifdef trace
+            t01sname( ak_strat, 'no key seque' );
+&           endif
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    ;
+    END;
+(*ENDIF*) 
+IF  ( gg_strategy.str_distinc <> no_distinct ) AND
+    _auto_dist_pos AND ( _keycolcnt > 0 ) AND 
+    ( _keycolcnt = dmli.d_sparr.pbasep^.sbase.bkeycolcount )
+THEN
+    BEGIN
+    access_info.srec_query_prop.qps_switches :=
+          access_info.srec_query_prop.qps_switches + [ qp_auto_distinct ];
+    gg_strategy.str_out_keyseqlen := 0; (* enable optimization *)
+    END;
+(*ENDIF*) 
+IF  ( gg_strategy.str_out_keyseqlen <> NOT_SEQUENCED_GG07 )
+THEN
+    BEGIN
+    (* sequenced key columns found *)
+    IF  ( _keycolcnt > 0 ) AND ( _only_key_outp )
+    THEN
+        access_info.srec_query_prop.qps_switches :=
+              access_info.srec_query_prop.qps_switches +
+              [ qp_only_keyseq_in_output ];
+    (*ENDIF*) 
+    IF  ( access_info.srec_involved_cols.ic_i_outp_cnt > 0 ) AND
+        NOT ( qp_auto_distinct in access_info.srec_query_prop.qps_switches )
+    THEN
+        BEGIN
+        gg_strategy.str_out_keyseqlen := gg_strategy.str_out_keyseqlen +
+              KEYSEQLEN_OFFSET_GG07;
+        END;
+    (*ENDIF*) 
+    END;
+(* str_out_keyseqlen contains now length of sequenced key columns *)
+(* if there are index columns there will be an offset of          *)
+(* KEYSEQLEN_OFFSET_GG07 *)
+(* if there are no key columns str_out_keyseqlen                  *)
+(* contains 0 ( KEYSEQLEN_OFFSET_GG07 )                           *)
+(* if key columns in output not sequenced str_out_keyseqlen       *)
+(* is set to NOT_SEQUENCED_GG07                                   *)
+(*ENDIF*) 
+;
+&ifdef TRACE
+t01bool( ak_strat, 'inv only pos', NOT ( qp_inv_only_impossible in
+      access_info.srec_query_prop.qps_switches ));
+t01int4( ak_strat, 'out keyseqln', gg_strategy.str_out_keyseqlen );
+&endif
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    g041c30_to_trace ( acv.a_transinf.tri_trans,
+          'AK723ANALYZE_OUTPUT           ' );
+    IF  ( NOT ( qp_inv_only_impossible in
+        access_info.srec_query_prop.qps_switches ))
+    THEN
+        g041c30_to_trace ( acv.a_transinf.tri_trans,
+              'inv only possible             ' );
+    (*ENDIF*) 
+    IF  ( gg_strategy.str_out_keyseqlen = NOT_SEQUENCED_GG07 )
+    THEN
+        g041c30_to_trace ( acv.a_transinf.tri_trans,
+              'out keyseqlen     : undef     ' )
+    ELSE
+        g041int4_to_trace ( acv.a_transinf.tri_trans,
+              'out keyseqlen     ', gg_strategy.str_out_keyseqlen );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a723analyse_used_cols (
+            VAR acv           : tak_all_command_glob;
+            VAR dmli          : tak_dml_info;
+            VAR access_info   : tak70_strategy_record;
+            VAR gg_strategy   : tgg07_StrategyInfo);
+ 
+VAR
+      _stpos         : tsp00_Int2;
+      _stop          : tsp00_Int2;
+      _col_no        : tsp00_Int2;
+      _col_ptr       : tak00_colinfo_ptr;
+ 
+BEGIN
+ak723analyze_output( acv, dmli, access_info, gg_strategy );
+IF  NOT ( qp_inv_only_impossible in access_info.srec_query_prop.qps_switches )
+THEN
+    BEGIN
+    (* there are output columns, analyse qualification    *)
+    (* stop on last qualification stack entry *)
+    _stop := acv.a_mblock.mb_qual^.mqual_pos +
+          acv.a_mblock.mb_qual^.mqual_cnt;
+    (* because there are output columns, there is an jump_output stack entry *)
+    (* start on first qualification *)
+    _stpos     := acv.a_mblock.mb_qual^.mqual_pos +
+          acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mqual_pos ].epos - 1;
+&   ifdef trace
+    t01name( ak_strat, 'analyse qualificat' );
+    t01int4( ak_strat, 'start       ', _stpos );
+    t01int4( ak_strat, 'stop        ', _stop );
+&   endif
+    ;
+    WHILE ( _stpos < _stop ) AND
+          ( NOT ( qp_inv_only_impossible in
+          access_info.srec_query_prop.qps_switches )) DO
+        BEGIN
+&       ifdef trace
+        t01stackentry( ak_strat, acv.a_mblock.mb_st^[ _stpos ], _stpos );
+&       endif
+        CASE acv.a_mblock.mb_st^[ _stpos ].etype  OF
+            st_fixkey, st_varkey,
+            st_fixcol, st_varcol,
+            st_varlongchar:
+                BEGIN
+                a06find_colinfo( dmli.d_sparr.pbasep,
+                      acv.a_mblock.mb_st^[ _stpos ], _col_ptr );
+                IF  ( _col_ptr <> NIL )
+                THEN
+                    BEGIN
+                    IF  ( ctmulti in _col_ptr^.ccolpropset )
+                        OR
+                        ( ctkey in _col_ptr^.ccolpropset )
+                    THEN
+                        BEGIN
+                        _col_no := _col_ptr^.creccolno;
+                        IF  ( ctmulti in _col_ptr^.ccolpropset )
+                        THEN
+                            (* access_info.srec_involved_cols.ic_i_qual_cols *)
+                            ak723put_colno( access_info,
+                                  access_info.srec_involved_cols.ic_i_qual_cnt,
+                                  _col_no,
+                                  access_info.srec_involved_cols.ic_all_colbuf,
+                                  MAX_COL_SEQUENCE_GG00,
+                                  MAX_COL_SEQUENCE_GG00 );
+                        (*ENDIF*) 
+                        IF  ( ctkey in _col_ptr^.ccolpropset )
+                        THEN
+                            BEGIN
+                            (* access_info.srec_involved_cols.ic_k_qual_cols *)
+                            ak723put_colno( access_info,
+                                  access_info.srec_involved_cols.ic_k_qual_cnt,
+                                  _col_no,
+                                  access_info.srec_involved_cols.ic_all_colbuf,
+                                  MAX_COL_SEQUENCE_GG00 * 2 + MAX_STRATEGY_KEYS_GG04,
+                                  MAX_COLPOSARR_IDX_GG07 );
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+&                       ifdef trace
+                        t01name( ak_strat, 'normal col found  ' );
+&                       endif
+                        (* non key/inv column found *)
+                        access_info.srec_query_prop.qps_switches :=
+                              access_info.srec_query_prop.qps_switches +
+                              [ qp_inv_only_impossible ];
+                        END;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+&                   ifdef trace
+                    t01stackentry( ak_strat, acv.a_mblock.mb_st^[ _stpos ],
+                          _stpos );
+&                   endif
+                    a07_b_put_error( acv, e_old_fileversion, 1 );
+                    END ;
+                (*ENDIF*) 
+                END;
+            OTHERWISE
+                BEGIN
+                END;
+            END;
+        (*ENDCASE*) 
+        _stpos := succ( _stpos );
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+;
+&ifdef TRACE
+a725output_involved_cols( ak_strat, 'ic_info     ',
+      access_info.srec_involved_cols );
+t01int4( ak_strat, 'out keyseqln', gg_strategy.str_out_keyseqlen );
+&endif
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_involved_cols( acv.a_transinf.tri_trans ,
+          'A723ANALYZE_USED_C', access_info.srec_involved_cols,
+          ( gg_strategy.str_distinc <> no_distinct ),
+          NOT ( qp_inv_only_impossible in
+          access_info.srec_query_prop.qps_switches ));
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak723put_colno (
+            VAR access_info : tak70_strategy_record;
+            VAR colno_cnt   : tsp00_Int2;
+            VAR act_colno   : tsp00_Int2;
+            VAR colno_arr   : tak70_all_colbuf;
+            offset          : tsp00_Int2;
+            max_idx         : tsp00_Int2);
+ 
+VAR
+      _ix        : tsp00_Int2;
+      _fieldfound: boolean;
+ 
+BEGIN
+_ix         := 0;
+_fieldfound := false;
+WHILE ( _ix <= colno_cnt - 1 ) AND ( NOT _fieldfound ) DO
+    IF  ( colno_arr[ offset + _ix ] = act_colno )
+    THEN
+        _fieldfound := true
+    ELSE
+        _ix         := succ(_ix);
+    (*ENDIF*) 
+(*ENDWHILE*) 
+IF  ( NOT _fieldfound )
+THEN
+    IF  ( colno_cnt < max_idx )
+    THEN
+        BEGIN
+        colno_cnt                           := succ( colno_cnt );
+        colno_arr[ offset + colno_cnt - 1 ] := act_colno;
+        END
+    ELSE
+        BEGIN
+&       ifdef trace
+        t01name( ak_strat, 'colno_cnt >= mx_id' );
+&       endif
+        access_info.srec_query_prop.qps_switches :=
+              access_info.srec_query_prop.qps_switches + [ qp_inv_only_impossible ];
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

@@ -1,0 +1,460 @@
+
+   e1           < '<EXPR>';
+   e5           < '<FIXED>';
+   e6           < '<FLOAT>';
+   e7           < '<IDENT>';
+
+   e1e          < '</EXPR>';
+   e5e          < '</FIXED>';
+   e6e          < '</FLOAT>';
+   e7e          < '</IDENT>';
+
+  
+  s_add         < '<ADD/>';
+  s_sub         < '<SUB/>';
+  s_mul         < '<MUL/>';
+  s_div         < '<DIV/>';
+  s_mod         < '<MOD/>';
+
+  qot           < '''';
+  hash          < '#';
+  
+  digs          < '0123456789';
+  lcs           < 'abcdefghijklmnopqrstuvwxyz';
+  ucs           < 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+; tab, cariage return and linefeed allowed as whitespace 
+
+  tabs          < CHR(9);
+  cr            < CHR(10);
+  lf            < CHR(13);
+  crlf          < CHR(10) + CHR(13);
+  delim         < ' ' + tabs + cr + lf +';';
+  ws            < ' ' + tabs + cr + lf;
+
+  p_bt          = span(' ' + tabs);
+  p_obt         = ((p_bt)*) < '';
+  p_bl          = span(ws);
+  p_obl         = ((p_bl)*) < '';
+  p_abl         = ((p_bl)*);
+  p_lm          = pos(0) p_obl;
+  p_rm          = p_obl rpos(0);
+
+  p_path        : find['/\']* > pth (find:b('.') | rem()) > fil;
+
+  p_paths       : ((find:b(';') > pth ';') < '') | (rem() > pth < '');
+
+  p_apro        : find('"') find('\"')* find('"');
+
+  p_specchar    : find:b['\"', '<', '>', '&'] ('\"' < '&quot;' | '<' < '&lt;' | '>' < '&gt;'  | '&' < '&amp;');
+
+  p_aprospec    : find('"') p_specchar* find('"');
+
+  p_aprostr     : (find('"') < qot find:b('\"') '\"' < '"'  (find:b('\"') '\"' < '"')* find('"') < qot) | 
+                  (find('"') find('"'));
+
+  
+
+  p_combeg      : (p_bt* (find:ab('/') ('/' any('/*') > cty) < '' )) |
+                  ((p_bt | p_apro*) ((find:b('/') ('/' any('/*') > cty) < '' ) | ('' . cty abort() ) ));
+
+  p_combeg      > '//import "../xyz"';
+  p_combeg      > 'cpp_quote("/*#")';
+  p_combeg      > 'cpp_quote("/*#")';
+  p_combeg      > 'cpp_quote("/*#") /*';
+  p_combeg      > 'cpp_quote("/*#") //';
+
+
+
+  p_comcont     : (p_bt* find:b('/') '/' any('/*') > cty) ;
+
+  p_comend      : find('*/') < '';
+
+  p_comcont     > 'cpp_quote("/*#") ';
+  
+  p_emptyline   : (p_bt < '' | '') rpos(0);
+
+  p_comslash    : p_apro* find:b('//') ('//' rem()) < '';
+  p_comaster    : p_apro* find:b('/*') ('/*' find('*/')) < '';
+
+
+  p_ident       = any(lcs + ucs + '_') span(lcs+ucs+digs+'_$')*;
+
+  p_linecom     : (p_obt (((('/*' find:b('*/') > com '*/') | ('//' find:b[crlf] > com))  p_obl ) | '' > com)) < '';
+
+  p_uuid        : ((find('uuid') p_obl '(' find:b(')') > uid ')' ) | '' > uid) p_abl;
+
+  p_help        : (',' p_obl ('helpstring' '(' < '=' find:b(')') ) > hlp ')') | '';
+
+  p_attr_beg    : p_abl '[' > beg;
+
+  p_attr        : (p_obl '[' p_uuid p_help find(']') p_obl) < '';
+
+  p_dimension   : p_abl ((('[' p_abl find:b[ws+']'] > dim find(']') ) < cc('" DIMENSION="' + dim) ) > dim ) 
+                        | '' > dim;
+
+  p_dim_end     : p_abl (('[' p_abl find:b[ws+']']  find(']') ) | '');
+
+  p_type4       : (find:a['signed', 'unsigned'] > ty1 p_abl
+                   'long' > ty2 p_abl
+                   'long' > ty3 p_abl
+                   'int'  > ty4) < cc(ty1 + ' ' + ty2 + ' ' + ty3 + ' ' + ty4);
+
+  p_type41      : (find:a['signed', 'unsigned'] > ty1 p_abl
+                   'long' > ty2 p_abl
+                   'long' > ty3) < cc(ty1 + ' ' + ty2 + ' ' + ty3);
+
+  p_type3       : (find:a['signed', 'unsigned'] > ty1 p_abl
+                   find:a['short', 'long'] > ty2 p_abl
+                   'int' > ty3) < cc(ty1 + ' ' + ty2 + ' ' + ty3);
+
+  p_type2       : (find:a['signed', 'unsigned'] > ty1 p_abl
+                   find:a['char', 'short', 'long', 'int', 'hyper'] > ty2 p_abl)
+                   < cc(ty1 + ' ' + ty2);
+
+  p_type21      : ('long' > ty1 p_abl
+                   find:a['double', 'long', 'int'] > ty2 p_abl)
+                   < cc(ty1 + ' ' + ty2);
+
+  p_type22      : ('short' > ty1 p_abl 'int' > ty2 p_abl)
+                   < cc(ty1 + ' ' + ty2);
+
+  p_type        : p_type4 | p_type41 | p_type3 | p_type2 | p_type21  | p_type22 | p_ident;
+
+  p_entry_end   : p_abl p_type p_abl ('*' p_obl)*  p_abl p_ident p_dim_end p_abl ';' p_abl; 
+
+  p_entry       : (p_obl p_type > ety p_obl ('*' p_obl)* > poi p_abl p_ident > ena p_dimension p_abl ';' p_abl p_linecom) 
+                  < cc(' <MEMBER NAME="' + ena + '" TYPE="' + ety + poi + dim + '"/>' + cr);
+
+  p_uuid_beg    : p_abl (('[' p_uuid p_apro* find(']') p_abl) | '');
+
+  p_typedef_beg : p_abl 't' > beg 'ypedef' p_abl;
+
+  p_typedef_end : p_uuid_beg p_abl 'typedef' p_uuid_beg p_entry_end;
+  
+  p_typedef     : '' > uid (p_uuid_beg p_obl 'typedef' p_uuid_beg) < cc('<TYPEDEF UUID="' + uid + '"') 
+                   p_entry < cc(' NAME="' + ena + '" TYPE="' + ety + poi + dim + '"/>');
+
+ 
+  p_struct_beg  : p_uuid_beg p_abl 'typedef' p_uuid_beg 's' > beg 'truct' p_abl p_ident p_abl '{';
+
+  p_struct_end  : find('}') p_abl p_ident p_abl ';';
+
+  p_struct      : (p_uuid_beg p_obl 'typedef' p_obl p_uuid_beg p_obl 'struct'  p_obl p_ident > pid p_obl '{' p_obl) 
+                  < cc('<STRUCT NAME="' + pid + '" UUID="' + uid + '">' + cr) 
+                   p_entry* 
+                  ('}' p_obl p_ident p_obl ';' p_obl) < cc('</STRUCT>');
+
+  p_enum_beg    : p_abl 'typedef' p_abl 'e' > beg 'num' p_abl '{';
+
+  p_enum_end    : find('}') p_obl ';';
+
+  p_enum_mem    : (p_abl p_ident > mid p_abl '=' p_abl ((find:b[ws+','] > val find(',') ) | find:b[ws+'}'] > val ) )
+                  < cc(' <MEMBER NAME="' + mid + '" VALUE="' + val + '"/>' + cr);
+
+  p_enum        : (p_abl 'typedef' p_abl 'enum' p_abl '{' p_abl)
+                  < cc('<ENUM NAME="' + eid + '">' + cr)
+                  p_enum_mem* 
+                  (p_abl '}' p_abl p_ident . eid p_abl ';') < cc('</ENUM>');
+            
+  p_inout       : (p_abl '/*' span(' [') find:b(']') > dir span('] */'));
+
+  p_far         : (p_obl ('__RPC_FAR' < ' Far="TRUE"' | '' ) > fap p_obl) < '';
+
+  p_mentry      : (p_inout p_ident > ety p_far ('*' p_obl)* > poi p_abl p_ident > ena p_abl span(',)') p_linecom p_abl)
+                                     < cc(' <ENTRY NAME="' + ena + ' Direction="' + dir + '" TYPE="' + ety + poi +  fap + '"/>' + cr);
+
+  p_direction    : (p_abl (('[' find:b(']') > dir ']') | '' > dir) p_abl) < '';
+
+  p_mparam      : (p_direction p_type > ety p_far ('*' p_obl)* > poi p_abl (p_ident | '') > ena p_abl 
+                   p_dimension p_abl span(',)') p_abl)
+                                     < cc('  <PARAM NAME="' + ena + '" DIRECTION="' + dir + '" TYPE="' + ety + poi + fap  + dim + '"/>' + cr);
+
+  p_idl         : (find('HRESULT') p_abl p_ident > pid p_abl '(')
+                  < cc(' <IDL NAME="' + pid + '">' + cr)
+                  p_mparam*
+                  (find(';') p_abl) < cc(' </IDL>') ((p_abl '}' p_abl ';') | '') < '';
+
+  p_idl_beg     : find('HRESUL') 'T' > beg p_abl p_ident p_abl '(';
+
+  p_idl_end     : breakx(')') ')' p_obl ';';
+
+  p_library_beg : p_uuid_beg p_abl 'l' > beg 'ibrary' p_abl p_ident p_abl '{';
+
+  p_library     : (p_uuid_beg p_abl 'library' p_abl p_ident > lid p_abl '{' )
+                  < cc('<LIBRARY NAME="' + lid + '" UUID="' + uid + '">');
+ 
+ 
+  p_interface_beg : p_uuid_beg p_abl 'i' > beg 'nterface' p_abl p_ident p_abl ':' p_abl ('IUnknown' | p_ident) p_abl ;
+
+  p_interface_end : p_interface_beg find('{');
+
+  p_interface   : (p_uuid_beg p_abl 'interface' p_abl p_ident > iid p_abl ':' p_abl ('IUnknown' | p_ident) p_abl '{' p_abl)
+                  < cc('<INTERFACE NAME="' + iid + '" UUID="' + uid + '">' + cr);
+
+  p_coclass_beg : p_uuid_beg p_abl 'c' 'o' > beg 'class' p_abl p_ident p_abl  '{';
+
+  p_coclass     : (p_uuid_beg p_abl 'coclass' p_abl p_ident > cid p_abl  '{' find('}') p_abl ';' p_abl)
+                  < cc('<COCLASS NAME="' + cid + '" UUID="' + uid + '"/>');
+
+  p_cpp_beg     : p_abl 'cpp_' 'q' > beg 'uote' p_abl '(' ;
+  p_cpp         : (p_abl find('cpp_quote') p_abl '(' p_abl p_aprospec > str p_abl ')' p_abl)
+                  < cc('<CPP STRING=' + str + '/>');
+
+ 
+  p_pragma_beg  : p_abl '#' 'p' > beg 'ragma' p_abl 'pack';
+  p_pragma      : (p_abl '#pragma' p_abl 'pack' p_abl (('(' find:b(')') > val ')') | (rem() > val)) )
+                  < cc('<PRAGMA PACK="' + val + '"/>');
+
+  p_hash_beg    : p_abl '#' > beg ('define ' | 'ifdef ' | 'ifndef ' |  'else' | 'endif' | 'if ');
+
+  p_hash        : (p_abl ('#' ('define ' | 'ifdef ' | 'ifndef ' | 'else' | 'endif' | 'if ')  rem() ) > hsh)
+                  < cc('<DEFINE CODE="' + hsh + '"/>');
+
+  p_include_beg : p_abl '#i' 'n' > beg 'clude' p_abl '"';
+
+  p_include     : (p_abl '#include' p_abl '"' find:b('"') > pth '"')
+                  < cc('<INCLUDE FILE="' + pth + '">');
+
+  p_import_beg  : p_abl 'i' 'm' > beg 'port' p_abl '"';
+
+  p_import      : (p_abl 'import' p_abl '"' find:b('"') > pth '"' p_abl ';')
+                 < cc('<IMPORT FILE="' + pth + '">');
+
+  p_nestedfile  : p_include | p_import;
+
+  p_filecompr   : find['\/']* (find['\/'] '..' find:a['\/']) < '' rem();
+
+;  p_string      : ('"' find('\"')* find('"')) > vl < cc(' STRING=' + vl) > vl;
+  p_string      : p_aprospec > vl < cc(' STRING=' + vl) > vl;
+
+  p_char        : (qot find('\' + qot)* find(qot)) > vl < cc(' CHAR="' + vl + '"');
+
+  
+  p_fixed       = span(digs);
+
+  p_signed      = (find:a['+-'] | '') p_obl p_fixed;
+ 
+  p_float       = ((p_signed '.' p_fixed) | 
+                   ((p_signed '.') > fi < cc(fi +'0'))  | 
+                   (('.'  p_fixed) > fi < cc('0' + fi))) 
+                   ((find:a('e') < 'E' p_signed) | '') ;
+
+  p_hex         = (find:a('0x') span('0123456789abcdefABCDEF')) > vl < cc(' NUMBER="' + vl + '"');
+  
+  p_floatno     = p_float > fn < cc(e6 + fn + e6e);
+  
+       
+  p_fixedno     = p_signed > fn < cc(e5 + fn + e5e);
+
+  p_cident      = p_ident > id < cc(e7 + id + e7e);
+
+  p_number      : (p_float | p_signed) > vl < cc(' NUMBER="' + vl + '"');
+ 
+  p_primary     = p_floatno | p_fixedno | p_cident;
+
+  p_klammer     = ('(' p_obl pcall(p_punktstrich) > ir p_obl ')') < ir;
+
+  p_par_or_prim : p_klammer | p_primary;
+
+  p_rechnung    = pcall(p_par_or_prim);
+
+  p_punktop     = p_obl ('*' < s_mul | '/' < s_div | find:a('mod') < s_mod) > opp p_obl;
+  
+  p_punkt       : (p_rechnung > cy ((p_punktop p_rechnung > ca) < cc(opp + cy + ca) > cy )*) < cy;
+ 
+  p_strichop    = p_obl ('+' < s_add | '-' < s_sub) > ops p_obl;
+
+  p_strich      : (p_punkt > cx ((p_strichop p_punkt > co) < cc(ops + cx + co) > cx )*) < cx;
+
+  p_punktstrich : p_obl p_strich;
+
+  p_exprstring  : find:b(';') . ex fail();
+
+
+  p_ausdruck    : p_punktstrich > vl < cc(' EXPRESSION="' + ex + '">' + e1 + vl + e1e) > vl;
+
+  p_expression  : ((find:b(';') . ex fail()) | p_ausdruck);
+
+  p_expression  > '1+2*3;';
+  ex?;
+
+  p_value       : '' > vl ((p_string | p_char | p_number | p_hex) > vl < cc(vl + '>') > vl | p_expression );
+
+  p_bracket_beg : p_abl '[' > beg p_abl;
+
+
+  p_const_beg   : p_abl 'c' > beg 'onst' any(ws);
+
+  p_consttype   : ('char' > ty p_abl '*' p_abl) | (p_type > ty p_bl);
+
+  p_const       : (p_abl 'const' p_abl p_consttype  p_ident > na p_abl '=' p_abl p_value p_abl ';' rem()) 
+                  < cc('<CONST NAME="' + na + '" TYPE="' + ty + '"' + vl  + '</CONST>');
+
+
+  p_find        : (p_include | p_import) rem();
+
+  p_beg         : p_const_beg | p_enum_beg | p_library_beg |
+                  p_struct_beg | p_typedef_beg | p_interface_beg | p_idl_beg | p_coclass_beg | 
+                  p_attr_beg | p_cpp_beg | p_pragma_beg | p_hash_beg;
+
+  p_beg_cont    : p_enum_beg | p_library_beg | p_struct_beg | p_typedef_beg | p_interface_beg | p_coclass_beg | p_hash_beg; 
+ 
+  p_end         : p_enum_end | p_struct_end | p_typedef_end | p_interface_end | p_idl_end;
+
+  p_cont        : p_enum | p_struct |  p_typedef | p_idl | p_hash | p_interface | p_coclass;
+
+  p_typestruct  : p_typedef | p_struct_end;
+
+p_idl >'		HRESULT IDL_CHK_BASIS_TYPES_Err0([in] boolean * *pi_boolean[1]);';
+
+
+p_idl >'		HRESULT IDL_CHK_BASIS_TYPES_Err0([in] boolean ** *pi_boolean[1]);';
+
+
+  p_const       > '  const int APO_MODULE_NAME_LENGTH = 10; ';
+
+  p_const       > '  const  BTP_OMSLC_ERROR   = "003"  ; ';
+
+  p_const       > '  const  BTP_OMSLC_ERROR   = ''\''''  ; ';
+
+
+  p_const       > '  const  BTP_OMSLC_ERROR   = ''003''  ; ';
+
+  p_const       > '  const int ATP_OMSLC_ERROR   = 003; ';
+
+  p_const       > 'const int aaa = 1+1;';
+
+  p_const       > 'const int aaa = (((1+1)));';
+
+  p_const       > 'const int aaa = -1;';
+
+  p_const       > 'const int aaa = - 1;';
+
+  p_const       > '  const int ARRAY   = - 3.1 + - 1 - VAR mod 5 / 2 * 1; ';
+
+p_typedef >
+
+'typedef
+	[
+		uuid(A6DE9A83-6173-11d1-A943-00A0C94311A5),
+		helpstring("LiveCacheType: CHAR")
+	]
+	char   OmsTypeChar;';
+
+
+ p_struct      > 
+
+'  typedef [uuid(6FD316FC-D2E2-11d2-B4CC-006094B90CA9), public]
+  struct A2C_FileListHandle
+  {
+    A2C_FileList*         RowDef;
+    OmsTypeABAPTabHandle  Handle;
+  } A2C_FileListHandle; ';
+
+p_struct > '
+typedef struct tagOCPFIPARAMS
+{
+    ULONG cbStructSize;
+    HWND hWndOwner;
+    int x;
+    int y;
+    LPCOLESTR lpszCaption;
+    ULONG cObjects;
+    LPUNKNOWN lplpUnk;
+    ULONG cPages;
+    CLSID lpPages;
+    LCID lcid;
+    DISPID dispidInitialProperty;
+
+} OCPFIPARAMS;
+';
+
+
+p_struct > '
+
+typedef
+    [
+        uuid(74F2C121-27EC-11d3-A996-00A0C9430731),
+        helpstring("LiveCache internal Type")
+    ]
+    struct TParamDescriptor {
+      OmsTypeInt4    len;
+      unsigned char* val;
+    } TParamDescriptor;';
+
+p_typedef >
+
+'typedef hyper OmsTypeInt64;';
+
+p_typedef >
+
+'typedef unsigned hyper OmsTypeUInt64;';
+
+p_end >
+
+'typedef unsigned hyper OmsTypeUInt64;';
+
+p_typedef >
+
+'typedef unsigned long OmsTypeUInt64;';
+
+p_end >
+
+'typedef unsigned long OmsTypeUInt64;';
+
+p_path > '../FF_lctests/checkparmstypes.idl';
+pth?;
+fil?;
+
+p_filecompr > 'x\..\..\a\b.h';
+
+p_filecompr > 'x\..\a\b.h';
+
+  p_const       > 'const  aaa = "XXX";';
+  p_const       > 'const char aaa = "XXX";';
+  p_const       > 'const char * aaa = "XXX";';
+  p_const       > 'const char* aaa = "XXX";';
+  p_const       > 'const char *aaa = "XXX";';
+  p_cpp      > 'cpp_quote("\"&<>")';
+  p_const       > 'const char aaa = "\"&<>";';
+
+  p_aprospec   > '"\"&<>"';
+
+p_interface   > '
+    [
+	    object,
+	    uuid(9C6BDDD2-4ADA-11d3-806C-00C04FADCAFF),
+	    helpstring("ITS Image Control Events"),
+	    pointer_default(unique)
+    ]
+    interface IITSImageControlEvents : IITSControlEvents 
+    {     
+		[id(DISPID_DBLCLICK)] 
+            HRESULT OnDblClick();
+		[id(DISPID_CLICK)] 
+            HRESULT OnClick();
+		[id(1)] 
+            HRESULT OnContextMenu([in]long x, [in]long y);
+		[id(2)] 
+            HRESULT OnImageClick([in]long x, [in]long y);
+		[id(3)] 
+            HRESULT OnImageDblClick([in]long x, [in]long y);
+		[id(4), helpstring("method ControlClick")] 
+            HRESULT OnControlClick([in]long x, [in]long y);
+		[id(5), helpstring("method ControlDblClick")]
+            HRESULT OnControlDblClick([in]long x, [in]long y);
+		[id(6), helpstring("method ContextMenuSelected")] 
+            HRESULT OnContextMenuSelected([in] BSTR strFCode);
+    };
+';
+
+  p_const       > 'const  int aaa = 0x00;';
+
+  p_type        > 'unsigned long long int'; 
+
+  p_type        > 'unsigned long long'; 
+
+  p_type        > 'signed long    long'; 
+
+

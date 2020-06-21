@@ -1,0 +1,110 @@
+#!/usr/bin/perl
+#
+# @(#)ntcpc		1997-11-18
+#
+# G. Großmann, SAP AG
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package ntcpc;
+use Env;
+use Carp;
+use File::Basename;
+use File::Copy;
+
+do "$TOOLVARS";
+if ( $@ ) { warn "Error while executing toolvars:\n", "$@"; exit }
+ToolTrace("ntcpc called with @ARGV\n");
+
+$SOURCE = basename($ARGV[0], "\.c");
+
+$CPC64="";
+if ( $ENV{RELVER} gt "R73" ) { 
+    $CPC64="-BIT64" if (defined $ENV{BIT64} && ! defined $ENV{XCOMP});
+    
+}
+
+if (! defined $ENV{XCOMP} )
+{
+  if ( ! -f "$DBROOT/bin/cpc.exe" ) { 
+	warn "$DBROOT/bin/cpc.exe doesn't exist!\n";
+	exit 2;
+  }
+} 
+else 
+{
+#In case of an Cross-Compilation
+  if ( ! -f "$DBROOT/cpc_32Bit/bin/cpc.exe" ) { 
+	warn "$DBROOT/cpc_32Bit/bin/cpc.exe doesn't exist for Cross-Compilation!\n";
+	exit 2;
+  }
+}
+
+copy $ARGV[0], "$SOURCE.cpc" ;
+if ( $COMPILE_DBROOT ne "" ) { $DBROOT = $COMPILE_DBROOT; $ENV{DBROOT} = $DBROOT }
+
+if ( $COMPILE_GOSCRIPT ) {
+	system("$TOOLSHELL $TOOL/bin/$COMPILE_GOSCRIPT") == 0
+		or croak "Error while executing \"$SHELL $TOOL/bin/$COMPILE_GOSCRIPT\"\n".
+		"message: $!\n";
+}
+
+if (! defined $ENV{XCOMP} )
+{
+	if ($CPC64 ne "")
+	{
+		$RET = system("cpc", "$CPC64", "-H nocheck", "-s", "-S adabas", "-E cansi", "-c", $SOURCE);
+	}
+	else
+	{
+		$RET = system("cpc", "-H nocheck", "-s", "-S adabas", "-E cansi", "-c", $SOURCE);
+	}
+} 
+else 
+{
+#In case of an Cross-Compilation
+#Redefinition of $DBROOT because cpc.exe is calling pc3.exe with the known $DBROOT. 
+#cpc.exe, pc3.exe and all related stuff have to be copied to DBROOT/cpc_32Bit/bin, DBROOT/cpc_32Bit/pgm or
+#DBROOT/cpc/sdk (>= 7.4.02) respectively
+$DBROOTTMP = $DBROOT;
+$DBROOT = "$DBROOT/cpc_32Bit";
+if ($CPC64 ne "")
+{
+	$RET = system("$DBROOT/bin/cpc.exe", "$CPC64", "-H nocheck", "-s", "-S adabas", "-E cansi", "-c", $SOURCE);
+}
+else
+{
+	$RET = system("$DBROOT/bin/cpc.exe", "-H nocheck", "-s", "-S adabas", "-E cansi", "-c", $SOURCE);
+}
+$DBROOT = $DBROOTTMP;
+}
+
+if ( $RET == 0 ) { 
+	unlink "$SOURCE.cpc" 
+}
+else {
+	open(FILE_IN, "$SOURCE.pcl");
+	print <FILE_IN>;
+	close(FILE_IN);
+}
+
+__END__

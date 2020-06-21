@@ -1,0 +1,1046 @@
+(* @(#)optimizer/optm6.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm6.p *)
+
+   (* this module contains the procedures that perform the optimizing *)
+   (* transformations and those procedures that evaluate the necessary*)
+   (* conditions for these transformations.                           *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../common/hdg.def"
+#include "../optimizer/more_csg.def"
+#define PrevExpr1link            field[ExprLink[index1]]
+#define PrevExpr2link            field[ExprLink[index2]]
+#define PrevStmnt1link           field[StmntLink[index1]]
+#define PrevStmnt2link           field[StmntLink[index2]]
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/csg.h"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+#include "../optimizer/optm2.h"
+#include "../optimizer/optm5.h"
+#include "../optimizer/set_util.h"
+#include "../optimizer/temp_util.h"
+
+
+(* export *)
+
+#include "../optimizer/optm6.h"
+
+
+(* privates *)
+(* initial *)
+(* routines *)
+
+   function NoPack ( typ : SymbolTableRange ): SymbolTableRange;
+   begin
+	while (typ > 0) and (STab[typ].SKind = PackedTypeDcl)  do
+	   typ := STab[typ].SType;
+	NoPack := typ;
+   end;
+
+
+   function RemoveExpressions
+      (FirstStmnt: HdgRange;
+       LinkToFirstStmnt,
+       index1,
+       index2: HdgRange;
+       traversal: TraversalType;
+       var temporary: SymbolTableRange;
+       var BuiltEntry: boolean)
+      : boolean;
+
+      (* this function first checks if two identical expressions can be *)
+      (* moved to the head of the statement list. if they can be moved, *)
+      (* a long statement which assigns the expression to a temporary   *)
+      (* storage is created and placed at the top of the statement list.*)
+      (* then, the pointers to these two expression nodes are replaced  *)
+      (* by pointers to nodes which load the temporary storage and true *)
+      (* is returned. if the expressions cannot be removed, the function*)
+      (* returns the false.                                       *)
+
+   var
+      NodeIndex,
+      CnodeIndex,
+      LinkNode: HdgRange;
+      ExitDesc: NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+      MovingLval: boolean;
+      TempType: SymbolTableRange;
+#ifdef TRACE
+      LineNr : integer;
+#endif
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+#endif
+      NodeIndex := ExprChain[index1];  (* NodeIndex and CnodeIndex *)
+      CnodeIndex:= ExprChain[index2];  (* are identical nodes        *)
+
+      MovingLval := IsLvalOp (NodeIndex);
+      if MovingLval then begin
+         TempType := gl_AnyPtrPtr;
+      end
+      else begin
+	 if MajorOperator = ifthenelse
+	    then TempType := NoPack (TypeFieldOf(IfTrueField))
+            else TempType := NoPack (TypeField);
+      end;
+
+      if
+         gl_TempAvail (temporary, TempType) and
+         ConditionsSatisfied (
+            NONMODIFY,
+            NodeIndex,
+            FirstStmnt,
+            BuiltEntry) and
+         ConditionsSatisfied (
+            MOVEBACKWARDS,
+            NodeIndex,
+            FirstStmnt,
+            BuiltEntry) and
+         ConditionsSatisfied (
+            MOVEBACKWARDS,
+            CnodeIndex,
+            FirstStmnt,
+            BuiltEntry)
+      then begin
+         if temporary = -1 then begin
+
+            (* create assignment statement and place at head of stmnt list *)
+
+#ifdef TRACE
+	    LineNr := ZeilenNr (FirstStmnt);
+#endif
+
+            temporary := gl_GetTemporary (TempType);
+            if MovingLval then begin
+               FirstStmnt := CreateAssignmentStatement (
+                  CreateAddrOfLval (NodeIndex),
+                  FirstStmnt,
+                  temporary,
+                  -1);
+            end
+            else begin
+               FirstStmnt := CreateAssignmentStatement (
+                  NodeIndex,
+                  FirstStmnt,
+                  temporary,
+                  -1);
+            end;
+
+            LinkNode := LinkToFirstStmnt;
+            PrevNodeLink := FirstStmnt;
+
+#ifdef TRACE
+	    if control ['v'] then begin
+	       write ('COMMON EXPR:     hilf ');
+	       SelectForPrinting ( FirstStmnt, 5, false);
+	       writeln;
+	       writeln ('        vor Zeile ', LineNr);
+	       writeln ('        - red exp');
+            end  (* if *);
+#endif
+
+            (* create load node for expression 1's' previous node to point to *)
+
+            PrevExpr1link := CreateLoadNode (temporary);
+            if MovingLval then begin
+               PrevExpr1link := UnaryExpression (
+                  DerefOp,
+                  TypeField,
+                  PrevExpr1link,
+                  0,
+                  0);
+            end;
+            NextLinkOf (PrevExpr1link) := NextLink;
+            NextLink := -1;
+         end  (* if *);
+
+         (* create load node for expression 2's' previous node to point to *)
+
+         PrevExpr2link := CreateLoadNode (temporary);
+         if MovingLval then begin
+            PrevExpr2link := UnaryExpression (
+               DerefOp,
+               TypeField,
+               PrevExpr2link,
+               0,
+               0);
+         end;
+         NextLinkOf (PrevExpr2link) := CnextLink;
+         CnextLink := -1;
+
+         if control ['V'] then begin
+            writeln (output,'redundant expressions found: ',NodeIndex,',',
+                  CnodeIndex);
+         end  (* if *);
+
+#ifdef TRACE
+	 if control ['v'] then begin
+	    writeln ('        - red exp');
+         end  (* if *);
+#endif
+
+         RemoveExpressions := true;
+      end
+      else begin
+         if control ['V'] then begin
+            writeln (output,'conditions for redundant expressions failed');
+         end  (* if *);
+
+         RemoveExpressions := false;
+      end  (* if *);
+
+   end (*RemoveExpressions*);
+
+
+   procedure TransformExpressionList
+      (FirstStmnt,
+       LinkNode: HdgRange;
+       traversal: TraversalType;
+       var success: boolean);
+
+      (* this procedure searches for redundant expressions in a statement    *)
+      (* list. each expression is compared to every other expression.  if    *)
+      (* two expressions have equal exit descriptors, they are further test- *)
+      (* ed for equality. if they are identical expressions, then they are   *)
+      (* removed and placed in an assignment statement at the head of the    *)
+      (* statement list.                                                     *)
+
+   label 100;
+
+   var
+      CurrentStatement,
+      CurrentLink,
+      NodeIndex,
+      CnodeIndex: HdgRange;
+      index1,
+      index2,
+      StatementIndex: TableRange;
+      temporary: SymbolTableRange;
+      ExitDesc: NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+      NodeRemoved,
+      BuiltEntry: boolean;
+      DescPtr,
+      CdescPtr: DescriptorRange;
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+#endif
+
+      if control ['V'] then begin
+         writeln (output);
+         writeln (
+            output, 'TransformExpressionList: FirstStmnt = ', FirstStmnt:1);
+      end  (* if *);
+
+      100:  (* restart here after transformation *)
+
+      if success then begin
+         ExprFlag := true;
+         StmntFlag := true;
+         NoExpr := 0;
+         NoStmnt := 0;
+         EssentialBit := true;
+         ExitTraverse (FirstStmnt, LinkNode, traversal, ExitDesc);
+         success := false;
+         ExprFlag := false;
+         StmntFlag := true;
+      end  (* if *);
+
+      NodeRemoved := false;
+
+      (* search for expressions with identical ExitDescriptors *)
+
+      for index1 := 1 to NoExpr  do begin
+
+         StatementIndex := ExprStmnt [index1];
+         CurrentStatement := StmntChain [StatementIndex];
+         CurrentLink := StmntLink [StatementIndex];
+         BuiltEntry := false;
+         temporary := -1;
+         NodeIndex := ExprChain [index1];
+         DescPtr := ptr (DscField);
+
+         for index2 := index1+1  to  NoExpr  do begin
+
+            CnodeIndex := ExprChain[index2];
+            CdescPtr := ptr (CdescriptorField);
+
+            if control ['V'] then begin
+               writeln (
+                  output,'compare expressions: ',NodeIndex,',', CnodeIndex);
+            end  (* if *);
+
+            (* do not look at subexpression of deleted node *)
+
+            if CdescPtr <> nil then begin
+
+	     if (DescPtr^.essential and CdescPtr^.essential) and
+		(DescPtr^.ExitDescriptor.hash_code =
+		 CdescPtr^.ExitDescriptor.hash_code)
+	     then begin
+
+               if
+                  EqualDescriptors (
+                     DescPtr^.ExitDescriptor,
+                     CdescPtr^.ExitDescriptor)
+               then begin
+                  if identical (NodeIndex, CnodeIndex) then begin
+                     if RemoveExpressions (
+                           CurrentStatement,
+                           CurrentLink,
+                           index1,
+                           index2,
+                           traversal,
+                           temporary,
+                           BuiltEntry)
+                     then begin
+                        NodeRemoved := true;
+                        RedundantExpr := RedundantExpr + 1;
+                        DeallocateDsc (CnodeIndex);
+		     end  (* if RemoveExpression *);
+		  end  (* if identical *);
+	       end  (* if EqualDescriptors *);
+	      end (* if EqualHashCode *)
+            end  (* if *);
+
+         end  (* for *);
+
+         if NodeRemoved then begin
+            success := true;             (* transformation performed *)
+            FirstStmnt := PrevNodeLink;  (* top of list may have moved *)
+            goto 100;                    (* start over at top of list *)
+         end  (* if *);
+
+      end  (* for *);
+
+   end  (* TransformExpressionList *);
+
+
+   function RemoveRedundantStatement
+      (index1,
+       index2: HdgRange;
+       var BuiltEntry: boolean)
+      : boolean;
+
+      (* this function checks if a statement, which is identical to a    *)
+      (* previous statement, can be moved in front of that statement. if *)
+      (* it can be moved without changing the effect of the code then it *)
+      (* is removed and true is returned. otherwise, false is returned.  *)
+
+   var
+      NodeIndex,FirstStmnt : HdgRange;
+#ifdef TRACE
+      LineNr1, LineNr2 : integer;
+#endif
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output,'RemoveRedundantStatements');
+      end  (* if *);
+      NodeIndex := StmntChain[index2];
+      FirstStmnt := StmntChain[index1+1];
+      if
+         ConditionsSatisfied (NONMODIFY, NodeIndex, FirstStmnt, BuiltEntry)
+      and
+         ConditionsSatisfied (MOVEBACKWARDS, NodeIndex, FirstStmnt, BuiltEntry)
+      then begin
+         PrevStmnt2link := NextLink;
+         if control ['V'] then begin
+            writeln (output,'redundant statement: ',NodeIndex,' removed');
+         end  (* if *);
+
+#ifdef TRACE
+	 if control ['v'] then begin
+	    LineNr1 := ZeilenNr (StmntChain[index1]);
+	    LineNr2 := ZeilenNr (StmntChain[index2]);
+	    write ('RED STMNT:     ');
+	    SelectForPrinting ( NodeIndex, 5, false);
+	    writeln;
+	    writeln ('        in Zeilen ', LineNr1, ' und ', LineNr2);
+         end  (* if *);
+#endif
+
+         RemoveRedundantStatement := true; (* that the statement was removed *)
+      end
+      else begin
+         if control ['V'] then begin
+            writeln (output,'conditions for redundant statements failed');
+         end  (* if *);
+         RemoveRedundantStatement := false;
+      end  (* if *);
+   end  (* RemoveRedundantStatement *);
+
+
+   procedure TransformStatementList
+      (FirstStmnt,
+       LinkToFirstStmnt: HdgRange;
+       traversal: TraversalType;
+       var success: boolean);
+
+      (* this procedure searches for redundant statements in a statement    *)
+      (* list.if two statements have equal exit descriptors they are tested *)
+      (* for equality. if they are identical, the redundant statement is    *)
+      (* removed.                                                           *)
+
+   label 100;
+
+   var
+      index1,index2 : integer;
+      NodeIndex,CnodeIndex : HdgRange;
+      ExitDesc : NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+      StmntRemoved, BuiltEntry : boolean;
+      DescPtr,
+      CdescPtr: DescriptorRange;
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+#endif
+
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output,'TransformStatementList: FirstStmnt = ', FirstStmnt:1);
+      end  (* if *);
+
+      100:  (* restart here after transformation *)
+
+      if success then begin
+         ExprFlag := true;
+         StmntFlag := true;
+         NoExpr := 0;
+         NoStmnt := 0;
+         EssentialBit := true;
+         ExitTraverse(FirstStmnt,LinkToFirstStmnt,traversal,ExitDesc);
+         success := false;
+         ExprFlag := true;
+         StmntFlag := false;
+      end  (* if *);
+
+      StmntRemoved := false;
+
+      for index1 := 1 to NoStmnt   do begin
+
+         BuiltEntry := false;
+         NodeIndex := StmntChain[index1];
+         DescPtr := ptr (DscField);
+
+         for index2 := index1+1  to  NoStmnt  do begin
+
+            CnodeIndex := StmntChain[index2];
+            CdescPtr := ptr (CdescriptorField);
+
+            if control ['V'] then begin
+               writeln (output,'compare stmnts: ',NodeIndex,',',
+                     CnodeIndex);
+            end  (* if *);
+
+	   if (DescPtr^.essential and CdescPtr^.essential) and
+	      (DescPtr^.ExitDescriptor.hash_code =
+	       CdescPtr^.ExitDescriptor.hash_code)
+	   then begin
+
+            if EqualDescriptors (
+                  DescPtr^.ExitDescriptor,
+                  CdescPtr^.ExitDescriptor)
+            then begin
+
+               if identical (NodeIndex,CnodeIndex)  then begin
+
+                  if RemoveRedundantStatement (index1, index2, BuiltEntry)
+                  then begin  (* must indicate that cnode was removed *)
+                     StmntRemoved := true;
+                     RedundantStmnts := RedundantStmnts + 1;
+                     DeallocateDsc(CnodeIndex);
+		  end  (* if RemoveRedundantStatement *);
+	       end  (* if identical *);
+	    end  (* if EqualDescriptors *);
+	   end (* if EqualHashCode *);
+         end  (* for *);
+
+         if StmntRemoved then begin
+            success := true;  (* performed transformation *)
+            goto 100;
+         end  (* if *);
+
+      end  (* for *);
+
+   end (*TransformStatementList*);
+
+
+   procedure ConvertLoop
+      (NodeIndex,
+       LinkNode: HdgRange;
+       var NewLinkNode: HdgRange);
+      (* this procedure transforms a for loop or a while loop into a *)
+      (* RepeatUntil loop within an ifthen beginend statement so as to   *)
+      (* facilitate optimization.                                    *)
+
+   var
+      CnodeIndex : HdgRange;
+
+   begin
+      (* first, an ifthenelse node must be constructed around the loop *)
+
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output,'ConvertLoop into RepeatUntil');
+      end  (* if *);
+
+      CnodeIndex := ComplexStmnt (
+         ifthenelse,
+         0,
+         CopyTree (WhileTestField),
+         NodeIndex,
+         -1,
+         -1);
+
+      (* link ifthenelse into the hdg *)
+      PrevNodeLink := CnodeIndex;
+      CnextLink := NextLink;
+      NextLink := -1;
+
+      (* return loop's' predecessor *)
+      NewLinkNode := CifTrueLink;
+
+      (* then, the loop must be converted into a RepeatUntil *)
+
+      (* create a unary expression node for the RepeatTest by using  *)
+      (* demorgan's' law to produce the compliment of the while test.  *)
+
+      RepeatTest := demorgan (WhileTestField);
+
+      (* change the loop node into a RepeatUntil node *)
+      Node1field := shl (RepeatUntil, 16) + NopOp;
+
+      LoopsConverted := LoopsConverted + 1;
+
+   end (*ConvertLoop*);
+
+
+   procedure MoveStatement
+      (index1: integer;
+       var LoopIndex, LinkNode: HdgRange);
+      (* this procedure moves a statement in front of a loop. *)
+
+   var
+      NodeIndex: HdgRange;
+
+   begin
+      NodeIndex := StmntChain[index1];
+
+      PrevStmnt1link := NextLink; (* to remove stmnt, link predecessor *)
+                                     (* node to successor node            *)
+
+      if NextLink = StmntChain[index1+1] then begin
+         StmntLink[index1+1] := StmntLink[index1];
+      end  (* if *);
+
+      PrevNodeLink := NodeIndex;  (* link loop's' predecessor node to this *)
+                                     (* moved statement                      *)
+      NextLink := LoopIndex; (* statement links to loop *)
+      LinkNode := NextLinkLink;
+
+   end  (* MoveStatement *);
+
+
+   procedure MoveStmntOutsideLoop
+      (LoopIndex: HdgRange;
+       var LinkNode: HdgRange;
+       var success: boolean);
+
+   label
+      100;
+
+   var
+      NodeIndex,
+      CnodeIndex,
+      NewLinkNode: HdgRange;
+      index1: integer;
+      ExitDesc: NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+      BuiltEntry: boolean;
+#ifdef TRACE
+      LineNr1, LineNr2 : integer;
+#endif
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+#endif
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output,'MoveStmntOutsideLoop');
+      end  (* if *);
+
+      100:  (* restart here after move *)
+
+      if success then begin
+         ExprFlag := true;
+         StmntFlag := true;
+         NoExpr := 0;
+         NoStmnt := 0;
+         EssentialBit := true;
+         BuildExitDescriptors (LoopIndex, -1, StmntTraversal, ExitDesc);
+         success := false;
+         ExprFlag := false;
+         StmntFlag := false;
+      end  (* if *);
+
+      BuiltEntry := false;
+      CnodeIndex := LoopIndex;
+
+      for index1 := 1 to NoStmnt do begin
+         (* search for invariant statements to be moved out of loop *)
+
+         NodeIndex := StmntChain[index1];
+
+         if
+            (NodeIndex <> LoopIndex) and  (* skip loop itself *)
+            ConditionsSatisfied (
+               MOVEOUTSIDELOOP,
+               NodeIndex,
+               LoopIndex,
+               BuiltEntry)
+         then begin (* move the statement outside the loop *)
+            if control ['V'] then begin
+               writeln (output);
+               writeln (output,'move stmnt ',NodeIndex,' outside loop');
+            end  (* if *);
+
+#ifdef TRACE
+	 if control ['v'] then begin
+	    LineNr1 := ZeilenNr (NodeIndex);
+	    LineNr2 := ZeilenNr (LoopIndex);
+	    write ('INV STMNT:     ');
+	    SelectForPrinting ( NodeIndex, 5, false);
+	    writeln;
+	    writeln ('        in Zeile ', LineNr1, ' vor ', LineNr2);
+         end  (* if *);
+#endif
+
+            if CmajorOperator =  loop  then begin
+               (* must be converted into a conditional RepeatUntil node *)
+               ConvertLoop (LoopIndex, LinkNode, NewLinkNode);
+               LinkNode := NewLinkNode;
+            end  (* if *);
+
+            success := true;  (* performed transformation *)
+            MoveStatement (index1, LoopIndex, LinkNode);
+            StmntsOutsideLoop := StmntsOutsideLoop + 1;
+
+            (* now, must see if moving this statement outside the loop *)
+            (* allows a previous statement to be moved out.            *)
+
+            goto 100;
+
+         end  (* if *);
+
+      end  (* for *);
+
+   end  (* MoveStmntOutsideLoop *);
+
+
+   procedure MoveExprOutsideLoop
+      (LoopIndex: HdgRange;
+       var LinkNode: HdgRange;
+       var success: boolean);
+
+   label
+      100;
+
+   var
+      NodeIndex,
+      CnodeIndex,
+      NewLinkNode,
+      SaveNextLink: HdgRange;
+      index1,index2 : integer;
+      temporary : SymbolTableRange;
+      ExitDesc : NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+      BuiltEntry : boolean;
+      MovingLval: boolean;
+      TempType: SymbolTableRange;
+#ifdef TRACE
+      LineNr1, LineNr2 : integer;
+#endif
+
+
+   function SubExpression
+      (expr1,
+       expr2: HdgRange)
+      : boolean;
+      (* returns true if expr1 is a subexpression of expr2, false otherwise *)
+
+   var
+      NodeIndex: integer;
+      flag: boolean;
+
+   begin
+      if expr1 = expr2 then begin
+         SubExpression := true;
+      end
+      else if expr2 = -1 then begin
+	 SubExpression := false;
+      end
+      else begin
+         NodeIndex := expr2;
+         case MajorOperator of
+            node: begin
+               SubExpression := false;
+            end;
+            UnaryExp: begin
+               SubExpression := SubExpression (expr1, Unary1operand);
+            end;
+            BinaryExp: begin
+               if SubExpression (expr1, Bin1operand) then begin
+                  SubExpression := true;
+               end
+               else begin
+                  SubExpression := SubExpression (expr1, Bin2operand);
+               end  (* if *);
+            end;
+            ExpList: begin
+               NodeIndex := ListHeadField;
+               repeat
+                  flag := SubExpression (expr1, NodeIndex);
+                  NodeIndex := NextLink;
+               until flag or (NodeIndex = -1);
+               SubExpression := flag;
+            end;
+            LongStmnt: begin
+               if SubExpression (expr1, Ls1operand) then begin
+                  SubExpression := true;
+               end
+               else begin
+                  SubExpression := SubExpression (expr1, Ls2operand);
+               end  (* if *);
+            end;
+            ifthenelse: begin
+               if SubExpression (expr1, IfCondField) then begin
+                  SubExpression := true;
+               end
+               else if SubExpression (expr1, IfTrueField) then begin
+                  SubExpression := true;
+               end
+               else begin
+                     SubExpression := (IfFalseField <> -1) and SubExpression (expr1, IfFalseField);
+               end  (* if *);
+            end;
+            spec,
+            ShortStmnt,
+            loop,
+            Switch,
+            Case,
+            RepeatUntil,
+            Proc,
+            OpenProc: begin
+               PasCerror ('unexpected MajorOperator in SubExpression');
+            end;
+         end  (* case *);
+      end  (* if *);
+   end  (* SubExpression *);
+
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDesc, set1 );
+      set_Def ( ExitDesc, set2 );
+#endif
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output,'MoveExprOutsideLoop (', LoopIndex:1, ')');
+      end  (* if *);
+
+      100: (* restart here after move *)
+
+      if success then begin
+         ExprFlag := true;
+         StmntFlag := true;
+         NoExpr := 0;
+         NoStmnt := 0;
+         EssentialBit := true;
+         BuildExitDescriptors (LoopIndex, -1, StmntTraversal, ExitDesc);
+         success := false;
+         ExprFlag := false;
+         StmntFlag := false;
+      end  (* if *);
+      BuiltEntry := false;
+      CnodeIndex := LoopIndex;
+
+      for index1 := 1 to NoExpr  do begin
+         (* search for expressions to be moved out of loop *)
+
+         NodeIndex := ExprChain [index1];
+         MovingLval := IsLvalOp (NodeIndex);
+         if MovingLval then begin
+            TempType := gl_AnyPtrPtr;
+         end
+         else begin
+	    if MajorOperator = ifthenelse
+	       then TempType := NoPack (TypeFieldOf(IfTrueField))
+               else TempType := NoPack (TypeField);
+         end;
+
+         if
+            gl_TempAvail (-1, TempType) and
+            ConditionsSatisfied (
+               MOVEOUTSIDELOOP,
+               NodeIndex,
+               LoopIndex,
+               BuiltEntry)
+         then begin
+
+            (* construct an assignment statement outside loop *)
+
+            if
+               (CmajorOperator = loop)
+            and
+               (not SubExpression (NodeIndex, CwhileTestField))
+            then begin
+               (* convert loop into RepeatUntil loop *)
+               ConvertLoop (LoopIndex, LinkNode, NewLinkNode);
+               LinkNode := NewLinkNode;
+            end  (* if *);
+            success := true;
+            BuiltEntry := false;
+            if control ['V'] then begin
+               writeln (
+                  output,'   moved expression ',NodeIndex,' outside loop');
+            end  (* if *);
+
+#ifdef TRACE
+	 if control ['v'] then begin
+	    LineNr1 := ZeilenNr (NodeIndex);
+	    LineNr2 := ZeilenNr (LoopIndex);
+	    write ('INV EXPR:      ');
+	    SelectForPrinting ( NodeIndex, 5, false);
+	    writeln;
+	    writeln ('        in Zeile ', LineNr1, ' vor ', LineNr2);
+         end  (* if *);
+#endif
+
+            SaveNextLink := NextLink;
+            NextLink := -1;
+
+            temporary := gl_GetTemporary (TempType);
+            if MovingLval then begin
+               NodeIndex:= CreateAssignmentStatement (
+                  CreateAddrOfLval (NodeIndex),
+                  LoopIndex,
+                  temporary,
+                  -1);
+            end
+            else begin
+               NodeIndex:= CreateAssignmentStatement (
+                  NodeIndex,
+                  LoopIndex,
+                  temporary,
+                  -1);
+            end;
+
+            PrevNodeLink := NodeIndex;(* link new stmnt to previous node *)
+            LinkNode := NextLinkLink;
+
+            PrevExpr1link := CreateLoadNode (temporary);
+            if MovingLval then begin
+               PrevExpr1link := UnaryExpression (
+                  DerefOp,
+                  TypeField,
+                  PrevExpr1link,
+                  0,
+                  0);
+            end;
+            NextLinkOf (PrevExpr1link) := SaveNextLink;
+            ExprOutsideLoop := ExprOutsideLoop + 1;
+            goto 100;
+         end  (* if *);
+
+      end  (* for *);
+
+   end  (* MoveExprOutsideLoop *);
+
+
+   procedure ClearUnnecessaryDsc
+      (NodeIndex: HdgRange;
+       traversal: TraversalType);
+
+      (* this procedure clears all exit descriptors except for the one *)
+      (* pointed at by NodeIndex                                      *)
+
+   var ExitDsc : NodeDescriptorType;
+#ifdef FLEX
+      set1, set2 : Set;
+#endif
+
+   begin
+#ifdef FLEX
+      set_Ref ( ExitDsc, set1 );
+      set_Def ( ExitDsc, set2 );
+#endif
+      IncludedNode := NodeIndex;
+      EssentialBit := true;
+      BuildExitDescriptors (NodeIndex, -1, traversal, ExitDsc);
+      IncludedNode := -1;
+   end  (* ClearUnnecessaryDsc *);
+
+
+   procedure TransformLoop;
+      (* this procedure calls routines that optimize loops. *)
+
+   var
+      success : boolean;
+      DescPtr: DescriptorRange;
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output);
+         writeln (output,'#### optimize loop ####');
+         writeln (output);
+      end  (* if *);
+      IncludedNode := -1;
+      ExcludedNode := -1;
+      OptimizeNode := NodeIndex;
+
+      success := true; (* assume a transformation has been performed *)
+      TransformStatementList(WhileBodyField,WhileBodyLink,StmntTraversal,success);
+      TransformExpressionList(WhileBodyField,WhileBodyLink,StmntTraversal,success);
+      success := true;
+      MoveStmntOutsideLoop(NodeIndex, LinkNode,success);
+      MoveExprOutsideLoop(NodeIndex, LinkNode,success);
+
+      ClearUnnecessaryDsc (NodeIndex, StmntTraversal);
+
+      if control ['V'] then begin
+         DescPtr := ptr (DscField);
+         PrintDescriptor(NodeIndex,'loop',DescPtr^.ExitDescriptor);
+      end  (* if *);
+      OptimizeNode := -1;
+
+   end  (* TransformLoop *);
+
+
+   procedure TransformProc;
+      (* this procedure calls routines that optimize procedures.*)
+
+   var
+      success: boolean;
+      DescPtr: DescriptorRange;
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output);
+         writeln (output,'#### optimize procedure ####');
+         writeln (output);
+      end  (* if *);
+      IncludedNode := -1;
+      ExcludedNode := -1;
+      OptimizeNode := NodeIndex;
+      success := true;  (* assume transformation has been performed *)
+      TransformStatementList(ProcBody,ProcBodyLink,StmntTraversal,success);
+      TransformExpressionList(ProcBody,ProcBodyLink,StmntTraversal,success);
+
+      ClearUnnecessaryDsc (NodeIndex, StmntTraversal);
+
+      if control ['V'] then begin
+         DescPtr := ptr (DscField);
+         PrintDescriptor(NodeIndex,'proc',DescPtr^.ExitDescriptor);
+      end  (* if *);
+      OptimizeNode := -1;
+
+   end  (* TransformProc *);
+
+
+   procedure OptIfthenelse;
+      (* this procedure removes redundant statements and expressions *)
+      (* from an ifthenelse node.                                    *)
+
+   var
+      success : boolean;
+      DescPtr: DescriptorRange;
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output);
+         writeln (output,'#### optimize ifthenelse ####');
+         writeln (output);
+      end  (* if *);
+      OptimizeNode := NodeIndex;
+
+      (* first, remove redundant code from the IfTrue statements *)
+      success := true;  (* assume a transformation has been performed *)
+      TransformStatementList(IfTrueField,IfTrueLink,traversal,success);
+      TransformExpressionList(IfTrueField,IfTrueLink,traversal,success);
+
+
+      if IfFalseField <> -1  then begin
+
+         (* remove redundant code from the IfFalse statements *)
+         success := true;
+         TransformStatementList(IfFalseField,IfFalseLink,traversal,success);
+         TransformExpressionList(IfFalseField,IfFalseLink,traversal,success);
+
+      end  (* if *);
+
+      ClearUnnecessaryDsc (NodeIndex, traversal);
+
+      if control ['V'] then begin
+         DescPtr := ptr (DscField);
+         PrintDescriptor(NodeIndex,'ifthenelse',DescPtr^.ExitDescriptor);
+      end  (* if *);
+      OptimizeNode := -1;
+
+   end  (*OptIfthenelse*);

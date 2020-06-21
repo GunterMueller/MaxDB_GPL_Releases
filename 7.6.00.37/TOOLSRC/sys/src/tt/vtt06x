@@ -1,0 +1,2200 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP AG$ADABAS FOR R/3$VTT06X$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : Josef Hasenberger
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+
+// iserver.cpp
+//
+// IServer for handling iput/iget - requests 
+// 1997-07-23	    Josef Hasenberger
+// Version: 2.0
+
+// Changes:
+// ++++++++
+// Josef, 9.10.97
+//			Aenderungen fuer den Status MLOCKED
+
+// Description:
+//  Server to handle locking and unlocking of modules.
+//  For each GRP-Area the clients communicate via a named pipe with 
+//  the server (naming convention for pipe: "SHARENAME")
+//  The pipe name is read from the registry (see function GetPipeParameters
+//  for description) .
+//	Each pipe is handled in a seperate Thread. Pipes are in this context
+//  used to synchronize the access to the lock information.
+//  The locking is done in the Object TILock (which was designed as a work
+//  and die object, i.e it read locking information evertime a service 
+//  from the object is requested - In the beginning we wanted to write
+//  a fat client rather then a fat server)
+//  
+//  The clients request 2 general types of services:
+//	1) IGet:
+//		Request a lock for a certain module, if module not locked, lock
+//		the module for the user on the associated node.
+//		If module locked, tell the client by whom and when.
+//		The client uses _icp to copy the module when it is not locked.
+//		
+//  2) IPut:
+//		unlock a module (only allowed when module is locked by the same
+//		user on the same node).
+//		If unlock is OK then the client sends the module to the server
+//		which saves it on the GRP-Area (or DEVELOP-Area).
+//		The old module is copied and gets the Extension MMDD (Month and Day).
+//		A backup file is only generated once a day!
+//		At the moment the new module gets the security attributes of
+//		the module root directory.
+
+//	Installation:
+//		The server is designed to run as a service.
+//		After installing the service (iserver -install), the service
+//		has to run in the environment of the GRP-Administrator
+//		(Log on as ... in the Service Control Panel)
+//		The service can be started and stopped in the Control Panel.
+//		Stopping the service does not interact with running client requests
+//		
+//		The Grp-Share is read from the registry (see above). The 
+//		GRP-Administrator (and therefor the IServer) has to have Read/Write
+//		permission on this share. 
+//
+//		In the Grp-Share-Directory the file containig the lock information
+//		must exist (it can be empty in the beginning) and the GRP-Admi must
+//		have read/write permission on this file. Other users should have
+//		no access on this file. The file is a binary.
+//		A detailed description on this file can be found in the
+//		documentation of TILock.
+//		The name of the file is specified with the constant STATFILENAME.
+//		Every action on the STATFILENAME is documented in an ascii
+//		protocoll file (extension .prot).
+//		If STATFILENAME is lost, every information on the lock status is lost.
+
+//	Remarks:
+//		If locking, unlocking or copying the file fails, the old status
+//		on the lockfile is restored or not commited (tp like mechanism for
+//		copying modules on the server.
+
+
+
+
+
+
+// Issues for further development: 
+		// Check Security of the newly created module in the GRP-Area after IPut ...
+		// Dynamically check registry for updated GRP-Share entries
+
+
+#define  STRICT
+#include <windows.h>
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <tchar.h>
+#include <process.h>
+#include  <io.h>   /* &gar */
+
+//#define DEBUG
+
+//#include "iconstants.h"
+//#include "iserver.h"
+//#include "ilock.h"
+
+// Function prototypes for local functions
+DWORD	ServerProc(const char * );
+void	StopServerProc(char **, int);
+int		GetPipeParameters(char ***, int *);
+void	MyError(const char *, const char *, DWORD);
+void	HandleIGet(HANDLE, const char *, P_IMSSG, TILock *);
+void	HandleIPut(HANDLE, const char *, P_IMSSG, TILock *);
+void	HandleIStat(HANDLE, const char *, P_IMSSG, TILock *); /* CTS 1103611 */
+void    HandleIExcl(HANDLE, const char *, P_IMSSG, TILock *); /* CTS 1103612 */
+
+void	HandleIPutObjects(HANDLE, const char *GRPShare, P_IMSSG pIMSSG);
+int		MySendMessage(HANDLE, P_IMSSG);
+int		MyReceiveModule(HANDLE, const char *);
+int		MyReceiveMessage(HANDLE, P_IMSSG);
+void	MyIServerStart(int, char **);
+
+VOID WINAPI service_ctrl(DWORD dwCtrlCode);
+VOID WINAPI service_main(DWORD dwArgc, LPTSTR *lpszArgv);
+VOID CmdInstallService();
+VOID CmdRemoveService();
+VOID CmdDebugService(int argc, char **argv);
+BOOL WINAPI ControlHandler ( DWORD );
+LPTSTR GetLastErrorText( LPTSTR lpszBuf, DWORD dwSize );
+BOOL ReportStatusToSCMgr(DWORD, DWORD, DWORD);
+VOID AddToMessageLog(LPTSTR, WORD wErrorType=EVENTLOG_ERROR_TYPE);
+VOID ServiceStop();
+
+// local constants
+const char * SZAPPNAME = "IServer";
+
+
+// A development tree is read only, if the file TREELOCKEINDICATOR does exist
+// in the root of the tree.
+const char * TREELOCKEDINDICATOR = ".rel";
+
+
+
+// internal variables
+SERVICE_STATUS          ssStatus;       // current status of the service
+SERVICE_STATUS_HANDLE   sshStatusHandle;
+BOOL                    bDebug = FALSE;
+HANDLE					hServerStopEvent = NULL;
+DWORD					dwErr;
+
+
+void main (int argc, char *argv[])
+{
+    SERVICE_TABLE_ENTRY dispatchTable[] =
+    {
+        { "IServer", (LPSERVICE_MAIN_FUNCTION)service_main },
+        { NULL, NULL }
+    };
+
+    if ( (argc > 1) &&
+         ((*argv[1] == '-') || (*argv[1] == '/')) )
+    {
+        if ( _stricmp( "install", argv[1]+1 ) == 0 )
+        {
+            CmdInstallService();
+        }
+        else if ( _stricmp( "remove", argv[1]+1 ) == 0 )
+        {
+            CmdRemoveService();
+        }
+        else if ( _stricmp( "debug", argv[1]+1 ) == 0 )
+        {
+            bDebug = TRUE;
+            CmdDebugService(argc, argv);
+        }
+		else
+        {
+			printf( "%s -install          to install the service\n", SZAPPNAME );
+			printf( "%s -remove           to remove the service\n", SZAPPNAME );
+			printf( "%s -debug <params>   to run as a console app for debugging\n", SZAPPNAME );
+        }
+        exit(0);
+    }
+	else
+
+    // if it doesn't match any of the above parameters
+    // the service control manager may be starting the service
+    // so we must call StartServiceCtrlDispatcher
+	printf( "\nStartServiceCtrlDispatcher being called.\n" );
+	printf( "This may take several seconds.  Please wait.\n" );
+
+	if (!StartServiceCtrlDispatcher(dispatchTable))
+		AddToMessageLog(TEXT("StartServiceCtrlDispatcher failed."));
+}
+
+
+void WINAPI service_main(DWORD dwArgc, LPTSTR *lpszArgv)
+{
+
+    // register our service control handler:
+    //
+    sshStatusHandle = RegisterServiceCtrlHandler( TEXT(SZAPPNAME), service_ctrl);
+
+	try
+	{
+		if (!sshStatusHandle)
+	        throw ;				
+
+		// SERVICE_STATUS members that don't change in example
+		//
+		ssStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+		ssStatus.dwServiceSpecificExitCode = 0;
+
+
+		// report the status to the service control manager.
+		//
+		if (!ReportStatusToSCMgr(
+			SERVICE_START_PENDING, // service state
+			NO_ERROR,              // exit code
+			3000))                 // wait hint
+			throw ;
+
+		MyIServerStart( dwArgc, lpszArgv );
+	}
+	catch (void)
+	{
+		// do nothing and exit later on anyway
+	}
+
+    // try to report the stopped status to the service control manager.
+    //
+    if (sshStatusHandle)
+        (VOID)ReportStatusToSCMgr(
+                            SERVICE_STOPPED,
+                            dwErr,
+                            0);
+    return;
+}
+
+
+
+void MyIServerStart (int argc, char *argv[])
+{
+
+	unsigned    *plServerThreadID =NULL;	// Pointer to an arry of thread id's
+	HANDLE	    *phThreads = NULL;			// Pointer to an array of thread handles
+	char	    **PipeArray = NULL;			// Character array with the names of pipes
+	int		    NumPipes;					// Number of pipes, i.e. array size
+
+
+    // report the status to the service control manager.
+    //
+    if (!ReportStatusToSCMgr(
+        SERVICE_START_PENDING, // service state
+        NO_ERROR,              // exit code
+        3000))                 // wait hint
+        exit (1);
+
+    // create the event object. The control handler function signals
+    // this event when it receives the "stop" control code.
+    //
+    hServerStopEvent = CreateEvent(
+        NULL,    // no security attributes
+        TRUE,    // manual reset event
+        FALSE,   // not-signalled
+        NULL);   // no name
+
+    if ( hServerStopEvent == NULL)
+        exit (1);
+
+    // report the status to the service control manager.
+    ReportStatusToSCMgr(SERVICE_START_PENDING,NO_ERROR,3000); 
+ 
+
+	// Read the names of the pipes to create from config-file (or registry)
+	if (GetPipeParameters(&PipeArray, &NumPipes)!=MY_OK)
+	{
+	    MyError(argv[0], "Cannot get pipe parameters from registry",0);
+	    exit (1);
+	}
+    ReportStatusToSCMgr(SERVICE_START_PENDING,NO_ERROR,3000); 
+
+
+
+	phThreads = (HANDLE*)new char [NumPipes * sizeof(HANDLE)];
+	plServerThreadID = (unsigned *)new char [NumPipes * sizeof(unsigned)];
+
+	if ((phThreads == NULL) || (plServerThreadID == NULL))
+	{
+	    MyError(argv[0],"cannot allocate memory",GetLastError());
+	    exit (1);
+	}					   
+
+	// For each named pipe create a listening thread
+	for (int i=0; i<NumPipes; i++)
+	{
+	    ReportStatusToSCMgr(SERVICE_START_PENDING,NO_ERROR,3000); 
+	    phThreads[i] = (HANDLE)_beginthreadex (
+			(void*)NULL,										// No security.
+            (unsigned)0,										// Same stack size.
+            (unsigned int (__stdcall *)(void *))ServerProc,		// Thread procedure.
+            (void *)PipeArray[i],								// Parameter.
+            (unsigned)0,										// Start immediatly.
+            (unsigned *)&plServerThreadID[i]);					// Thread ID.
+	    if (phThreads[i] == NULL)
+			MyError(argv[0],"_beginthreadex failed (listening thread)!",
+				GetLastError());
+	}
+		
+
+	// Service started
+    ReportStatusToSCMgr(SERVICE_RUNNING, NO_ERROR,0);
+	AddToMessageLog("IServer started", EVENTLOG_INFORMATION_TYPE);
+
+
+	// Wait for Service to stop
+	WaitForSingleObject (hServerStopEvent, INFINITE);
+
+	// Stop ServerProcs
+	StopServerProc(PipeArray, NumPipes);
+	
+	// Wait for ServerProcs to stop
+	for (i=0; i<NumPipes; i++)
+	{
+	    ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 3000);
+		WaitForSingleObject(phThreads[i], INFINITE);
+	}
+
+	AddToMessageLog("IServer stopped", EVENTLOG_INFORMATION_TYPE);
+
+	if (phThreads) delete [] phThreads;
+	if (plServerThreadID) delete [] plServerThreadID;
+	if (PipeArray) delete [] PipeArray;
+}
+
+// Read the names of the pipes to create from the registry
+int GetPipeParameters(char ***PipeArray, int *NumPipes)
+{
+    // Name of named pipes: read from registry 
+	// Entries:
+	// Number of Grp-Pipes:	HKEY_LOCAL_MACHINE\Software\SAP\ITools\IServer\NumShares
+	// Grp-Share:			HKEY_LOCAL_MACHINE\Software\SAP\ITools\IServer\ShareN
+	//				(where N = NumShares)
+    // Build up each pipename by the following convention: \\.\pipe\ShareN
+
+	const char * IServerKey = "Software\\SAP\\ITools\\IServer";
+	const char * psNumGrpShares = "NumShares";
+	const char * psPipeNameSpec = "\\\\.\\pipe\\";
+	const char * GrpShareSpec = "Share";
+
+    char **NamedPipes;		// Array of pipe names
+
+	LONG lResult;
+	HKEY hkIServerKey;
+	DWORD dwNumGrpShares;
+
+	// Open the Key:
+	lResult = RegOpenKeyEx(
+		HKEY_LOCAL_MACHINE,
+		IServerKey,
+		0,
+		KEY_READ,
+		&hkIServerKey);
+	if (lResult != ERROR_SUCCESS)
+	{
+		MyError("GetPipeParameters","cannot read IserverKey from registry",
+			GetLastError());
+		return MY_NOTOK;
+	}
+	// Query Value
+	DWORD dwType; DWORD Size = sizeof (DWORD); 
+	lResult = RegQueryValueEx(
+		hkIServerKey,
+		psNumGrpShares,
+		0,
+		&dwType,
+		(LPBYTE)&dwNumGrpShares,
+		&Size);
+	if (lResult != ERROR_SUCCESS)
+	{
+		// Error handling
+		MyError("GetPipeParameters", "cannot read value NumShares from registry",
+			GetLastError());
+		return MY_NOTOK;
+	}
+	if (dwType != REG_DWORD)
+	{
+		MyError("GetPipeParameters", "Key NumShares must be defined as DWORD in registry",0);
+		return MY_NOTOK;
+	}
+
+	// Get the space for the NamedPipes array
+	NamedPipes = (char**) new char [dwNumGrpShares * sizeof (char*)];
+	
+	// Now read the appropriate Grp-Shares and build up the pipenames
+	for (DWORD i=0; i<dwNumGrpShares; i++)
+	{
+		// Build up the value name
+		char regKey[64] = "";
+		char * regValue = NULL;
+		char * pipeName = NULL;
+		sprintf(regKey,"%s%li",  GrpShareSpec, i);
+
+		// Query Value - Get size needed for result buffer
+		lResult = RegQueryValueEx(
+			hkIServerKey,
+			regKey,
+			0,
+			NULL,
+			NULL,
+			&Size);
+
+		if (lResult != ERROR_SUCCESS)
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot read size for Share variable from registry",
+				GetLastError());
+			return MY_NOTOK;
+		}
+		regValue = new char [Size];
+		pipeName = new char [strlen(psPipeNameSpec) + Size];
+		if ((regValue == NULL) || (pipeName == NULL))
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot allocate memory for Share and pipeName",
+				GetLastError());
+			return MY_NOTOK;
+		}
+		// Read Value
+		lResult = RegQueryValueEx(
+			hkIServerKey,
+			regKey,
+			0,
+			NULL,
+			(LPBYTE)regValue,
+			&Size);
+		if (lResult != ERROR_SUCCESS)
+		{
+			// Error handling
+			MyError("GetPipeParameters", "cannot read value for Share from registry",
+				GetLastError());
+			return MY_NOTOK;
+		}
+
+		// Build up the pipename and enter it to the array
+		strcpy (pipeName, psPipeNameSpec);
+		strcat (pipeName, regValue);
+		delete [] regValue;
+		NamedPipes[i] = pipeName;
+	}// for
+
+	*NumPipes = dwNumGrpShares;
+	*PipeArray = NamedPipes;
+	return MY_OK;
+}
+
+
+// error function (version one)
+void MyError(const char * Function, const char * errString, DWORD dwError)
+{
+	TCHAR buf[1024], api_msg[256] = "";
+
+	if (dwError != NO_ERROR)
+	{
+		GetLastErrorText( api_msg, 256 );
+	}
+	sprintf(buf, "IServer Error in %s: %s (%s [%li])  ", 
+		Function, errString, api_msg, dwError);
+	DBGOUT(buf);
+	AddToMessageLog(buf);
+}
+
+// Process to handle communication
+DWORD ServerProc(const char * PipeName)
+{
+   HANDLE hPipe;                       // Pipe handle.
+   CHAR   inBuf[IN_BUF_SIZE] = "";     // Input buffer for pipe.
+   CHAR   errorBuf[ERR_BUF_SIZE] = ""; // Used for error messages.
+   CHAR   BackupDir[_MAX_PATH];		   // Used for backup path
+   DWORD  retCode;                     // Used to trap return codes.
+   PSECURITY_DESCRIPTOR    pSD;
+   SECURITY_ATTRIBUTES     sa;
+                                       // create a security NULL security
+                                       // descriptor, one that allows anyone
+                                       // to write to the pipe...
+
+   // Naming convention for Statfile-Path: Pipename (without \\.\pipe)
+   // (This is equal to the GRP-Working directory)
+   char ComputerName[MAX_COMPUTERNAME_LENGTH + 1];
+   char Statfile[MAX_PATH], *p, GRPShare[MAX_PATH];
+
+   DWORD dwSize = MAX_COMPUTERNAME_LENGTH + 1;	
+   if (GetComputerName(ComputerName, &dwSize) != TRUE)
+   {
+	 MyError("ServerProc", "Error cannot get computer name", GetLastError());
+     _endthreadex(1);
+   }
+   p = strrchr(PipeName,'\\');
+   if (p) 
+	if (strlen(++p)>0)
+	{
+	   strcpy(GRPShare, "\\\\");
+	   strcat(GRPShare, ComputerName);
+	   strcat(GRPShare, "\\");
+	   strcat(GRPShare, p);
+	}	
+    else
+      p = NULL;
+   if (p==NULL)
+   {
+	 MyError("ServerProc", "Error cannot create GRPShare name", GetLastError());
+	 _endthreadex(1);
+   }
+   strcpy(Statfile, GRPShare);
+   strcat(Statfile, "\\");
+   strcat(Statfile, STATFILENAME);
+
+   strcpy(BackupDir, GRPShare);
+   strcat(BackupDir, "\\develop\\Backup\\");
+   if ( ! CreateDirectory(BackupDir, NULL) )
+   {
+	 retCode = GetLastError();
+	 if ( retCode != ERROR_ALREADY_EXISTS )
+	 {
+		 MyError("ServerProc", "Error cannot create 'Backup' directory", retCode );
+	    _endthreadex(1);
+	 }
+   }
+   strcpy(BackupDir, GRPShare);
+   strcat(BackupDir, "\\develop\\Backup\\sys");
+   if ( ! CreateDirectory(BackupDir, NULL) )
+   {
+	 retCode = GetLastError();
+	 if ( retCode != ERROR_ALREADY_EXISTS )
+	 {
+		 MyError("ServerProc", "Error cannot create 'Backup\\sys' directory", retCode );
+		 _endthreadex(1);
+	 }
+   }
+   strcpy(BackupDir, GRPShare);
+   strcat(BackupDir, "\\develop\\Backup\\sys\\src");
+   if ( ! CreateDirectory(BackupDir, NULL) )
+   {
+	 retCode = GetLastError();
+	 if ( retCode != ERROR_ALREADY_EXISTS )
+	 {
+		 MyError("ServerProc", "Error cannot create 'Backup\\sys\\src' directory", retCode );
+		 _endthreadex(1);
+	 }
+   }
+   strcpy(BackupDir, GRPShare);
+   strcat(BackupDir, "\\develop\\Backup\\sys\\desc");
+   if ( ! CreateDirectory(BackupDir, NULL) )
+   {
+	 retCode = GetLastError();
+	 if ( retCode != ERROR_ALREADY_EXISTS )
+	 {
+		 MyError("ServerProc", "Error cannot create 'Backup\\sys\\desc' directory", retCode );
+ 		 _endthreadex(1);
+	 }
+   }
+
+
+   // ILock Object for locking modules
+   TILock ILockObject(Statfile);
+	
+   pSD = (PSECURITY_DESCRIPTOR) LocalAlloc(LPTR,
+               SECURITY_DESCRIPTOR_MIN_LENGTH);
+   if (pSD == NULL)
+   {
+	 MyError("ServerProc", "Error in LocalAlloc for pSD", GetLastError());
+     _endthreadex(1);
+   }
+
+   if (!InitializeSecurityDescriptor(pSD, SECURITY_DESCRIPTOR_REVISION))
+   {
+     wsprintf (errorBuf, "Error: InitializeSecurityDescriptor() %d",
+               GetLastError());
+     MyError("ServerProc", errorBuf, NO_ERROR);
+     LocalFree((HLOCAL)pSD);
+     _endthreadex(1);
+   }
+                                       // add a NULL disc. ACL to the
+                                       // security descriptor.
+   if (!SetSecurityDescriptorDacl(pSD, TRUE, (PACL) NULL, FALSE))
+   {
+     wsprintf (errorBuf, "Error: SetSecurityDescriptorDacl() %d",
+                GetLastError());
+     MyError("ServerProc", errorBuf,0);
+     LocalFree((HLOCAL)pSD);
+     _endthreadex(1);
+   }
+   sa.nLength = sizeof(sa);
+   sa.lpSecurityDescriptor = pSD;
+   sa.bInheritHandle = TRUE;
+
+   DBGOUT("ServerProc: Thread created for pipe %s\n",PipeName);
+
+                                       // Create a local named pipe with
+                                       // the name PipeName.  
+   hPipe = CreateNamedPipe (PipeName,	
+               PIPE_ACCESS_DUPLEX,               // read from and write to pipe.
+               PIPE_WAIT                         // Wait on messages.
+               | PIPE_READMODE_MESSAGE           // Specify message mode pipe.
+               | PIPE_TYPE_MESSAGE,
+               MAX_PIPE_INSTANCES,               // Maximum instance limit.
+               OUT_BUF_SIZE,                     // Buffer sizes.
+               IN_BUF_SIZE,
+               TIME_OUT,                         // Specify time out.
+               &sa);                             // Security attributes.
+                                       
+    if (hPipe == INVALID_HANDLE_VALUE)	// Check Errors.
+    {
+		retCode = GetLastError();	    // Report any error, it should always
+		wsprintf (errorBuf,		    // succeed.
+			   "Error return code from CreateNamedPipe = %li.",
+			retCode);
+		MyError("ServerProc", errorBuf, retCode);
+		//MessageBox (NULL, errorBuf, "Debug Window",
+		//	 MB_ICONINFORMATION | MB_OK | MB_APPLMODAL);
+	    LocalFree((HLOCAL)pSD);
+		_endthreadex(1);
+    };
+      
+	BOOL bStop = FALSE;
+    do // while bStop != TRUE  - receive clients messages
+    {
+		// Block until a client connects.
+		if (ConnectNamedPipe(hPipe, NULL)==FALSE)
+		{
+			retCode = GetLastError();         // Report any error, it should always
+			wsprintf (errorBuf,               // succeed.
+				   "Error return code from ConnectNamedPipe = %li.",
+				retCode);
+			MyError("ServerProc", errorBuf, retCode);
+			//MessageBox (NULL, errorBuf, "Debug Window",
+			//	MB_ICONINFORMATION | MB_OK | MB_APPLMODAL);
+			LocalFree((HLOCAL)pSD);
+			_endthreadex(1);
+		};
+								   
+		T_IMSSG IMSSG;
+		P_IMSSG pIMSSG = &IMSSG;
+		retCode = MyReceiveMessage(hPipe, pIMSSG);
+		if (retCode == MY_OK)
+		{
+			// handle the client request
+			DBGOUT("-->Client %s connected from %s handling module %s\n",
+				   pIMSSG->User, pIMSSG->Node, pIMSSG->Module);
+
+			switch (pIMSSG->RequestType)
+			{
+			case ePUT:
+			case eDEL:
+			case ePREPARE_PUT: HandleIPut(hPipe, GRPShare, pIMSSG, &ILockObject);
+				break;
+
+			case eSTARTPUT_OBJECTS: HandleIPutObjects(hPipe, GRPShare, pIMSSG);
+				break;
+
+			case eGET: 
+			case eMGET: HandleIGet(hPipe, GRPShare, pIMSSG, &ILockObject);
+				break;
+			case eSTAT: HandleIStat(hPipe, GRPShare, pIMSSG, &ILockObject);
+				 break;
+			/*  */
+			case eEXCL: HandleIExcl(hPipe, GRPShare, pIMSSG, &ILockObject);
+                 break;
+			case eSTOP:
+				bStop = TRUE;
+				DBGOUT("ISERVER: STOP-Message received, stopping thread\n");
+				break;
+			default: 
+				wsprintf(errorBuf, "Protocol error: Unexpected Request Type %i.",
+					pIMSSG->RequestType);
+				MyError("ServerProc", errorBuf, NO_ERROR);
+			}
+		}
+		FlushFileBuffers (hPipe);
+		DisconnectNamedPipe (hPipe);    // Close pipe instance.
+		DBGOUT("ISERVER: Disconnect pipe for %s called\n",PipeName);
+    } while (!bStop); 
+
+    LocalFree((HLOCAL)pSD);
+	_endthreadex(0);                      // Clean up and die 
+	return (0);
+}
+
+
+// Handle IGet-Request
+void HandleIGet(HANDLE hPipe, const char *GRPShare, P_IMSSG pIMSSG, TILock * pILockObject)
+{
+	DBGOUT("ISERVER: In HandleIGet\n");
+	try
+	{
+		// Try to lock the module
+		int ret = ILOCK_NOTOK;
+		switch (pIMSSG->RequestType)
+		{
+		case eGET:	ret = pILockObject->Lock(pIMSSG->Module, pIMSSG->User, pIMSSG->Node, FALSE);
+			break;
+		case eMGET: ret = pILockObject->Lock(pIMSSG->Module, pIMSSG->User, pIMSSG->Node, TRUE);
+			break;
+		}
+
+		switch (ret)
+		{
+		case ILOCK_OK:
+			pIMSSG->RequestType = eACK_OK;
+			break;
+		case ILOCK_ALREADY_LOCKED:
+			TStateData StateData;
+			ret = pILockObject->GetLockStateData(pIMSSG->Module, &StateData);
+			if (ret == ILOCK_OK)
+			{
+				// Tell the client who has locked the file and when
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				strcpy(pIMSSG->Node, StateData.Node);
+				strcpy(pIMSSG->User, StateData.User);
+				pIMSSG->date = StateData.date;
+			}
+			else
+			{
+				// cannot get any more information
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}
+			break;
+		case ILOCK_MAX_USERS_REACHED:
+			// Maximum number of users concurrently locking a module reached
+			pIMSSG->RequestType = eACK_MAX_USERS_MGET_REACHED;
+			*(pIMSSG->Node) = '\0';
+			*(pIMSSG->User) = '\0';
+			break;
+
+		case ILOCK_NOTOK:
+		default:
+			pIMSSG->RequestType = eACK_NOTOK;
+			break;
+		}
+		if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+			throw "";
+	}
+	catch (const char * message)
+	{
+		// Do some error handling
+		if (strlen(message)>0)
+			MyError("HandleIGet", message, NO_ERROR);
+	}
+    return;
+}
+
+void HandleIPut(HANDLE hPipe, const char *GRPShare, P_IMSSG pIMSSG, TILock * pILockObject)
+{
+	BOOL bDone = FALSE;
+	BOOL ReceiveNext = FALSE;
+	BOOL bDel = FALSE;			// Flag for call of IDEL
+	int ret, ProtocolState=0;	// Communication analog to state machine (state 0-2)
+	TStateData StateData;		// Module state data
+	BOOL FirstModuleReceived = FALSE;	// True when at least one module was received
+	char TreeLockedIndicatorFile[MAX_PATH];	// if file is found, the tree is read only
+	BOOL TreeReadOnly = FALSE;
+
+
+	// Check tree for write permission
+	strcpy (TreeLockedIndicatorFile, GRPShare);
+	strcat (TreeLockedIndicatorFile, "/");
+	strcat (TreeLockedIndicatorFile, TREELOCKEDINDICATOR);
+
+	HANDLE hHandle = CreateFile(
+		TreeLockedIndicatorFile,
+		GENERIC_READ,
+		FILE_SHARE_READ,
+		NULL,
+		OPEN_EXISTING,
+		0,
+		NULL);
+	if (hHandle == INVALID_HANDLE_VALUE && (GetLastError() == ERROR_FILE_NOT_FOUND))
+		TreeReadOnly = FALSE;
+	else
+		TreeReadOnly = TRUE;
+	CloseHandle (hHandle);
+
+	
+	if (pIMSSG->RequestType == ePUT)
+		ProtocolState=2; // In case of an error on communication unlock the module
+	else
+		ProtocolState=0;
+
+	while (!bDone)
+	{
+		try
+		{
+			switch (ProtocolState)
+			{
+			case 0:	// Receive PREPARE_PUT or IDEL
+				// Before doing anything, set next state according to the message type
+				if (pIMSSG->RequestType == eDEL)
+				{
+					ProtocolState=2;
+					ReceiveNext = TRUE;		
+					bDel = TRUE;
+				}
+				else
+					ProtocolState=1;
+
+				if (pIMSSG->RequestType != ePREPARE_PUT 
+					&& pIMSSG->RequestType != eDEL)
+					throw "Protocol error: PREPARE_PUT or DEL expected!";
+				
+				// Check whether module is locked MLOCKED and the user is in the module list
+				// or if it is MLOCKED check whether its locke by the same user and node
+				ret = pILockObject->GetLockStateData(pIMSSG->Module, &StateData);
+				if (ret == ILOCK_OK)
+				{
+					// Check whether the module is locked
+					if ((StateData.State != LOCKED) && (StateData.State != MLOCKED))
+						//	Send state to client
+						pIMSSG->RequestType = eACK_NOT_LOCKED;
+					else
+						if ((StateData.State == LOCKED) && (!bDel))
+						{
+							// Now check for proper user
+							if (strcmp(pIMSSG->User, StateData.User) != 0)
+								// locked by different user
+								pIMSSG->RequestType = eACK_LOCKED_DIFFERENT_USER;
+							else
+								// finally check for propper node
+								if (strcmp(pIMSSG->Node, StateData.Node) != 0)
+									pIMSSG->RequestType = eACK_LOCKED_DIFFERENT_NODE;
+								else
+									// everything is ok!
+									pIMSSG->RequestType = eACK_OK;
+						}
+						else	// State == MLOCKED or bDel is true and state is LOCKED
+						{
+							BOOL bFound=FALSE;
+							for (UINT i=0; i<StateData.CountUsed && !bFound; i++)
+								if (strncmp(&StateData.UserList[(MAX_USERNAME_LENGTH+1)*i],
+											pIMSSG->User, MAX_USERNAME_LENGTH) == 0)
+									bFound = TRUE;
+							if (!bFound)	// User not found
+								pIMSSG->RequestType = eACK_NOT_LOCKED_BY_USER;
+							else
+								pIMSSG->RequestType = eACK_OK;
+						}
+
+				}	// cannot get lock info
+				else
+					if (ret == ILOCK_NOT_LOCKED)
+					{
+						pIMSSG->RequestType = eACK_NOT_LOCKED;
+						bDone=TRUE;	// exit loop now
+					}
+					else
+						pIMSSG->RequestType = eACK_NOTOK;
+
+				// if RequestType previously set not OK then tell client 
+				// who has locked the file if information is available
+				if ((pIMSSG->RequestType != eACK_OK) && (ret == ILOCK_OK)
+					 && (pIMSSG->RequestType != eACK_NOT_LOCKED_BY_USER))
+				{
+					strcpy(pIMSSG->Node, StateData.Node);
+					strcpy(pIMSSG->User, StateData.User);
+					pIMSSG->date = StateData.date;
+					bDone = TRUE; // exit loop now
+					DBGOUT("ISERVER: Received PREPARE_PUT but module not locked by client\n");
+				}
+				else
+				{
+					if (pIMSSG->RequestType != eACK_OK)
+						bDone = TRUE;	// exit loop now 
+					else
+					{
+						// Check whether client wants to write on a read only tree
+						if (!bDel && TreeReadOnly)
+						{
+							pIMSSG->RequestType = eACK_TREE_READONLY;
+							bDone = TRUE;	// exit loop
+						}
+					}
+				}
+
+				// Send result to the client
+				if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+					throw "send message to client failed!";
+				DBGOUT("ISERVER: Received PREPARE_PUT and sent ACK_xx(%i)\n",pIMSSG->RequestType);
+				break;
+
+			case 1: // Receive Module at least once and the as long as RequestType is equal eRECEIVE
+				if (!FirstModuleReceived)
+				{
+					if (MyReceiveModule(hPipe, GRPShare) != MY_OK)
+						throw "cannot receive module";
+					pIMSSG->RequestType = eACK_OK;
+					if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+						throw "send message to client failed!";
+					DBGOUT("ISERVER: Received Module and sent ACK_OK\n");
+					FirstModuleReceived=TRUE;
+				}
+				else
+				{
+					// receive next modules
+					if (MyReceiveMessage(hPipe, pIMSSG) != MY_OK)
+						throw "cannot receive expected RECEIVE message";
+					switch (pIMSSG->RequestType)
+					{
+					case eRECEIVE:
+						pIMSSG->RequestType = eACK_OK;
+						if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+							throw "send message to client failed!";
+						if (MyReceiveModule(hPipe, GRPShare) != MY_OK)
+							throw "cannot receive module";
+						pIMSSG->RequestType = eACK_OK;
+						if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+							throw "send message to client failed!";
+						DBGOUT("ISERVER: Received Module and sent ACK_OK\n");
+						break;
+
+					case ePUT:
+						ProtocolState=2;	// Next state
+						ReceiveNext=FALSE;	// Message already received
+						break;
+
+					default: 
+						pIMSSG->RequestType = eACK_NOTOK;	// report error to client
+						MySendMessage(hPipe, pIMSSG);
+						throw "Protocol error: RECEIVE or PUT expected!";
+					}
+				}
+				break;
+
+			case 2: // Receive PUT
+				if (ReceiveNext)	 // not necessary if ePUT is sent only
+					if (MyReceiveMessage(hPipe, pIMSSG) != MY_OK)
+						throw "cannot receive expected PUT message";
+				if (pIMSSG->RequestType != ePUT)
+					throw "Protocol error: PUT expected!";
+				
+				// Now unlock the module and send OK 
+				ret = pILockObject->Unlock(pIMSSG->Module, pIMSSG->User, pIMSSG->Node, bDel);
+				switch (ret)
+				{
+				case ILOCK_OK:
+					pIMSSG->RequestType = eACK_OK;
+					break;
+				case ILOCK_NOT_LOCKED:
+					pIMSSG->RequestType = eACK_NOT_LOCKED;
+					break;
+				default:
+					pIMSSG->RequestType = eACK_NOTOK;
+				}
+					
+				if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+					throw "send message to client failed!";
+
+				DBGOUT("ISERVER: Received ePUT and sent ACK_xx(%i)\n",pIMSSG->RequestType);
+				bDone=TRUE;
+				ProtocolState=-1;
+				break;
+			default:
+				throw "general error in state sequence!";
+			}
+		}
+		catch(const char * message)
+		{
+			MyError("HandleIPut", message, NO_ERROR);
+			bDone=TRUE;
+		}
+	} // while
+    return;
+}
+
+// Handle IStat-Request CTS 1103611
+void HandleIStat(HANDLE hPipe, const char *GRPShare, P_IMSSG pIMSSG, TILock * pILockObject)
+{
+	BOOL bDone = FALSE;
+	int ret;					// Communication analog to state machine (state 0-2)
+	TStateData StateData;		// Module state data
+	BOOL FirstModuleReceived = FALSE;	// True when at least one module was received
+	char ActUser[MAX_USERNAME_LENGTH+1];   // CTS 1103773
+	
+	DBGOUT("ISERVER: In HandleIStat\n");
+	try
+	{
+		ret = pILockObject->GetLockStateData(pIMSSG->Module, &StateData);
+		if (ret == ILOCK_OK)
+		{
+			if ( StateData.State == MLOCKED )
+				if  ( StateData.CountUsed <= 0 )
+					pIMSSG->RequestType = eACK_NOT_LOCKED;  /* for last lock */
+				else
+					pIMSSG->RequestType = eACK_MLOCKED;  /* for last lock */
+			else
+				if (StateData.State == UNLOCKED) 
+					pIMSSG->RequestType = eACK_NOT_LOCKED;  /* for last lock */
+				else
+					pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+			strcpy(pIMSSG->Node, StateData.Node);
+			strcpy(pIMSSG->User, StateData.User);
+			pIMSSG->date = StateData.date;
+		}
+		else 
+			if ( ret == ILOCK_NOT_LOCKED )
+			{
+				pIMSSG->RequestType = eACK_NOT_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}
+			else
+			{
+				// cannot get any more information
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}		
+		
+		
+		if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+				throw "";
+		// send all users if locked and the last unlocker
+		if ( pIMSSG->RequestType != eACK_NOT_LOCKED)
+		{
+			// to don't send two times the actual locker
+			strcpy(ActUser, StateData.User);
+			for (UINT i=0; i< StateData.CountUsed; i++)
+			{
+				*(pIMSSG->Node)='\0'; // ode unknown because only userlist
+				if (strncmp(&StateData.UserList[(MAX_USERNAME_LENGTH+1)*i],
+					ActUser, MAX_USERNAME_LENGTH) != 0)
+				{
+					// not the same user
+					strncpy ( pIMSSG->User, &StateData.UserList[(MAX_USERNAME_LENGTH+1)*i],MAX_USER_LENGTH);
+					pIMSSG->User[MAX_USER_LENGTH-1]='\0';
+					pIMSSG->RequestType = eACK_MLOCKED;
+					// send other users
+					if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+						throw "";
+				}
+			}
+			// last unlocker, if enough space in the user list 
+			// else empty unlocker (nessesary for close connection)
+			if ( StateData.CountUsed < StateData.CountMax )
+			{
+				strncpy ( pIMSSG->User, 
+					&StateData.UserList[(MAX_USERNAME_LENGTH+1)*StateData.CountUsed],
+					MAX_USER_LENGTH);		
+				pIMSSG->User[MAX_USER_LENGTH-1]='\0';
+			}
+			else // empty user if not enough space in userlist
+				*(pIMSSG->User)='\0';
+
+			pIMSSG->RequestType = eACK_NOT_LOCKED;
+			if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+				throw "";
+	
+		}
+	}
+	catch (const char * message)
+	{
+		// Do some error handling
+		if (strlen(message)>0)
+			MyError("HandleIStat", message, NO_ERROR);
+	}
+    return;
+}
+
+// Handle IExcl-Request CTS 1103612
+void HandleIExcl(HANDLE hPipe, const char *GRPShare, P_IMSSG pIMSSG, TILock * pILockObject)
+{
+	BOOL bDone = FALSE;
+	int ret;					// Communication analog to state machine (state 0-2)
+	TStateData StateData;		// Module state data
+	BOOL FirstModuleReceived = FALSE;	// True when at least one module was received
+
+	DBGOUT("ISERVER: In HandleIExcl\n");
+	try
+	{
+		/*
+		ret = pILockObject->GetLockStateData(pIMSSG->Module, &StateData);
+		if (ret == ILOCK_OK)
+		{
+			
+		}
+		else 
+			if ( ret == ILOCK_NOT_LOCKED )
+			{
+				pIMSSG->RequestType = eACK_NOT_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}
+			else
+			{
+				// cannot get any more information
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}		
+
+*/
+
+		// Try to lock the module
+		ret = pILockObject->LockExcl(pIMSSG->Module, pIMSSG->User, pIMSSG->Node);
+
+		switch (ret)
+		{
+		case ILOCK_OK:
+			pIMSSG->RequestType = eACK_OK;
+			break;
+		case ILOCK_ALREADY_LOCKED:
+			TStateData StateData;
+			ret = pILockObject->GetLockStateData(pIMSSG->Module, &StateData);
+			if (ret == ILOCK_OK)
+			{
+				// Tell the client who has locked the file and when
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				strcpy(pIMSSG->Node, StateData.Node);
+				strcpy(pIMSSG->User, StateData.User);
+				pIMSSG->date = StateData.date;
+			}
+			else
+			{
+				// cannot get any more information
+				pIMSSG->RequestType = eACK_ALLREADY_LOCKED;
+				*(pIMSSG->Node) = '\0';
+				*(pIMSSG->User) = '\0';
+			}
+			break;
+		case ILOCK_MAX_USERS_REACHED:
+			// Maximum number of users concurrently locking a module reached
+			pIMSSG->RequestType = eACK_MAX_USERS_MGET_REACHED;
+			*(pIMSSG->Node) = '\0';
+			*(pIMSSG->User) = '\0';
+			break;
+		case ILOCK_NOT_LOCKED:
+			pIMSSG->RequestType = eACK_NOT_LOCKED;
+			break;
+		case ILOCK_NOTOK:
+		default:
+			pIMSSG->RequestType = eACK_NOTOK;
+			break;
+		}
+		if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+			throw "";
+	}
+	catch (const char * message)
+	{
+		// Do some error handling
+		if (strlen(message)>0)
+			MyError("HandleIGet", message, NO_ERROR);
+	}
+    return;
+}
+
+
+// Handle Put request for objects only (no locking or check of locked module performed)
+void HandleIPutObjects(HANDLE hPipe, const char *GRPShare, P_IMSSG pIMSSG)
+{
+	BOOL bDone = FALSE;
+	BOOL bDel = FALSE;			// Flag for call of IDEL
+	int ProtocolState=0;		// Communication analog to state machine (state 0-2)
+	BOOL FirstModuleReceived = FALSE;	// True when at least one module was received
+	
+	
+	while (!bDone)
+	{
+		try
+		{
+			switch (ProtocolState)
+			{
+			case 0:	// Receive START_OBJECTS
+
+				if (pIMSSG->RequestType != eSTARTPUT_OBJECTS) 
+					throw "Protocol error: STARTPUT_OBJECTS expected!";
+				ProtocolState=1;
+
+				// Send result to the client
+				pIMSSG->RequestType = eACK_OK;
+				if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+					throw "send message to client failed!";
+				DBGOUT("ISERVER: Received STARTPUT_OBJECTS ACK_xx(%i)\n",pIMSSG->RequestType);
+				break;
+
+			case 1: // Receive objects as long as eRECEIVE
+				if (MyReceiveMessage(hPipe, pIMSSG) != MY_OK)
+					throw "cannot receive expected RECEIVE message";
+				switch (pIMSSG->RequestType)
+				{
+				case eRECEIVE:
+					pIMSSG->RequestType = eACK_OK;
+					if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+						throw "send message to client failed!";
+					if (MyReceiveModule(hPipe, GRPShare) != MY_OK)
+						throw "cannot receive module";
+					pIMSSG->RequestType = eACK_OK;
+					if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+						throw "send message to client failed!";
+					DBGOUT("ISERVER: Received object and sent ACK_OK\n");
+					break;
+
+				case eENDPUT_OBJECTS:
+					ProtocolState=2;	// Next state
+					break;
+
+				default: 
+					pIMSSG->RequestType = eACK_NOTOK;	// report error to client
+					MySendMessage(hPipe, pIMSSG);
+					throw "Protocol error: RECEIVE or STOP_OBJECTS expected!";
+				}
+				break;
+
+			case 2: // Receive STOP_OBJECTS
+				if (pIMSSG->RequestType != eENDPUT_OBJECTS)
+					throw "Protocol error: eENDPUT_OBJECTS expected!";
+				pIMSSG->RequestType = eACK_OK;
+				if (MySendMessage(hPipe, pIMSSG) != MY_OK)
+					throw "send message to client failed!";
+				DBGOUT("ISERVER: Received eENDPUT_OBJECTS and sent ACK_xx(%i)\n",pIMSSG->RequestType);
+				bDone=TRUE;
+				ProtocolState=-1;
+				break;
+			default:
+				throw "general error in state sequence!";
+			}
+		}
+		catch(const char * message)
+		{
+			MyError("HandleIPutObjects", message, NO_ERROR);
+			bDone=TRUE;
+		}
+	} // while
+    return;
+}
+
+
+// Send a message in a P_IMSSG packet
+int MySendMessage (HANDLE hPipe, P_IMSSG pIMSSG)
+{
+	int ret = MY_NOTOK;
+	DWORD dwBytesWritten;
+	BOOL bResult;
+	bResult = WriteFile(hPipe,
+		pIMSSG,
+		sizeof (T_IMSSG),
+		&dwBytesWritten,
+		NULL);
+	if (!bResult)
+	{
+		MyError("MySendMessage", "WriteFile failed for named pipe!",	
+			GetLastError());
+		ret = MY_NOTOK;
+	}
+	else
+	{
+		DBGOUT("ISERVER: MySendMessage %li bytes sent\n",dwBytesWritten);
+		ret = MY_OK;
+	}
+	return ret;
+}
+
+int MyReceiveMessage (HANDLE hPipe, P_IMSSG pIMSSG)
+{
+	int ret = MY_NOTOK;
+	DWORD dwBytesReceived;
+	BOOL bResult;
+
+	bResult=ReadFile (hPipe, pIMSSG, sizeof(T_IMSSG), &dwBytesReceived, NULL);
+	if (!bResult)
+	{
+		MyError ("MyReceiveMessage","ReadFile failed for named pipe",
+			GetLastError());
+		ret = MY_NOTOK;
+	}
+	else
+	{
+		if(dwBytesReceived != sizeof(T_IMSSG))
+		{
+			char buf[512];
+			sprintf(buf, "number of bytes received from client have unexpected length (%li)",
+				dwBytesReceived);
+			MyError("MyReceiveMessage", buf, NO_ERROR);
+			ret = MY_NOTOK;
+		}
+		else
+		{
+			DBGOUT("ISERVER: MyReceiveMessage %li bytes received\n",dwBytesReceived);
+			ret = MY_OK;
+		}
+	}
+	return ret;
+}
+	
+// Receive a module in the case of IPUT
+int MyReceiveModule(HANDLE hPipe, const char * GRPShare)
+{
+	int ret = MY_NOTOK;
+	HANDLE hModule = INVALID_HANDLE_VALUE;
+ 	char * ModuleBuffer = NULL;
+	DWORD dwBytesReceived, dwBytesWritten;
+	char ModulePathAbs[MAX_PATH];	// absolute module path
+	char ModulePathBackup[MAX_PATH];// path of module backup
+	char ModuleBackupFile[MAX_PATH];// File of module backup
+	char drive[_MAX_DRIVE];
+	char dir[_MAX_DIR];
+	BOOL bResult;
+	T_IMSGBUF MsgBuf;				// the message buffer
+	T_IFileInfo IFileInfo;			// the file info
+	T_IREQUEST	eAckMsg;			// ack-message variable
+	struct _finddata_t found_file;  /* &gar */
+	long hFile = 0;					/* &gar */
+	char * fname;					/* &gar */
+	
+
+
+	try
+	{
+		// First receive file info for the module (filename is relative path)
+		bResult=ReadFile (hPipe, &MsgBuf, sizeof (MsgBuf), &dwBytesReceived, NULL);
+		if (!bResult)
+		    throw "ReadFile from pipe for ModulePathRel failed";
+
+		DBGOUT("ISERVER: MyReceiveModule %li bytes received\n",dwBytesReceived);
+
+		if (MsgBuf.Signature != eFileInfo)
+			throw "Internal protocol error: eFileInfo expected!";
+
+		memcpy(&IFileInfo, MsgBuf.Buf, sizeof(T_IFileInfo));
+		// Build absolute module path
+		strcpy (ModulePathAbs, GRPShare);
+		strcat (ModulePathAbs, "\\");
+		// Also include Devlop-Directory into the path (changed by Josef, 10/07/97)
+		strcat (ModulePathAbs, STR_COMMON_DEVELOP_DIR);
+		strcat (ModulePathAbs, "\\");
+		strcat (ModulePathAbs, IFileInfo.Filename);
+
+		// If the file already exists, check the file time 
+/*
+		sprintf(mybuf, "Modulpath is '%s' for '%s'",ModulePathAbs, IFileInfo.Filename);
+		AddToMessageLog(mybuf);
+		DBGOUT("Modulpath is '%s' for '%s'",ModulePathAbs, IFileInfo.Filename);
+	*/
+		eAckMsg = eACK_OK;
+		/* &gar -> */
+		if( (hFile = _findfirst(ModulePathAbs, &found_file)) != -1L ) /* not find nothing */
+		{
+			if ( ( fname = strrchr(IFileInfo.Filename,'/')) == NULL ) 
+				fname = IFileInfo.Filename ;
+			else
+				fname++;
+			/*
+			char buf[MAX_PATH + 80];
+			sprintf(buf, "fname is '%s' , found_filename'%s'",fname, found_file.name);
+			AddToMessageLog(buf);
+			*/
+
+			if ( strcmp (fname, found_file.name) !=0 )
+			{
+				eAckMsg = eACK_NOT_CASE_SENSITIVE;
+			}
+			else
+			{
+			/* <- &gar */
+				hModule =  CreateFile ( ModulePathAbs, GENERIC_READ, FILE_SHARE_READ, NULL, 
+					OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hModule != INVALID_HANDLE_VALUE)
+				{
+					FILETIME mtime; 
+					if (GetFileTime(hModule,NULL,NULL,&mtime)!=NULL)
+					{
+						if (CompareFileTime(&mtime, &IFileInfo.mtime) >= 0)	// local module is newer or same age
+							eAckMsg = eACK_NOTOK;
+					}
+					else
+					{
+						// Issue a warning (but continue execution)
+						char buf[MAX_PATH + 80];
+						sprintf(buf, "WARNING: cannot get file time for module %s!",
+							ModulePathAbs);
+						MyError("MyReciveModule", buf, GetLastError());
+					}
+				}
+				CloseHandle(hModule);
+			}
+		}
+/* &gar test for case sensitive */
+		// Send result to client
+		bResult=WriteFile (hPipe, &eAckMsg, sizeof (eAckMsg), &dwBytesWritten, NULL);
+		if (!bResult)
+			throw "WriteFile for AckMsg (module) failed";
+
+		if (eAckMsg != eACK_OK)
+			return MY_OK;			// Nothing to do, file is newer on the server
+
+
+		// Build backup module path if backup is specified
+		// Josef, Backup-Modules get a time stamp: MMDD as an extension 
+		if (IFileInfo.bBackup == TRUE)
+		{
+			SYSTEMTIME mySystemTime;
+			char BackupExt[20];
+			GetLocalTime(&mySystemTime);
+			sprintf(BackupExt,".%04d%02d%02d-%02d'%02d''%02d", mySystemTime.wYear,
+                mySystemTime.wMonth, mySystemTime.wDay, mySystemTime.wHour, 
+                mySystemTime.wMinute, mySystemTime.wSecond);
+			// 03.03.98 G. Groﬂmann
+			//strcpy (ModulePathBackup, ModulePathAbs);
+			strcpy (ModuleBackupFile, GRPShare);
+			strcat (ModuleBackupFile, "\\");
+			strcat (ModuleBackupFile, STR_COMMON_DEVELOP_DIR);
+			strcat (ModuleBackupFile, "\\Backup\\");
+			strcat (ModuleBackupFile, IFileInfo.Filename);
+			strcat (ModuleBackupFile, BackupExt);
+			// 04.03.98 G. Groﬂmann
+			// CreateDirectory
+			_splitpath(ModuleBackupFile, drive, dir, NULL, NULL);
+			_makepath(ModulePathBackup, drive, dir, NULL, NULL);
+			if (! CreateDirectory(ModulePathBackup, NULL))
+			{
+                    int retCode;
+                    retCode = GetLastError();
+                    if ( retCode != ERROR_ALREADY_EXISTS )
+                    {
+    					char buf[MAX_PATH + 80];
+                        sprintf(buf, "WARNING: cannot create backup directory %s!",
+	                        ModulePathBackup);
+                        MyError("MyReciveModule", buf, retCode);
+                    }
+			}
+
+			// If Module already exists make a copy of it but do not replace existing file
+			if (MoveFile(ModulePathAbs, ModuleBackupFile) != TRUE)
+			{
+				DWORD dwError =	GetLastError();
+				// Ignore Error of non existing file and no warning if destination file 
+				// already exists 
+				if ((dwError != ERROR_FILE_NOT_FOUND) && (dwError != ERROR_ALREADY_EXISTS))
+				{
+					// Issue a warning (but continue execution)
+					char buf[MAX_PATH + 80];
+					sprintf(buf, "WARNING: cannot create backup for module %s!",
+						ModulePathAbs);
+					MyError("MyReciveModule", buf, GetLastError());
+				}
+			}
+            else
+            {
+                // 24.01.200 Gert Groﬂmann
+                // change creation time of backup file
+                FILETIME ctime;
+                
+                hModule = CreateFile( ModuleBackupFile, GENERIC_WRITE, 0, NULL, 
+                    OPEN_EXISTING, NULL, NULL);
+                if ( hModule != INVALID_HANDLE_VALUE )
+                {
+                    if (GetFileTime( hModule, &ctime, NULL, NULL ))
+                    {
+                        (void) SystemTimeToFileTime( &mySystemTime, &ctime );
+                        if ( !SetFileTime( hModule, &ctime, NULL, NULL ) )
+                        {
+                            char buf[MAX_PATH + 80];
+                            sprintf(buf, "WARNING: cannot set file time for backup file %s!",
+                                ModuleBackupFile);
+                            MyError("MyReciveModule", buf, GetLastError());
+                        }
+                    }
+                    else
+                    {
+                        char buf[MAX_PATH + 80];
+                        sprintf(buf, "WARNING: cannot get file time for backup file %s!",
+                            ModuleBackupFile);
+                        MyError("MyReciveModule", buf, GetLastError());
+                    }
+                }
+                else
+                {
+					char buf[MAX_PATH + 80];
+					sprintf(buf, "WARNING: cannot open backup file %s!",
+						ModuleBackupFile);
+					MyError("MyReciveModule", buf, GetLastError());
+                }
+                CloseHandle( hModule );
+            }
+		}
+
+        //create source directory for receiving file
+		_splitpath(ModulePathAbs, drive, dir, NULL, NULL);
+		_makepath(ModulePathBackup, drive, dir, NULL, NULL);
+		if (! CreateDirectory(ModulePathBackup, NULL))
+		{
+                int retCode;
+                retCode = GetLastError();
+                if ( retCode != ERROR_ALREADY_EXISTS )
+                {
+    				char buf[MAX_PATH + 80];
+                    sprintf(buf, "WARNING: cannot create directory %s!",
+	                    ModulePathBackup);
+                    MyError("MyReciveModule", buf, retCode);
+                }
+		}
+		// Open the handle for the new file 
+		hModule =  CreateFile (
+			ModulePathAbs,
+			GENERIC_WRITE,
+			0,
+			NULL,
+			CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL,
+			NULL);
+		if (hModule == INVALID_HANDLE_VALUE)
+		{
+			char buf [MAX_PATH + 80];
+			sprintf (buf, "cannot open module %s for writing",
+				ModulePathAbs);
+			throw buf;
+		}
+
+		// read in loop msg-packages until last package of the file is received
+		do
+		{
+			// Receive a packet
+			bResult=ReadFile (hPipe, &MsgBuf, sizeof (T_IMSGBUF), &dwBytesReceived, NULL);
+			if (!bResult)
+				throw "ReadFile for message buffer (module) failed";
+
+			DBGOUT("ISERVER: MyReceiveModule %li bytes received\n",dwBytesReceived);
+
+			// Save packet 
+			if (WriteFile(hModule, MsgBuf.Buf, MsgBuf.len, &dwBytesWritten, NULL) != TRUE)
+			{
+				char buf [MAX_PATH + 80];
+				sprintf (buf, "cannot write module %s!",
+					ModulePathAbs);
+				throw buf;
+			}
+		}while (MsgBuf.Signature == ePacket);
+
+		// Set new date on the file
+		SetFileTime(hModule, NULL, NULL, &IFileInfo.mtime);
+		CloseHandle(hModule);
+		ret = MY_OK;
+	}
+	catch (const char * errString)
+	{
+	    MyError("MyReciveModule", errString, GetLastError());
+	    ret = MY_NOTOK;
+		if (hModule != INVALID_HANDLE_VALUE) 
+			CloseHandle(hModule); 
+
+		// Don't leave corrupted modules on the grp-share
+		DeleteFile(ModulePathAbs);
+	}
+	return ret;
+}
+
+
+void StopServerProc(char *PipeArray[], int NumPipes)
+{
+	// Stop all open services by sending eSTOP message
+	T_IMSSG STOPMSSG;
+	STOPMSSG.RequestType = eSTOP;
+	STOPMSSG.Module[0] = '\0';
+	STOPMSSG.Node[0] = '\0';
+	STOPMSSG.User[0] = '\0';
+
+	HANDLE hPipe=INVALID_HANDLE_VALUE;                     
+	CHAR   inBuf[IN_BUF_SIZE] = "";     // Input buffer for pipe.
+
+	CHAR   errorBuf[ERR_BUF_SIZE] = ""; // Used for error messages.
+	BOOL   ExitLoop = FALSE;            // Boolean Flag to exit loop.
+
+	for (int i=0; i<NumPipes; i++)
+	{
+	    ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 3000);
+		if (WaitNamedPipe(PipeArray[i], NMPWAIT_USE_DEFAULT_WAIT))
+		{
+			// Open Pipe
+			BOOL bDone; int TryCount=200;
+			int LastError;
+			do
+			{
+				hPipe = CreateFile(PipeArray[i],
+					GENERIC_WRITE 
+					| GENERIC_READ,
+					0,
+					NULL,
+					OPEN_EXISTING,
+					FILE_ATTRIBUTE_NORMAL,
+					NULL);
+				if (hPipe == INVALID_HANDLE_VALUE)
+				{
+					LastError=GetLastError();
+  					if (LastError != ERROR_PIPE_BUSY && LastError != ERROR_SHARING_VIOLATION)
+					{
+						MyError("StopServerProc","CreateFile for open IServerPipe failed",LastError);
+						bDone=TRUE;
+					}
+					else
+					{
+						TryCount--;
+						if (TryCount==0)
+						{
+							fprintf(stderr, "Error: IServerPipe pipe busy, try again later!\n");
+							bDone=TRUE;
+						}
+						else
+							// Collision
+							bDone=FALSE, Sleep(100);
+					}
+				}
+				else
+					bDone=TRUE;
+			    ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 3000);
+			} while (!bDone);
+
+
+			// Send Stop-Message
+			if (hPipe != INVALID_HANDLE_VALUE)
+			{
+				DWORD dwBytesWritten;
+				if (!WriteFile(hPipe, &STOPMSSG, sizeof (T_IMSSG),&dwBytesWritten,NULL))
+				{ 
+					MyError("StopServerProc", "cannot write to pipe", GetLastError());
+				}
+				CloseHandle(hPipe);
+			}
+		}
+		else
+			MyError("StopServerProc","cannot open pipe",GetLastError());
+	}
+}
+
+
+
+//************************************************************************
+//----- Code from SDK example ----------
+//************************************************************************
+
+//
+//  FUNCTION: service_ctrl
+//
+//  PURPOSE: This function is called by the SCM whenever
+//           ControlService() is called on this service.
+//
+//  PARAMETERS:
+//    dwCtrlCode - type of control requested
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+VOID WINAPI service_ctrl(DWORD dwCtrlCode)
+{
+    // Handle the requested control code.
+    //
+    switch(dwCtrlCode)
+    {
+        // Stop the service.
+        //
+        case SERVICE_CONTROL_STOP:
+            ssStatus.dwCurrentState = SERVICE_STOP_PENDING;
+            ServiceStop();
+            break;
+
+        // Update the service status.
+        //
+        case SERVICE_CONTROL_INTERROGATE:
+            break;
+
+        // invalid control code
+        //
+        default:
+            break;
+
+    }
+
+    ReportStatusToSCMgr(ssStatus.dwCurrentState, NO_ERROR, 3000);
+
+}
+
+
+
+//
+//  FUNCTION: ReportStatusToSCMgr()
+//
+//  PURPOSE: Sets the current status of the service and
+//           reports it to the Service Control Manager
+//
+//  PARAMETERS:
+//    dwCurrentState - the state of the service
+//    dwWin32ExitCode - error code to report
+//    dwWaitHint - worst case estimate to next checkpoint
+//
+//  RETURN VALUE:
+//    TRUE  - success
+//    FALSE - failure
+//
+//  COMMENTS:
+//
+BOOL ReportStatusToSCMgr(DWORD dwCurrentState,
+                         DWORD dwWin32ExitCode,
+                         DWORD dwWaitHint)
+{
+    static DWORD dwCheckPoint = 1;
+    BOOL fResult = TRUE;
+
+
+    if ( !bDebug ) // when debugging we don't report to the SCM
+    {
+        if (dwCurrentState == SERVICE_START_PENDING)
+            ssStatus.dwControlsAccepted = 0;
+        else
+            ssStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+
+        ssStatus.dwCurrentState = dwCurrentState;
+        ssStatus.dwWin32ExitCode = dwWin32ExitCode;
+        ssStatus.dwWaitHint = dwWaitHint;
+
+        if ( ( dwCurrentState == SERVICE_RUNNING ) ||
+             ( dwCurrentState == SERVICE_STOPPED ) )
+            ssStatus.dwCheckPoint = 0;
+        else
+            ssStatus.dwCheckPoint = dwCheckPoint++;
+
+
+        // Report the status of the service to the service control manager.
+        //
+        if (!(fResult = SetServiceStatus( sshStatusHandle, &ssStatus))) {
+            AddToMessageLog(TEXT("SetServiceStatus"));
+        }
+    }
+    return fResult;
+}
+
+
+
+//
+//  FUNCTION: AddToMessageLog(LPTSTR lpszMsg)
+//
+//  PURPOSE: Allows any thread to log an error message
+//
+//  PARAMETERS:
+//    lpszMsg - text for message
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+VOID AddToMessageLog(LPTSTR lpszMsg, WORD wErrorType)
+{
+    TCHAR   szMsg[256];
+    HANDLE  hEventSource;
+    LPTSTR  lpszStrings[2];
+
+
+    if ( !bDebug )
+    {
+        dwErr = GetLastError();
+
+        // Use event logging to log the error.
+        //
+        hEventSource = RegisterEventSource(NULL, TEXT(SZAPPNAME));
+
+		if (wErrorType == EVENTLOG_ERROR_TYPE)
+		{
+			_stprintf(szMsg, TEXT("%s error: %d"), TEXT(SZAPPNAME), dwErr);
+			lpszStrings[0] = szMsg;
+			lpszStrings[1] = lpszMsg;
+
+			if (hEventSource != NULL) 
+				ReportEvent(hEventSource, // handle of event source
+					wErrorType,  // event type
+					0,                    // event category
+					0,                    // event ID
+					NULL,                 // current user's SID
+					2,                    // strings in lpszStrings
+					0,                    // no bytes of raw data
+					(const char **)lpszStrings,   // array of error strings
+					NULL);                // no raw data
+		}
+		else
+		{
+			_stprintf(szMsg, TEXT("%s: %s"), TEXT(SZAPPNAME), lpszMsg);
+			lpszStrings[0] = szMsg;
+
+			if (hEventSource != NULL)
+				ReportEvent(hEventSource, // handle of event source
+					wErrorType,  // event type
+					0,                    // event category
+					0,                    // event ID
+					NULL,                 // current user's SID
+					1,                    // strings in lpszStrings
+					0,                    // no bytes of raw data
+					(const char **)lpszStrings,   // array of error strings
+					NULL);                // no raw data
+
+
+		}
+        
+		(VOID) DeregisterEventSource(hEventSource);
+        
+    }
+}
+
+
+
+
+///////////////////////////////////////////////////////////////////
+//
+//  The following code handles service installation and removal
+//
+
+
+//
+//  FUNCTION: CmdInstallService()
+//
+//  PURPOSE: Installs the service
+//
+//  PARAMETERS:
+//    none
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+void CmdInstallService()
+{
+    SC_HANDLE   schService;
+    SC_HANDLE   schSCManager;
+
+    TCHAR szPath[MAX_PATH];
+	TCHAR szErr[256];
+
+
+    if ( GetModuleFileName( NULL, szPath, MAX_PATH ) == 0 )
+    {
+        _tprintf(TEXT("Unable to install %s - %s\n"), TEXT(SZAPPNAME), GetLastErrorText(szErr, 256));
+        return;
+    }
+
+    schSCManager = OpenSCManager(
+                        NULL,                   // machine (NULL == local)
+                        NULL,                   // database (NULL == default)
+                        SC_MANAGER_ALL_ACCESS   // access required
+                        );
+    if ( schSCManager )
+    {
+        schService = CreateService(
+            schSCManager,               // SCManager database
+            TEXT(SZAPPNAME),	        // name of service
+            TEXT(SZAPPNAME),			// name to display
+            SERVICE_ALL_ACCESS,         // desired access
+            SERVICE_WIN32_OWN_PROCESS,  // service type
+            SERVICE_DEMAND_START,       // start type
+            SERVICE_ERROR_NORMAL,       // error control type
+            szPath,                     // service's binary
+            NULL,                       // no load ordering group
+            NULL,                       // no tag identifier
+            NULL,				       // dependencies
+            NULL,                       // LocalSystem account
+            NULL);                      // no password
+
+        if ( schService )
+        {
+            _tprintf(TEXT("%s installed.\n"), TEXT(SZAPPNAME) );
+            CloseServiceHandle(schService);
+        }
+        else
+        {
+            _tprintf(TEXT("CreateService failed - %s\n"), GetLastErrorText(szErr, 256));
+        }
+
+        CloseServiceHandle(schSCManager);
+    }
+    else
+        _tprintf(TEXT("OpenSCManager failed - %s\n"), GetLastErrorText(szErr,256));
+}
+
+
+
+//
+//  FUNCTION: CmdRemoveService()
+//
+//  PURPOSE: Stops and removes the service
+//
+//  PARAMETERS:
+//    none
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+void CmdRemoveService()
+{
+    SC_HANDLE   schService;
+    SC_HANDLE   schSCManager;
+	TCHAR       szErr[256];
+
+
+    schSCManager = OpenSCManager(
+                        NULL,                   // machine (NULL == local)
+                        NULL,                   // database (NULL == default)
+                        SC_MANAGER_ALL_ACCESS   // access required
+                        );
+    if ( schSCManager )
+    {
+        schService = OpenService(schSCManager, TEXT(SZAPPNAME), SERVICE_ALL_ACCESS);
+
+        if (schService)
+        {
+            // try to stop the service
+            if ( ControlService( schService, SERVICE_CONTROL_STOP, &ssStatus ) )
+            {
+                _tprintf(TEXT("Stopping %s."), TEXT(SZAPPNAME));
+                Sleep( 1000 );
+
+                while( QueryServiceStatus( schService, &ssStatus ) )
+                {
+                    if ( ssStatus.dwCurrentState == SERVICE_STOP_PENDING )
+                    {
+                        _tprintf(TEXT("."));
+                        Sleep( 1000 );
+                    }
+                    else
+                        break;
+                }
+
+                if ( ssStatus.dwCurrentState == SERVICE_STOPPED )
+                    _tprintf(TEXT("\n%s stopped.\n"), TEXT(SZAPPNAME) );
+                else
+                    _tprintf(TEXT("\n%s failed to stop.\n"), TEXT(SZAPPNAME) );
+
+            }
+
+            // now remove the service
+            if( DeleteService(schService) )
+                _tprintf(TEXT("%s removed.\n"), TEXT(SZAPPNAME) );
+            else
+                _tprintf(TEXT("DeleteService failed - %s\n"), GetLastErrorText(szErr,256));
+
+
+            CloseServiceHandle(schService);
+        }
+        else
+            _tprintf(TEXT("OpenService failed - %s\n"), GetLastErrorText(szErr,256));
+
+        CloseServiceHandle(schSCManager);
+    }
+    else
+        _tprintf(TEXT("OpenSCManager failed - %s\n"), GetLastErrorText(szErr,256));
+}
+
+
+
+
+///////////////////////////////////////////////////////////////////
+//
+//  The following code is for running the service as a console app
+//
+
+
+//
+//  FUNCTION: CmdDebugService(int argc, char ** argv)
+//
+//  PURPOSE: Runs the service as a console application
+//
+//  PARAMETERS:
+//    argc - number of command line arguments
+//    argv - array of command line arguments
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//
+void CmdDebugService(int argc, char ** argv)
+{
+    DWORD dwArgc;
+    LPTSTR *lpszArgv;
+
+#ifdef UNICODE
+    lpszArgv = CommandLineToArgvW(GetCommandLineW(), &(dwArgc) );
+#else
+    dwArgc   = (DWORD) argc;
+    lpszArgv = argv;
+#endif
+
+    _tprintf(TEXT("Debugging %s.\n"), TEXT(SZAPPNAME));
+
+    SetConsoleCtrlHandler( ControlHandler, TRUE );
+
+    MyIServerStart( dwArgc, lpszArgv );
+}
+
+
+//
+//  FUNCTION: ControlHandler ( DWORD dwCtrlType )
+//
+//  PURPOSE: Handled console control events
+//
+//  PARAMETERS:
+//    dwCtrlType - type of control event
+//
+//  RETURN VALUE:
+//    True - handled
+//    False - unhandled
+//
+//  COMMENTS:
+//
+BOOL WINAPI ControlHandler ( DWORD dwCtrlType )
+{
+    switch( dwCtrlType )
+    {
+        case CTRL_BREAK_EVENT:  // use Ctrl+C or Ctrl+Break to simulate
+        case CTRL_C_EVENT:      // SERVICE_CONTROL_STOP in debug mode
+            _tprintf(TEXT("Stopping %s.\n"), TEXT(SZAPPNAME));
+            ServiceStop();
+            return TRUE;
+            break;
+
+    }
+    return FALSE;
+}
+
+//
+//  FUNCTION: GetLastErrorText
+//
+//  PURPOSE: copies error message text to string
+//
+//  PARAMETERS:
+//    lpszBuf - destination buffer
+//    dwSize - size of buffer
+//
+//  RETURN VALUE:
+//    destination buffer
+//
+//  COMMENTS:
+//
+LPTSTR GetLastErrorText( LPTSTR lpszBuf, DWORD dwSize )
+{
+    DWORD dwRet;
+    LPTSTR lpszTemp = NULL;
+
+    dwRet = FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                           NULL,
+                           GetLastError(),
+                           LANG_NEUTRAL,
+                           (LPTSTR)&lpszTemp,
+                           0,
+                           NULL );
+
+    // supplied buffer is not long enough
+    if ( !dwRet || ( (long)dwSize < (long)dwRet+14 ) )
+        lpszBuf[0] = TEXT('\0');
+    else
+    {
+        lpszTemp[lstrlen(lpszTemp)-2] = TEXT('\0');  //remove cr and newline character
+        _stprintf( lpszBuf, TEXT("%s (0x%x)"), lpszTemp, GetLastError() );
+    }
+
+    if ( lpszTemp )
+        LocalFree((HLOCAL) lpszTemp );
+
+    return lpszBuf;
+}
+
+
+//
+//  FUNCTION: ServiceStop
+//
+//  PURPOSE: Stops the service
+//
+//  PARAMETERS:
+//    none
+//
+//  RETURN VALUE:
+//    none
+//
+//  COMMENTS:
+//    If a ServiceStop procedure is going to
+//    take longer than 3 seconds to execute,
+//    it should spawn a thread to execute the
+//    stop code, and return.  Otherwise, the
+//    ServiceControlManager will believe that
+//    the service has stopped responding.
+//    
+VOID ServiceStop()
+{
+    if ( hServerStopEvent )
+        SetEvent(hServerStopEvent);
+}
+
+
+
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

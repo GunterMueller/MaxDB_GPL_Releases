@@ -1,0 +1,306 @@
+(* @(#)pascl/init.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* init.p *)
+
+(* defines *)
+
+#include "../common/csg.def"
+
+
+(* imports *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/opcode.i"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../pascl/globals1.i"
+#include "../pascl/p1m2.h"
+
+
+(* export *)
+
+#include "../pascl/init.h"
+
+
+(* privates *)
+
+const
+   ConstStackSize = 10;
+
+type
+   ConstStackRange = 0..ConstStackSize;
+
+var
+   ConstStack: array [ConstStackRange] of integer;
+   ConstSp: ConstStackRange;
+
+
+
+procedure itraverse
+   (NodeIndex: integer);
+forward;
+
+(* routines *)
+
+procedure pop;
+   (*  moves the stack pointer to remove the last element from the stack *)
+   begin
+   if ConstSp = 0 then begin
+      ErrorMsg (107, -1);
+   end  (* if *);
+   ConstSp := ConstSp -1;
+   end (*pop*);
+
+procedure push;
+   (* moves the stack pointer to insert an element onto the stack *)
+   begin
+   if ConstSp = ConstStackSize then begin
+      ErrorMsg (108, -1);
+   end  (* if *);
+   ConstSp := ConstSp + 1;
+   end (*push *);
+
+
+procedure InitCode ( NodeIndex : integer );
+   (*      the main part of the module                           *)
+   (*  this procedure interprets the actual intetrmediate code.  *)
+   var i,t,t1,addr,offset : integer;
+
+   begin
+     case MinorOperator of
+
+        NopOp : begin     (* do nothing *);
+        end;
+
+        LitOp : begin
+           t := STab [TypeField].SType;
+           push;
+           ConstStack [ConstSp] := Node1parameter;
+        end;
+
+	IdOp: begin
+	   if STab[ Node1parameter ].SKind = ConDcl  then begin
+	      if STab[ Node1parameter ].SFeld3 > 0 then
+		 itraverse( STab[ Node1parameter ].SFeld3 )
+	      else begin
+	         push;
+                 ConstStack [ConstSp] := STab[Node1parameter].SCon1val;
+	      end
+	   end
+	   else
+              ErrorMsg (100, -1); (* invalid constant expression *)
+        end;
+
+        LoadOp: begin
+	end;	
+	
+	ConvertOp: begin
+	end;	
+
+        LeOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] <= ConstStack [ConstSp]);
+           pop;
+        end;
+
+        LtOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] < ConstStack [ConstSp]);
+           pop;
+        end;
+
+        GeOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] >= ConstStack [ConstSp]);
+           pop;
+        end;
+
+        GtOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] > ConstStack [ConstSp]);
+           pop;
+        end;
+
+        EqOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] = ConstStack [ConstSp]);
+           pop;
+        end;
+
+        NeOp : begin
+           ConstStack [ConstSp-1] :=
+		ord(ConstStack [ConstSp-1] <> ConstStack [ConstSp]);
+           pop;
+        end;
+
+        UminusOp : begin
+           ConstStack [ConstSp] := -ConstStack [ConstSp];
+        end;
+
+        AddOp : begin
+           ConstStack [ConstSp-1] :=
+              ConstStack [ConstSp-1] + ConstStack [ConstSp];
+           pop;
+        end;
+
+        SubtOp : begin
+           ConstStack [ConstSp-1] :=
+              ConstStack [ConstSp-1] - ConstStack [ConstSp];
+           pop;
+        end;
+
+        MultOp : begin
+           ConstStack [ConstSp-1] :=
+              ConstStack [ConstSp-1] * ConstStack [ConstSp];
+           pop;
+        end;
+
+        DivOp : begin
+           ConstStack [ConstSp-1] :=
+              ConstStack [ConstSp-1] div ConstStack [ConstSp];
+           pop;
+        end;
+
+        AndOp: begin
+           ConstStack [ConstSp-1] := ord (
+              (ConstStack [ConstSp-1] = ord (true)) and
+              (ConstStack [ConstSp] = ord (true)));
+           pop;
+        end;
+
+        OrOp: begin
+           ConstStack [ConstSp-1] := ord (
+              (ConstStack [ConstSp-1] = ord (true)) or
+              (ConstStack [ConstSp] = ord (true)));
+           pop;
+        end;
+
+	NotOp: begin
+           ConstStack [ConstSp] :=
+		ord(ConstStack [ConstSp] = ord (false))
+	end;	
+
+        otherwise begin
+           ErrorMsg (100, -1); (* invalid constant expression *)
+        end;
+     end  (* case *);
+
+   end (*InitCode*);
+
+
+procedure IcsgTraverse(NodeIndex : integer );
+   (* interprets a line of code ***** *)
+   var i : integer;
+
+   begin
+   case MajorOperator of
+
+      node : begin
+         InitCode(NodeIndex);
+      end;
+
+      UnaryExp : begin
+         itraverse(Unary1operand);
+         InitCode(NodeIndex);
+      end;
+
+      BinaryExp : begin
+         itraverse(Bin1operand);
+         itraverse(Bin2operand);
+         InitCode(NodeIndex);
+      end;
+
+      LongStmnt : begin
+         CardCount := LsLineNo;
+         itraverse(Ls2operand);
+         itraverse(Ls1operand);
+         InitCode(NodeIndex) ;
+      end;
+
+      spec : begin
+         CardCount := SpecLineNo;
+         InitCode(NodeIndex);
+      end;
+
+      ShortStmnt : begin
+         CardCount := SsLineNo;
+         itraverse(Ss1operand);
+         InitCode(NodeIndex);
+      end;
+
+{
+ *    ExpList : begin
+ *       itraverse(List1expression);
+ *       itraverse(List2expression);
+ *       itraverse(List3expression);
+ *    end;
+}
+
+   end  (* case *); (*MajorOperator*)
+
+   end (*IcsgTraverse *);
+
+procedure itraverse;
+   (* traverses the semantic tree and resolves expressions *)
+   label 100;
+   var MajorOp:integer;
+
+   begin
+   while NodeIndex > -1 do begin
+      IcsgTraverse(NodeIndex);
+      MajorOp := MajorOperator;
+      if (MajorOp = node) or
+         (MajorOp = UnaryExp) or
+         (MajorOp = BinaryExp) or
+         (MajorOp = ExpList)
+      then begin
+         goto 100;
+      end  (* if *);
+      NodeIndex := NextLink;
+   end  (* while *);
+   100:  (* return label *)
+   end (*itraverse *);
+
+function ConstExp;
+   (* computes the of a constant expression *)
+
+   begin
+      ConstSp :=  0;
+      if tree <> 0 then				(* PTOX, FIX also for PCOMP *)
+      itraverse(tree);
+    { debug "ConstExp = ",ConstStack [ConstSp] enddebug }  (**)
+      {
+ *    return(ConstStack [ConstSp]);
+      }
+      ConstExp := ConstStack [ConstSp];
+   end (*ConstExp *);
+
+
+function IsPrimConstant(NodeIndex: integer) : boolean;
+   begin
+      IsPrimConstant := (MinorOperator = LitOp) or
+	 (MinorOperator = IdOp) and (STab[ Node1parameter ].SKind = ConDcl);
+   end;
+
+

@@ -1,0 +1,1267 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS96OC$
+.tt 2 $$$
+.tt 3 $R.Roedling$TCP/IP DATABASE SERVER$1997-01-23$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : TCP/IP_DATABASE_SERVER
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1996-01-19
+.sp
+.cp 3
+Version : 1996-01-19
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-01-23
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+#if defined(_WIN32)
+ #include          <winerror.h>
+ #include          <winsock.h>
+#else
+ #ifndef __off_t
+ #define __off_t
+ typedef long off_t;
+ #endif
+ #include          <sys\socket.h>
+ #include          <nerrno.h>
+#endif
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS96OC : "
+#define MF__   MOD__"UNDEFINED"
+
+#define MAXTCPIPCONNECTIONS       2000
+#define MIN_PACKET_SIZE           (2 * sizeof(OLD_SQL_PACKET_REC))
+#define MIN_PACKET_DATA_LEN       (2 * sizeof(OLD_SQL_PACKET_REC) - \
+                                   2 * OLD_RTE_HEADER_SIZE )
+
+
+
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+typedef struct sockaddr          sockaddr_type;
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+extern  GLOBAL_XSERVER_REC   gxr;
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+ULONG        sql96o_open_lis_socket   ( VOID );
+VOID _System sql96o_TCPIP_serv_thread ( ULONG                            ulConnInfoHandle );
+ULONG        sql96o_request           ( POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo );
+ULONG        sql96o_cancel_dump       ( ULONG                            ulServerRef,
+                                        PSZ                              pszServerDB,
+                                        ULONG                            ulReqType );
+ULONG        sql96o_transfer_new_db   ( POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo );
+ULONG        sql96o_transfer_old_db   ( POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo );
+ULONG        sql96o_set_sock_buf_sizes( INT                              sd,
+                                        ULONG                            ulMinSegmentSize,
+                                        PULONG                           pulMaxSegmentSize );
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+VOID _System sql96o_TCPIP_coordinator ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_serv_loop"
+  sockaddr_type                      SockAddr;
+  SQL_NODEIDC                        szSenderNodeID;
+  ULONG                              ulConnInfoHandle;
+  APIRET                             rc        = NO_ERROR;
+  ULONG                              ulErrCnt  = 0;
+  INT                                AddrLen   = sizeof(SockAddr);
+  INT                                sd        = UNDEF;
+  POLD_TCPIP_SERV_CONNECT_INFO_REC   pConnInfo = NULL;
+  #if defined(_WIN32)
+   EXCEPTION_REC                     ExceptionRecord;
+  #endif
+
+  DBGIN;
+
+  GUARD_EXCEPTION (&ExceptionRecord);
+
+  // --- set thread control info
+  gxr.OldTCPIPCoord.ThrdCtrlHeader.ulStartTime = time (NULL);
+
+  //
+  //
+  // --- set the thread priority
+  //
+  //
+  rc = SET_THREAD_PRIO ( gxr.OldTCPIPCoord.ThrdCtrlHeader.lThrdPrio,
+                         gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid,
+                         gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_SET_THRD_PRIO_ERROR,
+             gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid, rc ));
+    gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_TERMINATED;
+    gxr.ulCrashRc                              = rc;
+    ABORT();
+    }
+
+  if( !sql09c_init_handle_dir( &gxr.OldTCPIPCoord.pHandles,
+                               MAXTCPIPCONNECTIONS ))
+    {
+    MSGALL (( ERR_RESERVE_HANDLE_VALUES ));
+    gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_TERMINATED;
+    gxr.ulCrashRc                              = ERROR_INVALID_HANDLE;
+    ABORT();
+    }
+
+  rc = sql96o_open_lis_socket ();
+
+  if ( rc != NO_ERROR )
+    {
+    gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_TERMINATED;
+    gxr.ulCrashRc                              = rc;
+    ABORT();
+    }
+
+
+  for (;;)
+    {
+    MSG6 (( INFO_XSER_ACCEPTING ));
+
+    gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_SLEEPING;
+
+    rc = sql40c_accept_conn_request ( gxr.OldTCPIPCoord.sd, &sd,
+                                      &SockAddr, &AddrLen );
+
+    gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_RUNNING;
+
+
+    if ( (rc != NO_ERROR) || (sd == INVALID_SOCKET) )
+      {
+      if ( rc == EINTR ) continue;
+
+      MSGALL (( ERR_XSER_ACCEPT_ERROR, rc ));
+
+      if ( ( (++ulErrCnt) > 9 ) || ( rc == SOCENOTSOCK ) )
+        {
+        //
+        // --- try to reopen the listen socket
+        //
+        sql40c_socket_close ( gxr.OldTCPIPCoord.sd );
+        gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+        ulErrCnt          = 0;
+        AddrLen           = sizeof(SockAddr);
+
+        SLEEP( 30000 );
+
+        rc = sql96o_open_lis_socket ();
+
+        if ( rc != NO_ERROR )
+          break;
+        }
+      continue;
+      }
+    else
+      ulErrCnt = 0;
+
+    sql43c_get_host_by_address ( (PUCHAR)&SockAddr.sa_data[2],
+                                 szSenderNodeID, sizeof(szSenderNodeID));
+
+    MSG7 (( INFO_XSER_ACCEPT_CONNECTION, sd ));
+
+    rc =  sql40c_keep_alive ( sd );
+
+    if ( rc != NO_ERROR )
+      MSGCD (( ERR_XSER_KEEP_ALIV_ERROR, rc ))
+
+
+    // --- allocate space for the internal communication structure
+    rc = ALLOC_MEM((PPVOID)&pConnInfo, sizeof(OLD_TCPIP_SERV_CONNECT_INFO_REC));
+
+    if ( rc != NO_ERROR )
+      {
+      sql40c_socket_close ( sd );
+      continue;
+      }
+
+    // --- Get a new handle and combine it with the pointer to the
+    //     internal communication structure.
+    //
+    if ( !sql09c_reserve_handle ( gxr.OldTCPIPCoord.pHandles, &ulConnInfoHandle) )
+      {
+      MSGALL (( ERR_XSER_MAX_CONNECTIONS ));
+      sql40c_socket_close ( sd );
+      FREE_MEM ( pConnInfo );
+      continue;
+      }
+
+    if ( !sql09c_put_handle_data( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle,
+                                  pConnInfo, (ULONG)UNDEF, (ULONG)UNDEF))
+      {
+      MSGALL (( ERR_XSER_GET_SET_HANDLE_DATA ));
+      gxr.ulCrashRc  = ERROR_INVALID_HANDLE;
+      ABORT();
+      }
+
+    pConnInfo->ThrdCtrlHeader.Tid         = (TID)UNDEF;
+    pConnInfo->ThrdCtrlHeader.hThrd       = (HANDLE)INVALID_HANDLE_VALUE;
+    pConnInfo->ThrdCtrlHeader.lThrdPrio   = SERVER_THRD_PRIO;
+    pConnInfo->ThrdCtrlHeader.ThrdState   = THRD_INITIALIZED;
+    pConnInfo->ThrdCtrlHeader.ulStartTime = (ULONG)UNDEF;
+
+    pConnInfo->ulConnInfoHandle           = ulConnInfoHandle;
+    pConnInfo->sd                         = sd;
+    strcpy ( pConnInfo->szSenderNodeID, szSenderNodeID );
+
+    pConnInfo->ulConnStatus               = CON_INITIALIZED;
+    pConnInfo->ulServerRef                = (ULONG)UNDEF;
+    pConnInfo->pPacket                    = NULL;
+
+    pConnInfo->ulSwapType                 = (ULONG)UNDEF;
+    pConnInfo->ulMaxSegmentSize           = gxr.OldTCPIPCoord.ulMaxSegmentSize;
+
+    pConnInfo->fNewPackets                = FALSE;
+
+    #if defined(_WIN32)
+     pConnInfo->pWorldSA                  = &gxr.WorldSA;
+     pConnInfo->pLockSA                   = &gxr.LockSA;
+    #endif
+
+    rc = CREATE_THREAD( &pConnInfo->ThrdCtrlHeader.Tid,
+                        &pConnInfo->ThrdCtrlHeader.hThrd,
+                        sql96o_TCPIP_serv_thread,
+                        ulConnInfoHandle,
+                        CREATE_THRD_SUSPENDED,
+                        OLD_SERVER_STACK_SIZE);
+
+    if (rc != NO_ERROR)
+      {
+      MSGALL (( ERR_XSER_CREATING_THREAD, "SERVER", rc));
+
+      sql40c_socket_close ( sd );
+      sql09c_free_handle  ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle );
+      FREE_MEM ( pConnInfo );
+      }
+    else
+      {
+      rc = RESUME_THREAD(pConnInfo->ThrdCtrlHeader.Tid,
+                         pConnInfo->ThrdCtrlHeader.hThrd);
+
+      if (rc != NO_ERROR)
+        {
+        MSGALL (( ERR_XSER_RESUMING_THREAD, "SERVER", rc));
+
+        KILL_THREAD (pConnInfo->ThrdCtrlHeader.Tid,
+                     pConnInfo->ThrdCtrlHeader.hThrd);
+        sql40c_socket_close ( sd );
+        sql09c_free_handle  ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle );
+        FREE_MEM ( pConnInfo );
+        }
+      }
+    }
+
+  gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState = THRD_TERMINATED;
+  gxr.ulCrashRc                              = rc;
+  ABORT();
+
+  UNGUARD_EXCEPTION(&ExceptionRecord);
+
+  DBGOUT;
+  EXITTHREAD( rc, gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd );
+  return;
+  }
+
+/*------------------------------*/
+
+VOID sql96o_finish ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_finish"
+  ULONG                               ulCommState = SQLOK;
+  POLD_TCPIP_SERV_CONNECT_INFO_REC    pConnInfo;
+  ERRORTEXT                           ErrText;
+  ULONG                               ulTmp;
+  ULONG                               ulConnInfoHandle = 0;
+  TID                                 tidTID           = THREADID;
+
+  DBGPAS;
+
+  if ( tidTID != gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid)
+    {
+    KILL_THREAD ( gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid,
+                  gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd );
+    }
+
+  while ( sql09c_find_next_handle( gxr.OldTCPIPCoord.pHandles, &ulConnInfoHandle ))
+    {
+    if ( !sql09c_lock_handle ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle ))
+      continue;
+
+    if ( sql09c_get_handle_data  ( gxr.OldTCPIPCoord.pHandles,
+                                   ulConnInfoHandle,
+                                   (PVOID*)&pConnInfo,
+                                   &ulTmp, &ulTmp ))
+      {
+      if ( tidTID != pConnInfo->ThrdCtrlHeader.Tid)
+        {
+        KILL_THREAD ( pConnInfo->ThrdCtrlHeader.Tid,
+                      pConnInfo->ThrdCtrlHeader.hThrd );
+        }
+
+      if (( pConnInfo->ulConnStatus != 0               ) &&
+          ( pConnInfo->ulConnStatus != CON_INITIALIZED ) &&
+          ( pConnInfo->ulConnStatus != CON_CANCELLED   ) &&
+          ( pConnInfo->ulConnStatus != CON_RELEASED    ))
+        {
+        MSGD (( INFO_XSER_CONN_KILLED,
+                pConnInfo->szServerDB, pConnInfo->ulServerRef ));
+
+        sql33c_release ( &pConnInfo->Shm, ErrText );
+        pConnInfo->ulConnStatus = CON_RELEASED;
+        }
+
+      if ( pConnInfo->sd != INVALID_SOCKET )
+        {
+        sql40c_socket_close ( pConnInfo->sd );
+        pConnInfo->sd = INVALID_SOCKET;
+        }
+      }
+    }
+
+  if (gxr.OldTCPIPCoord.sd != INVALID_SOCKET)
+    {
+    sql40c_socket_close ( gxr.OldTCPIPCoord.sd );
+    gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+    }
+
+  return;
+  }
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static ULONG sql96o_open_lis_socket ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_open_lis_socket"
+  LONG                           rc;
+  ULONG                          ulMaxSegmentSize;
+  ULONG                          ulMinSegmentSize;
+  ULONG                          ulCommState = SQLOK;
+
+  DBGIN;
+
+  gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+
+  // --- get port number for remote sql service
+  rc = sql43c_get_service_by_name ( SOCKET_SERVICE_SQL30,
+                                    &gxr.OldTCPIPCoord.usServicePort );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_SERV_BY_NAME_ERROR, SOCKET_SERVICE_SQL30 ));
+    DBGOUT;
+    return ( rc );
+    }
+
+  MSG6 (( INFO_XSER_SERV_PORT, gxr.OldTCPIPCoord.usServicePort ))
+
+  // --- create server socket
+  rc = sql40c_stream_socket ( &gxr.OldTCPIPCoord.sd );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_LIS_SOCK_OPEN, rc ));
+    return ( rc );
+    }
+
+  rc =  sql40c_keep_alive ( gxr.OldTCPIPCoord.sd );
+
+  if ( rc != NO_ERROR )
+    MSGCD (( ERR_XSER_KEEP_ALIV_ERROR, rc ))
+
+  MSG6 (( INFO_XSER_OP_LISEN_SOCKET, gxr.OldTCPIPCoord.sd ));
+
+
+  ulMinSegmentSize = 1024;
+  ulMaxSegmentSize = sizeof(OLD_SQL_PACKET_REC);
+
+  ulCommState = sql96o_set_sock_buf_sizes( gxr.OldTCPIPCoord.sd,
+                                           ulMinSegmentSize,
+                                           &ulMaxSegmentSize );
+
+  if ( ulCommState != SQLOK )
+    {
+    sql40c_socket_close ( gxr.OldTCPIPCoord.sd );
+    gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+
+    DBGOUT;
+    return ( ulCommState );
+    }
+
+  gxr.OldTCPIPCoord.ulMaxSegmentSize = ulMaxSegmentSize;
+
+  // --- bind the socket to the server address
+  rc = sql40c_bind ( gxr.OldTCPIPCoord.sd, gxr.OldTCPIPCoord.usServicePort );
+
+  if ( rc != NO_ERROR )
+    {
+    if ( rc == SOCEADDRINUSE )
+      {
+      MSGALL (( ERR_XSER_SOCK_ADDR_IN_USE ));
+      }
+    else
+      MSGALL (( ERR_XSER_BIND_ERROR, rc ));
+
+    sql40c_socket_close ( gxr.OldTCPIPCoord.sd );
+    gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  rc = sql40c_listen ( gxr.OldTCPIPCoord.sd, 10 );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_LISTEN_ERROR, rc ));
+
+    sql40c_socket_close ( gxr.OldTCPIPCoord.sd );
+    gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  MSG6 (( INFO_XSER_LISTEN_ON_SOCKET, gxr.OldTCPIPCoord.sd ));
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql96o_set_sock_buf_sizes( INT    sd,
+                                        ULONG  ulMinSegmentSize,
+                                        PULONG pulMaxSegmentSize )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_set_sock_buf_sizes"
+  LONG                           rc;
+
+  DBGIN;
+
+  //
+  // --- set send buffer size
+  //
+  rc = sql40c_set_send_buffer_size ( sd, pulMaxSegmentSize,
+                                     ulMinSegmentSize );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_SET_BUF_SIZE, "SNDBUF", rc ));
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  //
+  // --- set receive buffer size
+  //
+  rc = sql40c_set_recv_buffer_size ( sd, pulMaxSegmentSize,
+                                     ulMinSegmentSize );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_SET_BUF_SIZE, "RCVBUF", rc ));
+    DBGOUT;
+    return ( SQLNOTOK );
+    }
+
+  MSG6 (( INFO_XSER_SEGMENT_SIZES, sd, ulMinSegmentSize, *pulMaxSegmentSize ));
+
+  DBGOUT;
+  return ( SQLOK );
+  }
+
+/*------------------------------*/
+
+static VOID _System sql96o_TCPIP_serv_thread ( ULONG ulConnInfoHandle )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_TCPIP_serv_thread"
+  POLD_TCPIP_SERV_CONNECT_INFO_REC   pConnInfo = NULL;
+  ULONG                              ulCommState;
+  HANDLE                             hServerThread;
+  ULONG                              ulTmp;
+  ERRORTEXT                          ErrText;
+  LONG                               rc;
+  #if defined(_WIN32)
+   EXCEPTION_REC                     ExceptionRecord;
+  #endif
+
+  DBGIN;
+
+  GUARD_EXCEPTION (&ExceptionRecord);
+
+  if ( !sql09c_get_handle_data  ( gxr.OldTCPIPCoord.pHandles,
+                                  ulConnInfoHandle,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+    {
+    MSGALL (( ERR_XSER_GET_SET_HANDLE_DATA ));
+    gxr.ulCrashRc  = ERROR_INVALID_HANDLE;
+    ABORT();
+    return;
+    }
+
+  // --- set thread control info
+  pConnInfo->ThrdCtrlHeader.ulStartTime = time (NULL);
+
+  //
+  //
+  // --- set the thread priority
+  //
+  //
+  rc = SET_THREAD_PRIO ( pConnInfo->ThrdCtrlHeader.lThrdPrio,
+                         pConnInfo->ThrdCtrlHeader.Tid,
+                         pConnInfo->ThrdCtrlHeader.hThrd );
+
+  if ( rc != NO_ERROR )
+    {
+    MSGALL (( ERR_XSER_SET_THRD_PRIO_ERROR,
+              pConnInfo->ThrdCtrlHeader.Tid, rc ));
+    gxr.ulCrashRc  = rc;
+    ABORT();
+    return;
+    }
+
+  MSG4 (( INFO_XSER_SERVER_STARTED, pConnInfo->ThrdCtrlHeader.Tid ))
+
+  pConnInfo->ThrdCtrlHeader.ThrdState = THRD_RUNNING;
+
+  ulCommState = sql96o_request ( pConnInfo );
+
+  if ( pConnInfo->ulConnStatus == CON_CONNECTED )
+    {
+    if ( ulCommState == SQLOK )
+      {
+      MSGD (( INFO_XSER_APPL_CONNECTED,
+              pConnInfo->szSenderNodeID,
+              pConnInfo->szServerDB,
+              pConnInfo->ulServerRef ));
+      MSG3 (( INFO_XSER_ENTER_DATA_TRANS,
+              pConnInfo->ThrdCtrlHeader.Tid ));
+
+      if ( pConnInfo->fNewPackets )
+        sql96o_transfer_new_db ( pConnInfo );
+      else
+        sql96o_transfer_old_db ( pConnInfo );
+
+      MSG3 (( INFO_XSER_END_OF_DATA_TRANS,
+              pConnInfo->ThrdCtrlHeader.Tid ));
+      MSGD (( INFO_XSER_APPL_DISCONNECT,
+              pConnInfo->szSenderNodeID,
+              pConnInfo->szServerDB,
+              pConnInfo->ulServerRef ));
+      }
+
+    if ( pConnInfo->fNewPackets )
+      sql33c_release ( &pConnInfo->Shm, ErrText );
+    else
+      sql33o_release ( &pConnInfo->OldShm, ErrText );
+
+    pConnInfo->ulConnStatus = CON_RELEASED;
+    }
+
+
+  MSG4 (( INFO_XSER_SERVER_EXITING, pConnInfo->ThrdCtrlHeader.Tid ));
+
+  if ( pConnInfo->sd != INVALID_SOCKET )
+    {
+    sql40c_socket_close ( pConnInfo->sd );
+    pConnInfo->sd = INVALID_SOCKET;
+    }
+
+  sql09c_free_handle  ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle );
+
+  pConnInfo->ThrdCtrlHeader.ThrdState = THRD_TERMINATED;
+  hServerThread                       = pConnInfo->ThrdCtrlHeader.hThrd;
+  FREE_MEM ( pConnInfo );
+
+  UNGUARD_EXCEPTION(&ExceptionRecord);
+
+
+  DBGOUT;
+  EXITTHREAD( ulCommState, hServerThread );
+  return;
+  }
+
+/*------------------------------*/
+
+static ULONG sql96o_request ( POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_request"
+  CONNECT_PARAM_REC               LocConnParam;
+  ULONG                           ulCommState;
+  ERRORTEXT                       ErrText;
+  CHAR                            szErrText[sizeof(ErrText) + 1];
+  ULONG                           ulMaxSegmentSize;
+  ULONG                           ulSenderRef;
+  ULONG                           ulReceiverRef;
+  ULONG                           ulServiceType;
+  SQL_DBNAMEC                     szSenderServerDB;
+  SQL_DBNAMEC                     szReceiverServerDB;
+  PID                             pidSenderPid;
+  USHORT                          usServicePort;
+  ULONG                           ulSwapType;
+  ULONG                           ulMessClass;
+  ULONG                           ulMinReplySize;
+  ULONG                           ulPacketSize;
+  ULONG                           ulMaxDataLen;
+  ULONG                           ulLocalHeaderSize;
+
+  DBGIN;
+
+
+  //
+  // ---  receive server reply
+  //
+  ulCommState = sql42o_recv_conpkt ( pConnInfo->sd,
+                                     &ulMessClass,
+                                     &ulReceiverRef,
+                                     &ulSenderRef,
+                                     &ulServiceType,
+                                     &ulMaxSegmentSize,
+                                     &ulSwapType,
+                                     szReceiverServerDB,
+                                     szSenderServerDB,
+                                     &pidSenderPid,
+                                     &usServicePort,
+                                     ErrText );
+
+  if ( ulCommState != SQLOK )
+    {
+    MSGD (( ERR_XSER_REC_REQ_PACKET_ERR ));
+    return ( ulCommState );
+    }
+
+  MSG2 (( INFO_XSER_REC_REQ_PACKET,
+          ulMessClass,
+          ulReceiverRef,
+          ulSenderRef,
+          ulServiceType,
+          szReceiverServerDB,
+          szSenderServerDB ));
+
+  switch ( ulMessClass )
+    {
+    case RSQL_RTE_ADDRESS_REQUEST :
+      usServicePort          = gxr.OldTCPIPCoord.usServicePort;
+      ulMessClass            = RSQL_RTE_ADDRESS_REPLY;
+      break;
+
+    case RSQL_RTE_REQUEST_CONN :
+    case RSQL_RTE_OPEN_SESSION :
+
+      ulPacketSize  = MIN_PACKET_SIZE;
+      ulMaxDataLen  = MIN_PACKET_SIZE;
+
+      ulCommState = sql33c_info_request( szReceiverServerDB,
+                                         ulServiceType,
+                                         1,
+                                         &ulPacketSize,
+                                         &ulMaxDataLen,
+                                         &ulMinReplySize,
+                                         ErrText );
+
+
+      if ( ulCommState == SQLOK )
+        {
+        MSG8 (( INFO_XSER_REC_CONN_REQ, szReceiverServerDB,
+                ulSenderRef, (ULONG)UNDEF, (ULONG)UNDEF ));
+
+        ulLocalHeaderSize = ulPacketSize - ulMaxDataLen;
+        ulPacketSize      = MIN_PACKET_SIZE + ulLocalHeaderSize;
+        ulMaxDataLen      = MIN_PACKET_DATA_LEN  + ulLocalHeaderSize;
+
+        memset ( &LocConnParam, 0, sizeof(LocConnParam) );
+        LocConnParam.ulPacketCnt       = 1;
+        LocConnParam.ulClientRef       = ulSenderRef;
+        LocConnParam.ulServiceType     = ulServiceType;
+        LocConnParam.pWorldSA          = pConnInfo->pWorldSA;
+        LocConnParam.pLockSA           = pConnInfo->pLockSA;
+        LocConnParam.ulConnTimeout     = LOCAL_CONN_TIMEOUT;
+        LocConnParam.pszServerDB       = szReceiverServerDB;
+        LocConnParam.pszClientNode     = pConnInfo->szSenderNodeID;
+        LocConnParam.ulPacketSize      = ulPacketSize;
+        LocConnParam.ulMaxDataLen      = ulMaxDataLen;
+        LocConnParam.ulMinReplySize    = ulMinReplySize;
+        LocConnParam.pidClientPID      = pidSenderPid;
+        LocConnParam.ulCommFlagNo      = (ULONG)UNDEF;
+        LocConnParam.ulServerRef       = (ULONG)UNDEF;
+
+        ulCommState = sql33c_connect( &LocConnParam, &pConnInfo->Shm,
+                                      ErrText );
+
+        if ( ulCommState != SQLOK )
+          {
+          sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+          MSGD (( ERR_XSER_CONN_REQ, szErrText ))
+          }
+        else
+          {
+          pConnInfo->ulConnStatus = CON_CONNECTED;
+          pConnInfo->fNewPackets  = TRUE;
+
+          if (( LocConnParam.ulPacketSize < MIN_PACKET_SIZE ) ||
+              ( LocConnParam.ulMaxDataLen < MIN_PACKET_DATA_LEN ))
+            {
+            MSGALL(( ERR_XSER_WRONG_PACKET_SIZE, szReceiverServerDB,
+                     ALIGN (MIN_PACKET_SIZE, 4096) ));
+            ulCommState = SQLNOTOK;
+            }
+          else
+            {
+            pConnInfo->ulServerRef      = LocConnParam.ulServerRef;
+            pConnInfo->pPacket          = (PVOID)LocConnParam.pCommPacketList[0];
+            pConnInfo->ulMaxSegmentSize = ulMaxSegmentSize;
+            pConnInfo->ulSwapType       = ulSwapType;
+            pConnInfo->ulSenderRef      = ulSenderRef;
+            strcpy ( pConnInfo->szServerDB, szReceiverServerDB );
+
+            // - store server reference
+            if ( !sql09c_put_handle_data ( gxr.OldTCPIPCoord.pHandles,
+                                           pConnInfo->ulConnInfoHandle,
+                                           pConnInfo,
+                                           (ULONG)UNDEF,
+                                           pConnInfo->ulServerRef ))
+              {
+              MSGALL (( ERR_XSER_GET_SET_HANDLE_DATA ));
+              gxr.ulCrashRc = ERROR_INVALID_HANDLE;
+              ABORT();
+              }
+
+            MSG8 (( INFO_XSER_CONN_REQ,
+                    szReceiverServerDB,
+                    pConnInfo->ulServerRef,
+                    LocConnParam.ulMaxDataLen -
+                    ulMinReplySize,
+                    pConnInfo->ulConnInfoHandle ));
+            }
+          }
+        }
+      else
+        {
+        ulCommState = sql33o_connect ( &pConnInfo->OldShm,
+                                       ulSenderRef,
+                                       ulServiceType,
+                                       szReceiverServerDB,
+                                       pConnInfo->pWorldSA,
+                                       pConnInfo->pLockSA,
+                                       &pConnInfo->ulServerRef,
+                                       &pConnInfo->pPacket,
+                                       ErrText,
+                                       LOCAL_CONN_TIMEOUT );
+
+        if ( ulCommState != SQLOK )
+          {
+          if ( ulCommState != SQLSTART_REQUIRED )
+            {
+            sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+            MSGD (( ERR_XSER_CONN_REQ, szErrText ))
+            }
+          }
+        else
+          {
+          pConnInfo->ulConnStatus     = CON_CONNECTED;
+          pConnInfo->fNewPackets      = FALSE;
+
+          pConnInfo->ulMaxSegmentSize = ulMaxSegmentSize;
+          pConnInfo->ulSwapType       = ulSwapType;
+          pConnInfo->ulSenderRef      = ulSenderRef;
+          strcpy ( pConnInfo->szServerDB, szReceiverServerDB );
+
+          // - store server reference
+          if ( !sql09c_put_handle_data ( gxr.OldTCPIPCoord.pHandles,
+                                         pConnInfo->ulConnInfoHandle,
+                                         pConnInfo,
+                                         (ULONG)UNDEF,
+                                         pConnInfo->ulServerRef ))
+            {
+            MSGALL (( ERR_XSER_GET_SET_HANDLE_DATA ));
+            gxr.ulCrashRc = ERROR_INVALID_HANDLE;
+            ABORT();
+            }
+          }
+        }
+
+      if ( ulMessClass == RSQL_RTE_REQUEST_CONN )
+        ulMessClass = RSQL_RTE_REPLY_CONN;
+      else
+        ulMessClass = RSQL_RTE_OPEN_SESSION_REPLY;
+
+      break;
+
+    case RSQL_RTE_CANCEL :
+      MSG5 (( INFO_XSER_CANCEL_REQUESTED, ulSenderRef  ));
+
+      ulCommState = sql96o_cancel_dump ( ulReceiverRef,
+                                         szReceiverServerDB,
+                                         SQL_RTE_CANCEL );
+
+      if ( ulCommState == SQLOK )
+        pConnInfo->ulConnStatus = CON_CANCELLED;
+
+      return ( ulCommState );
+
+    case RSQL_RTE_DUMP :
+      ulCommState = sql96o_cancel_dump ( ulReceiverRef,
+                                         szReceiverServerDB,
+                                         SQL_RTE_DUMP );
+
+      if ( ulCommState == SQLOK )
+        pConnInfo->ulConnStatus = CON_CANCELLED;
+
+      return ( ulCommState );
+
+    default :
+      MSGALL (( ERR_XSER_ILL_FRST_MESS_CLASS, ulMessClass ));
+      return ( SQLNOTOK );
+    }
+
+
+  if ( ulMaxSegmentSize < pConnInfo->ulMaxSegmentSize )
+    pConnInfo->ulMaxSegmentSize = ulMaxSegmentSize;
+
+  if ( ulCommState != SQLOK )            // - do not overwrite 'ulCommState'
+    {
+    sql42o_send_conpkt ( pConnInfo->sd,
+                         ulMessClass,
+                         pConnInfo->ulServerRef,
+                         ulSenderRef,
+                         ulServiceType,
+                         pConnInfo->ulMaxSegmentSize,
+                         szReceiverServerDB,
+                         szSenderServerDB,
+                         usServicePort,
+                         ulCommState,
+                         ErrText );
+    }
+  else
+    {
+    ulCommState = sql42o_send_conpkt ( pConnInfo->sd,
+                                       ulMessClass,
+                                       pConnInfo->ulServerRef,
+                                       ulSenderRef,
+                                       ulServiceType,
+                                       pConnInfo->ulMaxSegmentSize,
+                                       szReceiverServerDB,
+                                       szSenderServerDB,
+                                       usServicePort,
+                                       ulCommState,
+                                       ErrText );
+
+    if ( ulCommState != SQLOK )
+      MSGD (( ERR_XSER_SEND_REQ_PACKET_ERR ));
+    }
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql96o_transfer_old_db (POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_transfer_old_db"
+  ULONG                           ulCommState;
+  ERRORTEXT                       ErrText;
+  CHAR                            szErrText[sizeof(ErrText) + 1];
+  POLD_SQL_PACKET_REC             pSQLPacket;
+
+  for (;;)
+    {
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_COMMAND_WAIT;
+
+    pSQLPacket = (POLD_SQL_PACKET_REC)pConnInfo->pPacket;
+
+    ulCommState =  sql42o_recv_packet ( pConnInfo->sd,
+                                        pSQLPacket,
+                                        pConnInfo->ulSwapType,
+                                        pConnInfo->ulMaxSegmentSize,
+                                        ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      if ( ulCommState == SQLRELEASED )
+        break;
+
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_RECV_PACKET, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    if ( (pSQLPacket->ActSendLen < OLD_RTE_HEADER_SIZE) ||
+         (pSQLPacket->ActSendLen > sizeof(OLD_SQL_PACKET_REC)) )
+      {
+      MSGD (( ERR_XSER_ILL_PACKET_SIZE,
+              pSQLPacket->ActSendLen, pConnInfo->ulServerRef ));
+      ulCommState = SQLNOTOK;
+      break;
+      }
+    MSG8 (( INFO_XSER_READ_REQ_PACKET,
+            pSQLPacket->ActSendLen, pConnInfo->ulServerRef ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_COMMAND_SEND;
+
+    ulCommState = sql33o_request( &pConnInfo->OldShm, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_REQUEST, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    MSG8 (( INFO_XSER_REQUEST_RETURNED, pConnInfo->ulServerRef, ulCommState ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_DATA_RECEIVE;
+
+    ulCommState = sql33o_receive( &pConnInfo->OldShm, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_RECEIVE, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    MSG8 (( INFO_XSER_RECEIVE_RETURNED, pConnInfo->ulServerRef, ulCommState ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_DATA_SEND;
+
+    ulCommState = sql42o_send_packet ( pConnInfo->sd,
+                                       pSQLPacket,
+                                       pConnInfo->ulMaxSegmentSize,
+                                       SQLOK, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_SEND_PACKET, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+    MSG8 (( INFO_XSER_SEND_REPLY_PACKET,
+            pSQLPacket->ActSendLen, pConnInfo->ulServerRef ));
+    }
+
+  pConnInfo->ThrdCtrlHeader.ThrdState = THRD_RUNNING;
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql96o_transfer_new_db (POLD_TCPIP_SERV_CONNECT_INFO_REC pConnInfo)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_transfer_new_db"
+  ULONG                           ulCommState;
+  ERRORTEXT                       ErrText;
+  CHAR                            szErrText[sizeof(ErrText) + 1];
+  PCOMM_PACKET_REC                pCommPacket;
+  ULONG                           ulResDataLen;
+  PCOMM_PACKET_REC                pResCommPacket;
+  POLD_SQL_PACKET_REC             pSQLComPacket;
+  POLD_SQL_PACKET_REC             pSQLResPacket;
+
+  if ( RTE_HEADER_SIZE  < OLD_RTE_HEADER_SIZE )
+    {
+    MSGALL(( IERR_XSER_SURPRISING_HEADER ));
+    ABORT();
+    }
+
+  pCommPacket    = (PCOMM_PACKET_REC)pConnInfo->pPacket;
+  pSQLComPacket  = (POLD_SQL_PACKET_REC)((PCHAR)pCommPacket->pDataPart - OLD_RTE_HEADER_SIZE);
+
+  for (;;)
+    {
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_COMMAND_WAIT;
+
+    ulCommState =  sql42o_recv_packet ( pConnInfo->sd,
+                                        pSQLComPacket,
+                                        pConnInfo->ulSwapType,
+                                        pConnInfo->ulMaxSegmentSize,
+                                        ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      if ( ulCommState == SQLRELEASED )
+        break;
+
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_RECV_PACKET, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    MSG8 (( INFO_XSER_READ_REQ_PACKET,
+            pSQLComPacket->ActSendLen, pConnInfo->ulServerRef ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_COMMAND_SEND;
+
+    ulCommState = sql33c_request( &pConnInfo->Shm, 0, pSQLComPacket->ActSendLen, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_REQUEST, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    MSG8 (( INFO_XSER_REQUEST_RETURNED, pConnInfo->ulServerRef, ulCommState ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_DATA_RECEIVE;
+
+
+    ulCommState = sql33c_receive( &pConnInfo->Shm, &pResCommPacket, &ulResDataLen, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_RECEIVE, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    if ( (ulResDataLen + OLD_RTE_HEADER_SIZE) > sizeof(OLD_SQL_PACKET_REC))
+      {
+      MSGD (( ERR_INVALID_REPL_SIZE, ulResDataLen  ));
+      ulCommState = SQLNOTOK;
+      break;
+      }
+
+    pSQLResPacket  = (POLD_SQL_PACKET_REC)
+                       ((PCHAR)pResCommPacket->pDataPart - OLD_RTE_HEADER_SIZE);
+
+    pSQLResPacket->ActSendLen       = (INT2)ulResDataLen + OLD_RTE_HEADER_SIZE;
+    pSQLResPacket->MaxSendLen       = (INT2)ulResDataLen + OLD_RTE_HEADER_SIZE;
+    pSQLResPacket->ProtocolID       = RSQL_RTE_PROT_UNDEF;
+    pSQLResPacket->MessClass        = RSQL_RTE_REPLY_USER;
+    pSQLResPacket->RTEFlags         = RSQL_NORMAL;
+    pSQLResPacket->ResidualPackets  = 0;
+    pSQLResPacket->ReceiverRefID    = pSQLResPacket->SenderRefID;
+    pSQLResPacket->SenderRefID      = (INT4)pConnInfo->ulServerRef;
+    pSQLResPacket->RTEReturnCode    = SQLOK;
+    pSQLResPacket->Filler           = 0;
+
+    MSG8 (( INFO_XSER_RECEIVE_RETURNED, pConnInfo->ulServerRef, ulCommState ));
+
+    pConnInfo->ThrdCtrlHeader.ThrdState = THRD_DATA_SEND;
+
+    ulCommState = sql42o_send_packet ( pConnInfo->sd,
+                                       pSQLResPacket,
+                                       pConnInfo->ulMaxSegmentSize,
+                                       SQLOK, ErrText );
+
+    if ( ulCommState != SQLOK )
+      {
+      sql47c_ptoc ( szErrText, ErrText, sizeof (ErrText) );
+      MSGD (( ERR_XSER_SEND_PACKET, pConnInfo->ulServerRef, szErrText ));
+      break;
+      }
+
+    MSG8 (( INFO_XSER_SEND_REPLY_PACKET,
+            pSQLResPacket->ActSendLen, pConnInfo->ulServerRef ));
+    }
+
+  pConnInfo->ThrdCtrlHeader.ThrdState = THRD_RUNNING;
+
+  DBGOUT;
+  return ( ulCommState );
+  }
+
+/*------------------------------*/
+
+static ULONG sql96o_cancel_dump ( ULONG                        ulServerRef,
+                                  PSZ                          pszServerDB,
+                                  ULONG                        ulReqType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96o_cancel_dump"
+  ULONG                               ulCommState = SQLOK;
+  POLD_TCPIP_SERV_CONNECT_INFO_REC    pConnInfo;
+  ERRORTEXT                           ErrText;
+  ULONG                               ulTmp;
+  ULONG                               ulConnInfoHandle = 0;
+
+
+  DBGPAS;
+
+  // --- Find the connect info handle of the command to be cancelled and try
+  //     to lock it.
+  //
+  for ( ;; )
+    {
+    if (( !sql09c_find_handle_by_id ( gxr.OldTCPIPCoord.pHandles,
+                                      ulServerRef, &ulConnInfoHandle )) ||
+        ( !sql09c_lock_handle ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle )) )
+      {
+      return ( SQLOK );
+      }
+
+    if ( sql09c_get_handle_data  ( gxr.OldTCPIPCoord.pHandles,
+                                  ulConnInfoHandle,
+                                  (PVOID*)&pConnInfo,
+                                  &ulTmp, &ulTmp ))
+      {
+      if ( strcmp (pConnInfo->szServerDB, pszServerDB) )
+        continue;
+
+      if ( pConnInfo->fNewPackets )
+        ulCommState = sql33c_cancel_dump ( &pConnInfo->Shm, ulReqType, ErrText );
+      else if ( ulReqType == SQL_RTE_CANCEL )
+        ulCommState = sql33o_cancel ( &pConnInfo->OldShm, ErrText );
+      }
+
+    if ( !sql09c_unlock_handle ( gxr.OldTCPIPCoord.pHandles, ulConnInfoHandle ))
+      {
+      MSGALL (( ERR_XSER_LOCK_UNLOCK_HANDLE ));
+      gxr.ulCrashRc = ERROR_INVALID_HANDLE;
+      ABORT();
+      }
+    break;
+    }
+
+
+  MSG5 (( INFO_XSER_CANCEL_RETURNING, ulCommState ))
+
+  return ( ulCommState );
+  }
+
+
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20

@@ -1,0 +1,736 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS97C$
+.tt 2 $$$
+.tt 3 $R.Roedling$get SERVERDB and XSERVER status$1997-08-07$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       get_SERVERDB_and_XSERVER_status
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1994-11-02
+.sp
+.cp 3
+Version : 1994-11-02
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-08-07
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+
+/*
+ * INCLUDE FILES
+ */
+
+/*
+ *  DEFINES
+ */
+#define USE_REGISTRY
+
+#define MOD__  "VOS97C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define PARAM_SEARCH_KEY             "KERNELVERSION"
+#define SEARCH_PATTERN               "*."
+#define FILE_ATTRIBUTE               0
+#define DEFAULT_SERVICE_BUF          16384
+
+#define USE_SERVICE_MANAGER
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+#if defined(_WIN32)
+ #if defined ( USE_SERVICE_MANAGER )
+  static LPENUM_SERVICE_STATUS               lpessService           = NULL;
+  static ULONG                               ulNumServices;
+  static ULONG                               ulCurrService          = 0;
+  static BOOL                                fShowGateways          = FALSE;
+ #endif
+
+ static WIN32_FIND_DATA                      FindData;
+ static HANDLE                               FindHandle;
+ static PSZ                                  pszDBRoot;
+#else
+ static FILEFINDBUF3                         FindBuffer;
+ static HDIR                                 FindHandle = 1;
+ static PSZ                                  pszDBRoot;
+#endif
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+static VOID sql97_check_param_file ( PSZ    pszDBRoot,
+                                     PSZ    pszServerDB,
+                                     PBOOL  pfOk );
+
+#if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+ static BOOL sql97_get_next_db_gw( BOOL   fGateway,
+                                   PSZ    pszServerDB,
+                                   PBOOL  pfActive );
+#endif
+
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+
+#if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+
+ APIRET sql97_update ( PSZ    pszNodeName )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql97_update"
+   APIRET                 rc               = NO_ERROR;
+   ULONG                  ulSize           = DEFAULT_SERVICE_BUF;
+   ULONG                  ulRemaining      = 0;
+   ULONG                  ulResumeHandle;
+   SC_HANDLE              hScM;
+
+   DBGIN;
+
+   if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+     {
+     // --- Windows 95 - nothing to do !!!!!!!
+     DBGOUT;
+     return ( NO_ERROR );
+     }
+
+   // --- free old buffer
+   if ( lpessService != NULL )
+     {
+     rc = FREE_MEM ( lpessService );
+
+     lpessService = NULL;
+
+     if ( rc != NO_ERROR )
+       {
+       DBGOUT;
+       return( rc );
+       }
+     }
+
+
+
+   for ( ;; )
+     {
+     if (!(hScM = OpenSCManager( pszNodeName, NULL, SC_MANAGER_ENUMERATE_SERVICE)))
+       {
+       rc = GetLastError();
+
+       switch ( rc )
+         {
+         case ERROR_ACCESS_DENIED:      MSGCD (( ERR_ACCESS_DENIED ));
+                                        break;
+         case RPC_S_SERVER_UNAVAILABLE: MSGCD (( ERR_SERVER_NODE_UNKNOWN, pszNodeName ));
+                                        break;
+         default:                       MSGCD(( ERR_OPEN_SERVICE_MANAGER, rc ));
+                                        break;
+         }
+       DBGOUT;
+       return ( rc );
+       }
+
+     // --- allocate space for the result buffer
+     rc = ALLOC_MEM ( &lpessService, ulSize );
+
+     if ( rc != NO_ERROR )
+       {
+       lpessService = NULL;
+       DBGOUT;
+       return( rc );
+       }
+
+     ulCurrService    = (ULONG)UNDEF;
+     ulNumServices    = 0;
+     ulResumeHandle   = 0;
+
+     // --- now we ask for the service entries
+     if (!EnumServicesStatus( hScM, SERVICE_WIN32,
+                              SERVICE_ACTIVE | SERVICE_INACTIVE,
+                              lpessService, ulSize,
+                              &ulRemaining, &ulNumServices,
+                              &ulResumeHandle ))
+       {
+       rc = GetLastError ();
+
+       if (( rc != NO_ERROR ) && ( rc != ERROR_MORE_DATA ))
+         {
+         FREE_MEM ( lpessService );
+         lpessService = NULL;
+         DBGOUT;
+         return ( rc );
+         }
+
+       rc = FREE_MEM ( lpessService );
+
+       lpessService = NULL;
+
+       if ( rc != NO_ERROR )
+         {
+         DBGOUT;
+         return( rc );
+         }
+
+       if (!CloseServiceHandle(hScM))
+         {
+         rc = GetLastError();
+         MSGCD(( ERR_CLOSE_SERVICE_MANAGER, rc ));
+
+         DBGOUT;
+         return ( rc );
+         }
+
+       ulSize = ulSize + ulRemaining;
+       }
+     else
+       break;
+     }
+
+    if (!CloseServiceHandle(hScM) && rc == NO_ERROR)
+      {
+      rc = GetLastError();
+      MSGCD(( ERR_CLOSE_SERVICE_MANAGER, rc ));
+
+      DBGOUT;
+      return ( rc );
+      }
+
+   DBGOUT;
+   return ( rc );
+   }
+
+#endif
+
+/*------------------------------*/
+
+APIRET sql97_first_db_gw_state ( BOOL   fGateways,
+                                 PSZ    pszServerDB,
+                                 PBOOL  pfActive )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql97_first_db_gw_state"
+  PATHNAME  szSearchName;
+  PSZ       pszFileName, pszConfigPath;
+  BOOL      fValidParamFile;
+  APIRET    rc                = NO_ERROR;
+  ULONG     FindCount         = 1;
+  HEV       hevSem            = 0;
+
+  #if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+   if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+     {
+     ulCurrService = 0;
+     fShowGateways = fGateways;
+
+     if ( sql97_get_next_db_gw ( fShowGateways, pszServerDB, pfActive ) )
+       {
+       DBGOUT;
+       return( NO_ERROR );
+       }
+
+     DBGOUT;
+     return ( ERROR_NO_MORE_FILES );
+     }
+  #endif
+
+  *pfActive = FALSE;
+
+  #if defined(_WIN32)
+   pszFileName = FindData.cFileName;
+  #else
+   pszFileName = FindBuffer.achName;
+  #endif
+
+  /*
+   * get DBROOT from Environment
+   */
+   if ( sql01c_get_dbroot (&pszDBRoot) == FALSE )
+    {
+    MSGCD((ERR_DBROOT_NOT_SET));
+    DBGOUT;
+    return ( (APIRET)-1 );
+    }
+
+  sql01c_get_config_path ( &pszConfigPath );
+  strcpy (szSearchName, pszConfigPath ) ;
+  strcat (szSearchName, SEARCH_PATTERN);
+
+
+  #if defined(_WIN32)
+   FindHandle = FindFirstFile(szSearchName, &FindData);
+
+   if (FindHandle == INVALID_HANDLE_VALUE)
+     {
+     rc = GetLastError();
+     }
+   else
+     CharUpper(FindData.cFileName);
+  #else
+   rc = DosFindFirst(szSearchName,          // --- File pattern
+                     &FindHandle,           // --- Directory search handle
+                     FILE_ATTRIBUTE,        // --- Search attribute
+                     (PVOID) &FindBuffer,   // --- Result buffer
+                     sizeof(FindBuffer),    // --- Result buffer length
+                     &FindCount,            // --- Number of entries to find
+                     FIL_STANDARD);         // --- Return level 1 file info
+
+   if (( rc == ERROR_NO_MORE_FILES ) || ( !FindCount ))
+     {
+     rc = ERROR_NO_MORE_FILES;
+     DosFindClose(FindHandle);
+     }
+  #endif
+
+  if ( rc == ERROR_PATH_NOT_FOUND )
+    {
+    MSGCD((ERR_WRONG_DBROOT_PATH, pszDBRoot));
+    return ( rc );
+    }
+  else if ( rc == NO_ERROR )
+    {
+    do
+      {
+      if ( strrchr ( pszFileName, '.' ) != NULL )
+        fValidParamFile = FALSE;
+      else
+        sql97_check_param_file ( pszDBRoot, pszFileName, &fValidParamFile );
+
+      if ( fValidParamFile == FALSE )
+        {
+        #if defined(_WIN32)
+         if (!FindNextFile(FindHandle, &FindData))
+           {
+           rc = GetLastError();
+           FindClose(FindHandle);
+           }
+         else
+           CharUpper(FindData.cFileName);
+        #else
+         rc = DosFindNext(FindHandle,           // --- Directory handle
+                          (PVOID) &FindBuffer,  // --- Result buffer
+                          sizeof(FindBuffer),   // --- Result buffer length
+                          &FindCount);          // --- Number of entries to find
+
+         if (( rc == ERROR_NO_MORE_FILES ) || ( !FindCount ))
+           {
+           rc = ERROR_NO_MORE_FILES;
+           DosFindClose(FindHandle);
+           }
+        #endif
+        }
+      }
+    while (( fValidParamFile == FALSE ) && ( rc == NO_ERROR ));
+
+
+    if (( fValidParamFile == TRUE ) && ( rc == NO_ERROR ))
+      {
+      pszServerDB[MX_DBNAME] = '\0';
+      strncpy ( pszServerDB, pszFileName, MX_DBNAME );
+
+      rc = sql41c_open_event_sem ( &hevSem, SEM_COORD,
+                                   pszFileName, ERROR_ACCESS_DENIED);
+
+      if ((rc == NO_ERROR) || (rc == ERROR_ACCESS_DENIED))
+        {
+        *pfActive = TRUE;
+
+        if (rc == NO_ERROR)
+          sql41c_close_event_sem ( hevSem, "COORD" );
+        rc = NO_ERROR;
+        }
+      else if ( rc == ERROR_SEM_NOT_FOUND )
+        rc = NO_ERROR;
+      }
+    }
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+APIRET sql97_next_db_gw_state ( PSZ       pszServerDB,
+                                PBOOL     pfActive )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql97_next_db_gw_state"
+  APIRET    rc        = NO_ERROR;
+  ULONG     FindCount = 1;
+  HEV       hevSem    = 0;
+  BOOL      fValidParamFile;
+  PSZ       pszFileName;
+
+  #if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+   if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+     {
+     if ( lpessService == NULL )
+       {
+       DBGOUT;
+       return ( ERROR_NO_MORE_FILES );
+       }
+
+     if ( sql97_get_next_db_gw ( fShowGateways, pszServerDB, pfActive ) )
+       {
+       DBGOUT;
+       return( NO_ERROR );
+       }
+
+     DBGOUT;
+     return ( ERROR_NO_MORE_FILES );
+     }
+  #endif
+
+  *pfActive   = FALSE;
+
+  #if defined(_WIN32)
+   pszFileName = FindData.cFileName;
+  #else
+   pszFileName = FindBuffer.achName;
+  #endif
+
+  if ( pszDBRoot == NULL )
+   {
+   MSGCD((ERR_DBROOT_NOT_SET));
+   DBGOUT;
+   return ( (APIRET)-1 );
+   }
+
+  do
+    {
+    #if defined(_WIN32)
+     if (!FindNextFile(FindHandle, &FindData))
+       {
+       rc = GetLastError();
+       FindClose(FindHandle);
+       }
+    #else
+     rc = DosFindNext(FindHandle,           // --- Directory handle
+                      (PVOID) &FindBuffer,  // --- Result buffer
+                      sizeof(FindBuffer),   // --- Result buffer length
+                      &FindCount);          // --- Number of entries to find
+
+     if (( rc == ERROR_NO_MORE_FILES ) || ( !FindCount ))
+       {
+       rc = ERROR_NO_MORE_FILES;
+       DosFindClose(FindHandle);
+       }
+    #endif
+
+
+    if ( rc == NO_ERROR )
+      {
+      if ( strrchr ( pszFileName, '.' ) != NULL )
+        fValidParamFile = FALSE;
+      else
+        sql97_check_param_file ( pszDBRoot, pszFileName, &fValidParamFile );
+      }
+    }
+  while (( fValidParamFile == FALSE ) && ( rc == NO_ERROR ));
+
+
+  if (( fValidParamFile == TRUE ) && ( rc == NO_ERROR ))
+    {
+    pszServerDB[MX_DBNAME] = '\0';
+    strncpy ( pszServerDB, pszFileName, MX_DBNAME );
+
+    rc = sql41c_open_event_sem ( &hevSem, SEM_COORD,
+                                 pszFileName, ERROR_ACCESS_DENIED);
+
+    if ((rc == NO_ERROR) || (rc == ERROR_ACCESS_DENIED))
+      {
+      *pfActive = TRUE;
+
+      if (rc == NO_ERROR)
+        sql41c_close_event_sem ( hevSem, "COORD" );
+      rc = NO_ERROR;
+      }
+    else if ( rc == ERROR_SEM_NOT_FOUND )
+      rc = NO_ERROR;
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+APIRET sql97_xserver_state ( PSZ  pszNodeName, PBOOL  pfActive )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql97_xserver_state"
+  APIRET    rc     = NO_ERROR;
+  HEV       hevSem = 0;
+  #if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+   ULONG    ulCurrServ;
+  #endif
+
+ *pfActive   = FALSE;
+
+  #if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+   if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+     {
+     for (ulCurrServ = 0; ulCurrServ < ulNumServices; ulCurrServ++ )
+       {
+       if (! strncmp( lpessService[ulCurrServ].lpServiceName, XSERV_TITLE,
+                      sizeof(SERVICE_ID) - 1))
+         {
+         switch ( lpessService[ulCurrServ].ServiceStatus.dwCurrentState )
+           {
+           case SERVICE_START_PENDING:
+           case SERVICE_RUNNING:
+             *pfActive   = TRUE;
+             break;
+           default:
+             *pfActive   = FALSE;
+             break;
+           }
+
+         ulCurrServ++;
+
+         DBGOUT;
+         return( NO_ERROR );
+         }
+       }
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+  // --- check SERVER
+  rc = sql41c_open_event_sem ( &hevSem, SEM_XSERVER, "",
+                               ERROR_ACCESS_DENIED);
+
+  if (rc == ERROR_ACCESS_DENIED)
+    {
+    *pfActive = TRUE;
+    rc        = NO_ERROR;
+    }
+  else if ( rc == ERROR_SEM_NOT_FOUND )
+    {
+    *pfActive = FALSE;
+    rc        = NO_ERROR;
+    }
+  else if (rc == NO_ERROR)
+    {
+    sql41c_close_event_sem ( hevSem, XSERV_TITLE );
+    *pfActive = TRUE;
+    }
+  else
+    *pfActive = FALSE;
+
+  DBGOUT;
+  return ( rc );
+  }
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static VOID sql97_check_param_file ( PSZ   pszDBRoot,
+                                     PSZ   pszServerDB,
+                                     PBOOL pfValidParamFile )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql97_check_param_file"
+  SQL_DBNAME              server_db;
+  INT4                    xp_fd;
+  XP_KEY_TYPE             xp_key;
+  XP_VALUE_REC            xp_value;
+  ERRORTEXT               errtext;
+  INT1                    xp_ret;
+  BOOLEAN                 ok;
+
+  DBGPAS;
+
+  sql47c_ctop ( server_db, pszServerDB,      sizeof (SQL_DBNAME) );
+  sql47c_ctop ( xp_key,    PARAM_SEARCH_KEY, sizeof (XP_KEY_TYPE ) );
+
+  *pfValidParamFile = FALSE;
+
+  // --- display no error messages
+  sql60_disable_message_output ();
+
+  sql11c_OpenXParam ( pszDBRoot, server_db, &xp_fd,  errtext, XP_OPEN_REC, &ok);
+
+  if ( ok )
+    {
+    sql11c_GetXParam ( xp_fd , xp_key , &xp_value , errtext , &xp_ret );
+
+    if ( xp_ret == XP_OK )
+      *pfValidParamFile = TRUE;
+
+    sql11c_CloseXParam ( xp_fd , !XP_FLUSH, errtext , & ok );
+    }
+
+  sql60_enable_message_output();
+  }
+
+/*------------------------------*/
+
+#if defined (_WIN32) && defined ( USE_SERVICE_MANAGER )
+
+ static BOOL sql97_get_next_db_gw ( BOOL      fGateway,
+                                    PSZ       pszServerDB,
+                                    PBOOL     pfActive )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql97_get_next_db_gw"
+   PSZ    pszServiceID;
+
+   DBGIN;
+
+   if ( fGateway )
+     pszServiceID = SERVICE_ID_GW;
+   else
+     pszServiceID = SERVICE_ID;
+
+   for (; ulCurrService < ulNumServices; ulCurrService++ )
+     {
+     if (! strncmp( lpessService[ulCurrService].lpServiceName, pszServiceID,
+                    strlen(pszServiceID)))
+       {
+       strncpy( pszServerDB, lpessService[ulCurrService].lpServiceName +
+                strlen(pszServiceID), MX_DBNAME );
+
+       switch ( lpessService[ulCurrService].ServiceStatus.dwCurrentState )
+         {
+         case SERVICE_START_PENDING:
+         case SERVICE_RUNNING:
+           *pfActive   = TRUE;
+           break;
+         default:
+           *pfActive   = FALSE;
+           break;
+         }
+
+       ulCurrService++;
+
+       DBGOUT;
+       return ( TRUE );
+       }
+     }
+
+   DBGOUT;
+   return ( FALSE );
+   }
+
+#endif
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20
+.PA

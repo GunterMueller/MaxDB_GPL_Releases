@@ -1,0 +1,130 @@
+# dirdiff -<level> <pathname>
+#
+# @(#)dirdiff		1997-11-20
+#
+# compares files in path with files in path from level and
+# moves same files to ,file
+# levels:	-G : $GRP
+#			-A : $ALL
+#			-R : $REL
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package DirDiff;
+use Env;
+use Getopt::Std;
+use File::Basename;
+
+$Usage = "usage: dirrdiff [-h] {-G|-A|-R} file\n";
+
+die "" if !getopts('hGAR');
+if ( @ARGV == 0 && !defined($opt_h) )  {
+	die $Usage;
+}
+if ( $opt_h ) {
+	print <DATA>;
+	exit 0;
+}
+die "$Usage" if $opt_G+$opt_A+$opt_R != 1;
+die "%GRP% or %ALL% or %REL% isn't defined!\n" unless defined($GRP) && defined($ALL) && defined($REL);
+do {$CMPDIR=$GRP; $level=1; } if $opt_G;
+do {$CMPDIR=$ALL; $level=2; } if $opt_A;
+do {$CMPDIR=$REL; $level=3; } if $opt_R;
+
+$VMAKE_PATH = "$OWN,$GRP,$ALL,$REL";
+$ENV{'$VMAKE_PATH'} = $VMAKE_PATH;
+
+unlink "$TMP/dirdiff.prot";
+open(PROT, ">$TMP/dirdiff.prot") || die "Can't open $TMP/dirdiff.prot (output): $!\n";
+foreach $N ( @ARGV ) {
+
+	if ( -d $N ) {
+
+		print      "   *** compare $N <-> $CMPDIR/.. ***\n";
+		print PROT "   *** compare $N <-> $CMPDIR/.. ***\n";
+		opendir(DIR_IN, $N);
+		foreach $i ( grep !/^\.|,/ , readdir(DIR_IN)) {
+
+			local $FN  = basename($i);
+
+			if ( -f "$N/$i" ) {
+				print      "$FN ";
+				print PROT "$FN ";
+				local @ARGV = ( "-b", "-l$level", "$N/$i" );
+				$rc = system($TOOLSHELL, "$TOOL/bin/idiff$TOOLEXT -b -l$level $N/$i", ">nul");
+				if ( $rc == 0 ) {
+					local @ARGV = ( "$N/$FN" );
+					do "$TOOL/bin/scratch$TOOLEXT";
+					if ( $@ ) { die "Error while executing scratch$TOOLEXT: $@"}
+				} 
+				elsif ( $rc == 2 ) {
+						print      "not at $CMPDIR\n";
+						print PROT "not at $CMPDIR\n";
+  				} 
+				else { 
+						print      "is different\n";
+						print PROT "is different\n";
+				}
+			} 
+			else { 
+				print      "is not a file\n";
+				print PROT "is not a file\n";
+			}
+
+		} # foreach $i
+		closedir(DIR_IN);
+
+	} # if -d $N
+
+} # foreach
+close(PROT);
+
+__DATA__
+usage: usage: dirdiff [-h] {-G|-A|-R} file
+
+Optionen:
+    -G  : vergleicht mit Dateien aus %GRP%
+
+    -A  : vergleicht mit Dateien aus %ALL%
+
+    -R  : vergleicht mit Dateien aus %REL%
+
+Source-Angaben werden auf jedem Pfad im %VMAKE_PATH% 
+folgendermaszen gesucht :
+
+mit Pfadangabe:
+   Modulname             -> Pfad/Modulname
+   Datei mit/ohne Endung -> Pfad/Datei
+   eindeutige rel. Pfade werden expandiert nach folgenden Regeln:
+      1. {fast|quick|slow} -> sys/desc/{fast|quick|slow}, 
+      (bspw. fast/cpc.mac -> sys/desc/fast/cpc.mac)
+      2. [a-z][a-z] -> sys/src/[a-z][a-z] 
+      (bspw. wx/Demo.ico -> sys/src/wx/Demo.ico)
+
+keine Pfadangabe:
+   Modulname              -> sys/src/[a-z][a-z]/Datei
+   Datei mit !Desc-Endung -> %LAY%/Datei, 
+                             sys/src/Extra-Layer/Datei 
+   Datei mit Desc-Endung  -> sys/desc/{fast|quick|slow}/Datei 
+   Datei "Extra"          -> sys/desc/{fast|quick|slow}/Extra
+   Datei ohne Endung      -> %LAY%, 
+                             sys/desc/{fast|quick|slow}/
+                             Datei.{mac|shm|lnk|dld|shr|rel|lib}
+__END__

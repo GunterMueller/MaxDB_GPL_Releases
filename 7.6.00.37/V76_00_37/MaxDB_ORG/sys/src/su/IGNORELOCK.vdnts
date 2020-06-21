@@ -1,0 +1,140 @@
+file xinitdbk!
+
+* check the syntax! 
+file connect ( kern test !
+select * from dual with lock (ignre) !
+select * from dual with lock (ignore lock) !
+select * from dual with lock ignore  !
+select * from dual with ignore  !
+select * from dual with lock isolation level 1 (ignore)  !
+commit work release !
+
+* create test data!  
+file connect ( kern test !
+create table t ( k int, i int,
+primary key (k)) !
+insert t values (1,1)!
+insert t values (2,2)!
+insert t values (3,2)!
+insert t values (4,4)!
+insert t values (5,5)!
+commit work release !
+
+* connect session 1 and update uncommited row!
+file connect ( kern test !
+select * from sysdd.CONNECTPARAMETERS!
+fetch !
+update t set i = 3 where k = 3!
+
+* connect session 2 and tests some selects! 
+file connect ( kern test !
+select * from sysdd.CONNECTPARAMETERS!
+fetch !
+select * from sysdd.locks order by rowid_hex!
+fetch !
+select * from t with lock (nowait)!
+fetch !
+select * from t with lock (ignore)!
+fetch !
+select * from t with lock (ignore)!
+fetch pos(2)!
+fetch pos(3)!
+select * from t with lock (ignore)!
+fetch last !
+fetch prev !
+select i into :a from t where k = 3
+with lock (ignore)!
+select i into :a from t where k = 3
+with lock (nowait)!
+select * from t with lock (ignore) for reuse !
+fetch !
+commit work release !
+
+* session 1 creates index and update uncommited row!
+rollback work !
+create index i on t (i)!
+commit work !
+update t set i = 3 where k = 3!
+
+* connect session 2 and tests some selects! 
+file connect ( kern test !
+select * from t with lock (nowait)!
+fetch !
+select * from t with lock (ignore)!
+fetch !
+explain select /*+ INDEXACCESS */ 
+i from t where i > 2 with lock (ignore)!
+select /*+ INDEXACCESS */ i from t where i > 2
+with lock (ignore)!
+fetch !
+select * from t with lock (ignore) isolation level 2!
+commit work release !
+
+* connect session 2 in iso level 2 and check for error! 
+connect kern identified by test isolation level 2!
+select * from t with lock (nowait)!
+select * from t with lock (ignore)!
+commit work release !
+
+* connect session 2 and tests some selects with exclusive lock!
+file connect ( kern test !
+select * from t with lock (nowait)!
+fetch !
+select * from sysdd.locks order by rowid_hex!
+fetch !
+select * from t with lock (ignore)!
+fetch !
+select * from sysdd.locks order by rowid_hex!
+fetch !
+select * from t with lock (ignore) exclusive!
+fetch !
+select * from sysdd.locks order by rowid_hex!
+fetch !
+commit work release !
+
+* end session 1!
+drop table t !
+commit work release !
+* PTS 1134408-9 !
+file connect ( kern test !
+create table test (a1 int primary key, b1 char (8))!
+insert test values (2, 'bbb')!
+create table t ( a int primary key, b char (8))!
+insert t values (1, 'aaa')!
+insert t values (2, 'aaa')!
+alter table test foreign key xyz (a1) references t !
+create view v1 as select a, b, b1 from test, t
+   where test.a1 = t.a with check option !
+commit !
+lock table t in share mode !
+file connect ( kern test !
+insert t values (3, 'ccc') nowait !
+insert t select * from test nowait !
+insert v1 values (3, 'ccc', 'b1') nowait !
+commit !
+select * from t !
+fetch!
+update t set b = 'new' nowait !
+select * from t !
+fetch!
+update t set b = 'new' where a = 1 nowait !
+select * from t !
+fetch!
+update v1 set b = 'new' where a = 1 nowait !
+delete t nowait !
+select * from t !
+fetch!
+delete t where a = 1 nowait !
+select * from t !
+fetch!
+delete v1 where a = 1 nowait !
+select * from t !
+fetch!
+commit release !
+* end session 1!
+drop table t !
+drop table test !
+commit work release !
+file shutdwnk !
+vdnexit !
+

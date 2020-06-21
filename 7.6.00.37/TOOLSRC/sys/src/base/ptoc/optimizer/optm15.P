@@ -1,0 +1,729 @@
+(* @(#)optimizer/optm15.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optm15.p *)
+
+   (* this module performs strength reduction optimizations  *)
+   (* within loops.                                          *)
+
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../optimizer/more_csg.def"
+#include "../optimizer/opt_symtab.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/_shifts.h"
+#include "../common/csg.h"
+#include "../common/utilities.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/optm1.h"
+#include "../optimizer/optm2.h"
+#include "../optimizer/optm5.h"
+#include "../optimizer/optm12.h"
+#include "../optimizer/set_util.h"
+#include "../optimizer/temp_util.h"
+
+
+(* export *)
+
+#include "../optimizer/optm15.h"
+
+
+(* privates *)
+
+const
+   NoPatrns = 6;
+   StackSize = 5;
+   STableSize = 80;
+
+type
+   ReduxInfo = record
+      lval     : HdgRange;
+      ConstExp : integer;
+      StmntIndex : HdgRange;
+   end;
+
+   STableRange = 1..STableSize;
+
+   STableType = record
+      candidate : array [STableRange] of ReduxInfo;
+      sentinel : STableRange;
+   end;
+
+   StackRange = 0..StackSize;
+
+   StackType = record
+      StackArray : array [StackRange] of integer;
+      StackPtr : StackRange;
+   end;
+
+   PatrnType = array [1..NoPatrns] of integer;
+
+var
+   LoopStmnt,          (* points to loop node                      *)
+   LoopTailLink,           (* tail link of first stmnt in loop body    *)
+   PrevLink            (* Node2field field of stmnt pointing to loop    *)
+      :HdgRange;
+
+   STable :STableType;
+
+   patrn :PatrnType;
+   args :StackType;
+   HdgRoot :HdgRange;
+
+
+(* initial *)
+(* routines *)
+
+
+   procedure InitSTable
+      (one: integer);
+
+   begin
+      STable.sentinel := one;
+   end (*InitSTable*);
+
+
+   procedure PrintSTable;
+      (* print out lval in STable *)
+      var i :STableRange;
+
+      begin
+      write (output,'{ ');
+      for i := 1 to STable.sentinel - 1 do begin
+         write (output,STable.candidate[i].lval,':',
+                   STable.candidate[i].ConstExp,':',
+                   STable.candidate[i].StmntIndex,', ');
+      end  (* for *);
+      writeln (output,' }');
+      flush (output);
+      end (*PrintSTable*);
+
+
+   function SearchTable (lval: HdgRange) :STableRange;
+      (* this procedure performs a sentinel search on STable looking      *)
+      (* for var and returns its index if found, otherwise it returns the  *)
+      (* of the sentinel                                             *)
+   var i :STableRange;
+
+   begin
+      i := 1;
+      STable.candidate[STable.sentinel].lval := lval;
+      while not identical (STable.candidate[i].lval, lval) do begin
+         i := i + 1;
+      end  (* while *);
+      SearchTable := i;
+   end (*SearchTable*);
+
+
+   procedure AddTable
+      (lval: HdgRange;
+       NodeIndex: HdgRange;
+       constant: integer);
+
+      (* this procedure adds lval var to STable       *)
+
+   var i :STableRange;
+
+   begin
+      if STable.sentinel < STableSize then begin
+         i := SearchTable(lval);
+         if i = STable.sentinel then begin
+            (* insert new candidate for strength reduction in STable  *)
+            STable.candidate[i].lval := lval;
+            STable.candidate[i].ConstExp := constant;
+            STable.candidate[i].StmntIndex := NodeIndex;
+            STable.sentinel := STable.sentinel + 1;
+         end;
+      end;
+   end (*AddTable*);
+
+
+   procedure RmTable(j: STableRange);
+      (* this procedure removes lval from STable.  *)
+
+   begin
+      if j < STable.sentinel then begin
+         STable.sentinel := STable.sentinel - 1;
+         while j < STable.sentinel do begin
+            STable.candidate [j] := STable.candidate [j + 1];
+            j := j + 1;
+         end  (* while *);
+      end  (* if *);
+   end  (* RmTable *);
+
+
+   function ConstLit(NodeIndex :HdgRange;
+                      var literal :integer) :boolean;
+      (* this function checks for an integer literal and if found,  *)
+      (* returns it.                                                *)
+
+      begin
+      if (MajorOperator = node) and (MinorOperator = LitOp) then begin
+         literal := Node1parameter;
+         ConstLit := true;
+      end
+      else begin
+         ConstLit := false;
+      end  (* if *);
+      end (*ConstLit*);
+
+
+   function LiteralNode(literal :integer) :HdgRange;
+      (* this function creates an integer literal node. it returns the  *)
+      (* location of this newly created node.                           *)
+
+   begin
+      LiteralNode := node3 (LitOp, gl_IntegerPtr, literal, 0);
+   end  (* LiteralNode *);
+
+
+   function CrtInductnStmnt
+      (temp: SymbolTableRange;
+       ConstA,
+       ConstC: integer): HdgRange;
+
+      (* this function creates statement t := t + ac, for constants a&c. *)
+      (* the location of this newly created stmnt is returned.           *)
+
+   begin
+      CrtInductnStmnt := LongStatement (
+         PrefixOp,
+         STab [temp].SType,
+         node3 (IdOp, STab [temp].SType, temp, 0),
+         LiteralNode (ConstA * ConstC),
+         0,
+         AddOp,
+         -1);
+   end  (* CrtInductnStmnt *);
+
+
+   procedure FindVars
+      (NodeIndex: HdgRange);
+
+      (* this procedure finds all basic induction lval within  *)
+      (* a loop.                                                    *)
+
+   var
+      literal :integer;
+
+   begin
+      while NodeIndex <> -1 do begin
+         case MinorOperator of
+            PrefixOp: begin
+               if STab [TypeField].SType = IntegerType then begin
+                  case Ls2parameter of
+                     AddOp: begin
+                        if ConstLit (Ls2operand, literal) then begin
+                           AddTable (Ls1operand, NodeIndex, literal);
+                        end  (* if *);
+                     end;
+                     SubtOp: begin
+                        if ConstLit (Ls2operand, literal) then begin
+                           AddTable (Ls1operand, NodeIndex, -literal);
+                        end  (* if *);
+                     end;
+                  end  (* case *);
+               end  (* if *);
+            end;
+            ExpList: begin
+               FindVars (ListHeadField);
+            end;
+         end  (* case *);
+         NodeIndex := NextLink;
+      end  (* while *);
+      if control ['V'] then begin
+         PrintSTable;
+      end;
+   end  (* FindVars *);
+
+
+   procedure ScreenVars
+      (NodeIndex: HdgRange);
+
+      (* compute node exit descriptors at NodeIndex and screen  *)
+      (* out from STable any invalid induction lval.            *)
+
+   var
+#ifdef FLEX
+      intersection: PSet;
+      intersect : Set;
+      set1, set2, set3, set4 : Set;
+#else
+      intersection: Set;
+#endif
+      LoopExitDesc: NodeDescriptorType;
+      CandidateExitDesc: NodeDescriptorType;
+      i: STableRange;
+
+   begin
+#ifdef FLEX
+	intersection := @intersect;
+	set_Ref ( CandidateExitDesc, set1 );
+	set_Def ( CandidateExitDesc, set2 );
+	set_Ref ( LoopExitDesc, set3 );
+	set_Def ( LoopExitDesc, set4 );
+#endif
+
+      i := 1;
+      while i < STable.sentinel do begin
+         BuildExitDescriptors (
+            STable.candidate [i].StmntIndex,
+            -1,
+            StmntTraversal,
+            CandidateExitDesc);
+         ExcludedNode := STable.candidate[i].StmntIndex;
+         BuildExitDescriptors (NodeIndex, -1, StmntTraversal, LoopExitDesc);
+	 Intersect_Sets (intersection, CandidateExitDesc.ref, LoopExitDesc.def);
+	 if not Empty_check_Set (intersection) then begin
+            RmTable (i);
+         end
+         else begin
+	    Intersect_Sets (intersection,
+			CandidateExitDesc.ref, LoopExitDesc.ref);
+	    if Empty_check_Set (intersection) then begin
+               RmTable (i);
+            end
+            else begin
+               i := i + 1;
+            end  (* if *);
+         end  (* if *);
+      end  (* while *);
+      if control ['V'] then begin
+         PrintSTable;
+      end;
+   end  (* ScreenVars *);
+
+
+   function PopArgs :integer;
+      (* pop args stack *)
+
+      begin
+      if args.StackPtr > 0 then begin
+         PopArgs := args.StackArray[args.StackPtr];
+         args.StackPtr := args.StackPtr - 1;
+      end
+      else begin
+         PasCerror('module StrRedux -- stack underflow');
+      end  (* if *);
+      end (*PopArgs*);
+
+
+   procedure PushArgs(value :integer);
+      (* push onto args stack  *)
+      begin
+      if args.StackPtr < StackSize then begin
+         args.StackPtr := args.StackPtr + 1;
+         args.StackArray[args.StackPtr] := value;
+      end
+      else begin
+         PasCerror('module StrRedux -- stack overflow');
+      end  (* if *);
+      end (*PushArgs*);
+
+
+   procedure ClearArgs;
+      (* clear args stack *)
+      begin
+      args.StackPtr := 0;
+      end (*ClearArgs*);
+
+
+   procedure CreatePatrns;
+      (* create linear patrns: 1. a*i  2. a*i+b, *)
+      (* 3. a*i-b,  4. i*a,  5. i*a+b,  6. i*a-b *)
+   var
+      opr1,
+      opr2 :HdgRange;
+
+   begin
+      opr1 := CreateLoadNode (0);
+      opr2 := LiteralNode (0);
+      patrn[1] := BinaryExpression(MultOp,0,opr2,opr1);
+						   /* rainer  02.10.86 */
+      patrn[2] := BinaryExpression(AddOp,0,patrn[1],opr2);
+      patrn[3] := BinaryExpression(SubtOp,0,patrn[1],opr2);
+      patrn[4] := BinaryExpression(MultOp,0,opr1,opr2);
+						   /* rainer  02.10.86 */
+      patrn[5] := BinaryExpression(AddOp,0,patrn[4],opr2);
+      patrn[6] := BinaryExpression(SubtOp,0,patrn[4],opr2);
+   end  (* CreatePatrns *);
+
+
+   procedure InsrtInductnStmnt(NodeIndex,LinkNode :HdgRange);
+      (* insert inductive statement immediately after basic inductive *)
+      (* statement and link into statement list.                      *)
+
+      begin
+      if PrevNodeLink = -1 then begin
+         field[LoopTailLink] := NodeIndex;
+      end  (* if *);
+      NextLink := PrevNodeLink;
+      PrevNodeLink := NodeIndex;
+      (* mdebug 'insrt inductn after',NodeIndex enddebug *)
+      end (*InsrtInductnStmnt*);
+
+
+   procedure InsrtInitStmnt
+      (temp: SymbolTableRange;
+       ExprPtr :HdgRange);
+      (* create stmnt t := ai+b and insert in front of LoopStmnt  *)
+      (* and update PrevStmntLink.                               *)
+      var NodeIndex :HdgRange;
+
+      begin
+      NodeIndex := CreateAssignmentStatement(ExprPtr,LoopStmnt,temp,-1);
+      field[PrevLink] := NodeIndex;
+      PrevLink := NextLinkLink;
+      (* mdebug 'inserted initial: PrevLink =',PrevLink enddebug *)
+      end (*InsrtInitStmnt*);
+
+
+   procedure RepLinearExp(temp :SymbolTableRange;
+                            LinkNode :HdgRange);
+      (* LinkNode is pointer to linear expr.  create loadt node and  *)
+      (* re-link                                                      *)
+      var NodeIndex :HdgRange;
+
+      begin
+      NodeIndex := CreateLoadNode(temp);
+      PrevNodeLink := NodeIndex;
+      (* mdebug 'replaced linear exp at',NodeIndex enddebug *)
+      end (*RepLinearExp*);
+
+
+   function IdentExp
+      (NodeIndex,
+       CnodeIndex: HdgRange)
+      : boolean;
+
+   var
+      ReturnValue: boolean;
+
+   begin
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output, 'IdentExp, ', NodeIndex:1, ', ', CnodeIndex:1);
+      end;
+
+      if (NodeIndex = -1) or (CnodeIndex = -1) then begin
+         ReturnValue := NodeIndex = CnodeIndex;
+      end
+      else if (Node1field = Cnode1field) then begin
+
+         (* major and minor operators are equal *)
+         case MajorOperator of
+
+            node: begin
+               case MinorOperator of
+                  LitOp: begin
+                     PushArgs (Node1parameter);
+                     ReturnValue := true;
+                  end;
+                  otherwise begin
+                     ReturnValue := false;
+                  end;
+               end;
+            end;
+
+            UnaryExp: begin
+               case MinorOperator of
+                  LoadOp: begin
+                     if SearchTable (Unary1operand) < STable.sentinel then begin
+                        PushArgs (Unary1operand);
+                        ReturnValue := true;
+                     end
+                     else begin
+                        ReturnValue := false;
+                     end;
+                  end
+                  otherwise begin
+                     ReturnValue := false;
+                  end;
+               end;
+            end;
+
+            BinaryExp: begin
+               if IdentExp (Bin1operand, Cbin1operand) then begin
+                  ReturnValue := IdentExp (Bin2operand, Cbin2operand);
+               end
+               else begin
+                  ReturnValue := false;
+               end  (* if *);
+            end;
+
+            otherwise begin
+               ReturnValue := false;
+            end;
+
+         end  (* case *);
+      end
+      else begin
+         ReturnValue := false;
+      end  (* if *);
+
+      if control ['V'] then begin
+         writeln (output, '   ReturnValue = ', ord (ReturnValue):1);
+      end;
+
+      IdentExp := ReturnValue;
+
+   end  (* IdentExp *);
+
+
+   function MatchPatrn
+      (NodeIndex,
+       LinkNode: HdgRange)
+      : boolean;
+
+   label
+      100;
+
+   var
+      i,
+      j,
+      ConstA,
+      ConstB,
+      ConstC: integer;
+      temp: SymbolTableRange;
+      NewStmnt,
+      InduxStmntLink,
+      InductnVar: HdgRange;
+
+      (*    NewStmnt points to 't := t + ac'                   *)
+      (*    InduxStmntLink is NextLinkLink of 'i := i + c'     *)
+
+   begin
+      for i := 1 to NoPatrns do begin
+         ClearArgs;
+         if gl_TempAvail (-1, TypeField) and IdentExp (NodeIndex, patrn[i]) then begin
+            case i of
+               1: begin
+                  ConstB := 0;
+                  InductnVar := PopArgs;
+                  ConstA := PopArgs;
+               end;
+               2: begin
+                  ConstB := PopArgs;
+                  InductnVar := PopArgs;
+                  ConstA := PopArgs;
+               end;
+               3: begin
+                  ConstB := - PopArgs;
+                  InductnVar := PopArgs;
+                  ConstA := PopArgs;
+               end;
+               4: begin
+                  ConstB := 0;
+                  ConstA := PopArgs;
+                  InductnVar := PopArgs;
+               end;
+               5: begin
+                  ConstB := PopArgs;
+                  ConstA := PopArgs;
+                  InductnVar := PopArgs;
+               end;
+               6: begin
+                  ConstB := - PopArgs;
+                  ConstA := PopArgs;
+                  InductnVar := PopArgs;
+               end;
+            end  (* case *);
+
+            temp := gl_GetTemporary (TypeField);
+            j := SearchTable (InductnVar);
+            ConstC := STable.candidate [j].ConstExp;
+            InduxStmntLink := NextLinkLinkOf (STable.candidate [j].StmntIndex);
+            NewStmnt := CrtInductnStmnt (temp, ConstA, ConstC);
+            InsrtInductnStmnt (NewStmnt,InduxStmntLink);
+            InsrtInitStmnt (temp, NodeIndex);
+            RepLinearExp (temp, LinkNode);
+            MatchPatrn := true;
+            goto 100;
+         end  (* if *);
+      end  (* for *);
+      MatchPatrn := false;
+      100:
+   end  (* MatchPatrn *);
+
+
+   procedure force_register
+      (NodeIndex: HdgRange);
+
+   var
+      id: SymbolTableRange;
+
+   begin
+      id := Node1parameter;
+      if
+         (STab [id].SLevel = STab [ProcedureName].SLevel + 1)
+      and
+         (STab [id].SClass = AUTO)
+      then begin
+         STab [id].SClass := REGISTER;
+      end;
+   end  (* force_register *);
+
+
+   procedure ETraverse(NodeIndex,LinkNode :HdgRange);
+   forward;
+
+
+   procedure LinearExpSearch(NodeIndex,LinkNode :HdgRange);
+      (* this procedure searches for linear expressions of the induction   *)
+      (* lval.                                                             *)
+
+   begin
+      case MajorOperator of
+         node: begin
+#ifdef PYRAMID_DOUBTFUL
+            if MinorOperator = IdOp then begin
+               force_register (NodeIndex);
+            end;
+#endif
+         end;
+         spec: begin
+            (* don't' have to traverse *)
+         end;
+         ShortStmnt: begin
+            ETraverse(Ss1operand,Ss1operandLink);
+         end;
+         UnaryExp: begin
+            ETraverse(Unary1operand,Unary1operandLink);
+         end;
+         BinaryExp: begin
+            if MatchPatrn(NodeIndex,LinkNode) then begin
+               ExprReduced := ExprReduced + 1;
+            end
+            else begin
+               ETraverse(Bin1operand,Bin1operandLink);
+               ETraverse(Bin2operand,Bin2operandLink);
+            end  (* if *);
+         end;
+         ExpList: begin
+            ETraverse (ListHeadField, ListHeadFieldLink);
+            NodeIndex := ListHeadField;
+            while NextLink <> -1 do begin
+               ETraverse (NextLink, NextLinkLink);
+               NodeIndex := NextLink;
+            end;
+         end;
+         LongStmnt: begin
+            ETraverse(Ls2operand,Ls2operandLink);
+            ETraverse(Ls1operand,Ls1operandLink);
+         end;
+         ifthenelse: begin
+            ETraverse(IfCondField,IfCondLink);
+            ETraverse(IfTrueField,IfTrueLink);
+            if IfFalseField <> -1 then begin
+               ETraverse(IfFalseField,IfFalseLink);
+            end  (* if *);
+         end;
+         Switch: begin
+            ETraverse(SwitchTest,SwitchTestLink);
+            ETraverse(SwitchBody,SwitchBodyLink);
+         end;
+         Case: begin
+ (*
+  *         ETraverse(CeStatements,link6);
+  *)
+         end;
+         loop: begin
+            ETraverse(WhileTestField,WhileTestLink);
+            ETraverse(WhileBodyField,WhileBodyLink);
+         end;
+         RepeatUntil: begin
+            ETraverse(RepeatBody,RepeatBodyLink);
+            ETraverse(RepeatTest,RepeatTestLink);
+         end;
+         Proc: begin
+            (* don't' have to traverse *)
+         end;
+         OpenProc: begin
+           (* dont't' have to traverse *)
+         end;
+      end  (* case *);
+   end (*LinearExpSearch*);
+
+
+procedure ETraverse;
+   (* this  procedure traverses through a node in the hdg and calls  *)
+   (* 'LinearExpSearch'.                                           *)
+
+begin
+   while NodeIndex <> -1 do begin
+      NoNodesTraversed := NoNodesTraversed + 1 ;
+      LinearExpSearch (NodeIndex, LinkNode);
+      LinkNode := NextLinkLink;
+      NodeIndex := NextLink;
+   end  (* while *);
+end  (* ETraverse *);
+
+
+procedure StrengthReduce
+   (NodeIndex: HdgRange;
+    var LinkNode: HdgRange);
+
+   (************************************************************)
+   (*  basic theory:   for constant a,b,c:                     *)
+   (*       i := i0                     i := i0                *)
+   (*       ...                         t := a * i + b         *)
+   (*       loop                        loop                   *)
+   (*          ...                         ...                 *)
+   (*          exp(a*i+b)                  exp(t)              *)
+   (*          ...                         ...                 *)
+   (*          i := i + c     ====>        i := i + c          *)
+   (*          ...                         t := t + a * c      *)
+   (*          ...                         ...                 *)
+   (*       endloop                     endloop                *)
+   (************************************************************)
+
+begin
+   LoopStmnt := NodeIndex;
+   PrevLink := LinkNode;
+   LoopTailLink := TailLinkLinkOf (WhileBodyField);
+
+   if control ['G'] then begin
+      ConstantPropagation (LoopStmnt, -1); (* must propagate before *)
+   end;
+   CreatePatrns; (* note patrns are created on each call to strength reduce *)
+   InitSTable (1);
+   case MajorOperator of
+      loop: begin
+         FindVars (WhileTestField);
+         FindVars (WhileBodyField);
+      end;
+      RepeatUntil: begin
+         FindVars (RepeatBody);
+         FindVars (RepeatTest);
+      end;
+   end;
+   ScreenVars (LoopStmnt);
+   LinearExpSearch (LoopStmnt, -1);
+   LinkNode := PrevLink;  (* loop may have new LinkNode *)
+end  (* StrengthReduce *);

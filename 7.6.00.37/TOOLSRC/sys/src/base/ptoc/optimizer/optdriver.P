@@ -1,0 +1,320 @@
+(* @(#)optimizer/optdriver.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* optdriver.p *)
+
+(* define *)
+
+#include "../common/csg.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/_shifts.h"
+#include "../common/utilities.h"
+#include "../common/dumptree.h"
+#include "../optimizer/gl_decls.i"
+#include "../optimizer/set_util.h"
+#include "../optimizer/temp_util.h"
+#include "../optimizer/alloc_comdef.i"
+
+#include "../optimizer/optm1.h"
+#include "../optimizer/optm9.h"
+
+
+
+(* export *)
+
+#include "../optimizer/optdriver.h"
+
+
+(* privates *)
+(* initial *)
+
+   procedure OptdriverI;
+
+   var
+      i : DescriptorRange;
+
+   begin
+      first_time  := true;
+
+      OptimizedIf := false;
+      OptimizedLoop := false;
+      IncludedNode := -1;
+
+      BusyDescriptorList := nil;
+      FreeDescriptorList := nil;
+
+      NoExpr  := 0;
+      NoStmnt := 0;
+
+      (* initialize the node size array. *)
+
+      ExcludedNode := -1;
+
+      (* initialize the counters which collect optimization statistics. *)
+
+      ExprReduced        := 0;
+      PropagatedExp      := 0;
+      FoldExp            := 0;
+      RedundantStmnts    := 0;
+      RedundantExpr      := 0;
+      LoopsConverted     := 0;
+      StmntsOutsideLoop := 0;
+      ExprOutsideLoop   := 0;
+      LongStmntOpt      := 0;
+      OptIndex           := 0;
+      NoNodesTraversed  := 0;
+      InitialSize        := 0;
+   end  (* OptdriverI *);
+
+
+   procedure statistics;
+
+   begin
+      writeln (output);
+      writeln (output);
+      writeln (output, 'optimization statistics');
+      writeln (output);
+      writeln (output, 'number expressions reduced           = ',ExprReduced);
+      writeln (output, 'number redundant statements removed  = ',RedundantStmnts);
+      writeln (output, 'number redundant expressions removed = ',RedundantExpr);
+      writeln (output, 'number statements moved outside loop = ',StmntsOutsideLoop);
+      writeln (output, 'number expressions moved outside loop= ',ExprOutsideLoop);
+      writeln (output, 'number long statements optimized     = ',LongStmntOpt);
+      writeln (output);
+      writeln (output, 'SymTab - entries       : ' , SymPtr);
+      writeln (output, 'vars and params        : ' , max_index);
+      writeln (output, 'size of sets           : ' , NewWords);
+      writeln (output, 'max size of sets       : ' , NewWordsPlus);
+      writeln (output, 'used space by optimizer: ' , Maxused_space);
+      writeln (output);
+      writeln (output);
+   end  (* statistics *);
+
+
+(* routines *)
+
+
+
+   function init_relatives : boolean;
+
+
+      function M_M(a,b : integer) : integer;
+      begin
+	   if a < b then M_M := a
+		    else M_M := b;
+      end;
+
+   var
+	bis,i : integer;
+	delta : integer;
+	stop  : boolean;
+
+   begin
+	i := give_MrX;          /*
+				 *  24.06.87
+				 *  make a global var,
+				 *  to protect functions from  be
+				 *  moving out of a loop
+				 */
+
+	max_index := 0;
+	if SymPtr > SymSize-1
+	   then begin
+		bis := SymSize-1;
+		max_value := SymSize-1;
+		end
+	   else begin
+		bis := SymPtr;
+		max_value := SymPtr;
+		end;
+	for i := 0 to bis do
+	    begin
+	    case STab[i].SKind of
+		VarDcl, ParmDcl:
+		    begin
+		    rel_code[i] := max_index;
+		    sym_range[max_index] := i;
+		    max_index := max_index + 1;
+		    end;
+	    end;
+	    end;
+
+	(*
+	 * codiere alle (!) vars
+	 * if (control['E']) and (SymPtr > bis)
+	 *    then begin
+	 * 	i := STab[SymSize - 1].SNext;
+	 * 	while i<>0  do
+	 * 	   begin
+	 * 	   i := STab[i].SNext;
+	 * 	   end;
+	 * 	end;
+	 *)
+
+	NewWords := (max_index + 31) div 32;
+
+	stop := false;
+	delta := DELTA;
+	while not stop do
+		begin
+		NewVars  := (NewWords * 32) - max_index + (delta*32);
+		NewVars := M_M(NewVars,SymSize - 1 - max_value);
+		NewWordsPlus := (max_index + NewVars + 31 ) div 32;
+		if NewWordsPlus > NoWords
+		   then begin
+			if delta > 0
+			   then begin
+				delta := delta - 1;
+				end
+			   else begin
+				stop := true;
+				init_relatives := false;
+				end;
+			end
+		   else begin
+			stop := true;
+			init_relatives := true;
+			end;
+		end;
+
+#ifdef FLEX
+	s_desc  := sizeof ( NodeDescriptorRecord ) +
+		   ( 4 * NewWordsPlus * sizeof ( integer ) );
+	EntryRef := 0 * 4 * NewWordsPlus;
+	EntryDef := 1 * 4 * NewWordsPlus;
+	ExitRef  := 2 * 4 * NewWordsPlus;
+	ExitDef  := 3 * 4 * NewWordsPlus;
+#endif
+
+   end;
+
+
+   procedure OptProg;
+      (* read the hdg - optimize code *)
+
+   label
+      1;
+
+   var
+      NodeIndex: HdgRange;
+      last_tian : integer;
+#ifdef TRACE
+      c : char;
+#endif
+
+   begin
+(* DK
+      if control ['H'] then begin
+         ListHdg (HdgHead);
+      end
+*)
+      init_optimizer;
+      opt_glob := init_relatives;
+
+      if not opt_glob
+	 then begin
+	     (*
+              * writeln ('cannot optimize (to much vars)');
+	      *)
+	      goto 1;
+	      end;
+
+      /******************************
+       *** Global Optimization    ***
+       ******************************/
+
+      NodeIndex := HdgHead;
+
+      while NodeIndex <> -1 do begin
+         if MinorOperator <> FileOp then begin
+            if NoProc < ProcTableSize then begin
+               NoProc := NoProc + 1;
+            end;
+            ProcedureName := ProcLabel;
+            ProcTable [NoProc].SymTabInx := ProcedureName;
+	    /*
+             * ProcTable [NoProc].HdgFileOffset := NodeIndex;
+             * ProcTable [NoProc].Size := 0;
+	     */
+
+            ExcludedNode := -1;
+            IncludedNode := -1;
+            if control ['A'] then begin
+               OptimizedLoop := true;
+            end  (* if *);
+            if control ['B'] then begin
+               OptimizedIf := true;
+            end  (* if *);
+
+            init_proc;
+	    last_tian := ProcLabel;
+	    STab[last_tian].SFeld1 := SymPtr + 1;
+            OptimizeProg (NodeIndex);
+	    last_tian := ProcLabel;
+	    STab[last_tian].SFeld2 := SymPtr;
+            close_proc;
+
+         end  (* if *);
+
+         NodeIndex := NextLink;
+
+      end  (* while *);
+
+      1:
+
+      close_optimizer;	/* am ende aller optimierungen */
+
+
+      if control ['H'] then begin
+         writeln (output);
+         writeln (output);
+         writeln (output, 'optimized hdg');
+         ListHdg (HdgHead);
+      end;
+
+      if control ['V'] then begin
+         writeln (output);
+         writeln (output);
+         writeln (output, 'descriptor table');
+         ListDescTab;
+      end  (* if *);
+
+      if control ['v'] then begin
+         statistics;
+      end;
+
+   end  (* OptProg *);
+
+
+   procedure optimize;
+
+   begin
+      if (ErrorCount = 0) then begin
+         gl_InitSym;
+         OptProg;
+      end  (* if *);
+   end (*optimize*);

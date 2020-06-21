@@ -1,0 +1,4979 @@
+(* @(#)pascl/sysprocs.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* sysprocs.p *)
+
+
+(* define *)
+
+#include "../common/machdep.h"
+#include "../common/csg.def"
+#include "../common/hdg.def"
+#include "../pascl/sflags.def"
+
+
+(* import *)
+
+#ifndef PYRAMID_DOUBTFUL
+var big_goto: integer;
+#endif
+
+#include "../common/globals.i"
+#include "../common/csg.i"
+#include "../common/opcode.i"
+#include "../common/_shifts.h"
+#include "../common/stab.h"
+#include "../common/csg.h"
+#include "../common/utilities.h"
+#include "../common/fold.h"
+#include "../pascl/globals1.i"
+#include "../pascl/symtab.h"
+#include "../pascl/sem.h"
+#include "../pascl/semutil.h"
+#include "../pascl/initialize.h"
+#include "../pascl/decls.h"
+#include "../pascl/p1m2.h"
+#include "../pascl/pascal_opc.i"		/* DK 26.08.88 */
+
+
+(* export *)
+
+#include "../pascl/sysprocs.h"
+
+
+(* private *)
+const
+   IOcontrolMax = 199;
+
+type
+   String20 = packed array [0..19] of char;
+   IOcontrolType = packed array [0..IOcontrolMax] of char;
+
+
+(* initial *)
+
+procedure SysprocsI;
+
+begin
+   SysSproc [SysReset] := 'reset\0';
+   SysSproc [SysRewrite] := 'rewrite\0';
+   SysSproc [SysRead] := 'read\0';
+   SysSproc [SysWrite] := 'write\0';
+   SysSproc [SysFlush] := 'flush\0';
+   SysSproc [SysRemove] := 'remove\0';
+   SysSproc [SysMessage] := 'message\0';
+   SysSproc [SysOrd] := 'ord\0';
+   SysSproc [SysChr] := 'chr\0';
+   SysSproc [SysReadln] := 'readln\0';
+   SysSproc [SysWriteln] := 'writeln\0';
+   SysSproc [SysEoln] := 'eoln\0';
+   SysSproc [SysEof] := 'eof\0';
+   SysSproc [SysArgc] := 'argc\0' ;
+   SysSproc [SysArgv] := 'argv\0';
+   SysSproc [SysNew] := 'new\0';
+   SysSproc [SysDispose] := 'dispose\0';
+   SysSproc [SysPut] := 'put\0';
+   SysSproc [SysGet] := 'get\0';
+   SysSproc [SysPage] := 'page\0';
+   SysSproc [SysAbs] := 'abs\0';
+   SysSproc [SysArctan] := 'arctan\0';
+   SysSproc [SysCos] := 'cos\0';
+   SysSproc [SysExp] := 'exp\0';
+   SysSproc [SysLn] := 'ln\0';
+   SysSproc [SysOdd] := 'odd\0';
+   SysSproc [SysPack] := 'pack\0';
+   SysSproc [SysPred] := 'pred\0';
+   SysSproc [SysRound] := 'round\0';
+   SysSproc [SysSin] := 'sin\0';
+   SysSproc [SysSqr] := 'sqr\0';
+   SysSproc [SysSqrt] := 'sqrt\0';
+   SysSproc [SysSucc] := 'succ\0';
+   SysSproc [SysTrunc] := 'trunc\0';
+   SysSproc [SysUnpack] := 'unpack\0';
+   SysSproc [SysHalt] := 'halt\0';
+   SysSproc [SysClock] := 'clock\0';
+   SysSproc [SysSysclock] := 'sysclock\0';
+   SysSproc [SysWallclock] := 'wallclock\0';
+   SysSproc [SysPtr] := 'ptr\0';
+   SysSproc [SysDate] := 'date\0';
+   SysSproc [SysTime] := 'time\0';
+   SysSproc [SysLinelimit] := 'linelimit\0';
+   SysSproc [SysNull] := 'null\0';
+   SysSproc [SysCard] := 'card\0';
+   SysSproc [SysExpo] := 'expo\0';
+   SysSproc [SysRandom] := 'random\0';
+   SysSproc [SysSeed] := 'seed\0';
+   SysSproc [SysUndefined] := 'undefined\0';
+   SysSproc [SysLength] := 'length\0';
+   SysSproc [SysConcat] := 'concat\0';
+   SysSproc [SysCopy] := 'copy\0';
+   SysSproc [SysOrd2] := 'ord2\0';
+   SysSproc [SysOrd4] := 'ord4\0';
+   SysSproc [SysSizeof] := 'sizeof\0';
+   SysSproc [SysClose] := 'close\0';
+   SysSproc [SysEnvp] := 'envp\0';
+#ifdef RASX /*RAS07*/
+   SysSproc [SysAsm]   := 'EmbedC\0';
+#else
+   SysSproc [SysAsm]   := 'asm\0';
+#endif
+end;
+
+
+(* routines *)
+
+function IsProcedure(sysproc: integer): boolean;
+begin
+   case sysproc of
+
+      SysNull,
+      SysLinelimit,
+      SysTime,
+      SysDate,
+      SysHalt,
+      SysPack,
+      SysUnpack,
+      SysPage,
+      SysGet,
+      SysPut,
+      SysClose,
+      SysDispose,
+      SysNew,
+      SysArgv,
+      SysEnvp,
+      SysAsm,
+      SysRemove,
+      SysFlush,
+      SysWrite,
+      SysWriteln,
+      SysMessage,
+      SysRead,
+      SysReadln,
+      SysRewrite,
+      SysReset: begin
+         IsProcedure := true;
+      end;
+
+      otherwise begin
+         IsProcedure := false;
+      end;
+   end  (* case *);
+end; (* IsProcedure *)
+
+
+function CreateEnumBlock
+   (enum_typ: SymbolTableRange)
+   : SymbolTableRange;
+
+var
+   i,
+   enum_block,
+   enum_block_type,
+   first_member,
+   last_member: SymbolTableRange;
+   n,
+   offset,
+   string_size: integer;
+
+begin
+   StartupInit;
+   NewSymbol (0, BlockType, TypeDcl, 1, -1);
+   enum_block_type := SymPtr;
+   NewSymbol (0, enum_block_type, CBlockDcl, 1, -1);
+   enum_block := SymPtr;
+   STab [enum_block].SClass := LOCALSTATIC;
+   STab [enum_block].SSubClass := InitializedVar;
+   STab [enum_block].SParent := -1;
+   n := STab [enum_typ].SHighRange + 1;
+   first_member := enum_typ + 1;
+   last_member := enum_typ + n;
+   OutputInit ( enum_block, node3 (LitOp, IntegerPtr, n, 0));
+   offset := IntegerSize;
+   string_size := 0;
+   for i := first_member to last_member do begin
+      OutputInit ( enum_block,
+	 UnaryExpression (
+	    ConvertOp,
+	    PtrToCharPtr,
+	    node3 (LoadstrOp, PtrToCharPtr, STab [i].SName, 0),
+	    0, 0));
+      offset := offset + PointerSize;
+      string_size := string_size + GetStringLength (STab [i].SName) + 1;
+   end;
+   STab [enum_block_type].SBlockLen := offset div UcharSize + string_size;
+   STab [enum_block_type].SElemAlign := IntegerAlignment;
+   TypeSize (enum_block_type);
+   CreateEnumBlock := enum_block;
+end  (* CreateEnumBlock *);
+
+
+function EnterConstantString
+   (strn: String20)
+   : integer;
+
+var
+   i: integer;
+
+begin
+   i := -1;
+   repeat
+      i := i + 1;
+#ifdef RAS /*RASE err.15: overflow after miss. blank*/
+   until (strn [i] = ' ') or (i = 20);
+#else
+   until strn [i] = ' ';
+#endif
+
+#ifdef PYRAMID_DOUBTFUL
+   EnterConstantString := EnterString (strn [0], i);
+#else
+					(* Without underscore for T /31,/32 *)
+   EnterConstantString := EnterString (strn [1], i-1);
+#endif
+end  (* EnterConstantString *);
+
+
+function EnterNewLine
+   : integer;
+
+var
+   s: String20;
+
+begin
+   s [0] := chr (10);
+   EnterNewLine := EnterString (s [0], 1);
+end  (* EnterNewLine *);
+
+
+function MakeVal
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   MakeVal := UnaryExpression (
+      StorepOp,
+      TypeField,
+      NodeIndex,
+      0,
+      0);
+end  (* MakeVal *);
+
+
+procedure MakeRef
+   ( var NodeIndex: HdgRange);
+var
+   tempvar: SymbolTableRange;
+   temp : HdgRange;
+
+begin
+   if MinorOperator = LoadOp then begin
+      SetMinor (NodeIndex, StorepadrOp);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   end
+   else if MinorOperator = LitOp then begin
+      SetMinor (NodeIndex, LoadstrOp);
+   end
+   else if MinorOperator = CallOp then begin
+     tempvar := GetTemporary (ProcIndex, TypeField, false);
+     temp := node3(IdOp, TypeField, tempvar, 0);
+     NodeIndex := UnaryExpression (
+			StorepadrOp,
+			TypeField,
+			LongStatement(
+				StoreOp,
+				TypeField,
+				temp,
+				NodeIndex,
+				0,
+				0,
+				-1),
+			0,
+			0 );
+#ifdef PYRAMID_DOUBTFUL
+#else
+		 with STab [tempvar] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+#endif
+   end;
+end  (* MakeRef *);
+
+
+function StringElement
+   (NodeIndex: HdgRange;
+    element: integer)
+   : HdgRange;
+
+begin
+   NodeIndex := BinaryExpression (
+      SubscriptOp,
+      CharPtr,
+      Unary1operand,
+      node3 (LitOp, IntegerPtr, element, 0));
+   Bin2parameter := 0;
+   FoldSubscript (NodeIndex);
+   StringElement := UnaryExpression (
+      LoadOp,
+      CharPtr,
+      NodeIndex,
+      0,
+      0);
+end  (* StringElement *);
+
+
+function CallPcstart
+   (mode,
+    card: integer)
+   : HdgRange;
+
+begin
+   CallPcstart := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (ExpList, IntegerPtr, MakeVal(node3 (LitOp, IntegerPtr, mode, 0)), -1, -1),
+      EnterConstantString ('_sql__pmain'),
+      1,
+      card);
+end  (* CallPcstart *);
+
+
+function CallPcexit
+   (card: integer)
+   : HdgRange;
+
+begin
+   CallPcexit := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (ExpList, IntegerPtr, MakeVal(node3 (LitOp, IntegerPtr, 0, 0)), -1, -1),
+      EnterConstantString ('_sql__exit'),
+      1,
+      card);
+end  (* CallPcexit *);
+
+
+function CallUnit
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallUnit := LongStatement (
+      Sys0Op,
+      TypePtrIorechd,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__ut'),
+      1,
+      CardCount);
+end  (* CallUnit *);
+
+
+function CallFnil
+   (NodeIndex: HdgRange;
+    ComponentType: SymbolTableRange)
+   : HdgRange;
+
+begin
+   CallFnil := UnaryExpression (
+      DerefOp,
+      ComponentType,
+      LongStatement (
+         Sys0Op,
+         TypeField,
+         -1,
+         MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+         EnterConstantString ('_sql__nlf'),
+         1,
+         CardCount),
+      0,
+      0);
+end  (* CallFnil *);
+
+
+function RefFile
+   (PtrToFile: SymbolTableRange)
+   : HdgRange;
+
+begin
+   RefFile := UnaryExpression (
+      LoadOp,
+      TypePtrIorechd,
+      node3 (IdOp, TypePtrIorechd, PtrToFile, 0),
+      0,
+      0);
+end  (* RefFile *);
+
+
+function RefFileDotFbuf
+   (PtrToFile: SymbolTableRange)
+   : HdgRange;
+
+var
+   FileVar: HdgRange;
+
+begin
+   FileVar := UnaryExpression (
+      DerefOp,
+      TypeIorechd,
+      UnaryExpression (
+         LoadOp,
+         TypePtrIorechd,
+         node3 (IdOp, TypePtrIorechd, PtrToFile, 0),
+         0,
+         0),
+      0,
+      0);
+   FileVar := BinaryExpression (
+      ElementOp,
+      TypeFbuf,
+      FileVar,
+      node3 (LitOffsetOp, IntegerPtr, ElementFbuf, 0));
+   FileVar := UnaryExpression (
+      LoadOp,
+      TypeFbuf,
+      FileVar,
+      0,
+      0);
+   RefFileDotFbuf := FileVar;
+end  (* RefFileDotFbuf *);
+
+
+function CallMax
+   (width,
+    reduce,
+    min: HdgRange;
+    col: integer)
+   : HdgRange;
+
+var
+   width_lit : integer;
+
+begin
+
+   if MinorOperatorOf (width) = LitOp then begin
+      width_lit := Node1parameterOf (width);
+      if width_lit <= 0 then begin
+	 ErrorMsg (13, col);
+	 CallMax := min;
+      end
+      else begin
+	 width_lit := width_lit - Node1parameterOf (reduce);
+	 if width_lit >= Node1parameterOf (min) then
+	    CallMax := width
+	 else
+	    CallMax := min;
+      end;
+   end
+   else
+      CallMax := LongStatement (
+         Sys0Op,
+         IntegerPtr,
+         -1,
+         MakeList (ExpList, IntegerPtr, width, reduce, min),
+         EnterConstantString ('_sql__max'),
+         3,
+         CardCount);
+
+end  (* CallMax *);
+
+
+function CallNam
+   (item,
+    enumblk: HdgRange)
+   : HdgRange;
+
+begin
+   CallNam := LongStatement (
+      Sys0Op,
+      AnyPtrPtr,
+      -1,
+      MakeList (ExpList, IntegerPtr, EvalConvert (IntegerPtr, item), enumblk, -1),
+      EnterConstantString ('_sql__nname'),
+      2,
+      CardCount);
+end  (* CallNam *);
+
+
+function CallStrlen
+   (str: HdgRange)
+   : HdgRange;
+
+begin
+   CallStrlen := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (ExpList, AnyPtrPtr, str, -1, -1),
+      EnterConstantString ('_strlen'),
+      1,
+      CardCount);
+end  (* CallStrlen *);
+
+
+function CallPut
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallPut := LongStatement (
+      Sys0Op,
+      TypePtrIorechd,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__put'),
+      1,
+      CardCount);
+end  (* CallPut *);
+
+
+function CallGet
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallGet := LongStatement (
+      Sys0Op,
+      TypePtrIorechd,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__get'),
+      1,
+      CardCount);
+end  (* CallGet *);
+
+
+function CallUGet
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallUGet := LongStatement (
+      Sys0Op,
+      TypePtrIorechd,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__unget'),
+      1,
+      CardCount);
+end  (* CallUGet *);
+
+
+function CallPage
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallPage := LongStatement (
+      Sys0Op,
+      TypePtrIorechd,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__npa'),
+      1,
+      CardCount);
+end  (* CallPage *);
+
+
+function CallCompare
+   (p1,
+    p2: SymbolTableRange)
+   : HdgRange;
+
+const						(* EF4: 01-11-86 WB *)
+    GapSize = 200;
+
+type
+    gaprecord = record
+		    GCnt,
+		    GOffset: integer;
+		end;
+
+var
+   Exp1,
+   Exp2,
+   len,
+   temp,
+   NodeIndex: HdgRange;
+   i,						(* EF4: 01-11-86 WB *)
+   s : integer;
+   offset,
+   t1, t2,
+   TmpExp1, TmpExp2: HdgRange;
+   variants : boolean;
+   gapptr: integer;
+   gaps: array [1..GapSize] of gaprecord;
+
+
+   procedure Incrgapptr;
+
+   begin
+       gapptr := gapptr + 1;
+       if gapptr > GapSize then
+	   PasCerror ('CallCompare: Stack exceeded');
+   end;  (* Incrgapptr *)
+
+
+   procedure FindGaps (p: SymbolTableRange; var TotalOffset: integer);
+
+   var
+	Index: SymbolTableRange;
+	RecOffset,
+	RecSize,
+	TotalSize: integer;
+
+   begin
+       RecSize := STab [p].TypeInfo.SSize + TotalOffset;
+       Index := STab [p].SFirstField;
+       variants := (STab [p].SFirstVariant <> -1);
+       if STab [STab [Index].SType].SType = RecordType then
+	   FindGaps (STab [Index].SType, TotalOffset);
+       RecOffset := TotalOffset;
+       TotalSize := TotalOffset + STab [Index].TypeInfo.SSize;
+
+       while (STab [Index].SNextField <> -1) do begin
+	   Index := STab [Index].SNextField;
+	   with STab [Index].TypeInfo do
+	       if TotalSize < (SOffset + RecOffset) then begin
+		   gapptr := gapptr + 1;
+		   gaps [gapptr].GCnt := (TotalSize - TotalOffset) div 8;
+		   gaps [gapptr].GOffset := TotalOffset div 8;
+		   TotalOffset := SOffset + RecOffset;
+                   if STab [STab [Index].SType].SType = RecordType then
+	               FindGaps (STab [Index].SType, TotalOffset);
+		   TotalSize := TotalOffset + SSize;
+	       end else begin
+           	   if STab [STab [Index].SType].SType = RecordType then
+	       	       FindGaps (STab [Index].SType, TotalOffset);
+		   TotalSize := TotalSize + SSize;
+	       end;
+	   end;
+	if TotalOffset < RecSize then begin
+	    gapptr := gapptr + 1;
+	    with gaps [gapptr] do begin
+	        GCnt := (TotalSize - TotalOffset) div 8;
+	        GOffset := TotalOffset div 8;
+	        end;
+	    TotalOffset := RecSize + RecOffset;
+	    end;
+   end;	(* FindGaps *)
+
+begin
+   Exp1 := g1 [p1];
+   Exp2 := g1 [p2];
+   MakeRef (Exp1);
+   MakeRef (Exp2);
+   NodeIndex := Exp1;
+							(* EF4: 01-11-86 WB *)
+   s := EnterConstantString ('_sql__compare');
+   if STab [TypeType [p1]].SType = RecordType then begin
+       gapptr := 0;
+       variants := false;
+       i := 0;
+       FindGaps (TypeType [p1], i);
+       if variants then
+	   ErrorMsg (41, ColNo [p2]);
+       TmpExp1 := CopyTree (Exp1);
+       TmpExp2 := CopyTree (Exp2);
+       temp := MakeList (ExpList, TypeField, Exp1, Exp2, -1);
+       len := node3 (LitOp, IntegerPtr, gaps [1].GCnt, 0);
+       offset := node3 (LitOp, IntegerPtr, gaps [1].GOffset, 0);
+       AppendList (ExpList, IntegerPtr, temp, len);
+       AppendList (ExpList, IntegerPtr, temp, offset);
+       t1 := LongStatement (
+          Sys0Op,
+          IntegerPtr,
+          -1,
+          temp,
+          s,
+          4,
+          CardCount);
+       if gapptr > 1 then begin
+	   NodeIndex := Unary1operand;
+	   if MinorOperator = StoreOp then begin
+	       Exp1 := UnaryExpression (
+				StorepadrOp,
+				TypeField,
+				Ls1operand,
+				0,
+				0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+		 SaveIndex := NodeIndex;
+		 NodeIndex := Exp1;
+		 NodeIndex := Unary1operand;
+		 if ( MinorOperator = IdOp ) then begin
+			 with STab [Node1parameter] do begin
+			     if (SClass = AUTO) or (SClass = REGISTER) then
+			 	   SClass := AUTONR;
+			 end;
+		 end;
+		 NodeIndex := SaveIndex;
+#endif
+	   end else
+	       Exp1 := TmpExp1;
+	   NodeIndex := Exp2;
+	   NodeIndex := Unary1operand;
+	   if MinorOperator = StoreOp then begin
+	       Exp2 := UnaryExpression (
+				StorepadrOp,
+				TypeField,
+				Ls1operand,
+				0,
+				0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+		 SaveIndex := NodeIndex;
+		 NodeIndex := Exp2;
+		 NodeIndex := Unary1operand;
+		 if ( MinorOperator = IdOp ) then begin
+			 with STab [Node1parameter] do begin
+			     if (SClass = AUTO) or (SClass = REGISTER) then
+			 	   SClass := AUTONR;
+			 end;
+		 end;
+		 NodeIndex := SaveIndex;
+#endif
+	   end else
+	       Exp2 := TmpExp2;
+   	   temp := MakeList (ExpList, TypeField, Exp1, Exp2, -1);
+           for i := 2 to gapptr do begin
+               len := node3 (LitOp, IntegerPtr, gaps [i].GCnt, 0);
+               offset := node3 (LitOp, IntegerPtr, gaps [i].GOffset, 0);
+               t2 := CopyTree (temp);
+               AppendList (ExpList, IntegerPtr, t2, len);
+               AppendList (ExpList, IntegerPtr, t2, offset);
+               t2 := LongStatement (
+                  Sys0Op,
+                  IntegerPtr,
+                  -1,
+                  t2,
+                  s,
+                  4,
+                  CardCount);
+	       t1 := BinaryExpression (
+			    AddOp,
+			    IntegerPtr,
+			    t1,
+			    t2);
+	       end;
+	   end;
+       CallCompare := t1;
+   end else begin
+       temp := MakeList (ExpList, TypeField, Exp1, Exp2, -1);
+       if IsCharArray (TypeField) then begin
+           len := node3 (LitOp, IntegerPtr, LengthOfCharArray (TypeField), 0);
+       end else begin
+           len := node3 (LitSizeOp, IntegerPtr, TypeField, 0);
+       end;
+       offset := node3 (LitOp, IntegerPtr, 0, 0);
+       AppendList (ExpList, IntegerPtr, temp, len);
+       AppendList (ExpList, IntegerPtr, temp, offset);
+       CallCompare := LongStatement (
+          Sys0Op,
+          IntegerPtr,
+          -1,
+          temp,
+          s,
+          4,
+          CardCount);
+       end;
+end  (* CallCompare *);
+
+
+function CallMath
+   (routine: String20;
+    NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   CallMath := LongStatement (
+      Sys0Op,
+      DoublePtr,
+      -1,
+      MakeList (
+         ExpList,
+         DoublePtr,
+         EvalConvert (DoublePtr, NodeIndex),
+         -1,
+         -1),
+      EnterConstantString (routine),
+      1,
+      CardCount);
+end  (* CallMath *);
+
+
+function CallSetOp
+   (op: integer;
+    typ: SymbolTableRange;
+    res,
+    left,
+    right: HdgRange)
+   : HdgRange;
+
+var
+   size,
+   temp: HdgRange;
+   routine: integer;
+#ifdef PYRAMID_DOUBTFUL
+#else
+   NodeIndex: HdgRange;
+#endif
+#ifdef RAS /*RAS02 loc.vars. */
+   NBits, PrmStoOp: integer;
+#endif
+
+begin
+#ifdef RAS /*RAS02 call _ptoc_ISET_ADD etc.*/
+   NBits := STab[typ].TypeInfo.SSize;
+   PrmStoOp := StorepadrOp;  (* for sysprocs *)
+   if ( RAS_control ['S'] ) and ( NBits <= 32 ) then begin
+      PrmStoOp := StorepOp; (* for macros *)
+      case op of
+         AddOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_ADD');
+         end;
+         SubtOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_SUB');
+         end;
+         MultOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_MUL');
+         end;
+      end;
+   end else	
+#endif
+   if control ['n'] then begin
+      case op of
+         AddOp: begin
+            routine := EnterConstantString ('_sql__psetadd');
+         end;
+         SubtOp: begin
+            routine := EnterConstantString ('_sql__setsub');
+         end;
+         MultOp: begin
+            routine := EnterConstantString ('_sql__psetm');
+         end;
+      end;
+   end
+   else begin
+      case op of
+         AddOp: begin
+            routine := EnterConstantString ('_sql__setadd');
+         end;
+         SubtOp: begin
+            routine := EnterConstantString ('_sql__setmin');
+         end;
+         MultOp: begin
+            routine := EnterConstantString ('_sql__multi');
+         end;
+      end;
+   end;
+   res := UnaryExpression (
+#ifdef RAS /*RAS02 StorepadrOp -> StorepOp*/
+         PrmStoOp,
+#else
+         StorepadrOp,
+#endif
+      typ,
+      res,
+      0,
+      0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := res;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   MakeRef (left);
+   MakeRef (right);
+
+#ifdef RAS /*RAS02 StorepadrOp -> StorepOp*/
+   if ( RAS_control ['S'] ) and ( NBits <= 32 ) then begin
+     SetMinor ( left, StorepOp );
+     SetMinor ( right, StorepOp );
+   end;
+#endif
+
+   size := UnaryExpression (
+      StorepOp,
+      IntegerPtr,
+      node3 (LitSizeOp, IntegerPtr, typ, 0),
+      0,
+      0);
+   temp := MakeList (ExpList, typ, -1, -1, -1);
+   AppendList (ExpList, typ, temp, res);
+   AppendList (ExpList, typ, temp, left);
+   AppendList (ExpList, typ, temp, right);
+   AppendList (ExpList, typ, temp, size);
+   CallSetOp := LongStatement (
+      Sys0Op,
+      AnyPtrPtr,
+      -1,
+      temp,
+      routine,
+      4,
+      CardCount);
+end  (* CallSetOp *);
+
+
+function CallSetRel
+   (op: integer;
+    typ: SymbolTableRange;
+    left,
+    right: HdgRange)
+   : HdgRange;
+
+var
+   size,
+   temp: HdgRange;
+   routine: integer;
+#ifdef RAS /*RAS02 loc.vars.*/
+   NBits: integer;
+   NodeIndex: HdgRange;
+#endif
+
+begin
+#ifdef RAS /*RAS02 call _ptoc_ISET_EQL etc.*/
+   NBits := STab[typ].TypeInfo.SSize;
+   if ( RAS_control ['S'] ) and ( NBits <= 32 ) then
+      case op of
+         EqOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_EQL');
+         end;
+         NeOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_NEQ');
+         end;
+         GeOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_GEQ');
+         end;
+         GtOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_GTR');
+         end;
+         LtOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_LSS');
+         end;
+         LeOp: begin
+            routine := EnterConstantString ('__ptoc_ISET_LEQ');
+         end;
+      end
+   else	
+#endif
+   if control ['n'] then begin
+      case op of
+         EqOp: begin
+            routine := EnterConstantString ('_sql__erq');
+         end;
+         NeOp: begin
+            routine := EnterConstantString ('_sql__nre');
+         end;
+         GeOp: begin
+            routine := EnterConstantString ('_sql__psetge');
+         end;
+         GtOp: begin
+            routine := EnterConstantString ('_sql__psetgt');
+         end;
+         LtOp: begin
+            routine := EnterConstantString ('_sql__psetlt');
+         end;
+         LeOp: begin
+            routine := EnterConstantString ('_sql__psetle');
+         end;
+      end;
+   end
+   else begin
+      case op of
+         EqOp: begin
+            routine := EnterConstantString ('_sql__erq');
+         end;
+         NeOp: begin
+            routine := EnterConstantString ('_sql__nre');
+         end;
+         GeOp: begin
+            routine := EnterConstantString ('_sql__ger');
+         end;
+         GtOp: begin
+            routine := EnterConstantString ('_sql__gtl');
+         end;
+         LtOp: begin
+            routine := EnterConstantString ('_sql__ltl');
+         end;
+         LeOp: begin
+            routine := EnterConstantString ('_sql__lel');
+         end;
+      end;
+   end;
+   MakeRef (left);
+   MakeRef (right);
+#ifdef RAS /*RAS02 StorepadrOp -> StorepOp*/
+   if ( RAS_control ['S'] ) and ( NBits <= 32 ) then begin
+      SetMinor ( left, StorepOp ); (* for macros *)
+      SetMinor ( right, StorepOp );
+   end;
+#endif
+   size := UnaryExpression (
+      StorepOp,
+      IntegerPtr,
+      node3 (LitSizeOp, IntegerPtr, typ, 0),
+      0,
+      0);
+   temp := MakeList (ExpList, typ, -1, -1, -1);
+   AppendList (ExpList, typ, temp, size);
+   AppendList (ExpList, typ, temp, left);
+   AppendList (ExpList, typ, temp, right);
+   CallSetRel := LongStatement (
+      Sys0Op,
+      BooleanPtr,
+      -1,
+      temp,
+      routine,
+      3,
+      CardCount);
+end  (* CallSetRel *);
+
+
+function CallInct
+   (element: HdgRange;
+    ct: HdgRange)
+   : HdgRange;
+
+var
+   temp: HdgRange;
+
+begin
+   temp := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+   AppendList (ExpList, IntegerPtr, temp, MakeVal (element));
+   LinkLists (temp, ct);
+   CallInct := LongStatement (
+      Sys0Op,
+      BooleanPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__ic'),
+      -1,
+      CardCount);
+end  (* CallInct *);
+
+
+function CallIntor
+   (element: HdgRange;
+    NodeIndex: HdgRange)
+   : HdgRange;
+
+var
+   tmp1: HdgRange;
+   tmp2: HdgRange;
+   res: HdgRange;
+   indx_sym: SymbolTableRange;
+
+begin
+   if ListSizeField = 0 then
+      CallIntor := node3 (LitOp, BooleanPtr, 0, 0)
+   else begin
+      if not IsLval (element) then begin
+	 indx_sym := GetTemporary (ProcIndex, IntegerPtr, false);
+	 tmp2 := node3 (IdOp, IntegerPtr, indx_sym, 0);
+	 element := LongStatement ( StoreOp, IntegerPtr, tmp2,
+	    element, 0, 0, -1);
+      end
+      else begin
+	 indx_sym := 0;
+	 tmp2 := element;
+      end;
+      NodeIndex := ListHeadField;
+      res := 0;
+      while NodeIndex <> -1 do begin
+	 if MajorOperator = ExpList then begin
+	    tmp1 := FoldBinary (GeOp, BooleanPtr, element, ListHeadField);
+	    if res = 0 then begin
+	       res := tmp1;
+	       element := tmp2;
+	       tmp2 := FoldBinary (LeOp, BooleanPtr, element, ListTailField);
+	       res := FoldBinary (AndOp, BooleanPtr, res, tmp2);
+	    end
+	    else begin
+	       tmp2 := FoldBinary (LeOp, BooleanPtr, element, ListTailField);
+	       tmp1 := FoldBinary (AndOp, BooleanPtr, tmp1, tmp2);
+	       res := FoldBinary (OrOp, BooleanPtr, res, tmp1);
+	    end;
+	 end
+	 else begin
+	    tmp1 := FoldBinary (EqOp, BooleanPtr, element, NodeIndex);
+	    if res = 0 then begin
+	       res := tmp1;
+	       element := tmp2;
+	    end
+	    else
+	       res := FoldBinary (OrOp, BooleanPtr, res, tmp1);
+	 end;
+	 NodeIndex := NextLink;
+      end;
+      if indx_sym <> 0 then
+	 FreeTemporary(indx_sym);
+      CallIntor := res;
+   end;
+end;
+
+
+function CallInt
+   (element: HdgRange;
+    typ: SymbolTableRange;
+    right: HdgRange)
+   : HdgRange;
+
+var
+   sbase: SymbolTableRange;
+   indx_sym: SymbolTableRange;
+   lower,
+   upper,
+   indx,
+   left,
+   _right: HdgRange;
+#ifdef RAS /*RAS02 loc.vars.*/
+   NBits: integer;
+#endif
+
+begin
+   sbase := STab [typ].SBase;
+   lower := node3 (LitOp, IntegerPtr, STab [sbase].SLowRange, 0);
+   upper := node3 (LitOp, IntegerPtr, STab [sbase].SHighRange - STab [sbase].SLowRange, 0);
+   left := FoldBinary (SubtOp, IntegerPtr, element, lower);
+   if left <> element then begin
+      indx_sym := GetTemporary (ProcIndex, IntegerPtr, false);
+      indx := node3 (IdOp, IntegerPtr, indx_sym, 0);
+      left := LongStatement ( StoreOp, IntegerPtr, indx, left, 0, 0, -1);
+      indx := FoldUnary (LoadOp, IntegerPtr, indx);
+   end
+   else begin
+      indx_sym := 0;
+      indx := left;
+   end;
+   left := FoldBinary (
+      GeOp, BooleanPtr, left, node3 (LitOp, IntegerPtr, 0, 0));
+   left := FoldBinary (
+      AndOp, BooleanPtr, left,
+      FoldBinary (LeOp, BooleanPtr, indx, upper));
+   _right := FoldBinary (ShrOp, IntegerPtr, indx, node3 (LitOp, IntegerPtr, 3, 0));
+#ifdef RAS /*RAS02 use LoadadrOp in IN construct*/
+   NBits := STab[typ].TypeInfo.SSize;
+   if ( RAS_control ['S'] ) and ( NBits <= 32 ) then begin
+      SetMinor ( right, LoadadrOp );
+      _right := FoldBinary (SubscriptOp, BytePtr, right, _right);
+   end else
+      _right := FoldBinary (SubscriptOp, BytePtr, Unary1operandOf (right), _right);
+#else
+   _right := FoldBinary (SubscriptOp, BytePtr, Unary1operandOf (right), _right);
+#endif
+   _right := FoldUnary (LoadOp, BytePtr, _right);
+   _right := FoldBinary (BAndOp, IntegerPtr,
+      _right,
+      FoldBinary (ShlOp, IntegerPtr,
+         node3 (LitOp, IntegerPtr, 1, 0),
+         FoldBinary (BAndOp, IntegerPtr,
+            indx,
+            node3(LitOp, IntegerPtr, 7, 0))));
+   _right := FoldBinary (NeOp, BooleanPtr, _right, node3 (LitOp, IntegerPtr, 0, 0));
+   CallInt := FoldBinary (AndOp, BooleanPtr, left, _right);
+   if indx_sym <> 0 then
+      FreeTemporary (indx_sym);
+end  (* CallInt *);
+
+
+function CallCttot
+   (typ: SymbolTableRange;
+    res,
+    ct: HdgRange)
+   : HdgRange;
+
+var
+   sbase: SymbolTableRange;
+   lower,
+   upper: integer;
+   temp: HdgRange;
+   routine: integer;
+#ifdef PYRAMID_DOUBTFUL
+#else
+   NodeIndex: HdgRange;
+#endif
+#ifdef RAS /*RAS02 loc.vars.*/
+   NBits, NPairs, NSngls, PrmStoOp: integer;
+   Ok4Me: boolean;
+#endif
+
+begin
+#ifdef RAS /*RAS02 modify dynamic set constructor*/
+   NBits := STab[typ].TypeInfo.SSize;
+   NodeIndex := ct;
+   NodeIndex := ListHeadField;
+   NodeIndex := Unary1operand;
+   NPairs := Node1parameter;
+   NodeIndex := ct;
+   NodeIndex := ListHeadField;
+   NodeIndex := NextLink;
+   NodeIndex := Unary1operand;
+   NSngls := Node1parameter;
+   Ok4Me := ( RAS_control ['S'] ) and ( NBits <= 32 ) and ( NPairs = 0 ) and ( NSngls <= 3 );
+   if ( Ok4Me ) then
+      PrmStoOp := StorepOp (* for macros *)
+   else
+      PrmStoOp := StorepadrOp;  (* for sysprocs *)
+#endif
+   sbase := STab [typ].SBase;
+   lower := STab [sbase].SLowRange;
+   upper := STab [sbase].SHighRange - lower;
+   temp := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      UnaryExpression (
+#ifdef RAS /*RAS02 StorepadrOp -> StorepOp */
+         PrmStoOp,
+#else
+         StorepadrOp,
+#endif
+         typ,
+         res,
+         0,
+         0));
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := res;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      MakeVal (node3 (LitOp, IntegerPtr, lower, 0)));
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      MakeVal (node3 (LitOp, IntegerPtr, upper, 0)));
+   LinkLists (temp, ct);
+#ifdef RAS /*RAS02 call _ptoc_ISET_CONS1 etc*/
+   if Ok4Me then
+      case NSngls of
+	     1: routine := EnterConstantString ('__ptoc_ISET_CONS1');
+	     2: routine := EnterConstantString ('__ptoc_ISET_CONS2');
+	     3: routine := EnterConstantString ('__ptoc_ISET_CONS3');
+	  end else
+#endif
+   if control ['n'] then begin
+      routine := EnterConstantString ('_sql__pcnst');
+   end
+   else begin
+      routine := EnterConstantString ('_sql__scnst');
+   end;
+   CallCttot := LongStatement (
+      Sys0Op,
+      AnyPtrPtr,
+      -1,
+      temp,
+      routine,
+      -1,
+      CardCount);
+end  (* CallCttot *);
+
+
+function CallConvertt
+   (res,
+    src: HdgRange)
+   : HdgRange;
+
+var
+   r_sbase,
+   r_typ: SymbolTableRange;
+   r_lower,
+   r_upper: integer;
+   s_sbase,
+   s_typ: SymbolTableRange;
+   s_lower,
+   s_upper: integer;
+   temp: HdgRange;
+   routine: integer;
+
+begin
+   r_typ := TypeFieldOf (res);
+   r_sbase := STab [r_typ].SBase;
+   r_lower := STab [r_sbase].SLowRange;
+   r_upper := STab [r_sbase].SHighRange - r_lower;
+   s_typ := TypeFieldOf (src);
+   s_sbase := STab [s_typ].SBase;
+   s_lower := STab [s_sbase].SLowRange;
+   s_upper := STab [s_sbase].SHighRange - s_lower;
+
+   if (r_lower = s_lower) and (r_upper = s_upper) then begin
+   (* no conversion required, just move it *)
+
+      temp := LongStatement (
+         StoreOp, r_typ, CopyTree (res), src, 0, 0, CardCount);
+      temp := MakeList (
+         ExpList, AnyPtrPtr, temp, FoldUnary (LoadadrOp, AnyPtrPtr, res), -1);
+      SetMinor (temp, CommaOp);
+      CallConvertt := temp;
+   end
+   else begin
+   (* call sql__setco to move and convert *)
+
+      temp := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         temp,
+         UnaryExpression (
+            StorepadrOp,
+            r_typ,
+            res,
+            0,
+            0));
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         temp,
+         MakeVal (node3 (LitOp, IntegerPtr, r_lower, 0)));
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         temp,
+         MakeVal (node3 (LitOp, IntegerPtr, r_upper, 0)));
+
+      MakeRef (src);
+      AppendList (ExpList, IntegerPtr, temp, src);
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         temp,
+         MakeVal (node3 (LitOp, IntegerPtr, s_lower, 0)));
+      AppendList (
+         ExpList,
+         IntegerPtr,
+         temp,
+         MakeVal (node3 (LitOp, IntegerPtr, s_upper, 0)));
+
+      if control ['n'] then begin
+         routine := EnterConstantString ('_sql__psetco');
+      end
+      else begin
+         routine := EnterConstantString ('_sql__setco');
+      end;
+
+      CallConvertt := LongStatement (
+         Sys0Op,
+         AnyPtrPtr,
+         -1,
+         temp,
+         routine,
+         -1,
+         CardCount);
+   end;
+end  (* CallConvertt *);
+
+
+function CallPclose
+   : HdgRange;
+
+begin
+   CallPclose := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (
+         ExpList,
+         IntegerPtr,
+	 node3 (RegOp, IntegerPtr, FRAMEPOINTER_REG, 0),
+         -1,
+         -1),
+      EnterConstantString ('_sql__closea'),
+      1,
+      CardCount);
+end  (* CallPclose *);
+
+
+function CallHalt
+   (p: integer)
+   : HdgRange;
+
+var
+    index : integer;
+    NodeIndex : HdgRange;
+
+begin
+   if (cnt [p] = 1) then begin
+       index := StartCnt [p];
+       if AssgnmntCompatible (IntegerPtr, ExpVal [index]) then begin
+           NodeIndex := MakeList (
+              ExpList,
+              IntegerPtr,
+              UnaryExpression (
+                 StorepOp,
+                 IntegerPtr,
+                 EvalConvert (IntegerPtr, ExpVal [index]),
+                 0,
+                 0),
+              -1,
+              -1);
+           CallHalt := LongStatement (
+              Sys0Op,
+              IntegerPtr,
+              -1,
+              NodeIndex,
+              EnterConstantString ('_sql__stopp'),
+              0,
+              CardCount);
+       end else begin
+	   ErrorMsg (1, ExpColNo [index]);
+	   CallHalt := -1;
+	   end
+       end
+   else begin
+       NodeIndex := MakeList (
+              ExpList,
+              IntegerPtr,
+              UnaryExpression (
+                 StorepOp,
+                 IntegerPtr,
+                 node3 (LitOp, IntegerPtr, 0, 0),
+                 0,
+                 0),
+              -1,
+              -1);
+       CallHalt := LongStatement (
+          Sys0Op,
+          IntegerPtr,
+          -1,
+	  NodeIndex,
+          EnterConstantString ('_sql__stopp'),
+          0,
+          CardCount)
+   end
+end  (* CallHalt *);
+
+
+function CallClock
+   : HdgRange;
+
+begin
+   CallClock := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      -1,
+      EnterConstantString ('_sql__clock'),
+      0,
+      CardCount);
+end  (* CallClock *);
+
+
+function CallSysclock
+   : HdgRange;
+
+begin
+   CallSysclock := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      -1,
+      EnterConstantString ('_sql__ckl'),
+      0,
+      CardCount);
+end  (* CallSysclock *);
+
+
+function CallWallclock
+   : HdgRange;
+
+begin
+   CallWallclock := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (
+         ExpList,
+         IntegerPtr,
+         node3 (LitOp, IntegerPtr, 0, 0),
+         -1,
+         -1),
+      EnterConstantString ('_time'),
+      1,
+      CardCount);
+end  (* CallWallclock *);
+
+
+function CallStringCopy
+   (result,
+    source,
+    first,
+    size: HdgRange)
+   : HdgRange;
+
+var
+   NodeIndex,
+   max,
+   templist: HdgRange;
+
+begin
+   NodeIndex := result;
+   result := UnaryExpression (
+      StorepadrOp,
+      TypeField,
+      result,
+      0,
+      0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := result;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   max := node3 (LitOp, IntegerPtr, LengthOfString (TypeField), 0);
+   MakeRef (source);
+   templist := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+   AppendList (ExpList, IntegerPtr, templist, result);
+   AppendList (ExpList, IntegerPtr, templist, MakeVal (max));
+   AppendList (ExpList, IntegerPtr, templist, source);
+   AppendList (ExpList, IntegerPtr, templist, MakeVal (first));
+   AppendList (ExpList, IntegerPtr, templist, MakeVal (size));
+   CallStringCopy := LongStatement (
+      Sys0Op,
+      AnyPtrPtr,
+      -1,
+      templist,
+      EnterConstantString ('_sql__pstrcpy'),
+      5,
+      CardCount);
+end  (* CallStringCopy *);
+
+
+function CallStringConcat
+   (result,
+    left,
+    right: HdgRange)
+   : HdgRange;
+
+var
+   max,
+   NodeIndex,
+   temp: HdgRange;
+
+begin
+   NodeIndex := result;
+   result := UnaryExpression (
+      StorepadrOp,
+      TypeField,
+      result,
+      0,
+      0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := result;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   MakeRef (left);
+   MakeRef (right);
+   max := MakeVal (node3 (LitOp, IntegerPtr, LengthOfString (TypeField), 0));
+   temp := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+   AppendList (ExpList, IntegerPtr, temp, result);
+   AppendList (ExpList, IntegerPtr, temp, max);
+   AppendList (ExpList, IntegerPtr, temp, left);
+   AppendList (ExpList, IntegerPtr, temp, right);
+   CallStringConcat := LongStatement (
+      Sys0Op,
+      AnyPtrPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__pstrcat'),
+      4,
+      CardCount);
+end  (* CallStringConcat *);
+
+
+function CallStringCompare
+   (Exp1,
+    Exp2: HdgRange)
+   : HdgRange;
+
+var
+   len,
+   temp,
+   NodeIndex: HdgRange;
+
+begin
+   MakeRef (Exp1);
+   MakeRef (Exp2);
+   temp := MakeList (ExpList, IntegerPtr, Exp1, Exp2, -1);
+   CallStringCompare := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__pstrcomp'),
+      2,
+      CardCount);
+end  (* CallStringCompare *);
+
+
+function CallRange
+   (value: HdgRange;
+    lower,
+    upper: integer)
+   : HdgRange;
+
+var
+   temp: HdgRange;
+
+begin
+   temp := MakeList (
+      ExpList,
+      IntegerPtr,
+      MakeVal (value),
+      MakeVal (node3 (LitOp, IntegerPtr, lower, 0)),
+      MakeVal (node3 (LitOp, IntegerPtr, upper, 0)));
+   CallRange := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__setrang'),
+      3,
+      CardCount);
+end  (* CallRange *);
+
+
+function CallCaseErr
+   (p1: ParseStackRange)
+   : HdgRange;
+
+var
+   temp: HdgRange;
+
+begin
+   temp := MakeList (
+      ExpList,
+      IntegerPtr,
+      MakeVal (node3 (LoadstrOp, PtrToCharPtr, CurrentFile, 0)),
+      MakeVal (node3 (LitOp, IntegerPtr, CardNum[p1], 0)),
+      -1);
+   CallCaseErr := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__caseerr'),
+      2,
+      CardNum [p1]);
+end  (* CallCaseErr *);
+
+
+
+function CallNilCheck
+   (p1: ParseStackRange)
+   : HdgRange;
+
+var
+   temp: HdgRange;
+
+begin
+   temp := MakeList (
+      ExpList,
+      PtrToCharPtr,
+      g1 [p1],
+      MakeVal (node3 (LoadstrOp, PtrToCharPtr, CurrentFile, 0)),
+      MakeVal (node3 (LitOp, IntegerPtr, CardNum[p1], 0)));
+   CallNilCheck := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      temp,
+      EnterConstantString ('_sql__nil'),
+      3,
+      CardNum [p1]);
+end  (* CallNilCheck *);
+
+function EvalGoto
+   (LabIndex: SymbolTableRange)
+   : HdgRange;
+
+var
+   lab,
+   link: HdgRange;
+
+begin
+
+#ifndef PYRAMID_DOUBTFUL
+   (* tell the optimizer not to put vars in regs *)
+   big_goto := 1;
+   control['E'] := false;
+#endif
+
+   lab := UnaryExpression (
+      LoadadrOp,
+      AnyPtrPtr,
+      node3 ( LabelOp, IntegerPtr, LabIndex, CardCount),
+      0,
+      0);
+   link := node3 (StaticLinkOp, AnyPtrPtr, LabIndex, 0);
+   EvalGoto := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (ExpList, AnyPtrPtr, MakeVal (lab), MakeVal (link), -1),
+      EnterConstantString ('_sql__goto'),
+      2,
+      CardCount);
+end  (* EvalGoto *);
+
+
+function EvalDefname
+   (id: SymbolTableRange)
+   : HdgRange;
+
+var
+   FileVar,
+   FileName,
+   NameLen,
+   DataSize,
+   NodeIndex: HdgRange;
+   FileTyp: SymbolTableRange;
+
+begin
+   FileTyp := STab [id].SType;
+   FileVar := UnaryExpression (
+      StorepadrOp,
+      FileTyp,
+      node3 (IdOp, FileTyp, id, 0),
+      0,
+      0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   FileName := node3 (
+      LoadstrOp,
+      PacPtr,
+      STab [id].SName,
+      GetStringLength (STab [id].SName));
+   NameLen := node3 (LitOp, IntegerPtr, GetStringLength (STab [id].SName), 0);
+   if IsTextFile (FileTyp) then begin
+      DataSize := node3 (LitOp, IntegerPtr, 0, 0);
+   end
+   else begin
+      DataSize := node3 (
+         LitSizeOp,
+         IntegerPtr,
+         STab [FileTyp].SComponent,
+         0);
+   end;
+   NodeIndex := MakeList (ExpList, IntegerPtr, FileVar, FileName, -1);
+   AppendList (ExpList, IntegerPtr, NodeIndex, NameLen);
+   AppendList (ExpList, IntegerPtr, NodeIndex, DataSize);
+   NodeIndex := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      NodeIndex,
+      EnterConstantString ('_sql__dfn'),
+      4,
+      CardCount);
+   EvalDefname := NodeIndex;
+end  (* EvalDefname *);
+
+
+function EvalReset
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index,
+   count: integer;
+   NodeIndex,
+   FileVar,
+   FileName,
+   NameLen,
+   DataSize: HdgRange;
+   FileTyp,
+   FileNameTyp: SymbolTableRange;
+
+begin
+   count := cnt [ParmIndex];
+   if (count = 1) or (count = 2) then begin
+      index := StartCnt [ParmIndex];
+      FileTyp := ExpType [index];
+      FileVar := ExpVal [index];
+      if IsFile (FileTyp) then begin
+         MakeRef (FileVar);
+         if count = 1 then begin
+            FileName := node3 (LitOp, IntegerPtr, 0, 0);
+            NameLen := node3 (LitOp, IntegerPtr, 0, 0);
+         end
+         else begin
+            index := index + 1;
+            FileName := ExpVal [index];
+            FileNameTyp := ExpType [index];
+            if (FileNameTyp = CharPtr) and IsConstant (FileName) then begin
+               CharToPac (FileName);
+               FileNameTyp := PacPtr;
+            end;
+            if IsCharArray (FileNameTyp) then begin
+               if IsConstant (FileName) then begin
+                  MakeRef (FileName);
+                  NodeIndex := FileName;
+                  NameLen := node3 (
+                     LitOp,
+                     IntegerPtr,
+                     GetStringLength (Node1parameter),
+                     0);
+               end
+               else begin
+                  MakeRef (FileName);
+                  NameLen := node3 (
+                     LitOp,
+                     IntegerPtr,
+                     LengthOfCharArray (FileNameTyp),
+                     0);
+               end;
+            end
+            else begin
+               ErrorMsg (133, ExpColNo [index]);
+               FileName := node3 (LitOp, IntegerPtr, 0, 0);
+               NameLen := node3 (LitOp, IntegerPtr, 0, 0);
+            end;
+         end;
+         if IsTextFile (FileTyp) then begin
+            DataSize := node3 (LitOp, IntegerPtr, 0, 0);
+         end
+         else begin
+            DataSize := node3 (
+               LitSizeOp,
+               IntegerPtr,
+               STab [FileTyp].SComponent,
+               0);
+         end;
+         NodeIndex := MakeList (ExpList, IntegerPtr, FileVar, FileName, -1);
+         AppendList (ExpList, IntegerPtr, NodeIndex, NameLen);
+         AppendList (ExpList, IntegerPtr, NodeIndex, DataSize);
+         NodeIndex := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__reset'),
+            4,
+            CardCount);
+         EvalReset := NodeIndex;
+      end
+      else begin
+         ErrorMsg (32, ExpColNo [index]);
+         EvalReset := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalReset := -1;
+   end;
+end  (* EvalReset *);
+
+
+function EvalRewrite
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index,
+   count: integer;
+   NodeIndex,
+   FileVar,
+   FileName,
+   NameLen,
+   DataSize: HdgRange;
+   FileTyp,
+   FileNameTyp: SymbolTableRange;
+
+begin
+   count := cnt [ParmIndex];
+   if (count = 1) or (count = 2) then begin
+      index := StartCnt [ParmIndex];
+      FileTyp := ExpType [index];
+      FileVar := ExpVal [index];
+      if IsFile (FileTyp) then begin
+         MakeRef (FileVar);
+         if count = 1 then begin
+            FileName := node3 (LitOp, IntegerPtr, 0, 0);
+            NameLen := node3 (LitOp, IntegerPtr, 0, 0);
+         end
+         else begin
+            index := index + 1;
+            FileName := ExpVal [index];
+            FileNameTyp := ExpType [index];
+            if (FileNameTyp = CharPtr) and IsConstant (FileName) then begin
+               CharToPac (FileName);
+               FileNameTyp := PacPtr;
+            end;
+            if IsCharArray (FileNameTyp) then begin
+               if IsConstant (FileName) then begin
+                  MakeRef (FileName);
+                  NodeIndex := FileName;
+                  NameLen := node3 (
+                     LitOp,
+                     IntegerPtr,
+                     GetStringLength (Node1parameter),
+                     0);
+               end
+               else begin
+                  MakeRef (FileName);
+                  NameLen := node3 (
+                     LitOp,
+                     IntegerPtr,
+                     LengthOfCharArray (FileNameTyp),
+                     0);
+               end;
+            end
+            else begin
+               ErrorMsg (133, ExpColNo [index]);
+               FileName := node3 (LitOp, IntegerPtr, 0, 0);
+               NameLen := node3 (LitOp, IntegerPtr, 0, 0);
+            end;
+         end;
+         if IsTextFile (FileTyp) then begin
+            DataSize := node3 (LitOp, IntegerPtr, 0, 0);
+         end
+         else begin
+            DataSize := node3 (
+               LitSizeOp,
+               IntegerPtr,
+               STab [FileTyp].SComponent,
+               0);
+         end;
+         NodeIndex := MakeList (ExpList, IntegerPtr, FileVar, FileName, -1);
+         AppendList (ExpList, IntegerPtr, NodeIndex, NameLen);
+         AppendList (ExpList, IntegerPtr, NodeIndex, DataSize);
+         NodeIndex := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__rewrite'),
+            4,
+            CardCount);
+         EvalRewrite := NodeIndex;
+      end
+      else begin
+         ErrorMsg (32, ExpColNo [index]);
+         EvalRewrite := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalRewrite := -1;
+   end;
+end  (* EvalRewrite *);
+
+
+function EvalClose
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   FileVar: HdgRange;
+   FileTyp: SymbolTableRange;
+
+begin
+   if cnt [ParmIndex] = 1 then begin
+      index := StartCnt [ParmIndex];
+      FileTyp := ExpType [index];
+      FileVar := ExpVal [index];
+      if IsFile (FileTyp) then begin
+         MakeRef (FileVar);
+         EvalClose := LongStatement (
+            Sys0Op,
+            TypePtrIorechd,
+            -1,
+            MakeList (ExpList, FileTyp, FileVar, -1, -1),
+            EnterConstantString ('_sql__close'),
+            1,
+            CardCount);
+      end
+      else begin
+         ErrorMsg (32, ExpColNo [index]);
+         EvalClose := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, ColNo [ParmIndex]);
+      StackError (ParmIndex);
+      EvalClose := -1;
+   end;
+end;
+
+
+function EvalRead
+   (ProcOrFunc,
+    sysproc,
+    ParmIndex: integer)
+   : HdgRange;
+
+var
+   index,
+   last: integer;
+   FileVar,
+   IOitem,
+   Temp,
+   TempList,
+   NodeIndex: HdgRange;
+   exptype,
+   FileVarType,
+   FileTemp,
+   FileComponentType,
+   FileComponentStype: SymbolTableRange;
+
+begin
+   TempList := -1;
+   if cnt [ParmIndex] = 0 then begin
+      index := 0;
+      last := -1;
+      FileVar := UnaryExpression (
+         StorepadrOp,
+         TextPtr,
+         node3 (IdOp, TextPtr, InputPtr, 0),
+         0,
+         0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+      FileVarType := TextPtr;
+   end
+   else begin
+      index := StartCnt [ParmIndex];
+      last := index + cnt [ParmIndex] - 1;
+      if IsFile (ExpType [index]) and IsLval (ExpVal [index]) then begin
+         FileVar := ExpVal [index];
+         FileVarType := ExpType [index];
+         MakeRef (FileVar);
+         index := index + 1;
+      end
+      else begin
+         FileVar := UnaryExpression (
+            StorepadrOp,
+            TextPtr,
+            node3 (IdOp, TextPtr, InputPtr, 0),
+            0,
+            0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+         FileVarType := TextPtr;
+      end;
+   end  (* if *);
+   FileTemp := GetTemporary (ProcIndex, TypePtrIorechd, false);
+   Temp := LongStatement (
+      StoreOp,
+      TypePtrIorechd,
+      node3 (IdOp, TypePtrIorechd, FileTemp, 0),
+      CallUnit (FileVar),
+      0,
+      0,
+      CardCount);
+   TempList := LinkChain (TempList, Temp);
+   if IsTextFile (FileVarType) then begin
+      while index <= last do begin
+         NodeIndex := ExpVal [index];
+	 if (MajorOperatorOf (NodeIndex) = UnaryExp) and
+	    (MinorOperatorOf (NodeIndex) = LoadOp) and
+	    (MajorOperatorOf (Unary1operandOf (NodeIndex)) = node) and
+	    (MinorOperatorOf (Unary1operandOf (NodeIndex)) = IdOp)
+         then begin
+	    if (* control ['s'] and *)
+	       GetFlag (Node1parameterOf (Unary1operandOf (NodeIndex)), ControlVarFlag)
+	    then begin
+               ErrorMsg (145, ExpColNo [index]);
+	    end;
+	 end;
+         exptype := ExpType [index];
+         if MinorOperator = LoadOp then begin
+            IOitem := Unary1operand;
+         end
+         else begin
+            ErrorMsg (30, ExpColNo [index]);
+         end;
+         if exptype = CharPtr then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               CharPtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__1r'),
+               1,
+               CardCount);
+
+	    if control ['r'] then		(* EF4: 01-11-86 WB *)
+		Temp := RangeCheck (ExpStype [index], Temp);
+
+            Temp := LongStatement (
+               StoreOp,
+               CharPtr,
+               IOitem,
+               Temp,
+               0,
+               0,
+               CardCount);
+         end
+	 else if IsCharArray (exptype) then begin
+	    IOitem := NodeIndex;
+	    MakeRef (IOitem);
+	    Temp := node3 (LitOp, IntegerPtr, LengthOfCharArray (exptype), 0);
+	    Temp := MakeList (
+			ExpList,
+			FileVarType,
+			RefFile (FileTemp),
+			IOitem,
+			MakeVal (Temp));
+	    Temp := LongStatement (
+			Sys0Op,
+			IntegerPtr,
+			-1,
+			Temp,
+			EnterConstantString ('_sql__pr'),
+			3,
+			CardCount);
+	 end
+         else if exptype = IntegerPtr then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               IntegerPtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__intr'),
+               1,
+               CardCount);
+
+	    if control ['r'] then
+		Temp := RangeCheck (ExpStype [index], Temp);
+
+            Temp := LongStatement (
+               StoreOp,
+               IntegerPtr,
+               IOitem,
+               Temp,
+               0,
+               0,
+               CardCount);
+         end
+         else if exptype = FloatPtr then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               DoublePtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__lor'),
+               1,
+               CardCount);
+            Temp := LongStatement (
+               StoreOp,
+               FloatPtr,
+               IOitem,
+               EvalConvert (FloatPtr, Temp),
+               0,
+               0,
+               CardCount);
+         end
+         else if exptype = LongPtr then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               LongPtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__lor'),
+               1,
+               CardCount);
+            Temp := LongStatement (
+               StoreOp,
+               LongPtr,
+               IOitem,
+               EvalConvert (LongPtr, Temp),
+               0,
+               0,
+               CardCount);
+         end
+         else if exptype = DoublePtr then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               DoublePtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__lor'),
+               1,
+               CardCount);
+            Temp := LongStatement (
+               StoreOp,
+               DoublePtr,
+               IOitem,
+               Temp,
+               0,
+               0,
+               CardCount);
+         end
+         else if IsEnum (exptype) or (exptype = BooleanPtr) then begin
+            Temp := MakeList (
+               ExpList,
+               FileVarType,
+               RefFile (FileTemp),
+               UnaryExpression (
+                  LoadadrOp,
+                  AnyPtrPtr,
+                  node3 (
+                     IdOp,
+                     IntegerPtr,
+                     CreateEnumBlock (exptype),
+                     0),
+                  0,
+                  0),
+               -1);
+            Temp := LongStatement (
+               Sys0Op,
+               exptype,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__er'),
+               1,
+               CardCount);
+            Temp := LongStatement (
+               StoreOp,
+               exptype,
+               IOitem,
+               Temp,
+               0,
+               0,
+               CardCount);
+         end
+         else if IsOrdinal (exptype) then begin
+            Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+            Temp := LongStatement (
+               Sys0Op,
+               IntegerPtr,
+               -1,
+               Temp,
+               EnterConstantString ('_sql__intr'),
+               1,
+               CardCount);
+
+	    Temp := EvalConvert (exptype, Temp);	(* EF4: 01-11-86 WB *)
+	    if control ['r'] then
+		Temp := RangeCheck (ExpStype [index], Temp);
+
+            Temp := LongStatement (
+               StoreOp,
+               exptype,
+               IOitem,
+               Temp,
+               0,
+               0,
+               CardCount);
+         end
+         else begin
+            ErrorMsg (1, ExpColNo [index]);
+         end  (* if *);
+         TempList := LinkChain (TempList, Temp);
+         index := index + 1;
+      end  (* while *);
+      if sysproc = SysReadln then begin
+         if not IsTextFile (FileVarType) then begin
+            ErrorMsg (31, ExpColNo [StartCnt [ParmIndex]]);
+         end;
+         Temp := MakeList (ExpList, FileVarType, RefFile (FileTemp), -1, -1);
+         Temp := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            Temp,
+            EnterConstantString ('_sql__readln'),
+            1,
+            CardCount);
+         TempList := LinkChain (TempList, Temp);
+      end;
+   end
+   else begin
+      if sysproc = SysRead then begin
+         FileComponentStype := STab [FileVarType].SComponent;
+         FileComponentType := PrimType (FileComponentStype);
+         while index <= last do begin
+            NodeIndex := ExpVal [index];
+            Temp := GenStore (
+               Unary1operand,
+               ExpType [index],
+               ExpStype [index],
+               ExpColNo [index],
+               UnaryExpression (
+                  LoadOp,
+                  FileComponentType,
+                  CallFnil (RefFile (FileTemp), FileComponentType),
+                  0,
+                  0),
+               FileComponentType,
+               FileComponentStype,
+               ExpColNo [index],
+               CardCount);
+            TempList := LinkChain (TempList, Temp);
+            TempList := LinkChain (TempList, CallGet (RefFile (FileTemp)));
+            index := index + 1;
+         end  (* while *);
+      end
+      else begin
+         ErrorMsg (31, ExpColNo [StartCnt [ParmIndex]]);
+      end;
+   end;
+   FreeTemporary (FileTemp);
+   EvalRead := TempList;
+end  (* EvalRead *);
+
+
+function EvalWrite
+   (ProcOrFunc,
+    sysproc,
+    ParmIndex: integer)
+   : HdgRange;
+
+var
+   i,
+   index,
+   last,
+   IOcount: integer;
+   FileVar,
+   IOcontrol,
+   IOitem,
+   IOwidth,
+   IOdigits,
+   Temp,
+   TempList,
+   NodeIndex: HdgRange;
+   exptype,
+   FileVarType,
+   FileTemp,
+   WidthTemp,
+   ItemTemp,
+   FileComponentType,
+   FileComponentStype: SymbolTableRange;
+   octhexflag: boolean;
+   ParamList: HdgRange;
+   FilePtr: SymbolTableRange;
+   IOctlstring: IOcontrolType;
+   IOctllen: integer;
+
+
+   procedure Evalwidthdigits (LengthNode: HdgRange);
+
+   var
+      WidthTemp: SymbolTableRange;
+      Temp: HdgRange;
+
+   begin
+      WidthTemp := GetTemporary (ProcIndex, IntegerPtr, false);
+      Temp := LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, WidthTemp, 0),
+                  IOwidth,
+                  0,
+                  0,
+                  CardCount);
+      TempList := LinkChain (TempList, Temp);
+      IOwidth := UnaryExpression (
+                    LoadOp,
+                    IntegerPtr,
+                    node3 (IdOp, IntegerPtr, WidthTemp, 0),
+                    0,
+                    0);
+      IOdigits := ComplexStmnt (
+                     ifthenelse,
+                     IntegerPtr,
+                     BinaryExpression (
+                        LtOp,
+                        BooleanPtr,
+                        UnaryExpression (
+                           LoadOp,
+                           IntegerPtr,
+                           node3 (IdOp, IntegerPtr, WidthTemp, 0),
+                           0,
+                           0),
+                        LengthNode),
+                     UnaryExpression (
+                        LoadOp,
+                        IntegerPtr,
+                        node3 (IdOp, IntegerPtr, WidthTemp, 0),
+                        0,
+                        0),
+                     CopyTree (LengthNode),
+                     CardCount);
+      FreeTemporary (WidthTemp);
+   end;		(* Evalwidthdigits *)
+
+   procedure addcontrol (strn : String20);
+   var
+      i, len : integer;
+
+   begin
+      len := IOctllen;
+      i := 0;
+      repeat
+	 IOctlstring [len] := strn [i];
+	 len := len + 1;
+	 i := i + 1;
+      until strn [i] = ' ';
+      IOctllen := len;
+   end;
+
+
+begin
+   TempList := -1;
+   if cnt [ParmIndex] = 0 then begin
+      index := 0;
+      last := -1;
+      if sysproc = SysMessage then begin
+         FileVar := UnaryExpression (
+            StorepadrOp,
+            TextPtr,
+            node3 (IdOp, TextPtr, ErrorPtr, 0),
+            0,
+            0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+      end
+      else begin
+         FileVar := UnaryExpression (
+            StorepadrOp,
+            TextPtr,
+            node3 (IdOp, TextPtr, OutputPtr, 0),
+            0,
+            0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+      end;
+      FileVarType := TextPtr;
+   end
+   else begin
+      index := StartCnt [ParmIndex];
+      last := index + cnt [ParmIndex] - 1;
+      if IsFile (ExpType [index]) and IsLval (ExpVal [index]) then begin
+         if sysproc = SysMessage then begin
+            FileVar := UnaryExpression (
+               StorepadrOp,
+               TextPtr,
+               node3 (IdOp, TextPtr, ErrorPtr, 0),
+               0,
+               0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+            FileVarType := TextPtr;
+         end
+         else begin
+            FileVar := ExpVal [index];
+            FileVarType := ExpType [index];
+	    MakeRef (FileVar);
+	 end;
+	 index := index + 1;
+      end
+      else begin
+         if sysproc = SysMessage then begin
+            FileVar := UnaryExpression (
+               StorepadrOp,
+               TextPtr,
+               node3 (IdOp, TextPtr, ErrorPtr, 0),
+               0,
+               0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+         end
+         else begin
+            FileVar := UnaryExpression (
+               StorepadrOp,
+               TextPtr,
+               node3 (IdOp, TextPtr, OutputPtr, 0),
+               0,
+               0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileVar;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+         end;
+         FileVarType := TextPtr;
+      end;
+   end  (* if *);
+   if sysproc = SysMessage then begin
+      Temp := LongStatement (
+         Sys0Op,
+         IntegerPtr,
+         -1,
+         -1,
+         EnterConstantString ('_sql__flp'),
+         0,
+         CardCount);
+      TempList := LinkChain (TempList, Temp);
+   end;
+   FileTemp := GetTemporary (ProcIndex, TypePtrIorechd, false);
+   Temp := LongStatement (
+      StoreOp,
+      TypePtrIorechd,
+      node3 (IdOp, TypePtrIorechd, FileTemp, 0),
+      CallUnit (FileVar),
+      0,
+      0,
+      CardCount);
+   TempList := LinkChain (TempList, Temp);
+   if IsTextFile (FileVarType) then begin
+      IOctllen := 0;
+      IOcontrol := node3 (
+           LoadstrOp,
+           PtrToCharPtr,
+           0,				(* initialize later *)
+           0);
+      IOcount := 2;
+      ParamList := MakeList (
+           ExpList,
+           FileVarType,
+           RefFileDotFbuf (FileTemp),
+           MakeVal (IOcontrol),
+           -1);
+      while index <= last do begin
+         NodeIndex := ExpVal [index];
+         exptype := ExpType [index];
+         if MinorOperator = WocthexOp then begin
+            IOitem := Unary1operand;
+            IOwidth := Unary1parameter;
+            IOdigits := Unary2parameter;
+            octhexflag := true;
+         end
+         else if MinorOperator = WexpOp then begin
+            IOitem := Unary1operand;
+            IOwidth := Unary1parameter;
+            IOdigits := Unary2parameter;
+            octhexflag := false;
+         end
+         else begin
+            IOitem := NodeIndex;
+            IOwidth := -1;
+            IOdigits := -1;
+            octhexflag := false;
+         end;
+         if octhexflag then begin
+            if IsOrdinal (exptype) or IsPointer (exptype) then begin
+               IOitem := MakeVal (EvalConvert (IntegerPtr, IOitem));
+               if (IOwidth = -1) then begin
+                  if IOdigits = OctString then begin
+		     addcontrol ('%11o');
+                  end
+                  else begin
+		     addcontrol ('%8x');
+                  end;
+               end
+               else begin
+                  if IOdigits = OctString then begin
+		     addcontrol ('%*o');
+                  end
+                  else begin
+		     addcontrol ('%*x');
+                  end;
+               end;
+               IOdigits := -1;
+            end
+            else begin
+               ErrorMsg (30, ExpColNo [index]);
+               IOitem := -1;
+            end;
+         end
+         else if exptype = CharPtr then begin
+            IOitem := MakeVal (EvalConvert (IntegerPtr, IOitem));
+            if IOwidth = -1 then begin
+	       addcontrol ('%c');
+            end
+            else begin
+	       addcontrol ('%*c');
+            end;
+         end
+         else if exptype = IntegerPtr then begin
+            IOitem := MakeVal (IOitem);
+            if (IOwidth = -1) then begin
+	       addcontrol ('%10d');
+            end
+            else begin
+	       addcontrol ('%*d');
+            end;
+         end
+         else if exptype = FloatPtr then begin
+            IOitem := EvalConvert (DoublePtr, IOitem);
+            IOitem := MakeVal (IOitem);
+            if (IOwidth = -1) then begin
+	       addcontrol ('%21.13e');
+            end
+            else begin
+               if IOdigits = -1 then begin
+	          addcontrol ('%*.*e');
+                  IOdigits := CallMax (
+                     CopyTree (IOwidth),
+                     node3 (LitOp, IntegerPtr, 8, 0),
+                     node3 (LitOp, IntegerPtr, 1, 0),
+		     ExpColNo [index]);
+                  IOwidth := CallMax (
+                     IOwidth,
+                     node3 (LitOp, IntegerPtr, 0, 0),
+                     node3 (LitOp, IntegerPtr, 9, 0),
+		     ExpColNo [index]);
+               end
+               else begin
+	          addcontrol ('%*.*f');
+                  IOwidth := CallMax (
+                     IOwidth,
+                     node3 (LitOp, IntegerPtr, 0, 0),
+                     node3 (LitOp, IntegerPtr, 1, 0),
+		     ExpColNo [index]);
+               end;
+            end;
+         end
+         else if exptype = LongPtr then begin
+            IOitem := EvalConvert (LongPtr, IOitem);
+            IOitem := MakeVal (IOitem);
+            if (IOwidth = -1) then begin
+	       addcontrol ('%16ld');
+            end
+            else begin
+	       addcontrol ('%*ld');
+            end;
+         end
+         else if exptype = DoublePtr then begin
+            IOitem := MakeVal (IOitem);
+            if (IOwidth = -1) then begin
+	       addcontrol ('%21.13e');
+            end
+            else begin
+               if IOdigits = -1 then begin
+	          addcontrol ('%*.*e');
+                  IOdigits := CallMax (
+                     CopyTree (IOwidth),
+                     node3 (LitOp, IntegerPtr, 8, 0),
+                     node3 (LitOp, IntegerPtr, 1, 0),
+		     ExpColNo [index]);
+                  IOwidth := CallMax (
+                     IOwidth,
+                     node3 (LitOp, IntegerPtr, 0, 0),
+                     node3 (LitOp, IntegerPtr, 9, 0),
+		     ExpColNo [index]);
+               end
+               else begin
+	          addcontrol ('%*.*f');
+                  IOwidth := CallMax (
+                     IOwidth,
+                     node3 (LitOp, IntegerPtr, 0, 0),
+                     node3 (LitOp, IntegerPtr, 1, 0),
+		     ExpColNo [index]);
+               end;
+            end;
+         end
+         else if exptype = PacPtr then begin
+            TypeFieldOf (IOitem) := PtrToCharPtr;
+            if IOwidth = -1 then begin
+	       addcontrol ('%s');
+	    end
+	    else if MinorOperatorOf (IOwidth) = LitOp then begin
+	       if Node1parameterOf (IOwidth) < Node2parameterOf (IOitem)
+	       then
+		  i := Node1parameterOf (IOwidth)
+	       else
+		  i := Node2parameterOf (IOitem);
+	       IOdigits := node3 (LitOp, IntegerPtr, i, 0);
+	       addcontrol ('%*.*s');
+	    end
+	    else begin
+	       Temp :=  node3 (
+			   LitOp,
+			   IntegerPtr,
+			   Node2parameterOf (IOitem),
+			   0);
+	       Evalwidthdigits (Temp);
+	       addcontrol ('%*.*s');
+            end;
+            MakeRef (IOitem);
+            IOitem := MakeVal (IOitem);
+         end
+         else if IsCharArray (exptype) then begin
+            if  (* control ['s'] and *)
+               (not control ['y']) and
+               ((not IsPac (exptype)) or
+               (STab [STab [exptype].SIndex].SLowRange <> 1) or
+               (STab [STab [exptype].SIndex].SHighRange = 1))
+            then begin
+               ErrorMsg (144, ExpColNo [index]);
+            end;
+            if IOwidth = -1 then begin
+               IOdigits := node3 (
+                  LitOp,
+                  IntegerPtr,
+                  LengthOfCharArray (exptype),
+                  0);
+               IOwidth := CopyTree (IOdigits);
+            end
+	    else if MinorOperatorOf (IOwidth) = LitOp then begin
+	       if Node1parameterOf (IOwidth) < LengthOfCharArray (exptype)
+	       then
+		  i := Node1parameterOf (IOwidth)
+	       else
+		  i := LengthOfCharArray (exptype);
+	       IOdigits := node3 (LitOp, IntegerPtr, i, 0);
+	    end
+	    else begin
+               Temp := node3 (
+			  LitOp,
+			  IntegerPtr,
+			  LengthOfCharArray (exptype),
+			  0);
+	       Evalwidthdigits (Temp);
+	    end;
+	    addcontrol ('%*.*s');
+            MakeRef (IOitem);
+         end
+         else if IsString (exptype) then begin
+            if IsLval (ExpVal [index]) then begin
+               ItemTemp := 0;
+            end
+            else begin
+               ItemTemp := GetTemporary (ProcIndex, exptype, false);
+               Temp := EvalStringExp (
+                     node3 (IdOp, exptype, ItemTemp, 0),
+                     IOitem);
+               TempList := LinkChain (TempList, Temp);
+               IOitem := UnaryExpression (
+                  LoadOp,
+                  exptype,
+                  node3 (IdOp, exptype, ItemTemp, 0),
+                  0,
+                  0);
+            end;
+            if IOwidth = -1 then begin
+               IOdigits := EvalConvert (IntegerPtr, StringElement (CopyTree (IOitem), 0));
+               IOwidth := EvalConvert (IntegerPtr, StringElement (CopyTree (IOitem), 0));
+            end
+	    else if MinorOperatorOf (IOwidth) = LitOp then begin
+	       if Node1parameterOf (IOwidth) < LengthOfString (exptype)
+	       then
+		  i := Node1parameterOf (IOwidth)
+	       else
+		  i := LengthOfString (exptype);
+	       IOdigits := node3 (LitOp, IntegerPtr, i, 0);
+	    end
+	    else begin
+	       Temp := node3 (
+                          LitOp,
+                          IntegerPtr,
+                          LengthOfString (exptype),
+                          0);
+	       Evalwidthdigits (Temp);
+	    end;
+	    addcontrol ('%*.*s');
+            if ItemTemp <> 0 then begin
+               FreeTemporary (ItemTemp);
+            end;
+            IOitem := StringElement (IOitem, 1);
+            MakeRef (IOitem);
+         end
+         else if
+            IsEnum (exptype) or
+            (exptype = BooleanPtr)
+         then begin
+            IOitem := CallNam (
+               IOitem,
+               UnaryExpression (
+                  LoadadrOp,
+                  AnyPtrPtr,
+                  node3 (
+                     IdOp,
+                     IntegerPtr,
+                     CreateEnumBlock (exptype),
+                     0),
+                  0,
+                  0));
+            if IOwidth = -1 then begin
+	       addcontrol ('%s');
+            end
+            else begin
+               ItemTemp := GetTemporary (ProcIndex, AnyPtrPtr, false);
+               Temp := LongStatement (
+                  StoreOp,
+                  AnyPtrPtr,
+                  node3 (IdOp, AnyPtrPtr, ItemTemp, 0),
+                  IOitem,
+                  0,
+                  0,
+                  CardCount);
+               TempList := LinkChain (TempList, Temp);
+               IOitem := UnaryExpression (
+                  LoadOp,
+                  AnyPtrPtr,
+                  node3 (IdOp, AnyPtrPtr, ItemTemp, 0),
+                  0,
+                  0);
+	       Temp := CallStrlen (
+                          UnaryExpression (
+                          LoadOp,
+                          AnyPtrPtr,
+                          node3 (IdOp, AnyPtrPtr, ItemTemp, 0),
+                          0,
+                          0));
+	       Evalwidthdigits (Temp);
+	       addcontrol ('%*.*s');
+            end;
+            IOitem := MakeVal (IOitem);
+         end
+         else if
+            IsOrdinal (exptype) or
+            IsPointer (exptype)
+         then begin
+            IOitem := EvalConvert (IntegerPtr, IOitem);
+            IOitem := MakeVal (IOitem);
+            if (IOwidth = -1) then begin
+	       addcontrol ('%10d');
+            end
+            else begin
+	       addcontrol ('%*d');
+            end;
+         end
+         else begin
+            ErrorMsg (1, ExpColNo [index]);
+            IOitem := -1;
+         end  (* if *);
+         if IOitem <> -1 then begin
+            if IOwidth <> -1 then begin
+               AppendList (ExpList, IntegerPtr, ParamList, MakeVal (IOwidth));
+               IOcount := IOcount + 1;
+            end;
+            if IOdigits <> -1 then begin
+               AppendList (ExpList, IntegerPtr, ParamList, MakeVal (IOdigits));
+               IOcount := IOcount + 1;
+            end;
+            AppendList (ExpList, exptype, ParamList, IOitem);
+            IOcount := IOcount + 1;
+         end;
+         index := index + 1;
+      end  (* while *);
+      Node1parameterOf (IOcontrol) := EnterString (IOctlstring [0],
+						   IOctllen);
+      Temp := LongStatement (
+         Sys0Op,
+         IntegerPtr,
+         -1,
+         ParamList,
+         EnterConstantString ('_fprintf'),
+         IOcount,
+         CardCount);
+      TempList := LinkChain (TempList, Temp);
+      if (sysproc = SysWriteln) or (sysproc = SysMessage) then begin
+         Temp := MakeList (
+            ExpList,
+            FileVarType,
+            RefFile (FileTemp),
+            -1,
+            -1);
+         Temp := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            Temp,
+            EnterConstantString ('_sql__writeln'),
+            1,
+            CardCount);
+         TempList := LinkChain (TempList, Temp);
+      end;
+   end
+   else begin
+      FileComponentStype := STab [FileVarType].SComponent;
+      FileComponentType := PrimType (FileComponentStype);
+      FilePtr := GetTemporary (ProcIndex, IntegerPtr, false);
+      Temp := LongStatement (
+                  StoreOp,
+                  IntegerPtr,
+                  node3 (IdOp, IntegerPtr, FilePtr, 0),
+		  UnaryExpression (
+		     LoadOp,
+		     IntegerPtr,
+	             UnaryExpression (
+	                DerefOp,
+	                IntegerPtr,
+	                UnaryExpression (
+		           LoadOp,
+		           TypePtrIorechd,
+		           node3 (IdOp, TypePtrIorechd, FileTemp, 0),
+		           0, 0),
+		        0, 0),
+		     0, 0),
+                  0, 0,
+                  CardCount);
+      TempList := LinkChain (TempList, Temp);
+      while index <= last do begin
+	 NodeIndex := ExpVal [index];
+	 if ((MinorOperator = WocthexOp) or
+	    (MinorOperator = WexpOp)) then
+	    ErrorMsg (31, ExpColNo [index]);
+         Temp := GenStore (
+	    UnaryExpression (
+	       DerefOp,
+	       FileComponentType,
+	       UnaryExpression (
+		  LoadOp,
+		  IntegerPtr,
+		  node3 (IdOp, IntegerPtr, FilePtr, 0),
+		  0,
+		  0),
+	       0,
+	       0),
+            FileComponentType,
+            FileComponentStype,
+            ExpColNo [index],
+            ExpVal [index],
+            ExpType [index],
+            ExpStype [index],
+            ExpColNo [index],
+            CardCount);
+         TempList := LinkChain (TempList, Temp);
+         TempList := LinkChain (TempList, CallPut (RefFile (FileTemp)));
+         index := index + 1;
+      end  (* while *);
+(**
+      if (sysproc = SysWriteln) and (IsCharFile (FileVarType)) then begin
+         Temp := GenStore (
+            CallFnil (RefFile (FileTemp), FileComponentType),
+            FileComponentType,
+            FileComponentStype,
+            -1,
+            node3 (LitOp, FileComponentType, $0a, 0),
+            FileComponentType,
+            FileComponentStype,
+            -1,
+            CardCount);
+         TempList := LinkChain (TempList, Temp);
+         TempList := LinkChain (TempList, CallPut (RefFile (FileTemp)));
+      end
+      else
+ **)
+      if sysproc <> SysWrite then begin
+         ErrorMsg (31, ExpColNo [StartCnt [ParmIndex]]);
+      end;
+   end;
+   FreeTemporary (FileTemp);
+   EvalWrite := TempList;
+end  (* EvalWrite *);
+
+
+function EvalFlush
+   (p: integer)
+   : HdgRange;
+
+var
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [p] = 0 then begin
+      NodeIndex := UnaryExpression (
+         StorepadrOp,
+         TextPtr,
+         node3 (IdOp, TextPtr, OutputPtr, 0),
+         0,
+         0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   end
+   else begin
+      NodeIndex := ExpVal [StartCnt [p]];
+      MakeRef (NodeIndex);
+   end;
+   EvalFlush := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__fflush'),
+      1,
+      CardCount);
+end  (* EvalFlush *);
+
+
+function EvalRemove
+   (p: integer)
+   : HdgRange;
+
+var
+   FileName,
+   NameLen,
+   NodeIndex: HdgRange;
+   FileNameTyp: SymbolTableRange;
+   index: integer;
+
+begin
+   if cnt [p] <> 1 then begin
+      ErrorMsg (8, -1);
+      EvalRemove := -1;
+   end
+   else begin
+      index := StartCnt [p];
+      FileName := ExpVal [index];
+      FileNameTyp := ExpType [index];
+      if (FileNameTyp = CharPtr) and IsConstant (FileName) then begin
+         CharToPac (FileName);
+         FileNameTyp := PacPtr;
+      end;
+      if IsCharArray (FileNameTyp) then begin
+         if IsConstant (FileName) then begin
+            MakeRef (FileName);
+            NodeIndex := FileName;
+            NameLen := node3 (
+               LitOp,
+               IntegerPtr,
+               GetStringLength (Node1parameter),
+               0);
+         end
+         else begin
+            MakeRef (FileName);
+            NameLen := node3 (
+               LitOp,
+               IntegerPtr,
+               LengthOfCharArray (FileNameTyp),
+               0);
+         end;
+         EvalRemove := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            MakeList (ExpList, IntegerPtr, FileName, NameLen, -1),
+            EnterConstantString ('_sql__del'),
+            2,
+            CardCount);
+      end
+      else begin
+         ErrorMsg (133, ExpColNo [index]);
+         EvalRemove := -1;
+      end;
+   end;
+end  (* EvalRemove *);
+
+
+function EvalEoln
+   (p: integer)
+   : HdgRange;
+
+var
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [p] = 0 then begin
+      NodeIndex := UnaryExpression (
+         StorepadrOp,
+         TextPtr,
+         node3 (IdOp, TextPtr, InputPtr, 0),
+         0,
+         0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   end
+   else begin
+      NodeIndex := ExpVal [StartCnt [p]];
+      MakeRef (NodeIndex);
+   end;
+   if not IsTextFile (TypeField) then begin
+      ErrorMsg (31, ExpColNo [StartCnt [p]]);
+   end;
+   EvalEoln := LongStatement (
+      Sys0Op,
+      BooleanPtr,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__endol'),
+      1,
+      CardCount);
+end  (* EvalEoln *);
+
+
+function EvalEof
+   (p: integer)
+   : HdgRange;
+
+var
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [p] = 0 then begin
+      NodeIndex := UnaryExpression (
+         StorepadrOp,
+         TextPtr,
+         node3 (IdOp, TextPtr, InputPtr, 0),
+         0,
+         0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+   end
+   else begin
+      NodeIndex := ExpVal [StartCnt [p]];
+      MakeRef (NodeIndex);
+   end;
+   EvalEof := LongStatement (
+      Sys0Op,
+      BooleanPtr,
+      -1,
+      MakeList (ExpList, TypeField, NodeIndex, -1, -1),
+      EnterConstantString ('_sql__endof'),
+      1,
+      CardCount);
+end  (* EvalEof *);
+
+
+function EvalArgc
+   (p: integer)
+   : HdgRange;
+
+var
+   NodeIndex: integer;
+
+begin
+   NodeIndex := node3 (IdOp, IntegerPtr, _ArgcPtr, 0);
+   EvalArgc := NodeIndex;
+end  (* EvalArgc *);
+
+
+function EvalArgv
+   (p: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   temp,
+   ArgNo,
+   ArgDest,
+   DestSize: HdgRange;
+
+begin
+   index := StartCnt [p];
+   ArgNo := ExpVal [index];
+   index := index + 1;
+   ArgDest := ExpVal [index];
+   if (not AssgnmntCompatible (IntegerPtr, ExpVal [index - 1])) then begin
+       ErrorMsg (1, ExpColNo [index - 1]);
+       EvalArgv := -1;
+       end
+   else if (IsCharArray (ExpType [index])) then begin
+       MakeRef (ArgDest);
+       DestSize := node3 (LitOp, IntegerPtr, LengthOfCharArray (ExpType [index]), 0);
+       temp := MakeList (ExpList, IntegerPtr, ArgNo, ArgDest, -1);
+       AppendList (ExpList, IntegerPtr, temp, DestSize);
+       temp := LongStatement (
+      		Sys0Op,
+      		IntegerPtr,
+      		-1,
+      		temp,
+      		EnterConstantString ('_sql__rgv'),
+      		3,
+      		CardCount);
+       EvalArgv := temp
+       end
+   else begin
+       ErrorMsg (133, ExpColNo [index]);
+       EvalArgv := -1;
+       end;
+end  (* EvalArgv *);
+
+
+function EvalEnvp
+   (p: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   temp,
+   EnvName,
+   EnvNameSize,
+   EnvDest,
+   DestSize: HdgRange;
+   EnvNameTyp: SymbolTableRange;
+   length: integer;
+
+begin
+   index := StartCnt [p];
+   EnvName := ExpVal [index];
+   EnvNameTyp := ExpType [index];
+   index := index + 1;
+   EnvDest := ExpVal [index];
+   if ((not IsCharArray (EnvNameTyp)) and
+       (EnvNameTyp <> PacPtr)) and
+       (EnvNameTyp <> CharPtr) then begin
+       ErrorMsg (1, ExpColNo [index - 1]);
+       EvalEnvp := -1;
+   end
+   else if (IsCharArray (ExpType [index])) then begin
+       MakeRef (EnvName);
+       if (EnvNameTyp = PacPtr) or (EnvNameTyp = CharPtr) then
+          EnvNameSize := node3 (LitOp, IntegerPtr,
+                                GetStringLength(Node1parameterOf (ExpVal [index - 1])), 0)
+       else
+          EnvNameSize := node3 (LitOp, IntegerPtr, LengthOfCharArray (EnvNameTyp), 0);
+       MakeRef (EnvDest);
+       DestSize := node3 (LitOp, IntegerPtr, LengthOfCharArray (ExpType [index]), 0);
+       temp := MakeList (ExpList, IntegerPtr, EnvName, EnvNameSize, EnvDest);
+       AppendList (ExpList, IntegerPtr, temp, DestSize);
+       temp := LongStatement (
+      		Sys0Op,
+      		IntegerPtr,
+      		-1,
+      		temp,
+      		EnterConstantString ('_sql__env'),
+      		4,
+      		CardCount);
+       EvalEnvp := temp
+       end
+   else begin
+       ErrorMsg (133, ExpColNo [index]);
+       EvalEnvp := -1;
+       end;
+end  (* EvalEnvp *);
+
+function EvalNew
+   (p1,
+    p2: ParseStackRange)
+   : HdgRange;
+
+var
+   index: integer;
+   temp,
+   NodeIndex,
+   ItemSize: HdgRange;
+
+begin
+   if cnt [p2] > 0 then begin
+      index := StartCnt [p2];
+      NodeIndex := ExpVal [index];
+      if IsPointer (ExpType [index]) and
+	 (MinorOperator <> LitOp) then begin
+          MakeRef (NodeIndex);
+          ItemSize := node3 (
+             LitSizeOp,
+             IntegerPtr,
+             STab [STab [ExpType [index]].SDomain].SType,
+             0);
+          temp := MakeList (ExpList, IntegerPtr, NodeIndex, ItemSize, -1);
+          temp := LongStatement (
+             Sys0Op,
+             IntegerPtr,
+             -1,
+             temp,
+             EnterConstantString ('_sql__new'),
+             2,
+             CardCount);
+          EvalNew := temp;
+       end else begin
+	  ErrorMsg (1, ExpColNo [index]);
+	  EvalNew := -1;
+	  end
+   end
+   else begin
+      ErrorMsg (8, ColNo [p1]);
+      EvalNew := -1;
+   end;
+end  (* EvalNew *);
+
+
+function EvalDispose
+   (p1,
+    p2: ParseStackRange)
+   : HdgRange;
+
+var
+   index: integer;
+   temp,
+   NodeIndex,
+   ItemSize: HdgRange;
+   ItemTemp: SymbolTableRange;
+
+begin
+   if cnt [p2] > 0 then begin
+      index := StartCnt [p2];
+      NodeIndex := ExpVal [index];
+      if MinorOperator = LoadOp then begin
+         ItemTemp := 0;
+         temp := -1;
+         MakeRef (NodeIndex);
+      end
+      else begin
+         ItemTemp := GetTemporary (ProcIndex, TypeField, false);
+         temp := LongStatement (
+            StoreOp,
+            TypeField,
+            node3 (IdOp, TypeField, ItemTemp, 0),
+            NodeIndex,
+            0,
+            0,
+            CardCount);
+         NodeIndex := UnaryExpression (
+            StorepadrOp,
+            TypeField,
+            node3 (IdOp, TypeField, ItemTemp, 0),
+            0,
+            0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+      end;
+      ItemSize := node3 (
+         LitSizeOp,
+         IntegerPtr,
+         STab [STab [ExpType [index]].SDomain].SType,
+         0);
+      NodeIndex := MakeList (ExpList, IntegerPtr, NodeIndex, ItemSize, -1);
+      temp := LinkChain (
+         temp,
+         LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__dispse'),
+            1,
+            CardCount));
+      EvalDispose := temp;
+   end
+   else begin
+      ErrorMsg (8, ColNo [p1]);
+      EvalDispose := -1;
+   end;
+end  (* EvalDispose *);
+
+
+function EvalPut
+   (p: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   FileExp: HdgRange;
+
+begin
+   index := StartCnt [p];
+   FileExp := ExpVal [index];
+   MakeRef (FileExp);
+   EvalPut := CallPut (FileExp);
+end  (* EvalPut *);
+
+
+function EvalGet
+   (p: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   FileExp: HdgRange;
+
+begin
+   index := StartCnt [p];
+   FileExp := ExpVal [index];
+   MakeRef (FileExp);
+   EvalGet := CallUGet (FileExp);
+end  (* EvalGet *);
+
+
+function EvalPage
+   (p: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   FileExp: HdgRange;
+#ifdef PYRAMID_DOUBTFUL
+#else
+   NodeIndex: HdgRange;
+#endif
+
+begin
+   if cnt [p] = 0 then begin
+      FileExp := UnaryExpression (
+         StorepadrOp,
+         TextPtr,
+         node3 (IdOp, TextPtr, OutputPtr, 0),
+         0,
+         0);
+#ifdef PYRAMID_DOUBTFUL
+#else
+	 SaveIndex := NodeIndex;
+	 NodeIndex := FileExp;
+	 NodeIndex := Unary1operand;
+	 if ( MinorOperator = IdOp ) then begin
+		 with STab [Node1parameter] do begin
+		     if (SClass = AUTO) or (SClass = REGISTER) then
+		 	   SClass := AUTONR;
+		 end;
+	 end;
+	 NodeIndex := SaveIndex;
+#endif
+      EvalPage := CallPage (CallUnit (FileExp));
+   end
+   else begin
+      index := StartCnt [p];
+      if ExpType [index] <> TextPtr then begin
+	  ErrorMsg (31, ExpColNo [index]);
+	  StackError (p);
+	  EvalPage := -1;
+	  end
+      else begin
+          FileExp := ExpVal [index];
+          MakeRef (FileExp);
+          EvalPage := CallPage (CallUnit (FileExp));
+      end;
+   end;
+end  (* EvalPage *);
+
+
+procedure EvalMath
+   (sysproc,
+    p1,
+    p2: integer);
+
+var
+   routine: integer;
+
+begin
+   case sysproc of
+      SysArctan: begin
+         routine := EnterConstantString ('_sql__atan');
+      end;
+      SysCos: begin
+         routine := EnterConstantString ('_sql__cos');
+      end;
+      SysExp: begin
+         routine := EnterConstantString ('_sql__exp');
+      end;
+      SysLn: begin
+         routine := EnterConstantString ('_sql__ln');
+      end;
+      SysSin: begin
+         routine := EnterConstantString ('_sql__sin');
+      end;
+      SysSqrt: begin
+         routine := EnterConstantString ('_sql__sqrt');
+      end;
+   end  (* case *);
+   g1 [p1] := LongStatement (
+      Sys0Op,
+      DoublePtr,
+      -1,
+      MakeList (
+         ExpList,
+         DoublePtr,
+         EvalConvert (DoublePtr, ExpVal [StartCnt [p2]]),
+         -1,
+         -1),
+      routine,
+      1,
+      CardCount);
+   SubType [p1] := DoublePtr;
+   TypeType [p1] := DoublePtr;
+end  (* EvalMath *);
+
+
+function EvalPackUnpack
+   (sysstring: integer;
+    i,
+    a,
+    z: integer)
+   : HdgRange;
+
+var
+   m,
+   n,
+   u,
+   v: integer;
+   typ, typa, typz: SymbolTableRange;
+   temp: HdgRange;
+
+begin
+   typa := ExpType [a];
+   typz := ExpType [z];
+   if STab [typa].SType <> ArrayType then
+       ErrorMsg (21, ExpColNo [a]);
+   if STab [typz].SType <> ArrayType then
+       ErrorMsg (21, ExpColNo [z]);
+   if STab [typa].SElement <> STab [typz].SElement then
+       ErrorMsg (0, ExpColNo [z]);
+   temp := MakeList (ExpList, IntegerPtr, -1, -1, -1);
+   AppendList (ExpList, IntegerPtr, temp, ExpVal [i]);
+   MakeRef (ExpVal [a]);
+   AppendList (ExpList, IntegerPtr, temp, ExpVal [a]);
+   MakeRef (ExpVal [z]);
+   AppendList (ExpList, IntegerPtr, temp, ExpVal [z]);
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      node3 (LitSizeOp, IntegerPtr, STab [typa].SElement, 0));
+   typ := STab [typa].SIndex;
+   if not AssgnmntCompatible (PrimType (typ), ExpVal [i]) then
+       ErrorMsg (1, ExpColNo [i]);
+   m := STab [typ].SLowRange;
+   n := STab [typ].SHighRange;
+   typ := STab [ExpType [z]].SIndex;
+   u := STab [typ].SLowRange;
+   v := STab [typ].SHighRange;
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      node3 (LitOp, IntegerPtr, m, 0));
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      node3 (LitOp, IntegerPtr, (n - m) - (v - u), 0));
+   AppendList (
+      ExpList,
+      IntegerPtr,
+      temp,
+      node3 (LitSizeOp, IntegerPtr, ExpType [z], 0));
+   EvalPackUnpack := LongStatement (
+      Sys0Op,
+      IntegerPtr,
+      -1,
+      temp,
+      sysstring,
+      0,
+      CardCount);
+end  (* EvalPackUnpack *);
+
+
+function EvalDate
+   (p: integer)
+   : HdgRange;
+
+var
+   DateString: HdgRange;
+   index: integer;
+
+begin
+   if cnt [p] <> 1 then begin
+      ErrorMsg (8, -1);
+      EvalDate := -1;
+   end
+   else begin
+      index := StartCnt [p];
+      DateString := ExpVal [index];
+      if IsCharArray (ExpType [index]) then begin
+         if IsLval (DateString) then begin
+            MakeRef (DateString);
+            EvalDate := LongStatement (
+               Sys0Op,
+               IntegerPtr,
+               -1,
+               MakeList (ExpList, IntegerPtr, DateString, -1, -1),
+               EnterConstantString ('_sql__date'),
+               1,
+               CardCount);
+         end
+         else begin
+            ErrorMsg (133, ExpColNo [index]);
+            EvalDate := -1;
+         end;
+      end
+      else begin
+         ErrorMsg (133, ExpColNo [index]);
+         EvalDate := -1;
+      end;
+   end;
+end  (* EvalDate *);
+
+
+function EvalTime
+   (p: integer)
+   : HdgRange;
+
+var
+   TimeString: HdgRange;
+   index: integer;
+
+begin
+   if cnt [p] <> 1 then begin
+      ErrorMsg (8, -1);
+      EvalTime := -1;
+   end
+   else begin
+      index := StartCnt [p];
+      TimeString := ExpVal [index];
+      if IsCharArray (ExpType [index]) then begin
+         if IsConstant (TimeString) then begin
+            ErrorMsg (133, ExpColNo [index]);
+            EvalTime := -1;
+         end
+         else begin
+            MakeRef (TimeString);
+            EvalTime := LongStatement (
+               Sys0Op,
+               IntegerPtr,
+               -1,
+               MakeList (ExpList, IntegerPtr, TimeString, -1, -1),
+               EnterConstantString ('_sql__time'),
+               1,
+               CardCount);
+         end;
+      end
+      else begin
+         ErrorMsg (133, ExpColNo [index]);
+         EvalTime := -1;
+      end;
+   end;
+end  (* EvalTime *);
+
+
+function EvalLinelimit
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   NodeIndex,
+   FileVar,
+   LineLimit: HdgRange;
+
+begin
+   if cnt [ParmIndex] = 2 then begin
+      index := StartCnt [ParmIndex];
+      FileVar := ExpVal [index];
+      if IsTextFile (ExpType [index]) then begin
+         MakeRef (FileVar);
+         index := index + 1;
+         if ExpType [index] = IntegerPtr then begin
+            LineLimit := ExpVal [index];
+            NodeIndex := MakeList (ExpList, IntegerPtr, FileVar, LineLimit, -1);
+            NodeIndex := LongStatement (
+               Sys0Op,
+               IntegerPtr,
+               -1,
+               NodeIndex,
+               EnterConstantString ('_sql__lexe'),
+               2,
+               CardCount);
+            EvalLinelimit := NodeIndex;
+         end
+         else begin
+            ErrorMsg (0, ExpColNo [index]);
+            EvalLinelimit := -1;
+         end;
+      end
+      else begin
+         ErrorMsg (31, ExpColNo [index]);
+         EvalLinelimit := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalLinelimit := -1;
+   end;
+end  (* EvalLinelimit *);
+
+
+function EvalCard
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   typ,
+   temp: SymbolTableRange;
+   Set,
+   size: HdgRange;
+
+begin
+   if cnt [ParmIndex] = 1 then begin
+      index := StartCnt [ParmIndex];
+      typ := ExpType [index];
+      if IsSet (typ) then begin
+         Set := ExpVal [index];
+         if IsLval (Set) then begin
+            temp := 0;
+            MakeRef (Set);
+         end
+         else begin
+            temp := GetTemporary (ProcIndex, typ, false);
+            Set := UnaryExpression (
+               StorepadrOp,
+               typ,
+               UnaryExpression (
+                  DerefOp,
+                  typ,
+                  EvalSetExp (
+                     node3 (IdOp, typ, temp, 0),
+                     Set),
+                  0,
+                  0),
+               0,
+               0);
+         end;
+         size := UnaryExpression (
+            StorepOp,
+            IntegerPtr,
+            node3 (LitSizeOp, IntegerPtr, typ, 0),
+            0,
+            0);
+         EvalCard := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            MakeList (ExpList, IntegerPtr, Set, size, -1),
+            EnterConstantString ('_sql__ca'),
+            2,
+            CardCount);
+         if temp <> 0 then begin
+            FreeTemporary (temp);
+         end;
+      end
+      else begin
+         ErrorMsg (0, ExpColNo [index]);
+         EvalCard := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalCard := -1;
+   end;
+end  (* EvalCard *);
+
+
+function EvalExpo
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [ParmIndex] = 1 then begin
+      index := StartCnt [ParmIndex];
+      if AssgnmntCompatible (DoublePtr, ExpVal [index]) then begin
+         NodeIndex := MakeList (
+            ExpList,
+            IntegerPtr,
+            UnaryExpression (
+               StorepOp,
+               DoublePtr,
+               EvalConvert (DoublePtr, ExpVal [index]),
+               0,
+               0),
+            -1,
+            -1);
+         NodeIndex := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__expp'),
+            1,
+            CardCount);
+         EvalExpo := NodeIndex;
+      end
+      else begin
+         ErrorMsg (0, ExpColNo [index]);
+         EvalExpo := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalExpo := -1;
+   end;
+end  (* EvalExpo *);
+
+
+function EvalRandom
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [ParmIndex] = 1 then begin
+      index := StartCnt [ParmIndex];
+      if AssgnmntCompatible (DoublePtr, ExpVal [index]) then begin
+         NodeIndex := MakeList (
+            ExpList,
+            IntegerPtr,
+            UnaryExpression (
+               StorepOp,
+               DoublePtr,
+               EvalConvert (DoublePtr, ExpVal [index]),
+               0,
+               0),
+            -1,
+            -1);
+         NodeIndex := LongStatement (
+            Sys0Op,
+            DoublePtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__rd'),
+            1,
+            CardCount);
+         EvalRandom := NodeIndex;
+      end
+      else begin
+         ErrorMsg (0, ExpColNo [index]);
+         EvalRandom := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalRandom := -1;
+   end;
+end  (* EvalRandom *);
+
+
+function EvalSeed
+   (ParmIndex: integer)
+   : HdgRange;
+
+var
+   index: integer;
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [ParmIndex] = 1 then begin
+      index := StartCnt [ParmIndex];
+      if AssgnmntCompatible (IntegerPtr, ExpVal [index]) then begin
+         NodeIndex := MakeList (
+            ExpList,
+            IntegerPtr,
+            UnaryExpression (
+               StorepOp,
+               IntegerPtr,
+               EvalConvert (IntegerPtr, ExpVal [index]),
+               0,
+               0),
+            -1,
+            -1);
+         NodeIndex := LongStatement (
+            Sys0Op,
+            IntegerPtr,
+            -1,
+            NodeIndex,
+            EnterConstantString ('_sql__srand'),
+            1,
+            CardCount);
+         EvalSeed := NodeIndex;
+      end
+      else begin
+         ErrorMsg (0, ExpColNo [index]);
+         EvalSeed := -1;
+      end;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      EvalSeed := -1;
+   end;
+end  (* EvalSeed *);
+
+
+procedure EvalLength
+   (p1,
+    p2: ParseStackRange);
+
+label
+   100;
+
+var
+   index: integer;
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [p2] = 1 then begin
+      index := StartCnt [p2];
+      if not AssgnmntCompatible (StringPtr, ExpVal [index]) then begin
+         ErrorMsg (0, ExpColNo [index]);
+         StackError (p1);
+         goto 100;
+      end;
+      NodeIndex := ExpVal [index];
+      if IsConstant (NodeIndex) then begin
+	 g1 [p1] := node3 (LitOp, IntegerPtr, Node2parameter, 0);
+      end
+      else begin
+	 g1 [p1] := EvalConvert (IntegerPtr, StringElement (NodeIndex, 0));
+      end;
+      SubType [p1] := IntegerPtr;
+      TypeType [p1] := IntegerPtr;
+   end
+   else begin
+      ErrorMsg (8, ColNo [p1]);
+      StackError (p1);
+      goto 100;
+   end;
+   100:  (* error return *)
+end  (* EvalLength *);
+
+
+procedure EvalConcat
+   (p1,
+    p2: ParseStackRange);
+
+label
+   100;
+
+var
+   i,
+   index: integer;
+   NodeIndex: HdgRange;
+
+begin
+   if cnt [p2] >= 2 then begin
+      index := StartCnt [p2];
+      if not AssgnmntCompatible (StringPtr, ExpVal [index]) then begin
+         ErrorMsg (0, ExpColNo [index]);
+         StackError (p1);
+         goto 100;
+      end;
+      NodeIndex := EvalConvert (StringPtr, ExpVal [index]);
+      for i := 1 to cnt [p2] - 1 do begin
+         if not AssgnmntCompatible (StringPtr, ExpVal [index + i]) then begin
+            ErrorMsg (0, ExpColNo [index + i]);
+            StackError (p1);
+            goto 100;
+         end;
+         NodeIndex := BinaryExpression (
+            ConcatOp,
+            StringPtr,
+            NodeIndex,
+            EvalConvert (StringPtr, ExpVal [index + i]));
+      end;
+      g1 [p1] := NodeIndex;
+      SubType [p1] := StringPtr;
+      TypeType [p1] := StringPtr;
+   end
+   else begin
+      ErrorMsg (8, ColNo [p1]);
+      StackError (p1);
+      goto 100;
+   end;
+   100:  (* error return *)
+end  (* EvalConcat *);
+
+
+procedure EvalCopy
+   (p1,
+    p2: ParseStackRange);
+
+label
+   100;
+
+var
+   index: integer;
+
+begin
+   if cnt [p2] = 3 then begin
+      index := StartCnt [p2];
+      if not AssgnmntCompatible (StringPtr, ExpVal [index]) then begin
+         ErrorMsg (0, ExpColNo [index]);
+         StackError (p1);
+         goto 100;
+      end;
+      if not AssgnmntCompatible (IntegerPtr, ExpVal [index + 1]) then begin
+         ErrorMsg (0, ExpColNo [index + 1]);
+         StackError (p1);
+         goto 100;
+      end;
+      if not AssgnmntCompatible (IntegerPtr, ExpVal [index + 2]) then begin
+         ErrorMsg (0, ExpColNo [index + 2]);
+         StackError (p1);
+         goto 100;
+      end;
+      g1 [p1] := UnaryExpression (
+         SubStrOp,
+         StringPtr,
+         EvalConvert (StringPtr, ExpVal [index]),
+         EvalConvert (IntegerPtr, ExpVal [index + 1]),
+         EvalConvert (IntegerPtr, ExpVal [index + 2]));
+      SubType [p1] := StringPtr;
+      TypeType [p1] := StringPtr;
+   end
+   else begin
+      ErrorMsg (8, -1);
+      StackError (p1);
+   end;
+   100:
+end  (* EvalCopy *);
+
+procedure EvalPred
+   (p1,
+    p2: integer);
+
+var
+   index : integer;
+   typ,
+   styp : SymbolTableRange;
+   NodeIndex : HdgRange;
+
+begin
+   index := StartCnt [p2];
+   typ := ExpType [index];
+   styp := ExpStype [index];
+   if (typ = FloatPtr) or
+      (typ = LongPtr) or
+      (typ = DoublePtr) then begin
+       ErrorMsg (9, ExpColNo [index]);
+       StackError (p1);
+   end else begin
+      NodeIndex := EvalConvert (IntegerPtr, ExpVal [index]);
+      if IsConstant (NodeIndex) then begin
+	 if control ['r'] and (Node1parameter = STab [styp].SLowRange) then
+	    ErrorMsg(148, ColNo [p1])
+	 else
+	    Node1parameter := Node1parameter - 1;
+      end
+      else begin
+	 if control ['r'] then begin
+	    NodeIndex := MakeList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 ( LitOp, IntegerPtr, STab [styp].SLowRange, 0),
+		     node3 ( LitOp, IntegerPtr, STab [styp].SHighRange, 0));
+	    AppendList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 (LoadstrOp, PtrToCharPtr, CurrentFile, 0));
+	    AppendList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 (LitOp, IntegerPtr, CardNum[p1], 0));
+	    NodeIndex := LongStatement (
+		     Sys0Op,
+		     IntegerPtr,
+		     -1,
+		     NodeIndex,
+		     EnterConstantString ('_sql__pred'),
+		     5,
+		     CardCount);
+	 end
+	 else
+	    NodeIndex := BinaryExpression (
+		    SubtOp,
+		    IntegerPtr,
+		    NodeIndex,
+		    node3 (LitOp, IntegerPtr, 1, 0));
+      end;
+      g1 [p1] := EvalConvert ( typ, NodeIndex);
+      SubType [p1] := ExpType [index];
+      TypeType [p1] := ExpType [index];
+   end;
+end; (* EvalPred *)
+
+procedure EvalSucc
+   (p1,
+    p2: integer);
+
+var
+   index : integer;
+   typ,
+   styp : SymbolTableRange;
+   NodeIndex : HdgRange;
+
+begin
+   index := StartCnt [p2];
+   typ := ExpType [index];
+   styp := ExpStype [index];
+   if (typ = FloatPtr) or
+      (typ = LongPtr) or
+      (typ = DoublePtr) then begin
+       ErrorMsg (9, ExpColNo [index]);
+       StackError (p1);
+   end else begin
+      NodeIndex := EvalConvert (IntegerPtr, ExpVal [index]);
+      if IsConstant (NodeIndex) then begin
+	 if control ['r'] and (Node1parameter = STab [styp].SHighRange) then
+	    ErrorMsg(147, ColNo [p1])
+	 else
+	    Node1parameter := Node1parameter + 1;
+      end
+      else begin
+	 if control ['r'] then begin
+	    NodeIndex := MakeList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 ( LitOp, IntegerPtr, STab [styp].SLowRange, 0),
+		     node3 ( LitOp, IntegerPtr, STab [styp].SHighRange, 0));
+	    AppendList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 (LoadstrOp, PtrToCharPtr, CurrentFile, 0));
+	    AppendList (
+		     ExpList,
+		     IntegerPtr,
+		     NodeIndex,
+		     node3 (LitOp, IntegerPtr, CardNum[p1], 0));
+	    NodeIndex := LongStatement (
+		     Sys0Op,
+		     IntegerPtr,
+		     -1,
+		     NodeIndex,
+		     EnterConstantString ('_sql__succ'),
+		     5,
+		     CardCount);
+	 end
+	 else
+	    NodeIndex := BinaryExpression (
+		    AddOp,
+		    IntegerPtr,
+		    NodeIndex,
+		    node3 (LitOp, IntegerPtr, 1, 0));
+      end;
+      g1 [p1] := EvalConvert ( typ, NodeIndex);
+      SubType [p1] := ExpType [index];
+      TypeType [p1] := ExpType [index];
+   end;
+end; (* EvalSucc *)
+
+procedure EvalSys
+   (ProcOrFunc,
+    sysproc,
+    p1,
+    p2: integer);
+
+var
+   index: integer;
+   typ,
+   tmpvar: SymbolTableRange;
+   NodeIndex,
+   temp: HdgRange;
+
+begin
+
+   for index := StartCnt [p2] to StartCnt [p2] + cnt [p2] - 1 do begin
+      check_call (ExpVal [index], ExpColNo [index]);
+   end;
+
+   case sysproc of
+
+      SysReset: begin
+	 g1 [p1] := EvalReset (p2);
+      end;
+
+      SysRewrite: begin
+	 g1 [p1] := EvalRewrite (p2);
+      end;
+
+      SysReadln: begin
+	 g1 [p1] := EvalRead (ProcOrFunc, sysproc, p2);
+      end;
+
+      SysRead: begin
+	 if cnt [p2] = 0 then begin
+	     ErrorMsg (8, ColNo [p1]);
+	     g1 [p1] := -1;
+         end else
+         if (cnt [p2] = 1) then begin
+             index := StartCnt [p2];
+             if IsFile (ExpType [index]) then begin
+                ErrorMsg (8, ColNo [p2]);
+		g1 [p1] := -1;
+             end else begin
+		g1 [p1] := EvalRead (ProcOrFunc, sysproc, p2);
+             end;
+	 end else
+	     g1 [p1] := EvalRead (ProcOrFunc, sysproc, p2);
+      end;
+
+      SysWriteln,
+      SysMessage: begin
+	 g1 [p1] := EvalWrite (ProcOrFunc, sysproc, p2);
+      end;
+
+      SysWrite: begin
+	 if cnt [p2] = 0 then begin
+	     ErrorMsg (8, ColNo [p1]);
+	     g1 [p1] := -1;
+	 end else
+         if (cnt [p2] = 1) then begin
+             index := StartCnt [p2];
+             if IsFile (ExpType [index]) then begin
+                ErrorMsg (8, ColNo [p2]);
+		g1 [p1] := -1;
+             end else begin
+		g1 [p1] := EvalWrite (ProcOrFunc, sysproc, p2);
+             end;
+	 end else
+	     g1 [p1] := EvalWrite (ProcOrFunc, sysproc, p2);
+      end;
+
+      SysFlush: begin
+	 g1 [p1] := EvalFlush (p2);
+      end;
+
+      SysRemove: begin
+	 g1 [p1] := EvalRemove (p2);
+      end;
+
+      SysOrd,
+      SysOrd4: begin
+         if cnt [p2] = 1 then begin
+            index := StartCnt [p2];
+            if
+               IsOrdinal (ExpType [index]) or
+               IsPointer (ExpType [index])
+            then begin
+
+	(* Uebernommen aus Abgleich des generierten C-Codes, *)
+	(* dort kommentiert 'IST' *)
+#ifdef RASN /*RASN1 avoid convert on char*/
+               if ( RAS_control ['c'] ) then
+	          g1 [p1] := LongStatement ( Sys0Op , IntegerPtr , -1 ,
+			   MakeList ( ExpList , IntegerPtr ,
+						ExpVal [index] ,
+			   -1 , -1) ,
+			   EnterConstantString ( '_sql__ord' ) ,
+			   1 , CardCount)
+               else
+#endif
+	       g1 [p1] := LongStatement ( Sys0Op , IntegerPtr , -1 ,
+			   MakeList ( ExpList , IntegerPtr ,
+					FoldUnary ( ConvertOp , IntegerPtr ,
+						ExpVal [index]) ,
+			   -1 , -1) ,
+			   EnterConstantString ( '_sql__ord' ) ,
+			   1 , CardCount);
+(* original:   g1 [p1] := FoldUnary (    1992-Jul-10 J.Bruehe
+ *                ConvertOp,            changed to integrate C-Code-change
+ *                IntegerPtr,           in 'sysprocs.c'
+ *                ExpVal [index]);              *)
+
+               SubType [p1] := IntegerPtr;
+	       TypeType [p1] := IntegerPtr;
+            end
+            else begin
+               ErrorMsg (9, ExpColNo [index]);
+               StackError (p1);
+            end;
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysOrd2: begin
+         if cnt [p2] = 1 then begin
+            index := StartCnt [p2];
+            if IsOrdinal (ExpType [index]) then begin
+	       g1 [p1] := FoldUnary (
+                  ConvertOp,
+                  ShortPtr,
+                  ExpVal [index]);
+               SubType [p1] := ShortPtr;
+	       TypeType [p1] := ShortPtr;
+            end
+            else begin
+               ErrorMsg (9, ExpColNo [index]);
+               StackError (p1);
+            end;
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysChr: begin
+	 index := StartCnt [p2];
+	 if IsOrdinal (ExpType [index]) then begin
+	     g1 [p1] := FoldUnary (
+                ConvertOp,
+                CharPtr,
+                ExpVal [StartCnt [p2]]);
+             SubType [p1] := CharPtr;
+	     TypeType [p1] := CharPtr;
+	     end
+	 else begin
+	    ErrorMsg (1, ExpColNo [index]);
+	     g1 [p1] := FoldUnary (
+                ConvertOp,
+                CharPtr,
+                node3 (LitOp, IntegerPtr, 0, 0));
+             SubType [p1] := CharPtr;
+	     TypeType [p1] := CharPtr;
+	    end;
+      end;
+
+      SysEoln: begin
+	 g1 [p1] := EvalEoln (p2);
+         SubType [p1] := BooleanPtr;
+	 TypeType [p1] := BooleanPtr;
+      end;
+
+      SysEof: begin
+	 g1 [p1] := EvalEof (p2);
+         SubType [p1] := BooleanPtr;
+	 TypeType [p1] := BooleanPtr;
+      end;
+
+      SysArgc: begin
+	 g1 [p1] := EvalArgc (p2);
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysArgv: begin
+         if cnt [p2] = 2 then begin
+	    g1 [p1] := EvalArgv (p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysEnvp: begin
+         if cnt [p2] = 2 then begin
+	    g1 [p1] := EvalEnvp (p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysAsm: begin
+         index := StartCnt [p2];
+         if cnt [p2] <> 1 then begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end else
+         if (ExpType [index] = PacPtr) then begin
+            asm_esc := true;
+            temp := special (AsmOp, 0, Node1parameterOf (ExpVal [index]), ExpColNo [index]);
+#ifdef RASX /*RAS07*/
+            g1 [p1] := temp;
+#else
+            NodeIndex := special (AsmOp, 0, EnterNewLine, ExpColNo [index]);
+	    g1 [p1] := LinkChain (temp, NodeIndex);
+#endif
+         end
+         else begin
+            ErrorMsg (1, ExpColNo [index]);
+	    g1 [p1] := -1;
+         end;
+      end;
+
+      SysNew: begin
+	 g1 [p1] := EvalNew (p1, p2);
+	 TypeType [p1] := VoidType;
+         SubType [p1] := VoidType;
+      end;
+
+      SysDispose: begin
+	 g1 [p1] := EvalDispose (p1, p2);
+	 TypeType [p1] := VoidType;
+         SubType [p1] := VoidType;
+      end;
+
+      SysPut: begin
+         if cnt [p2] = 1 then begin
+	    g1 [p1] := EvalPut (p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysGet: begin
+         if cnt [p2] = 1 then begin
+	    g1 [p1] := EvalGet (p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysPage: begin
+	 g1 [p1] := EvalPage (p2);
+      end;
+
+      SysOdd: begin
+	 index := StartCnt [p2];
+	 if IsOrdinal (ExpType [index]) then begin
+	     g1 [p1] := UnaryExpression (
+                ConvertOp,
+                BooleanPtr,
+                BinaryExpression (
+                   BAndOp,
+                   IntegerPtr,
+                   UnaryExpression (
+                      ConvertOp,
+                      IntegerPtr,
+                      ExpVal [StartCnt [p2]],
+                      0,
+                      0),
+                   node3 (LitOp, IntegerPtr, 1, 0)),
+                0,
+                0);
+             SubType [p1] := BooleanPtr;
+	     TypeType [p1] := BooleanPtr;
+	     end
+	else begin
+	    ErrorMsg (1, ColNo [p1]);
+            StackError(p1);
+	    end;
+      end;
+
+      SysPred: begin
+         if cnt [p2] = 1 then begin
+	    EvalPred (p1, p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysSucc: begin
+         if cnt [p2] = 1 then begin
+	    EvalSucc (p1, p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysAbs: begin
+         index := StartCnt [p2];
+         typ := ExpType [index];
+         case STab [typ].SType of
+            CharType,
+	    UcharType,
+            ShortType,
+	    UshortType,
+            IntegerType,
+            UlongType,
+            LongType,
+            FloatType,
+            DoubleType: begin
+	       if IsConstant (ExpVal [index]) then begin
+		  NodeIndex := ExpVal [index];
+		  if IsNegative (NodeIndex) then begin
+		     NodeIndex := FoldUnary (UminusOp, typ, NodeIndex);
+		  end;
+		  g1 [p1] := NodeIndex;
+	       end
+	       else begin
+		  tmpvar := GetTemporary (ProcIndex, typ, false);
+		  NodeIndex := UnaryExpression (
+				  LoadOp,
+				  typ,
+				  node3 (IdOp, typ, tmpvar, 0),
+				  0, 0);
+		  temp := ComplexStmnt (
+		     ifthenelse,
+		     typ,
+		     BinaryExpression (
+			GeOp,
+			typ,
+			CopyTree (NodeIndex),
+			node3 (LitOp, typ, 0, 0)),
+		     NodeIndex,
+		     UnaryExpression (
+			UminusOp,
+			typ,
+			CopyTree (NodeIndex),
+			0,
+			0),
+		     CardCount);
+		  g1 [p1] := MakeList (
+			      ExpList,
+			      typ,
+			      LongStatement (
+				 StoreOp,
+				 typ,
+				 node3 (IdOp, typ, tmpvar, 0),
+				 ExpVal [index],
+				 0, 0, CardCount),
+			      temp,
+			      -1);
+		  FreeTemporary (tmpvar);
+	       end;
+	       TypeType [p1] := typ;
+	       SubType [p1] := typ;
+            end;
+            otherwise begin
+               ErrorMsg (1, ColNo [p1]);
+	       g1 [p1] := -1;
+	       TypeType [p1] := VoidType;
+               SubType [p1] := VoidType;
+            end;
+         end  (* case *);
+      end;
+
+      SysArctan,
+      SysCos,
+      SysExp,
+      SysLn,
+      SysSin,
+      SysSqrt: begin
+         if cnt [p2] = 1 then begin
+            EvalMath (sysproc, p1, p2);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysRound: begin
+         if cnt [p2] = 1 then begin
+	    index := StartCnt [p2];
+	    typ := ExpType [index];
+	    if (typ <> FloatPtr) and
+	       (typ <> LongPtr) and
+	       (typ <> DoublePtr) then begin
+		ErrorMsg (9, ExpColNo [index]);
+		StackError (p1);
+	    end else begin
+		g1 [p1] := LongStatement (
+               		Sys0Op,
+               		IntegerPtr,
+               		-1,
+               		MakeList (
+                  		ExpList,
+                  		DoublePtr,
+                  		EvalConvert (DoublePtr, ExpVal [index]),
+                  		-1,
+                  		-1),
+               		EnterConstantString ('_sql__round'),
+               		1,
+            		CardCount);
+            	SubType [p1] := IntegerPtr;
+		TypeType [p1] := IntegerPtr;
+	    end;
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysSqr: begin
+         if cnt [p2] = 1 then begin
+            index := StartCnt [p2];
+            typ := ExpType [index];
+            NodeIndex := ExpVal [index];
+            case STab [typ].SType of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+               IntegerType,
+               UlongType,
+               LongType,
+               FloatType,
+               DoubleType: begin
+		  g1 [p1] := FoldBinary (
+                     MultOp,
+                     typ,
+                     CopyTree (NodeIndex),
+                     NodeIndex);
+		  TypeType [p1] := typ;
+                  SubType [p1] := typ;
+               end;
+               otherwise begin
+                  ErrorMsg (1, ColNo [p1]);
+		  g1 [p1] := -1;
+		  TypeType [p1] := VoidType;
+                  SubType [p1] := VoidType;
+               end;
+            end  (* case *);
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysTrunc: begin
+         if cnt [p2] = 1 then begin
+	    index := StartCnt [p2];
+	    typ := ExpType [index];
+	    if (typ <> FloatPtr) and
+	       (typ <> LongPtr) and
+	       (typ <> DoublePtr) then begin
+		ErrorMsg (9, ExpColNo [index]);
+		StackError (p1);
+	    end else begin
+		g1 [p1] := LongStatement (
+		Sys0Op,
+		IntegerPtr,
+		-1,
+		MakeList (
+			ExpList,
+			DoublePtr,
+			EvalConvert (DoublePtr, ExpVal [index]),
+			-1,
+			-1),
+		EnterConstantString ('_sql__trunc'),
+		1,
+		CardCount);
+		SubType [p1] := IntegerPtr;
+		TypeType [p1] := IntegerPtr;
+	    end;
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysPack: begin
+         index := StartCnt [p2];
+	 if cnt [p2] = 3 then
+	     g1 [p1] := EvalPackUnpack (
+                EnterConstantString ('_sql__pack'),
+                index + 1,
+                index,
+                index + 2)
+	 else begin
+	     ErrorMsg (8, ExpColNo [index + cnt [p2] - 1]);
+	     StackError (p1);
+	     end;
+      end;
+
+      SysUnpack: begin
+         index := StartCnt [p2];
+	 if cnt [p2] = 3 then
+	     g1 [p1] := EvalPackUnpack (
+                EnterConstantString ('_sql__unpack'),
+                index + 2,
+                index + 1,
+                index)
+	 else begin
+	     ErrorMsg (8, ExpColNo [index + cnt [p2] - 1]);
+	     StackError (p1);
+	     end;
+      end;
+
+      SysHalt: begin
+	 if (cnt [p2] > 1) then begin
+	     ErrorMsg (8, ExpColNo [StartCnt [p2] + 1]);
+	     g1 [p1] := -1
+	 end else
+	     g1 [p1] := CallHalt (p2)
+      end;
+
+      SysClock: begin
+	 g1 [p1] := CallClock;
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysSysclock: begin
+	 g1 [p1] := CallSysclock;
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysWallclock: begin
+	 g1 [p1] := CallWallclock;
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysPtr: begin
+	 if cnt [p2] = 1 then begin
+	    g1 [p1] := FoldUnary (
+               ConvertOp,
+               AnyPtrPtr,
+               ExpVal [StartCnt [p2]]);
+	 end
+	 else begin
+            ErrorMsg (8, ColNo [p1]);
+	    StackError (p1);
+	 end;
+         SubType [p1] := AnyPtrPtr;
+	 TypeType [p1] := AnyPtrPtr;
+      end;
+
+      SysDate: begin
+	 g1 [p1] := EvalDate (p2);
+      end;
+
+      SysTime: begin
+	 g1 [p1] := EvalTime (p2);
+      end;
+
+      SysLinelimit: begin
+	 g1 [p1] := EvalLinelimit (p2);
+      end;
+
+      SysNull: begin
+	 g1 [p1] := -1;
+      end;
+
+      SysCard: begin
+	 g1 [p1] := EvalCard (p2);
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysExpo: begin
+	 g1 [p1] := EvalExpo (p2);
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysRandom: begin
+	 g1 [p1] := EvalRandom (p2);
+         SubType [p1] := DoublePtr;
+	 TypeType [p1] := DoublePtr;
+      end;
+
+      SysSeed: begin
+	 g1 [p1] := EvalSeed (p2);
+         SubType [p1] := IntegerPtr;
+	 TypeType [p1] := IntegerPtr;
+      end;
+
+      SysUndefined: begin
+	 g1 [p1] := node3 (LitOp, BooleanPtr, FalseValue, 0);
+         SubType [p1] := BooleanPtr;
+	 TypeType [p1] := BooleanPtr;
+      end;
+
+      SysLength: begin
+         EvalLength (p1, p2);
+      end;
+
+      SysConcat: begin
+         EvalConcat (p1, p2);
+      end;
+
+      SysCopy: begin
+         EvalCopy (p1, p2);
+      end;
+
+      SysSizeof: begin
+         if cnt [p2] = 1 then begin
+            index := StartCnt [p2];
+            NodeIndex := ExpVal [index];
+            if MinorOperator = LoadOp then begin
+               NodeIndex := Unary1operand;
+            end;
+            if MinorOperator = IdOp then begin
+               typ := PrimType (STab [Node1parameter].SType);
+            end
+            else begin
+               typ := ExpType [index];
+            end;
+	    g1 [p1] := node3 (LitSizeOp, IntegerPtr,typ,0);  (* 22.02.1990 *)
+            SubType [p1] := IntegerPtr;
+	    TypeType [p1] := IntegerPtr;
+         end
+         else begin
+            ErrorMsg (8, ColNo [p1]);
+            StackError (p1);
+         end;
+      end;
+
+      SysClose: begin
+	 g1 [p1] := EvalClose (p2);
+      end;
+
+      otherwise begin
+         ErrorMsg (27, -1);
+      end;
+
+   end  (* case *);
+end  (* EvalSys *);

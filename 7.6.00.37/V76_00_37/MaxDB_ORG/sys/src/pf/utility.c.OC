@@ -1,0 +1,405 @@
+/*
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+
+*/
+#define PROGNAME "utility"
+#include "winhead.h"
+#ifndef WIN
+HWND hWnd=NULL;
+#endif
+#define SQL_PASSTHROUGH SQL_CONNECT_OPT_DRVR_START+1
+#define SQL_SQLMODE SQL_CONNECT_OPT_DRVR_START+2
+#define SQL_COMPONENT SQL_CONNECT_OPT_DRVR_START+3
+#define SQL_CANCELCALLBACK SQL_CONNECT_OPT_DRVR_START+4
+#define SQL_SERVICE SQL_CONNECT_OPT_DRVR_START+5
+#define SQL_MESSAGE_CODE SQL_CONNECT_OPT_DRVR_START+6
+#define SQL_UTILITY_SESSION SQL_CONNECT_OPT_DRVR_START+7
+#define SP1M_STATE_UTILITY  44
+
+enum CSP_COMP {COMP_CALL=0, COMP_CPC, COMP_COBPC, COMP_CONTROL, COMP_DOMAIN,
+COMP_EASY, COMP_LOAD, COMP_ODBC, COMP_OCI, COMP_PLRUN, COMP_QUERY, COMP_SQLPL,
+COMP_TPLRUN, COMP_UTIL, COMP_WB, COMP_XCI};
+
+#define SQL_UTILITY  2
+
+#define SQL_CANCELCALLBACK SQL_CONNECT_OPT_DRVR_START+4
+
+#define TABLE PROGNAME
+#define SELECT
+#ifndef DEFAULTS
+#define USERNAME "SUPERDBA"
+#define PASSWORD "ADMIN"
+#define DBNODE   "sqlprec:D"
+
+#define ODBCUSER  "ODBC"
+#define ODBCPASSW "ODBC"
+#define CONTROLUSER "CONTROL"
+#define CONTROLPASSWORD "CONTROL"
+#endif
+
+#define BUFLEN 1000
+#define ERROR_CHECK(hstmtx)      if (retcode != SQL_SUCCESS) {\
+                           SQLError(henv, hdbc, hstmtx,\
+                              sqlstate, &esq_sql_code, error_txt,\
+                                    len_error_txt, &used_error_txt);\
+                           SPRINTF(buffer, " sqlstate: %s"CRLF, sqlstate);\
+                         PRINTF(buffer);\
+                  SPRINTF(buffer, " esq_sql_code: %ld"CRLF, esq_sql_code);\
+                         PRINTF(buffer);\
+                  SPRINTF(buffer, " error_txt: %s"CRLF, error_txt);\
+                         PRINTF(buffer);\
+                  switch (retcode) {\
+                  case(SQL_NO_DATA_FOUND) :\
+                          break;\
+                  case(SQL_ERROR) : \
+                     if (STRCMP(sqlstate,"S1000") && esq_sql_code != -22002 ) \
+                     if (STRCMP(sqlstate,"IM002")) \
+                     if (STRCMP(sqlstate,"08003")) \
+                     if (STRCMP(sqlstate,"08001") && esq_sql_code != -715 ) \
+		     { return(16); }\
+                     break;\
+                  case(SQL_SUCCESS_WITH_INFO) : \
+                       if (STRCMP(sqlstate,"01004"))\
+                          if (STRCMP(sqlstate,"22001"))\
+                        { return(16); }\
+                     break;\
+                  case(SQL_NEED_DATA) : \
+                     break;\
+                  default   :\
+                          return(16);\
+                          break; } }
+
+#define LEN_ERROR_TXT 200
+UCHAR szConnStrIn[256];
+UCHAR szConnStrOut[256];
+SWORD cbConnStrOut;
+
+UCHAR buffer [BUFLEN];
+
+HENV henv        = SQL_NULL_HENV;
+HDBC hdbc        = SQL_NULL_HDBC;
+HDBC hdbcstate   = SQL_NULL_HDBC;
+HSTMT hstmt      = SQL_NULL_HSTMT;
+HSTMT hstmtstate = SQL_NULL_HSTMT;
+
+UCHAR sqlstate  [ 10 ];
+SDWORD esq_sql_code;
+UCHAR error_txt  [ LEN_ERROR_TXT ] ;
+SWORD len_error_txt = LEN_ERROR_TXT;
+SWORD used_error_txt;
+RETCODE retcode;
+UDWORD vParam;
+SWORD iscancel=-1;
+
+RETCODE UtilityState(VOID);
+RETCODE StateSaveConnect(HDBC *hdbc);
+RETCODE StateSaveDisconnect(HDBC *hdbc);
+
+int MAIN(int argc, char **argv);
+int MAIN(int argc, char **argv)
+{
+  int count;
+  char szPagesTransferred[32];
+  char szPagesLeft[32];
+  
+#ifdef WIN32
+  UCHAR szSQLStr[]={"SAVE DATA QUICK TO 'c:\\temp\\sav.log' UNKNOWN BLOCKSIZE 8"};
+#else
+  UCHAR szSQLStr[]={"SAVE DATA QUICK TO '/dev/null' UNKNOWN BLOCKSIZE 8"};
+#endif
+
+  SPRINTF(buffer, PROGNAME" running."CRLF);
+  PRINTF(buffer);
+
+  retcode = SQLAllocEnv(&henv);
+  SPRINTF(buffer, " SQLAllocEnv retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocConnect(henv, &hdbc);
+  SPRINTF(buffer, " SQLAllocConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+#define XX1
+#ifdef XX1
+  SPRINTF(szConnStrIn, "UID=%s;DSN=%s;pwd=%s;COMPOnent=%d;SERVICE=%d",
+	CONTROLUSER, DBNODE, CONTROLPASSWORD, COMP_CONTROL, SQL_UTILITY);
+  retcode = SQLDriverConnect (hdbc, hWnd, szConnStrIn, SQL_NTS,
+  szConnStrOut, sizeof(szConnStrOut), &cbConnStrOut, SQL_DRIVER_NOPROMPT);
+  SPRINTF(buffer," SQLDriverConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  SPRINTF(buffer," szConnStrOut='%s'"CRLF, szConnStrOut);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocStmt(hdbc, &hstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLExecDirect(hstmt, szSQLStr, SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = UtilityState();
+  SPRINTF(buffer, " UtilityState retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer, " SQLDisconnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  /* Option Connect Test */
+
+  retcode = SQLSetConnectOption(hdbc, SQL_COMPONENT, COMP_CONTROL);
+  SPRINTF(buffer, " SQLSetConnectOption retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLGetConnectOption(hdbc, SQL_COMPONENT, &vParam);
+  SPRINTF(buffer, " SQLGetConnectOption(SQL_COMPONENT = %ld) retcode: '%s'"CRLF, vParam, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLSetConnectOption(hdbc, SQL_SERVICE, SQL_UTILITY);
+  SPRINTF(buffer, " SQLSetConnectOption (SQL_SERVICE) retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLGetConnectOption(hdbc, SQL_SERVICE, &vParam);
+  SPRINTF(buffer, " SQLGetConnectOption (SQL_SERVICE = %ld) retcode: '%s'"CRLF, vParam, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLConnect(hdbc, DBNODE, SQL_NTS, CONTROLUSER, SQL_NTS, CONTROLPASSWORD, SQL_NTS);
+  SPRINTF(buffer," SQLConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocStmt(hdbc, &hstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLExecDirect(hstmt, szSQLStr, SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer, " SQLDisconnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+#endif
+  /* Async Test */
+
+  retcode = SQLSetConnectOption(hdbc, SQL_COMPONENT, COMP_CONTROL);
+  SPRINTF(buffer, " SQLSetConnectOption retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLSetConnectOption(hdbc, SQL_SERVICE, SQL_UTILITY);
+  SPRINTF(buffer, " SQLSetConnectOption (SQL_SERVICE) retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  SPRINTF(szConnStrIn, "UID=%s;DSN=%s;pwd=%s;",	CONTROLUSER, DBNODE, CONTROLPASSWORD);
+  retcode = SQLDriverConnect (hdbc, hWnd, szConnStrIn, SQL_NTS,
+  szConnStrOut, sizeof(szConnStrOut), &cbConnStrOut, SQL_DRIVER_NOPROMPT);
+  SPRINTF(buffer," SQLDriverConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  SPRINTF(buffer," szConnStrOut='%s'"CRLF, szConnStrOut);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLAllocStmt(hdbc, &hstmt);
+  SPRINTF(buffer," SQLAllocStmt retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLSetStmtOption (hstmt, SQL_ASYNC_ENABLE, SQL_ASYNC_ENABLE_ON);
+  SPRINTF(buffer," SQLSetStmtOption retcode: %s"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+
+  retcode = StateSaveConnect(&hdbcstate);
+
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+    retcode = SQLAllocStmt(hdbcstate, &hstmtstate);
+  SPRINTF(buffer," SQLAllocStmt retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmtstate);
+
+  retcode = SQLBindParameter(hstmtstate, 6, SQL_PARAM_OUTPUT, SQL_C_CHAR,
+			     SQL_CHAR, sizeof(szPagesTransferred)-1, 0, 
+			     szPagesTransferred, sizeof(szPagesTransferred), NULL);
+
+  retcode = SQLBindParameter(hstmtstate, 7, SQL_PARAM_OUTPUT, SQL_C_CHAR,
+			     SQL_CHAR, sizeof(szPagesLeft)-1, 0, szPagesLeft, 
+			     sizeof(szPagesLeft), NULL);
+
+  retcode = SQLExecDirect(hstmt, szSQLStr, SQL_NTS);
+  SPRINTF(buffer," SQLExecDirect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  if (retcode != SQL_STILL_EXECUTING)
+    ERROR_CHECK(hstmt);
+
+  count = 0;
+  while(retcode == SQL_STILL_EXECUTING && count < 50) {
+    RETCODE ret;
+    count++;
+    retcode = SQLExecDirect(hstmtstate, "STATE SAVE", SQL_NTS);
+    SPRINTF(buffer," SQLExecDirect (STATE SAVE) retcode: '%s'"CRLF, cnvret(retcode));
+    PRINTF(buffer);
+    ERROR_CHECK(hstmt);
+    Sleep(3*1000);
+    if (retcode == SQL_SUCCESS) {
+      SPRINTF(buffer,"szPagesTransferred=%s, szPagesLeft=%s"CRLF, 
+	      szPagesTransferred, szPagesLeft);
+      PRINTF(buffer);
+    }
+    retcode = SQLExecDirect(hstmt, szSQLStr, SQL_NTS);
+    SPRINTF(buffer," SQLExecDirect (SAVE DATA) retcode: '%s'"CRLF, cnvret(retcode));
+    PRINTF(buffer);
+    if (retcode != SQL_STILL_EXECUTING)
+      ERROR_CHECK(hstmt);
+  }
+
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+    retcode = SQLFreeStmt(hstmtstate, SQL_DROP);
+  SPRINTF(buffer," SQLFreeStmt retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(hstmtstate);
+
+  retcode = StateSaveDisconnect(&hdbcstate);
+  
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer, " SQLDisconnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeConnect(hdbc);
+  SPRINTF(buffer, " SQLFreeConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeEnv(henv);
+  SPRINTF(buffer, " SQLFreeEnv retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+  SPRINTF(buffer, " %s ending"CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  return(0);
+}
+
+RETCODE UtilityState(VOID)
+{
+  RETCODE retcode;
+  HDBC hdbc=SQL_NULL_HDBC;
+  HSTMT hstmt=SQL_NULL_HSTMT;
+  retcode = SQLAllocConnect(henv, &hdbc);
+  if (retcode == SQL_SUCCESS) {
+    if (hdbc != SQL_NULL_HDBC) {
+      retcode = SQLSetConnectOption(hdbc, SQL_COMPONENT, COMP_CONTROL);
+      SPRINTF(buffer, " SQLSetConnectOption (SQL_COMPONENT) '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	retcode = SQLSetConnectOption(hdbc, SQL_UTILITY_SESSION, TRUE);
+      SPRINTF(buffer, " SQLSetConnectOption (SQL_UTILITY_SESSION) '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+  retcode = SQLConnect(hdbc, DBNODE, SQL_NTS, CONTROLUSER, SQL_NTS, CONTROLPASSWORD, SQL_NTS);
+      SPRINTF(buffer," SQLConnect retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	retcode = SQLAllocStmt(hdbc, &hstmt);
+      SPRINTF(buffer," SQLAllocStmt retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      ERROR_CHECK(hstmt);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	retcode = SQLExecDirect(hstmt, "STATE SAVE", SQL_NTS);
+      SPRINTF(buffer," SQLExecDirect retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      ERROR_CHECK(hstmt);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	retcode = SQLFreeStmt(hstmt, SQL_DROP);
+      SPRINTF(buffer," SQLFreeStmt retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      ERROR_CHECK(hstmt);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	retcode = SQLDisconnect(hdbc);
+      SPRINTF(buffer," SQLDisconnect retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      retcode = SQLFreeConnect(hdbc);
+      SPRINTF(buffer," SQLFreeConnect retcode: '%s'"CRLF, cnvret(retcode));
+      PRINTF(buffer);
+      if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+	hdbc = SQL_NULL_HDBC;
+    }
+  }
+  return(retcode);
+}
+
+RETCODE StateSaveConnect(HDBC *hdbc)
+{
+  RETCODE retcode;
+  retcode = SQLAllocConnect(henv, hdbc);
+  SPRINTF(buffer, " SQLAllocConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLSetConnectOption(*hdbc, SQL_COMPONENT, COMP_CONTROL);
+  SPRINTF(buffer, " SQLSetConnectOption (SQL_COMPONENT) '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+    retcode = SQLSetConnectOption(*hdbc, SQL_UTILITY_SESSION, TRUE);
+  SPRINTF(buffer, " SQLSetConnectOption (SQL_UTILITY_SESSION) '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+    retcode = SQLConnect(*hdbc, DBNODE, SQL_NTS, CONTROLUSER, SQL_NTS, CONTROLPASSWORD, SQL_NTS);
+  SPRINTF(buffer," SQLConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  return(retcode);
+}
+
+RETCODE StateSaveDisconnect(HDBC *hdbc)
+{
+  retcode = SQLDisconnect(*hdbc);
+  SPRINTF(buffer, " SQLDisconnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeConnect(*hdbc);
+  SPRINTF(buffer," SQLFreeConnect retcode: '%s'"CRLF, cnvret(retcode));
+  PRINTF(buffer);
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO)
+    *hdbc = SQL_NULL_HDBC;
+  return(retcode);
+}

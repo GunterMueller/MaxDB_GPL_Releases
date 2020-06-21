@@ -1,0 +1,696 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Copy;
+
+#######################
+sub checkdir {
+    if ( opendir(CHECKDIR,"@_") )
+    {
+        closedir(CHECKDIR);
+        return 1;
+    }
+    return 0;
+}
+#######################
+sub checkfile {
+    if ( open(CHECKFILE,"<@_") )
+    {
+        close(CHECKFILE);
+        return 1;
+    }
+    return 0;
+}
+#######################
+sub Usage {
+  print "Syntax:remcall.pl User Remotehost Devpath [BIT64] IGME IgmeVersion Command\n";
+  print "       remcall.pl User Remotehost Devpath branch=apo/<branch> lcversion=<lcversion>\n";
+  print "                                          apo_com_short=<apo_com_short>\n";
+  print "                                          apo_patch_level=<apo_patch_level>\n";
+  print "User         is the remote user identification i.e. d027923\n";
+  print "Remotehost   is the remote hostname i.e. p26216\n";
+  print "Devpath      is the remote development path i.e. 'd:/V72//'\n";
+  print "             use '-' if no additional path is wanted\n";
+  print "Command      is the command to be executed i.e. 'imf kernel'\n";
+  print "             BIT64 is a command prefix that sets 64BIT environment\n";
+  print "             IGME is a command prefix that sets IGME environment\n";
+  print "apo/<branch> marks a apo remotemake\n";
+  print "branch       apo branch\n";
+}
+
+$| = 1;
+
+$ENV{TOOL}="/rel/TOOL/tool";
+#
+if ( checkdir($ENV{TOOL}) == 0 ) {
+    print "TOOL directory expected $ENV{TOOL} not found\n";
+    exit;
+}
+#
+# Argument parsing
+#
+if ( @ARGV < 3 ) {
+   Usage();
+   exit;
+}
+
+$is_APO_remmake=0;
+$Branch = "";
+$User=uc(shift);
+$Remotehost=lc(shift);
+$Devpath=shift;
+$DB_VERS="";
+$p4client="";
+$lc_state="DEV";
+$IgmeVersion=undef;
+$MakeVersion=undef;
+$Use64Bit="";
+$no_new_profile=0;
+
+if ( $ARGV[0] eq BIT64 ) {
+    $WantBIT64="BIT64";
+    shift;
+} else {
+$WantBIT64=undef;
+}
+if ( $ARGV[0] eq NOPROFILE )
+{
+	$no_new_profile = 1;
+	shift;
+	
+}
+if ( $ARGV[0] eq IGME ) {
+    shift;
+    $IgmeVersion=shift;
+}
+elsif ( $ARGV[0] eq MAKE ) {
+    shift;
+    # format of make version
+    # 7.3.00.44; 7.4.03.DEV; 7.5.00.COR
+    $MakeVersion=shift;
+}
+else
+{
+	while ($ARGV[0] =~ /^(.*)=(.*)$/)
+	{
+		$variable=$1;
+		$value=$2;
+		shift;
+		if ( $variable =~ /^branch$/)
+		{
+			$Branch=$value;
+			$Branch=$1	if ($Branch =~ /apo\/(.*)$/);
+			$ENV{BRANCH_INFO} = $Branch;
+			$is_APO_remmake = 1;
+			$ENV{APOMAKE} = 1;
+		}
+		elsif ( $variable =~ /^lcversion$/)
+		{
+			$ENV{LCVERSION}=$value;
+		}
+		elsif ( $variable =~ /^lcpool_count$/ )
+		{
+			$ENV{LCPOOL_COUNT} = $value;
+		}		
+		elsif ( $variable =~ /^apo_com_short$/ )
+		{
+			$ENV{APO_COM_SHORT}=$value;
+		}	
+		elsif ( $variable =~ /^apo_patch_level$/ )
+		{
+			$ENV{APO_PATCH_LEVEL}=$value;
+		}	
+		elsif ( $variable =~ /^changelist$/ )
+		{
+			$ENV{LATEST_CHANGE}=$value;
+		}	
+		elsif ( $variable =~ /^relstat$/ )
+		{
+			$ENV{RELSTAT}=$value;
+		}	
+		elsif ( $variable =~ /^p4client$/ )
+		{
+			$p4client=$value;
+		}
+	}
+	unless (defined $Branch)
+	{	
+	#
+	# It does not make to much sense anymore to have a default here...
+	#
+	    print "Missing release information... Giving up\n";
+	    exit;
+	}
+}
+
+$Command="@ARGV";
+
+$Releases="/rel";
+do "/rel/TOOL/tool/bin/remuserEnv.pl" || die "Cant execute local Env 'remuserEnv.pl'\n";
+#if ($is_APO_remmake)
+#{
+#do "/rel/TOOL/tool/bin/remuserAPOEnv.pl" || die "Cant execute local Env 'remuserAPOEnv.pl'\n";
+#}
+
+my $IgmeAPI;
+$ENV{PERL5LIB}="$ENV{TOOL}/bin:$ENV{TOOL}/lib/perl5";
+$ENV{TERM}="vt100";
+$ENV{DBTERM}="vt100_hp";
+chomp ( $Hostname=`hostname` );
+#
+# Since this script only creates test releases, build number requests are suppressed
+$ENV{RELSTAT}="TEST" if (! defined $ENV{RELSTAT});
+if ($is_APO_remmake)
+{
+	$ENV{BIT64}="1";
+	
+	if ( $No32Bit == 1 ) {
+	    $Use64Bit="";
+	} else {	
+		$Use64Bit="_64";
+	}
+	$CommonOwn = "$Releases/apo/$Branch";
+}
+elsif (defined $IgmeVersion)
+{
+	if ( $WantBIT64 eq "BIT64" ) {
+	    if ( $No64Bit == 1 ) {
+	        print "64Bit not yet supported on this platform\n";
+	        exit;
+	    }
+	    $ENV{BIT64}="1";
+	    $Use64Bit="_64";
+	    shift;
+	} else {
+	    delete $ENV{BIT64};
+	    $Use64Bit="_32";
+	}
+	if ( $No64Bit == 1 ) {
+	    delete $ENV{BIT64};
+	    $Use64Bit="";
+	}
+	if ( $No32Bit == 1 ) {
+	    $ENV{BIT64}="1";
+	    $Use64Bit="";
+	}
+
+	unshift @INC,"$ENV{TOOL}/bin","$ENV{TOOL}/lib/perl5";
+
+	require igme;
+	
+	$IgmeAPI = igme::api::new();
+	
+	if ( ! defined $IgmeAPI ) {
+	    print "Parsing profile information failed... Giving up\n";
+	    exit;
+	}
+
+
+	$UsePerforce=undef;
+	foreach my $line ( $IgmeAPI->cat($IgmeVersion) ) {
+	   if ( $line =~ /^depot:/ ) {
+		$UsePerforce="depot:";
+	        last;
+	   }
+	}
+	
+	#
+	# igme -c allows to list the entry found in the specification. If perforce is used,
+	# a single line containing 'depot:' is found.
+	#
+	# chomp ( $UsePerforce=`$ENV{TOOL}/bin/igme -c $IgmeVersion | grep "depot:"` );
+	
+	if ( substr($IgmeVersion, 0, 4) eq "TOOL" ) {
+	    $IgmeVersion="TOOL";
+	    $IgmePath=$IgmeVersion;
+	    $CommonOwn="$Releases/$IgmePath";
+	} else {
+	    $IgmePath=$IgmeVersion;
+	#
+	# Temporary solution for 7.3...
+	#
+	    if ( "$IgmeVersion" eq "7.3.00.develop" ) {
+	        $IgmePath="73";
+	    } elsif ( substr($IgmeVersion, 0, 3) eq "7.3" ) {
+	        if ( substr($IgmeVersion, 4, 1) eq "0" ) {
+	            $IgmePath=~s/7.3.0([0-9])\.develop/73$1/;
+	        } else {
+	            $IgmePath=~s/7.3.([0-9][0-9])\.develop/73$1/;
+	        }
+	    } else {
+	#
+	# 'normal' case
+	#
+	        local $IgmeRelease=substr($IgmeVersion, 0, 3);
+	
+		$CurrentDevelopVersion="";
+		foreach ( $IgmeAPI->list() ) {
+		    $currentEntry = substr($_, 0, 15);
+		    if ( $currentEntry =~ /develop/ ) {
+			if ( $currentEntry =~ /^$IgmeRelease/ ) {
+			    if ( $currentEntry gt $CurrentDevelopVersion ) {
+				$CurrentDevelopVersion = $currentEntry;
+			    }
+			}
+		    }
+		}
+	
+	        if ( substr($IgmeVersion, 0, 10) eq substr($CurrentDevelopVersion, 0, 10) ) {
+	            $IgmePath=~s/(.*)\.[0-9]*\.develop/$1/;
+	        } else {
+	#
+	# Do to name restriction ( i.e. SUT740132 is too long for a database name )
+	# the CommonOwn is reduced for completion level below 10 ...
+	# If this is no longer wanted, this is the part to modify....
+	#
+	            if ( substr($IgmeVersion, 4, 1) eq "0" ) {
+	                $IgmePath=~s/(.*)\.0([0-9])\.develop/$1$2/;
+	            } else {
+	                $IgmePath=~s/(.*)\.([0-9][0-9])\.develop/$1$2/;
+	            }
+	        }
+	        $IgmePath=~s/\.//g;
+	    }
+	    $CommonOwn="$Releases/$IgmePath$Use64Bit";
+	}
+}
+else
+{
+	$Use64Bit="_32";
+	if ( $WantBIT64 eq "BIT64" )
+	{
+		$Use64Bit="_64";
+	}
+	if ( $No64Bit == 1 )
+	{
+	    delete $ENV{BIT64};
+	    $Use64Bit="";
+	}
+	if ( $No32Bit == 1 )
+	{
+	    $ENV{BIT64}="1";
+	    $Use64Bit="";
+	}
+	$CommonOwn = "$Releases/";
+	
+	
+	if (($MakeVersion =~ /^(\d)\.(\d).(\d\d)\.(.*)$/) || ($MakeVersion =~ /^(\d)\.(\d).([^.]*)$/))
+	{
+		$CommonOwn .= "$1$2";
+		my $corlevel = $3;
+		$lc_state = $4;
+		if (defined $lc_state)
+		{	$CommonOwn .= "$corlevel";	}
+		else  # make version without corlevel -> 3rd "parameter" = lc_state
+		{	$lc_state = $corlevel;		}
+		unless ($lc_state =~ /DEV/i)
+		{	$CommonOwn .= "$lc_state"; }
+		$CommonOwn .= "$Use64Bit";
+		$lc_state = "RAMP" if ($lc_state =~ /\d\d/);		
+	}
+	elsif ($MakeVersion =~ /^(\d)\.(\d)\.(.*)$/)
+	{
+		
+		die "wrong format for MakeVersion ($MakeVersion)";
+	}
+
+}
+
+$CommonOwn=~tr/./_/;
+
+
+$ENV{PYTHONPATH}="$ENV{TOOL}/lib/Python";
+#
+########################
+#
+print "$User logged in from $Remotehost using $Devpath for ";
+if ($ENV{APOMAKE})
+{	print "$Branch\n"; }
+elsif ( defined $IgmeVersion)
+{   print "$IgmeVersion\n"; }
+else
+{   print "$MakeVersion\n"; }
+
+$Pid=$$;
+$LoginTime=`date`;
+#
+#################
+sub giveup() {
+	exit;
+}
+#################
+#
+$SIG{'HUP'} = 'giveup';
+$SIG{'INT'} = 'giveup';
+$SIG{'QUIT'} = 'giveup';
+$SIG{'TERM'} = 'giveup';
+$SIG{'PIPE'} = 'giveup';
+#
+if ( $Devpath ne X ) {
+#
+# Prepare a fresh $OWN...
+#
+# DHCP does no longer allow to tranmit Remotehost as hostname
+# IP Addresses may change with each login, so remote host identification
+# is removed from path.
+#    $OWN=$CommonOwn._.$User._.$Remotehost;
+    $OWN=$CommonOwn._.$User;
+    $OWN.="_$p4client" if ($ENV{APOMAKE} && ($p4client ne ""));
+    $ENV{OWN}=$OWN;
+    $ENV{DISPLAY}="${Remotehost}:0.0";
+
+    # lock file for a user local make
+    $OWNLOCK="$OWN/currentLogin";
+
+    if ( $Command =~/^cleanup(.*)/ )
+    {
+    	my $cleanup_options = $1;
+    	my $user_to_cleanup = $User;
+    	my @dirs_to_cleanup = ();
+    	my $makedir = $Releases;
+    	$makedir .= "/apo" if ($is_APO_remmake);
+    	if ($cleanup_options =~ /-all/)
+    	{
+    		if ($cleanup_options =~ /-user(\s+|=)(\S+)/)
+    		{	$user_to_cleanup = $2; }
+    		opendir MAKEDIR, "$makedir";
+    		@dirs_to_cleanup = grep {/_$user_to_cleanup/} readdir MAKEDIR;
+			close DEVDIR;
+			for (my $i=0; $i<@dirs_to_cleanup; $i++)
+			{
+				$dirs_to_cleanup[$i] = "$makedir/".$dirs_to_cleanup[$i];
+			}
+		}
+    	elsif ( -d "$OWN" )
+    	{
+    		@dirs_to_cleanup = ("$OWN");
+    	}
+    	my $diskspace = 0;	
+    	if ( @dirs_to_cleanup )
+    	{
+	    	foreach  (@dirs_to_cleanup)
+	    	{
+	    		$OWN = "$_";
+	    		if ($cleanup_options =~ /-check/)
+	    		{
+		    		if ($^O =~ /mswin/i)
+		    		{
+		    			$OWN =~ tr /\//\\/;
+						print ("To delete $_\n");	
+		    		}
+		    		else
+		    		{
+						my $output=`du -sk $OWN`;
+						chomp $output;
+						if ($output =~ /^(\d*)\s*(.*)$/)
+						{
+							print ("To delete $2 on $Hostname($1)\n");
+							$diskspace+=$1;
+						}
+					}
+				}
+				else
+	    		{
+	    			print "Cleaning up $OWN on $Hostname\n";
+			        system( "dbmcli -s inst_unreg $OWN/usr" );
+			        system( "irconf -r -p $OWN/usr" );
+			        system( "rm -rf $OWN" );
+			    }
+		    }
+		    if ($cleanup_options =~ /-check/)
+		    {
+		    	print ("$diskspace KB free after deleting\n");
+		    }
+		}
+		else
+		{
+			print "Nothing to delete ...\n";
+		}
+        giveup();
+    }
+    elsif ( $Command eq "kill" ) {
+    	if ( -f "$ENV{OWN}/sys/wrk/vmake.pid") {
+            open (PIDFILE, "<$ENV{OWN}/sys/wrk/vmake.pid");
+            my $pid = <PIDFILE>;
+            close PIDFILE;
+            chomp $pid;
+            kill "-9", $pid;
+            print "vmake stopped (PID $pid)\n";
+            cleanup();
+        }
+        else{
+           print ("Error: can't find process information (is vmake running ?)\n");
+           giveup();
+        }
+    } else {
+#
+# All releases using perforce, do not need source server in vmake path
+# Igme uses -x to let them be ignored...
+#
+	if (defined $IgmeVersion)
+	{
+	        if ( "$UsePerforce" eq "depot:" ) {
+	            @IgmeArgs = ( "-p", "$Remotehost:$Devpath", "-x" );
+	        } else {
+	            @IgmeArgs = ( "-p", "$Hostname:$CommonOwn,$Remotehost:$Devpath" );
+	        }
+	}
+    }
+} else {
+    if ( $Command eq "cleanup" ) {
+#
+# A more user friendly message instead of sh:cleanup not found....
+#
+        print "You are trying to cleanup main area, which is very destructiv...\n";
+        print "remfree only supported for user area for this reason...\n";
+        giveup();
+    }
+#
+# Use common Version
+#
+     $OWN=$CommonOwn;
+     $ENV{OWN}=$OWN;
+
+     # lock file for a common make
+     my ($relstr) = $CommonOwn =~ /([^\/]*)$/;
+     $OWNLOCK="$TOOL/currentLogin/$relstr.rel";
+     if (defined $IgmeVersion)
+     {
+	     if ( "$UsePerforce" eq "depot:" ) {
+	         @IgmeArgs = ( "-p", "/rel/$IgmePath"."SRC//", "-x" );
+	     } else {
+	         @IgmeArgs = ();
+	     }
+     }
+}
+
+if ( checkdir($OWN) == 0 ) {
+    mkdir($OWN,0777);
+}
+chdir($OWN);
+
+#
+# On some platforms the 64 bit libraries have special path. On TRUE64 not...
+#
+if ( $Use64Bit eq "_64" ) {
+      $LibPath="$OWN/usr/lib/lib64";
+} else {
+      $LibPath="$OWN/usr/lib";
+}
+
+if ($is_APO_remmake == 1)
+{
+	$ENV{VMAKE_PATH}="$ENV{OWN},$Remotehost:$Devpath";
+	
+	local $platform;
+	{
+		local @ARGV=("-lcversion", "$ENV{LCVERSION}", "-apo_com_short", "$ENV{APO_COM_SHORT}", "-remcall");
+		push @ARGV, "-lcpool_count", $ENV{LCPOOL_COUNT} if ($ENV{LCPOOL_COUNT});
+		push @ARGV, "-apo_patch_level", $ENV{APO_PATCH_LEVEL} if ($ENV{APO_PATCH_LEVEL});
+		do "/rel/TOOL/tool/bin/vmakeEnv.pl";
+		vmakeEnv::setLC_OWN();
+		vmakeEnv::setLCVERSION();
+		vmakeEnv::setRELVER();
+		vmakeEnv::setCORRECTION_LEVEL();
+		vmakeEnv::setBUILDPRAEFIX();
+		vmakeEnv::setAPO_COM_RELEASE();
+		vmakeEnv::setAPO_COM_BUILD();
+		vmakeEnv::setAPO_PATCH_LEVEL();
+		vmakeEnv::setLCMAKEID();
+		$platform = vmakeEnv::getPlatform();
+		$ENV{VMAKE_PATH} = "$ENV{VMAKE_PATH},$ENV{LC_OWN}//";
+	}
+	$skel_profile="$ENV{TOOL}/profiles/APODev/iprofile.$platform";
+
+
+	open(FILE_OUT, ">$ENV{OWN}/.iprofile") or die "Can't open $ENV{OWN}/.iprofile (output): $!\n";
+	
+	print FILE_OUT "#!/bin/sh";
+	print FILE_OUT "# this file was generated by remcall.pl";
+	print FILE_OUT "# please do not change this file";
+	print FILE_OUT "\n";
+	print FILE_OUT "OWN=$ENV{OWN}\n";
+	print FILE_OUT "RELVER=$ENV{RELVER}\n";
+	print FILE_OUT "CORRECTION_LEVEL=$ENV{CORRECTION_LEVEL}\n";
+	print FILE_OUT "BUILDPRAEFIX=$ENV{BUILDPRAEFIX}\n";
+	print FILE_OUT "VMAKE_PATH=$ENV{VMAKE_PATH}\n";
+	print FILE_OUT "LCVERSION=$ENV{LCVERSION}\n";
+	print FILE_OUT "LC_OWN=$ENV{LC_OWN}\n";
+	print FILE_OUT "LCMAKEID=$ENV{LCMAKEID}\n";
+	print FILE_OUT "APO_COM_SHORT=$ENV{APO_COM_SHORT}\n";
+	print FILE_OUT "APO_COM_RELEASE=$ENV{APO_COM_RELEASE}\n";
+	print FILE_OUT "APO_COM_BUILD=$ENV{APO_COM_BUILD}\n";
+	print FILE_OUT "APOMAKE=$ENV{APOMAKE}\n";
+	print FILE_OUT "APO_PATCH_LEVEL=$ENV{APO_PATCH_LEVEL}\n";
+	print FILE_OUT "BRANCH_INFO=$ENV{BRANCH_INFO}\n";
+	print FILE_OUT "RELSTAT=$ENV{RELSTAT}\n";
+	print FILE_OUT "USER=\"${User}(remuser)\"\n";
+	print FILE_OUT "export OWN RELVER CORRECTION_LEVEL BUILDPRAEFIX VMAKE_PATH  APO_COM_BUILD RELSTAT LCMAKEID\n";
+	print FILE_OUT "export LCVERSION LC_OWN APO_COM_SHORT APO_COM_RELEASE APOMAKE BRANCH_INFO USER APO_PATCH_LEVEL\n";
+	print FILE_OUT "\n# imports from $skel_profile:\n\n";	
+	print FILE_OUT  ". $skel_profile\n";
+	close FILE_OUT;
+}
+else
+{
+	if (defined $IgmeVersion)
+	{
+		if ( $IgmeVersion eq "TOOL" ) {
+		    $SkeletonFile="$Releases/SkeletonTool";
+		} else {
+		    if ( substr($IgmeVersion, 0, 1) eq 6 ) {
+		        $SkeletonFile="$Releases/Skeleton6";
+		    } else {
+		        $SkeletonFile="$Releases/Skeleton";
+		    }
+		}
+	
+	        if ( $OWN ne "/rel/TOOL" ) {	
+	            push @IgmeArgs, ( "-s", $SkeletonFile, $IgmeVersion );
+		    $IgmeAPI->igme( @IgmeArgs );
+		} else {
+	            print "/rel/TOOL/.iprofile allowed to be modified MANUAL ONLY!\n";
+	        }
+	
+		#
+		# If it is removed local modifications will no longer lead to ineffectiv changes...
+		#
+		system( "rm -f $OWN/.iprofile.skel" );
+	}
+	else
+	{
+		# use existing profile
+		unless ( $Devpath =~ /^X$/ || $no_new_profile )
+		{
+			local @ARGV = ("-own", $OWN, "-tool", "/rel/TOOL/tool", "-lc_state", $lc_state, "-src", "$Remotehost:$Devpath");
+			push @ARGV, "-bit64"  if ( $Use64Bit =~ /_64/ );
+			print "Creating profile ...\n";
+			print "call	/rel/TOOL/tool/bin/createlcprofile.pl @ARGV\n";
+			do "/rel/TOOL/tool/bin/createlcprofile.pl";		
+			if ( $@ )
+			{
+				die "\nError: $@ \n";
+			}
+			print "\nProfile created successfully\n\n";
+		}
+	}
+}
+
+if ( $Command eq "xterm" ) {
+    $ENV{DBROOT}="$OWN/usr";
+    if ($ENV{APOMAKE}) {
+    	$DevStudio = "APODevelopment:".$ENV{BRANCH_INFO};
+    	$ENV{DEV_STUDIO}=$DevStudio;
+    } else {
+    	$ENV{DEV_STUDIO}=$IgmeVersion;
+    }
+
+    $ENV{PYTHONPATH}="$ENV{TOOL}/lib/Python";
+    $ENV{P4CLIENT}="LCEnv_$Hostname";
+
+    $ENV{TOOLVARS}="$ENV{TOOL}/bin/toolvars.pl";
+    $ENV{USER}="${User}(remuser)";
+    system(". $OWN/.iprofile; . $HOME/.vdnvars; nohup xterm -display ${Remotehost}:0.0 -title \"remuser_${User}\@$Hostname\" +ls -e $BASHCALL >/dev/null &");
+    giveup();
+}
+
+if ( open(LOCKFILE,"<$OWNLOCK") ) {
+ print "remuser on $Hostname busy.\nTry again later or on other platform! Command running:\n";
+ while (<LOCKFILE>) {
+    print $_;
+ }
+ close(LOCKFILE);
+ giveup();
+}
+
+#####################
+sub cleanup() {
+        unlink($OWNLOCK);
+        exit;
+}
+#####################
+
+open(LOCKFILE,">$OWNLOCK");
+ print LOCKFILE "Current User=$User Pid=$Pid logged in at $LoginTime";
+ print LOCKFILE   "Command:$Command\n";
+close(LOCKFILE);
+
+$SIG{'HUP'} = 'cleanup';
+$SIG{'INT'} = 'cleanup';
+$SIG{'QUIT'} = 'cleanup';
+$SIG{'TERM'} = 'cleanup';
+$SIG{'PIPE'} = 'cleanup';
+
+$ENV{OWN}="$OWN";
+$ENV{DBROOT}="$OWN/usr";
+$ENV{DEV_STUDIO}=$IgmeVersion;
+$ENV{P4CLIENT}="LCEnv_$Hostname";
+$ENV{PYTHONPATH}="$ENV{TOOL}/lib/Python";
+$ENV{USER}="${User}(remuser)";
+
+if ( checkfile( "$OWN/.iprofile" ) == 1 ) {
+
+    open(EXECUTOR,"| sh") || die("Can't open shell\n");
+    print EXECUTOR ". $OWN/.iprofile\n";
+
+    if ( checkfile( "$ENV{HOME}/.vdnvars" ) == 1 ) {
+        print EXECUTOR ". $HOME/.vdnvars\n";
+    } else {
+        print "can't find .vdnvars \n";
+        exit;
+    }
+
+    print EXECUTOR "TOOLVARS=$ENV{TOOL}/bin/toolvars.pl\n";
+    print EXECUTOR "export TOOLVARS\n";
+    print EXECUTOR "umask 0002\n";
+    print EXECUTOR "echo ===================================================================\n";
+    print EXECUTOR "echo ---  `uname -a`  ---\n";
+    print EXECUTOR "echo ===================================================================\n";
+
+    print EXECUTOR "$Command\n";
+    close(EXECUTOR);
+} else {
+    print "can't read .iprofile\n";
+}
+
+cleanup();
+

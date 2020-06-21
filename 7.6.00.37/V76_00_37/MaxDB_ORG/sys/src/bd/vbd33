@@ -1,0 +1,2330 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VBD33$
+.tt 2 $$$
+.tt 3 $JuergenP$leafoverflow$2000-09-07$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+Module  : leafoverflow
+=========
+.sp
+Purpose : overflow handling of leaves
+          containing primary data
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              bd33AppendNewLeaf (
+                    VAR current     : tbd_current_tree;
+                    VAR rec         : tgg00_Rec;
+                    VAR nptr        : tbd_node_ptrs;
+                    index           : integer;
+                    VAR newLeafPage : tsp00_PageNo);
+ 
+        PROCEDURE
+              bd33LeafOverflow (
+                    VAR current   : tbd_current_tree;
+                    VAR rec       : tgg00_Rec;
+                    VAR nptr      : tbd_node_ptrs;
+                    index         : integer;
+                    left          : tsp00_PageNo);
+ 
+        PROCEDURE
+              bd33AppendNewTempLeaf (
+                    VAR current     : tbd_current_tree;
+                    VAR rec         : tgg00_Rec;
+                    VAR nptr        : tbd_node_ptrs;
+                    index           : integer;
+                    VAR newLeafPage : tsp00_PageNo);
+ 
+        PROCEDURE
+              bd33TempLeafOverflow (
+                    VAR current   : tbd_current_tree;
+                    VAR rec       : tgg00_Rec;
+                    VAR nptr      : tbd_node_ptrs;
+                    index         : integer;
+                    left          : tsp00_PageNo);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4;
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tbd_nodeptr;
+                    curr_buf_cnt   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              leafhandling : VBD31;
+ 
+        PROCEDURE
+              b31sort_entries (VAR nptr : tbd_nodeptr;
+                    t : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b31pointer_list (VAR nptr : tbd_nodeptr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              branchnodehandling : VBD51;
+ 
+        PROCEDURE
+              b51ldivert_leftnext (right : tsp00_PageNo;
+                    new_left    : tsp00_PageNo;
+                    VAR current : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              indexing             : VBD53;
+ 
+        PROCEDURE
+              bd53NewLeafIndex (
+                    VAR Nptr         : tbd_nodeptr;
+                    VAR Nnptr        : tbd_nodeptr;
+                    VAR NewSeparator : tgg00_Lkey;
+                    t                : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              bd53NextLeafIndex (
+                    VAR Nptr         : tbd_nodeptr;
+                    RecIndex         : tsp00_Int4;
+                    VAR Key          : tgg00_Lkey;
+                    VAR NewSeparator : tgg00_Lkey;
+                    t                : tgg00_TransContextPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              indexupdateorders    : VBD54;
+ 
+        PROCEDURE
+              b54add_index (pSep       : tsp00_KeyAddr;
+                    SepLen             : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    VAR IndexOrderList : tbd00_OrderList);
+ 
+        PROCEDURE
+              b54repl_index (pOldSep   : tsp00_KeyAddr;
+                    OldSepLen          : tsp00_Int4;
+                    pNewSep            : tsp00_KeyAddr;
+                    NewSepLen          : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    VAR IndexOrderList : tbd00_OrderList);
+ 
+        PROCEDURE
+              b54execute_indexorder (VAR indexorderlist : tbd00_OrderList;
+                    VAR current : tbd_current_tree);
+ 
+        FUNCTION
+              b54tadd_index (pSep       : tsp00_KeyAddr;
+                    SepLen             : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+        FUNCTION
+              b54trepl_index (pOldSep   : tsp00_KeyAddr;
+                    OldSepLen          : tsp00_Int4;
+                    pNewSep            : tsp00_KeyAddr;
+                    NewSepLen          : tsp00_Int4;
+                    n_id               : tsp00_PageNo;
+                    n_level            : tsp00_Int2;
+                    pIndexOrderList    : tsp00_Addr) : boolean;
+ 
+        PROCEDURE
+              b54texecute_indexorder (
+                    pIndexOrderList : tsp00_Addr;
+                    VAR current     : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              entryhandling        : VBD35;
+ 
+        PROCEDURE
+              b35add_space (VAR nptr : tbd_nodeptr;
+                    pos  : tsp00_Int4;
+                    plus : tsp00_Int4;
+                    t    : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b35del_space (VAR nptr : tbd_nodeptr;
+                    pos   : tsp00_Int4;
+                    minus : tsp00_Int4;
+                    t     : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b35get_entrykey (VAR nptr : tbd_nodeptr;
+                    index   : integer;
+                    VAR sep : tgg00_Lkey;
+                    t       : tgg00_TransContextPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              nodehandling : VBD13;
+ 
+        PROCEDURE
+              b13free_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              bd13GetNode (VAR Current : tbd_current_tree;
+                    Pno       : tsp00_PageNo;
+                    PageLockMode : tbd00_PageLockMode;
+                    NodeReq   : tbd_node_request;
+                    VAR Nptrs : tbd_node_ptrs);
+ 
+        PROCEDURE
+              b13new_node (lno  : tsp00_Int2;
+                    VAR nptr    : tbd_node_ptrs;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              b13r_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree;
+                    lru_info    : tbd_lru_info);
+ 
+        PROCEDURE
+              b13w_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        PROCEDURE
+              bd999CreateIndexOrderList(
+                    VAR trans           : tgg00_TransContext;
+                    VAR pIndexOrderList : tsp00_Addr);
+ 
+        PROCEDURE
+              bd999DestroyIndexOrderList(
+                    VAR trans           : tgg00_TransContext;
+                    VAR pIndexOrderList : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_cpp_auxiliary_functions : vgg06;
+ 
+        FUNCTION
+              gg06Align (
+                    length    : tsp00_Int4;
+                    alignment : tsp00_Int4) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01page (layer : tgg00_Debug;
+                    VAR n    : tbd_node;
+                    start_p  : tsp00_Int4;
+                    stop_p   : tsp00_Int4);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              b06dump_bad_page;
+ 
+              tbd_univ_ptr tbd_nodeptr
+&             ifdef TRACE
+ 
+        PROCEDURE
+              t01page;
+ 
+              tsp00_Page tbd_node
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenP
+.sp
+.cp 3
+Created : 1980-02-13
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 2000-09-07
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+The routines described below process the leaves of the current
+tree.
+.sp
+A leaf of a B* tree 'overflows' if a record is to be inserted in
+the leaf and this is not possible due to the fact that there is
+no longer sufficient space available in the leaf.  This can occur
+when an entry is being newly inserted but also when an entry is being
+replaced by a longer entry.  If the leaf has an environment
+(a left and/or right neighbor leaf), the insertion can be made possible
+by redistributing entries between the leaf and its environment.
+If necessary, this environment must be created or changed by
+adding a new (empty) leaf.
+.sp
+If the handling of an overflow makes it necessary to modify the
+current B* index, the routines make available suitable
+orders for index processing.  If, during overflow handling, entries
+change their position in the leaf or even change leaves, the
+position data for entries in the leaves concerned are labelled as
+unreliable in the short-term memory or are deleted from it.
+Invariably, all leaves of a permanent file that are involved in
+the reorganization are written back immediately afterwards.
+Changes in leaf nodes of permanent files are first carried out
+separately on new leaf nodes (copies on leaves with new page
+numbers) and then integrated into the tree after successful
+execution.
+.sp
+Information on the current tree is found in 'current'.  Instructions
+for a possible, future index reorganization are entered in
+indexorderlist.
+.sp 2
+   b33addoverflow(b,nptr,index,left,current,e)
+.sp
+It is assumed that the record transferred to b is to be inserted
+in the leaf referenced by the pointer nptr at the position indexed
+by the parameter 'index' but there is not enough space
+available in the leaf.  This routine reorganizes the leaf with its
+environment and inserts the new record.
+Acknowledgements in e:
+   - e_ok
+   - b_no_more_space
+   - b_disk_not_accessible
+.sp 2
+   bd33AppendNewLeaf(b,nptr,index,current)
+.sp
+It is assumed that a new record is to be inserted at the end
+of the file identified by 'current' and not enough space
+is available in the leaf referenced by the pointer nptr.
+This routine is intended to prevent the overflow handling for
+mass inserts in ascending sequence.  A new right neighbor leaf is
+requested and integrated into the tree and a new entry is added.
+Acknowledgements in trError_gg00:
+   - e_ok
+   - e_no_more_space
+   - e_disk_not_accessible
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+If the 'overflowing' leaf n has a right neighbor rn in the tree,
+a check is run to find out whether the old contents of the two
+leaves can be distributed between the two with the new record, so that
+neither one is overfilled or underfilled ('overflow' toward the
+right).  If there is no right neighbor or if the total available
+space is insufficient for the new record, an attempt will be made
+to balance it with a left neighbor ln, if such a leaf exists.
+If this balancing is also unsuccessful, a new, empty leaf
+new_rn is requested and made the (new) right neighbor of n.  In
+the least favorable of circumstances, this one new leaf will
+also be insufficient.
+.br
+Assumed - two long entries in leaf n
+.in 10
+.of 2
+- the new entry must be inserted between these two entries
+.in 10
+.of 2
+_ the new entry is so long that it does not fit in one leaf
+together with one of the two entries present
+.in 0
+In this case, an additional new leaf is required.
+.sp
+Due to the fact that the security requirements for permanent and
+temporary files differ from one another, overflow handling for
+these two types of files differs as follows:
+.in 4
+.of 2
+- for temporary files, entries are balanced in the old leaves.
+.in 4
+.of 2
+- for permanent files, new leaves must be requested and the contents
+of the old leaves must be transferred to the new leaves
+.in 4
+.of 2
+_ for temporary files, it is sufficient if the changes are made in the
+leaves in the data cache
+.in 4
+.of 2
+_ for permanent files, the leaves must be written out directly to
+the secondary storage
+.in 0
+.sp
+As regards the short-term memory, there is no check run as to
+whether entries are actually moved to one or to both of the leaves:
+basically, all reminders of entries of the leaf that has overflowed
+are deleted.  For permanent files, reminders of entries in the left or
+right neighbor leaf are deleted.  For temporary files, on the other
+hand, the position data in the reminders for the left or right neighbor
+leaf are labelled as unreliable.
+.sp
+The B*_tree_index is reorganized as follows:
+.br
+In temporary files, an add_index operation is executed for each new
+leaf; if balancing can be performed in the old leaves, the old
+separator for the right leaf is replaced by a new separator both for
+right balancing and for left balancing.  Likewise in permanent
+files, an add_index operation is executed for each leaf that is
+added.  However, it is not enough merely to replace the old
+separator.  Since the old leaves are replaced by new ones, the pointers
+in the index section of the tree must be redirected from the old leaves
+to the new.
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33AppendNewLeaf (
+            VAR current     : tbd_current_tree;
+            VAR rec         : tgg00_Rec;
+            VAR nptr        : tbd_node_ptrs;
+            index           : integer;
+            VAR newLeafPage : tsp00_PageNo);
+ 
+VAR
+      rnptr          : tbd_node_ptrs;
+      sep            : tgg00_Lkey;
+      indexorderlist : tbd00_OrderList;
+ 
+BEGIN
+WITH current, curr_trans^ DO
+    BEGIN
+    trError_gg00   := e_ok;
+    rnptr.np_ptr   := NIL;
+    rnptr.np_cbptr := NIL;
+    indexorderlist.olstCount_bd00 := 0;
+    bd53NextLeafIndex (nptr.np_ptr, index, rec.recKey_gg00, sep, curr_trans);
+    IF  trError_gg00 = e_ok
+    THEN
+        b13new_node (LEAF_LEVEL_BD00, rnptr, current);
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        WITH rnptr.np_ptr^ DO
+            BEGIN
+            SAPDB_PascalMove ('VBD33 ',   1,    
+                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                  @rec, 1, @rnptr.np_ptr^, BODY_BEG_BD00, rec.recLen_gg00, trError_gg00);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                newLeafPage           := nd_id;
+                nptr.np_ptr^.nd_right := newLeafPage;
+                nd_sorted             := true;
+                nd_bottom             := BODY_BEG_BD00 + gg06Align (rec.recLen_gg00, REC_ALIGN_BD00);
+                nd_record_cnt         := 1;
+                IF  (ftsTemp_egg00 IN curr_tree_id.fileType_gg00        ) OR
+                    (eftsClustered_egg00 IN currExtendedFileTypeSet_bd00)
+                THEN
+                    nd_left := nptr.np_ptr^.nd_id;
+                (*ENDIF*) 
+                nd_pointer_list [MAX_POINTERINDEX_BD00] := BODY_BEG_BD00;
+                b54add_index (@sep.keyVal_gg00, sep.keyLen_gg00, nd_id, LEAF_LEVEL_BD00, indexorderlist)
+                END
+            ELSE
+                b13free_node (rnptr, current);
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            b13w_release_node (rnptr, current);
+            b13w_release_node (nptr, current);
+            IF  trError_gg00 = e_ok
+            THEN
+                b54execute_indexorder (indexorderlist, current)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        IF  rnptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (rnptr, current, lru_normal)
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33LeafOverflow (
+            VAR current   : tbd_current_tree;
+            VAR rec       : tgg00_Rec;
+            VAR nptr      : tbd_node_ptrs;
+            index         : integer;
+            left          : tsp00_PageNo);
+ 
+VAR
+      bUpdateLeftLinkage : boolean;
+      ncov               : integer;
+      neighbcov          : integer;
+      newRecLen          : integer;
+      newLeftPage        : tsp00_PageNo;
+      right              : tsp00_PageNo;
+      neighb_nptr        : tbd_node_ptrs;
+      indexorderlist     : tbd00_OrderList;
+ 
+BEGIN
+neighb_nptr.np_ptr            := NIL;
+neighb_nptr.np_cbptr          := NIL;
+indexorderlist.olstCount_bd00 := 0;
+newLeftPage                   := NIL_PAGE_NO_GG00;
+newRecLen                     := rec.recLen_gg00 + POINTERSIZE_BD00;
+WITH nptr.np_ptr^ DO
+    BEGIN
+    ncov  := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+    right := nd_right;
+    END;
+(*ENDWITH*) 
+WITH current, curr_tree_id, curr_trans^ DO
+    BEGIN
+    bUpdateLeftLinkage := (ftsTemp_egg00 IN fileType_gg00) OR
+          (eftsClustered_egg00 IN currExtendedFileTypeSet_bd00);
+    (* *)
+    IF  (right = NIL_PAGE_NO_GG00) OR (ftsDynamic_egg00 IN fileType_gg00)
+    THEN
+        trError_gg00 := e_no_more_space
+    ELSE
+        BEGIN
+        bd13GetNode (current, right, plmLock_ebd00, nr_for_update, neighb_nptr);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            WITH neighb_nptr.np_ptr^ DO
+                neighbcov := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+            (*ENDWITH*) 
+            IF  (ncov + neighbcov + newRecLen) > 2 * FULLCOVERING_BD00
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                IF  NOT neighb_nptr.np_ptr^.nd_sorted
+                THEN
+                    b31sort_entries (neighb_nptr.np_ptr, curr_trans);
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    bd33_RightDistribute (current, nptr, neighb_nptr, index,
+                          ncov, neighbcov, rec, indexorderlist);
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    b13w_release_node (neighb_nptr, current);
+                    b13w_release_node (nptr, current)
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (e_ok <> trError_gg00) AND (NIL <> neighb_nptr.np_ptr)
+            THEN
+                b13r_release_node (neighb_nptr, current, lru_normal)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_no_more_space) AND (NOT (ftsDynamic_egg00 in fileType_gg00))
+    THEN
+        IF  left <> NIL_PAGE_NO_GG00
+        THEN
+            BEGIN
+            trError_gg00 := e_ok;
+            bd13GetNode (current, left, plmLock_ebd00, nr_for_update, neighb_nptr);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                WITH neighb_nptr.np_ptr^ DO
+                    neighbcov := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+                (*ENDWITH*) 
+                IF  (ncov + neighbcov + newRecLen) > 2 * FULLCOVERING_BD00
+                THEN
+                    trError_gg00 := e_no_more_space
+                ELSE
+                    BEGIN
+                    IF  NOT neighb_nptr.np_ptr^.nd_sorted
+                    THEN
+                        b31sort_entries (neighb_nptr.np_ptr, curr_trans);
+                    (*ENDIF*) 
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        bd33_LeftDistribute (current, nptr, neighb_nptr,
+                              index, ncov, neighbcov, rec, indexorderlist);
+                    (*ENDIF*) 
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        b13w_release_node (nptr, current);
+                        b13w_release_node (neighb_nptr, current)
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  (e_ok <> trError_gg00) AND (NIL <> neighb_nptr.np_ptr)
+                THEN
+                    b13r_release_node (neighb_nptr, current, lru_normal)
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  trError_gg00 = e_no_more_space
+    THEN
+        BEGIN (* neither right distribution nor left distribution are possible *)
+        trError_gg00 := e_ok;
+        b13new_node (LEAF_LEVEL_BD00, neighb_nptr, current);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            neighb_nptr.np_ptr^.nd_right := right;
+            neighbcov                    := 0;
+            IF  bUpdateLeftLinkage
+            THEN
+                BEGIN
+                neighb_nptr.np_ptr^.nd_left  := nptr.np_ptr^.nd_id;
+                newLeftPage                  := neighb_nptr.np_ptr^.nd_id;
+                END;
+            (*ENDIF*) 
+            bd33_RightDistribute (current, nptr, neighb_nptr, index,
+                  ncov, neighbcov, rec, indexorderlist);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                nptr.np_ptr^.nd_right := neighb_nptr.np_ptr^.nd_id;
+                b13w_release_node (neighb_nptr, current);
+                b13w_release_node (nptr, current)
+                END;
+            (*ENDIF*) 
+            IF  (bUpdateLeftLinkage) AND (trError_gg00 = e_ok) AND (right <> NIL_PAGE_NO_GG00)
+            THEN
+                b51ldivert_leftnext (right, newLeftPage, current);
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        b54execute_indexorder (indexorderlist, current);
+    (*ENDIF*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        IF  neighb_nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (neighb_nptr, current, lru_normal)
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33_LeftDistribute (
+            VAR current        : tbd_current_tree;
+            VAR nptr           : tbd_node_ptrs;
+            VAR lnptr          : tbd_node_ptrs;
+            index              : integer;
+            ncov               : integer;
+            lncov              : integer;
+            VAR rec            : tgg00_Rec;
+            VAR indexorderlist : tbd00_OrderList);
+ 
+VAR
+      lno          : tsp00_Int2;
+      ind_pos      : integer;
+      insert_pos   : integer;
+      pos          : integer;
+      new_el       : integer;
+      oflw         : integer;
+      opt_oflw     : integer;
+      ptrlist_oflw : integer;
+      new_space    : integer;
+      old_rightsep : tgg00_Lkey;
+      new_rightsep : tgg00_Lkey;
+ 
+BEGIN
+&ifdef TRACE
+t01page (bd_oflw, lnptr.np_ptr^, 1, lnptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, lnptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((lnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (lnptr.np_ptr^));
+t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, nptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (nptr.np_ptr^));
+&endif
+new_el    := rec.recLen_gg00;
+new_space := new_el + POINTERSIZE_BD00;
+opt_oflw  := ncov - ((ncov + lncov) DIV 2);
+WITH current, curr_trans^ DO
+    BEGIN
+    IF  opt_oflw > 0
+    THEN
+        BEGIN
+        ptrlist_oflw := 0;
+        oflw         := 0;
+        WITH nptr.np_ptr^ DO
+            BEGIN
+            lno := nd_level;
+            IF  index > nd_record_cnt - 1
+            THEN
+                BEGIN
+                insert_pos := nd_bottom;
+                index      := index - 1
+                END
+            ELSE
+                insert_pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - index ];
+            (*ENDIF*) 
+            ind_pos := 1;
+            REPEAT
+                IF  ind_pos <= nd_record_cnt - 1
+                THEN
+                    pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - ind_pos ]
+                ELSE
+                    pos := nd_bottom;
+                (*ENDIF*) 
+                oflw         := pos - BODY_BEG_BD00;
+                ind_pos      := ind_pos + 1;
+                ptrlist_oflw := ptrlist_oflw + POINTERSIZE_BD00
+            UNTIL
+                (oflw + ptrlist_oflw >= opt_oflw) OR
+                (ind_pos = nd_record_cnt - 1)
+            (*ENDREPEAT*) 
+            END;
+        (*ENDWITH*) 
+        IF  insert_pos < pos
+        THEN
+            IF  lncov + oflw + new_space + ptrlist_oflw > FULLCOVERING_BD00
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                b35get_entrykey (nptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',   2,    
+                          sizeof (nptr.np_ptr^), sizeof (lnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @lnptr.np_ptr^, lnptr.np_ptr^.nd_bottom, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        b35del_space (nptr.np_ptr, BODY_BEG_BD00, oflw,
+                              curr_trans);
+                    (*ENDIF*) 
+                    WITH lnptr.np_ptr^ DO
+                        BEGIN
+                        insert_pos := nd_bottom + insert_pos - BODY_BEG_BD00;
+                        nd_bottom  := nd_bottom + gg06Align (oflw, REC_ALIGN_BD00)
+                        END;
+                    (*ENDWITH*) 
+                    b35add_space (lnptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00),
+                          curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',   3,    
+                          sizeof (rec), sizeof (lnptr.np_ptr^), @rec, 1,
+                          @lnptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        ELSE
+            IF  (ncov - oflw + new_space - ptrlist_oflw > FULLCOVERING_BD00)
+                OR (lncov + oflw + ptrlist_oflw > FULLCOVERING_BD00)
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                b35get_entrykey (nptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',   4,    
+                          sizeof (nptr.np_ptr^), sizeof (lnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @lnptr.np_ptr^, lnptr.np_ptr^.nd_bottom, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        b35del_space (nptr.np_ptr, BODY_BEG_BD00, oflw,
+                              curr_trans);
+                    (*ENDIF*) 
+                    WITH lnptr.np_ptr^ DO
+                        nd_bottom := nd_bottom + gg06Align (oflw, REC_ALIGN_BD00);
+                    (*ENDWITH*) 
+                    insert_pos := insert_pos - gg06Align (oflw, REC_ALIGN_BD00);
+                    b35add_space (nptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00),
+                          curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',   5,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        trError_gg00 := e_no_more_space;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        b31pointer_list (nptr.np_ptr);
+        b31pointer_list (lnptr.np_ptr);
+&       ifdef TRACE
+        t01page (bd_oflw, lnptr.np_ptr^, 1, lnptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, lnptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((lnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (lnptr.np_ptr^));
+        t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, nptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (nptr.np_ptr^));
+&       endif
+        bd53NewLeafIndex (lnptr.np_ptr, nptr.np_ptr, new_rightsep, curr_trans);
+        IF  trError_gg00 = e_ok
+        THEN
+            WITH curr_tree_id DO
+                IF  ftsPerm_egg00 in fileType_gg00
+                THEN
+                    BEGIN
+                    curr_lvl_1_pno := NIL_PAGE_NO_GG00;
+                    b54repl_index (@old_rightsep.keyVal_gg00, old_rightsep.keyLen_gg00,
+                          @new_rightsep.keyVal_gg00, new_rightsep.keyLen_gg00,
+                          nptr.np_ptr^.nd_id, lno, indexorderlist)
+                    END
+                ELSE
+                    BEGIN
+                    b54repl_index (@old_rightsep.keyVal_gg00, old_rightsep.keyLen_gg00,
+                          @new_rightsep.keyVal_gg00, new_rightsep.keyLen_gg00,
+                          nptr.np_ptr^.nd_id, lno, indexorderlist);
+                    END
+                (*ENDIF*) 
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33_RightDistribute (
+            VAR current        : tbd_current_tree;
+            VAR nptr           : tbd_node_ptrs;
+            VAR  rnptr         : tbd_node_ptrs;
+            index              : integer;
+            ncov               : integer;
+            rncov              : integer;
+            VAR rec            : tgg00_Rec;
+            VAR indexorderlist : tbd00_OrderList);
+ 
+VAR
+      lno            : tsp00_Int2;
+      ind_pos        : integer;
+      insert_pos     : integer;
+      pos            : integer;
+      new_el         : integer;
+      new_space      : integer;
+      oflw           : integer;
+      opt_oflw       : integer;
+      ptrlist_oflw   : integer;
+      post_rnptr     : tbd_node_ptrs;
+      post_rn_pno    : tsp00_PageNo;
+      old_rightsep   : tgg00_Lkey;
+      new_rightsep   : tgg00_Lkey;
+      post_right_sep : tgg00_Lkey;
+      pRec           : tgg00_RecPtr;
+      pNode          : tbd_nodeptr;
+ 
+BEGIN
+&ifdef TRACE
+t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, nptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (nptr.np_ptr^));
+t01page (bd_oflw, rnptr.np_ptr^, 1, rnptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, rnptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (rnptr.np_ptr^));
+&endif
+post_rnptr.np_ptr   := NIL;
+post_rnptr.np_cbptr := NIL;
+post_rn_pno         := NIL_PAGE_NO_GG00;
+new_el              := rec.recLen_gg00;
+new_space           := new_el + POINTERSIZE_BD00;
+opt_oflw            := ncov - ((ncov + rncov) DIV 2);
+WITH current, curr_trans^ DO
+    BEGIN
+    IF  opt_oflw > 0
+    THEN
+        BEGIN
+        ptrlist_oflw := 0;
+        oflw := 0;
+        WITH nptr.np_ptr^ DO
+            BEGIN
+            lno := nd_level;
+            IF  index > nd_record_cnt - 1
+            THEN
+                BEGIN
+                insert_pos := nd_bottom;
+                index      := index - 1
+                END
+            ELSE
+                insert_pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - index ];
+            (*ENDIF*) 
+            ind_pos := nd_record_cnt - 1;
+            REPEAT
+                pos          := nd_pointer_list[ MAX_POINTERINDEX_BD00 - ind_pos ];
+                oflw         := nd_bottom - pos;
+                ind_pos      := ind_pos - 1;
+                ptrlist_oflw := ptrlist_oflw + POINTERSIZE_BD00
+            UNTIL
+                (oflw + ptrlist_oflw >= opt_oflw) OR
+                (ind_pos = FIRST_REC_INDEX_BD00)
+            (*ENDREPEAT*) 
+            END;
+        (*ENDWITH*) 
+        IF  insert_pos >= pos
+        THEN
+            BEGIN
+            IF  (rncov = 0) AND (insert_pos = nptr.np_ptr^.nd_bottom)
+            THEN
+                BEGIN
+                oflw   := 0;
+                trError_gg00 := e_ok;
+                pos    := nptr.np_ptr^.nd_bottom
+                END
+            ELSE
+                BEGIN
+                IF  rncov + oflw + new_space + ptrlist_oflw > FULLCOVERING_BD00
+                THEN
+                    BEGIN
+                    IF  (rncov = 0) AND (insert_pos = BODY_BEG_BD00)
+                    THEN
+                        trError_gg00 := e_ok
+                    ELSE
+                        trError_gg00 := e_no_more_space
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    b35get_entrykey (rnptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                (*ENDIF*) 
+                IF  oflw > 0
+                THEN
+                    BEGIN
+                    b35add_space (rnptr.np_ptr, BODY_BEG_BD00, oflw, curr_trans);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        SAPDB_PascalMove ('VBD33 ',   6,    
+                              sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                              @nptr.np_ptr^, pos,
+                              @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                        IF  trError_gg00 = e_move_error
+                        THEN
+                            BEGIN
+                            trError_gg00 := e_data_page_corrupted;
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                            END
+                        ELSE
+                            WITH nptr.np_ptr^ DO
+                                nd_bottom  := nd_bottom - gg06Align (oflw, REC_ALIGN_BD00)
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    IF  insert_pos = BODY_BEG_BD00
+                    THEN
+                        BEGIN
+                        pNode := nptr.np_ptr;
+                        pRec  := @nptr.np_ptr^.nd_body [insert_pos];
+                        SAPDB_PascalMove ('VBD33 ',   7,    
+                              sizeof (rec), sizeof (nptr.np_ptr^),
+                              @rec, 1,
+                              @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                        IF  trError_gg00 = e_move_error
+                        THEN
+                            BEGIN
+                            trError_gg00 := e_data_page_corrupted;
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                            END
+                        ELSE
+                            WITH nptr.np_ptr^ DO
+                                nd_bottom  := nd_bottom + gg06Align (new_el, REC_ALIGN_BD00)
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        insert_pos := BODY_BEG_BD00 + insert_pos - pos;
+                        b35add_space (rnptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00), curr_trans);
+                        IF  trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            pNode := rnptr.np_ptr;
+                            pRec  := @rnptr.np_ptr^.nd_body [insert_pos];
+                            SAPDB_PascalMove ('VBD33 ',   8,    
+                                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                                  @rec, 1,
+                                  @rnptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                            IF  trError_gg00 = e_move_error
+                            THEN
+                                BEGIN
+                                trError_gg00 := e_data_page_corrupted;
+                                b06dump_bad_page (trTaskId_gg00, 'd',
+                                      FILE_EXT_COR_BD00, rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                                END
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            IF  (ncov - oflw + new_space - ptrlist_oflw > FULLCOVERING_BD00) OR
+                (rncov + oflw + ptrlist_oflw > FULLCOVERING_BD00)
+            THEN
+                IF  (insert_pos = BODY_BEG_BD00) AND (rncov = 0)
+                THEN
+                    BEGIN
+                    oflw := nptr.np_ptr^.nd_bottom - BODY_BEG_BD00;
+                    SAPDB_PascalMove ('VBD33 ',   9,    
+                          sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                    rnptr.np_ptr^.nd_bottom := nptr.np_ptr^.nd_bottom;
+                    SAPDB_PascalMove ('VBD33 ',  10,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        WITH nptr.np_ptr^ DO
+                            BEGIN
+                            nd_bottom  := BODY_BEG_BD00 + gg06Align (new_el, REC_ALIGN_BD00);
+                            END
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    trError_gg00 := e_no_more_space
+                (*ENDIF*) 
+            ELSE
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    b35get_entrykey (rnptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                (*ENDIF*) 
+                b35add_space (rnptr.np_ptr, BODY_BEG_BD00, oflw, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  11,    
+                          sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                          @nptr.np_ptr^, pos,
+                          @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        WITH nptr.np_ptr^ DO
+                            nd_bottom := nd_bottom - gg06Align (oflw, REC_ALIGN_BD00);
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    b35add_space (nptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00), curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  12,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd',
+                              FILE_EXT_COR_BD00, nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        trError_gg00 := e_no_more_space;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_no_more_space) AND (rncov = 0)
+    THEN
+        BEGIN
+        trError_gg00    := e_ok;
+        post_rnptr     := rnptr;
+        rnptr.np_ptr   := NIL;
+        rnptr.np_cbptr := NIL;
+        b13new_node (LEAF_LEVEL_BD00, rnptr, current);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            oflw := nptr.np_ptr^.nd_bottom - insert_pos;
+            SAPDB_PascalMove ('VBD33 ',  13,    
+                  sizeof (nptr.np_ptr^), sizeof (post_rnptr.np_ptr^),
+                  @nptr.np_ptr^, insert_pos,
+                  @post_rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+            nptr.np_ptr^.nd_bottom := insert_pos;
+            post_rnptr.np_ptr^.nd_bottom := BODY_BEG_BD00 + gg06Align (oflw, REC_ALIGN_BD00);
+            SAPDB_PascalMove ('VBD33 ',  14,    
+                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                  @rec, 1,
+                  @rnptr.np_ptr^, BODY_BEG_BD00, new_el, trError_gg00);
+            IF  trError_gg00 = e_move_error
+            THEN
+                BEGIN
+                trError_gg00 := e_data_page_corrupted;
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1);
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      post_rnptr.np_ptr^.nd_id, post_rnptr.np_ptr, 1)
+                END
+            ELSE
+                BEGIN
+                WITH rnptr.np_ptr^ DO
+                    BEGIN
+                    nd_pointer_list[ MAX_POINTERINDEX_BD00 ] := BODY_BEG_BD00;
+                    nd_record_cnt := nd_record_cnt + 1;
+                    nd_bottom     := BODY_BEG_BD00 + gg06Align (new_el, REC_ALIGN_BD00);
+                    nd_right      := post_rnptr.np_ptr^.nd_id;
+                    END;
+                (*ENDWITH*) 
+                post_rn_pno := post_rnptr.np_ptr^.nd_id;
+                b31pointer_list (post_rnptr.np_ptr);
+&               ifdef TRACE
+                t01page (bd_oflw, post_rnptr.np_ptr^, 1, post_rnptr.np_ptr^.nd_bottom);
+                t01page (bd_oflw, post_rnptr.np_ptr^,
+                      MAX_BOTTOM_BD00 - ((post_rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+                      sizeof (post_rnptr.np_ptr^));
+&               endif
+                bd53NewLeafIndex (rnptr.np_ptr, post_rnptr.np_ptr, post_right_sep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    b13w_release_node (post_rnptr, current)
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        b31pointer_list (nptr.np_ptr);
+        IF  post_rn_pno = NIL_PAGE_NO_GG00
+        THEN
+            b31pointer_list (rnptr.np_ptr);
+        (*ENDIF*) 
+        nptr.np_ptr^.nd_right := rnptr.np_ptr^.nd_id;
+&       ifdef TRACE
+        t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, nptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (nptr.np_ptr^));
+        t01page (bd_oflw, rnptr.np_ptr^, 1, rnptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, rnptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (rnptr.np_ptr^));
+&       endif
+        bd53NewLeafIndex (nptr.np_ptr, rnptr.np_ptr, new_rightsep, curr_trans);
+        IF  trError_gg00 = e_ok
+        THEN
+            WITH curr_tree_id DO
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    b54repl_index (@old_rightsep.keyVal_gg00, old_rightsep.keyLen_gg00,
+                          @new_rightsep.keyVal_gg00, new_rightsep.keyLen_gg00,
+                          rnptr.np_ptr^.nd_id, lno, indexorderlist)
+                ELSE
+                    b54add_index (@new_rightsep.keyVal_gg00, new_rightsep.keyLen_gg00,
+                          rnptr.np_ptr^.nd_id, lno, indexorderlist);
+                (*ENDIF*) 
+                IF  post_rn_pno <> NIL_PAGE_NO_GG00
+                THEN
+                    b54add_index (@post_right_sep.keyVal_gg00, post_right_sep.keyLen_gg00,
+                          post_rn_pno, lno, indexorderlist)
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 <> e_ok) AND (post_rnptr.np_ptr <> NIL)
+    THEN
+        BEGIN
+        IF  (rnptr.np_ptr <> NIL)
+        THEN
+            b13r_release_node (rnptr, current, lru_normal);
+        (*ENDIF*) 
+        rnptr := post_rnptr
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33AppendNewTempLeaf (
+            VAR current     : tbd_current_tree;
+            VAR rec         : tgg00_Rec;
+            VAR nptr        : tbd_node_ptrs;
+            index           : integer;
+            VAR newLeafPage : tsp00_PageNo);
+ 
+VAR
+      rnptr           : tbd_node_ptrs;
+      sep             : tgg00_Lkey;
+      pIndexOrderList : tsp00_Addr;
+ 
+BEGIN
+WITH current, curr_trans^ DO
+    BEGIN
+    trError_gg00    := e_ok;
+    rnptr.np_ptr    := NIL;
+    rnptr.np_cbptr  := NIL;
+    pIndexOrderList := NIL;
+    bd999CreateIndexOrderList (curr_trans^, pIndexOrderList);
+    IF  trError_gg00 = e_ok
+    THEN
+        bd53NextLeafIndex (nptr.np_ptr, index, rec.recKey_gg00, sep,
+              curr_trans);
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        b13new_node (LEAF_LEVEL_BD00, rnptr, current);
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        WITH rnptr.np_ptr^ DO
+            BEGIN
+            SAPDB_PascalMove ('VBD33 ',  15,    
+                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                  @rec, 1, @rnptr.np_ptr^, BODY_BEG_BD00, rec.recLen_gg00, trError_gg00);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                newLeafPage           := nd_id;
+                nptr.np_ptr^.nd_right := newLeafPage;
+                nd_sorted             := true;
+                nd_bottom             := BODY_BEG_BD00 + gg06Align (rec.recLen_gg00, REC_ALIGN_BD00);
+                nd_record_cnt         := 1;
+                IF  (ftsTemp_egg00 IN curr_tree_id.fileType_gg00        ) OR
+                    (eftsClustered_egg00 IN currExtendedFileTypeSet_bd00)
+                THEN
+                    nd_left := nptr.np_ptr^.nd_id;
+                (*ENDIF*) 
+                nd_pointer_list [MAX_POINTERINDEX_BD00] := BODY_BEG_BD00;
+                IF  NOT b54tadd_index (@sep.keyVal_gg00, sep.keyLen_gg00,
+                    nd_id, LEAF_LEVEL_BD00, pIndexOrderList)
+                THEN
+                    trError_gg00 := e_no_more_memory;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 <> e_ok
+            THEN
+                b13free_node (rnptr, current);
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            b13w_release_node (rnptr, current);
+            b13w_release_node (nptr, current);
+            IF  trError_gg00 = e_ok
+            THEN
+                b54texecute_indexorder (pIndexOrderList, current)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        IF  rnptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (rnptr, current, lru_normal)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    bd999DestroyIndexOrderList (curr_trans^, pIndexOrderList);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33TempLeafOverflow (
+            VAR current   : tbd_current_tree;
+            VAR rec       : tgg00_Rec;
+            VAR nptr      : tbd_node_ptrs;
+            index         : integer;
+            left          : tsp00_PageNo);
+ 
+VAR
+      bUpdateLeftLinkage : boolean;
+      ncov               : integer;
+      neighbcov          : integer;
+      newRecLen          : integer;
+      newLeftPage        : tsp00_PageNo;
+      right              : tsp00_PageNo;
+      neighb_nptr        : tbd_node_ptrs;
+      pIndexOrderList    : tsp00_Addr;
+ 
+BEGIN
+neighb_nptr.np_ptr            := NIL;
+neighb_nptr.np_cbptr          := NIL;
+newLeftPage                   := NIL_PAGE_NO_GG00;
+newRecLen                     := rec.recLen_gg00 + POINTERSIZE_BD00;
+WITH nptr.np_ptr^ DO
+    BEGIN
+    ncov  := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+    right := nd_right;
+    END;
+(*ENDWITH*) 
+WITH current, curr_tree_id, curr_trans^ DO
+    BEGIN
+    bUpdateLeftLinkage := (ftsTemp_egg00 IN fileType_gg00) OR
+          (eftsClustered_egg00 IN currExtendedFileTypeSet_bd00);
+    (* *)
+    pIndexOrderList := NIL;
+    bd999CreateIndexOrderList (curr_trans^, pIndexOrderList);
+    IF  (trError_gg00 = e_ok)
+        AND ((right = NIL_PAGE_NO_GG00) OR (ftsDynamic_egg00 IN fileType_gg00))
+    THEN
+        trError_gg00 := e_no_more_space;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        bd13GetNode (current, right, plmLock_ebd00, nr_for_update, neighb_nptr);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            WITH neighb_nptr.np_ptr^ DO
+                neighbcov := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+            (*ENDWITH*) 
+            IF  (ncov + neighbcov + newRecLen) > 2 * FULLCOVERING_BD00
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                IF  NOT neighb_nptr.np_ptr^.nd_sorted
+                THEN
+                    b31sort_entries (neighb_nptr.np_ptr, curr_trans);
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    bd33_RightDistributeTemp (current, nptr, neighb_nptr, index,
+                          ncov, neighbcov, rec, pIndexOrderList);
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    b13w_release_node (neighb_nptr, current);
+                    b13w_release_node (nptr, current)
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (e_ok <> trError_gg00) AND (NIL <> neighb_nptr.np_ptr)
+            THEN
+                b13r_release_node (neighb_nptr, current, lru_normal)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_no_more_space) AND (NOT (ftsDynamic_egg00 in fileType_gg00))
+    THEN
+        IF  left <> NIL_PAGE_NO_GG00
+        THEN
+            BEGIN
+            trError_gg00 := e_ok;
+            bd13GetNode (current, left, plmLock_ebd00, nr_for_update, neighb_nptr);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                WITH neighb_nptr.np_ptr^ DO
+                    neighbcov := nd_bottom - BODY_BEG_BD00 + ((nd_record_cnt)*POINTERSIZE_BD00);
+                (*ENDWITH*) 
+                IF  (ncov + neighbcov + newRecLen) > 2 * FULLCOVERING_BD00
+                THEN
+                    trError_gg00 := e_no_more_space
+                ELSE
+                    BEGIN
+                    IF  NOT neighb_nptr.np_ptr^.nd_sorted
+                    THEN
+                        b31sort_entries (neighb_nptr.np_ptr, curr_trans);
+                    (*ENDIF*) 
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        bd33_LeftDistributeTemp (current, nptr, neighb_nptr,
+                              index, ncov, neighbcov, rec, pIndexOrderList);
+                    (*ENDIF*) 
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        b13w_release_node (nptr, current);
+                        b13w_release_node (neighb_nptr, current)
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  (e_ok <> trError_gg00) AND (NIL <> neighb_nptr.np_ptr)
+                THEN
+                    b13r_release_node (neighb_nptr, current, lru_normal)
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  trError_gg00 = e_no_more_space
+    THEN
+        BEGIN (* neither right distribution nor left distribution are possible *)
+        trError_gg00 := e_ok;
+        b13new_node (LEAF_LEVEL_BD00, neighb_nptr, current);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            neighb_nptr.np_ptr^.nd_right := right;
+            neighbcov                    := 0;
+            IF  bUpdateLeftLinkage
+            THEN
+                BEGIN
+                neighb_nptr.np_ptr^.nd_left  := nptr.np_ptr^.nd_id;
+                newLeftPage                  := neighb_nptr.np_ptr^.nd_id;
+                END;
+            (*ENDIF*) 
+            bd33_RightDistributeTemp (current, nptr, neighb_nptr, index,
+                  ncov, neighbcov, rec, pIndexOrderList);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                nptr.np_ptr^.nd_right := neighb_nptr.np_ptr^.nd_id;
+                b13w_release_node (neighb_nptr, current);
+                b13w_release_node (nptr, current)
+                END;
+            (*ENDIF*) 
+            IF  (bUpdateLeftLinkage) AND (trError_gg00 = e_ok) AND (right <> NIL_PAGE_NO_GG00)
+            THEN
+                b51ldivert_leftnext (right, newLeftPage, current);
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        b54texecute_indexorder (pIndexOrderList, current);
+    (*ENDIF*) 
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal);
+        (*ENDIF*) 
+        IF  neighb_nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (neighb_nptr, current, lru_normal)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    bd999DestroyIndexOrderList (curr_trans^, pIndexOrderList);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33_LeftDistributeTemp (
+            VAR current        : tbd_current_tree;
+            VAR nptr           : tbd_node_ptrs;
+            VAR lnptr          : tbd_node_ptrs;
+            index              : integer;
+            ncov               : integer;
+            lncov              : integer;
+            VAR rec            : tgg00_Rec;
+            pIndexOrderList    : tsp00_Addr);
+ 
+VAR
+      lno          : tsp00_Int2;
+      ind_pos      : integer;
+      insert_pos   : integer;
+      pos          : integer;
+      new_el       : integer;
+      oflw         : integer;
+      opt_oflw     : integer;
+      ptrlist_oflw : integer;
+      new_space    : integer;
+      old_rightsep : tgg00_Lkey;
+      new_rightsep : tgg00_Lkey;
+ 
+BEGIN
+&ifdef TRACE
+t01page (bd_oflw, lnptr.np_ptr^, 1, lnptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, lnptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((lnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (lnptr.np_ptr^));
+t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, nptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (nptr.np_ptr^));
+&endif
+new_el    := rec.recLen_gg00;
+new_space := new_el + POINTERSIZE_BD00;
+opt_oflw  := ncov - ((ncov + lncov) DIV 2);
+WITH current, curr_trans^ DO
+    BEGIN
+    IF  opt_oflw > 0
+    THEN
+        BEGIN
+        ptrlist_oflw := 0;
+        oflw         := 0;
+        WITH nptr.np_ptr^ DO
+            BEGIN
+            lno := nd_level;
+            IF  index > nd_record_cnt - 1
+            THEN
+                BEGIN
+                insert_pos := nd_bottom;
+                index      := index - 1
+                END
+            ELSE
+                insert_pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - index ];
+            (*ENDIF*) 
+            ind_pos := 1;
+            REPEAT
+                IF  ind_pos <= nd_record_cnt - 1
+                THEN
+                    pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - ind_pos ]
+                ELSE
+                    pos := nd_bottom;
+                (*ENDIF*) 
+                oflw         := pos - BODY_BEG_BD00;
+                ind_pos      := ind_pos + 1;
+                ptrlist_oflw := ptrlist_oflw + POINTERSIZE_BD00
+            UNTIL
+                (oflw + ptrlist_oflw >= opt_oflw) OR
+                (ind_pos = nd_record_cnt - 1)
+            (*ENDREPEAT*) 
+            END;
+        (*ENDWITH*) 
+        IF  insert_pos < pos
+        THEN
+            IF  lncov + oflw + new_space + ptrlist_oflw > FULLCOVERING_BD00
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                b35get_entrykey (nptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  16,    
+                          sizeof (nptr.np_ptr^), sizeof (lnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @lnptr.np_ptr^, lnptr.np_ptr^.nd_bottom, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        b35del_space (nptr.np_ptr, BODY_BEG_BD00, oflw,
+                              curr_trans);
+                    (*ENDIF*) 
+                    WITH lnptr.np_ptr^ DO
+                        BEGIN
+                        insert_pos := nd_bottom + insert_pos - BODY_BEG_BD00;
+                        nd_bottom  := nd_bottom + gg06Align (oflw, REC_ALIGN_BD00)
+                        END;
+                    (*ENDWITH*) 
+                    b35add_space (lnptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00),
+                          curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  17,    
+                          sizeof (rec), sizeof (lnptr.np_ptr^), @rec, 1,
+                          @lnptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        ELSE
+            IF  (ncov - oflw + new_space - ptrlist_oflw > FULLCOVERING_BD00)
+                OR (lncov + oflw + ptrlist_oflw > FULLCOVERING_BD00)
+            THEN
+                trError_gg00 := e_no_more_space
+            ELSE
+                BEGIN
+                b35get_entrykey (nptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  18,    
+                          sizeof (nptr.np_ptr^), sizeof (lnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @lnptr.np_ptr^, lnptr.np_ptr^.nd_bottom, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              lnptr.np_ptr^.nd_id, lnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        b35del_space (nptr.np_ptr, BODY_BEG_BD00, oflw,
+                              curr_trans);
+                    (*ENDIF*) 
+                    WITH lnptr.np_ptr^ DO
+                        nd_bottom := nd_bottom + gg06Align (oflw, REC_ALIGN_BD00);
+                    (*ENDWITH*) 
+                    insert_pos := insert_pos - gg06Align (oflw, REC_ALIGN_BD00);
+                    b35add_space (nptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00),
+                          curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  19,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        trError_gg00 := e_no_more_space;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        b31pointer_list (nptr.np_ptr);
+        b31pointer_list (lnptr.np_ptr);
+&       ifdef TRACE
+        t01page (bd_oflw, lnptr.np_ptr^, 1, lnptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, lnptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((lnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (lnptr.np_ptr^));
+        t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, nptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (nptr.np_ptr^));
+&       endif
+        bd53NewLeafIndex (lnptr.np_ptr, nptr.np_ptr, new_rightsep, curr_trans);
+        IF  trError_gg00 = e_ok
+        THEN
+            WITH curr_tree_id DO
+                IF  ftsPerm_egg00 in fileType_gg00
+                THEN
+                    BEGIN
+                    curr_lvl_1_pno := NIL_PAGE_NO_GG00;
+                    IF  NOT b54trepl_index (@old_rightsep.keyVal_gg00,
+                        old_rightsep.keyLen_gg00, @new_rightsep.keyVal_gg00,
+                        new_rightsep.keyLen_gg00, nptr.np_ptr^.nd_id, lno,
+                        pIndexOrderList)
+                    THEN
+                        trError_gg00 := e_no_more_memory;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    IF  NOT b54trepl_index (@old_rightsep.keyVal_gg00,
+                        old_rightsep.keyLen_gg00, @new_rightsep.keyVal_gg00,
+                        new_rightsep.keyLen_gg00, nptr.np_ptr^.nd_id, lno,
+                        pIndexOrderList)
+                    THEN
+                        trError_gg00 := e_no_more_memory;
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd33_RightDistributeTemp (
+            VAR current        : tbd_current_tree;
+            VAR nptr           : tbd_node_ptrs;
+            VAR  rnptr         : tbd_node_ptrs;
+            index              : integer;
+            ncov               : integer;
+            rncov              : integer;
+            VAR rec            : tgg00_Rec;
+            pIndexOrderList    : tsp00_Addr);
+ 
+VAR
+      lno            : tsp00_Int2;
+      ind_pos        : integer;
+      insert_pos     : integer;
+      pos            : integer;
+      new_el         : integer;
+      new_space      : integer;
+      oflw           : integer;
+      opt_oflw       : integer;
+      ptrlist_oflw   : integer;
+      post_rnptr     : tbd_node_ptrs;
+      post_rn_pno    : tsp00_PageNo;
+      old_rightsep   : tgg00_Lkey;
+      new_rightsep   : tgg00_Lkey;
+      post_right_sep : tgg00_Lkey;
+      pRec           : tgg00_RecPtr;
+      pNode          : tbd_nodeptr;
+ 
+BEGIN
+&ifdef TRACE
+t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, nptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (nptr.np_ptr^));
+t01page (bd_oflw, rnptr.np_ptr^, 1, rnptr.np_ptr^.nd_bottom);
+t01page (bd_oflw, rnptr.np_ptr^,
+      MAX_BOTTOM_BD00 - ((rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+      sizeof (rnptr.np_ptr^));
+&endif
+post_rnptr.np_ptr   := NIL;
+post_rnptr.np_cbptr := NIL;
+post_rn_pno         := NIL_PAGE_NO_GG00;
+new_el              := rec.recLen_gg00;
+new_space           := new_el + POINTERSIZE_BD00;
+opt_oflw            := ncov - ((ncov + rncov) DIV 2);
+WITH current, curr_trans^ DO
+    BEGIN
+    IF  opt_oflw > 0
+    THEN
+        BEGIN
+        ptrlist_oflw := 0;
+        oflw := 0;
+        WITH nptr.np_ptr^ DO
+            BEGIN
+            lno := nd_level;
+            IF  index > nd_record_cnt - 1
+            THEN
+                BEGIN
+                insert_pos := nd_bottom;
+                index      := index - 1
+                END
+            ELSE
+                insert_pos := nd_pointer_list[ MAX_POINTERINDEX_BD00 - index ];
+            (*ENDIF*) 
+            ind_pos := nd_record_cnt - 1;
+            REPEAT
+                pos          := nd_pointer_list[ MAX_POINTERINDEX_BD00 - ind_pos ];
+                oflw         := nd_bottom - pos;
+                ind_pos      := ind_pos - 1;
+                ptrlist_oflw := ptrlist_oflw + POINTERSIZE_BD00
+            UNTIL
+                (oflw + ptrlist_oflw >= opt_oflw) OR
+                (ind_pos = FIRST_REC_INDEX_BD00)
+            (*ENDREPEAT*) 
+            END;
+        (*ENDWITH*) 
+        IF  insert_pos >= pos
+        THEN
+            BEGIN
+            IF  (rncov = 0) AND (insert_pos = nptr.np_ptr^.nd_bottom)
+            THEN
+                BEGIN
+                oflw   := 0;
+                trError_gg00 := e_ok;
+                pos    := nptr.np_ptr^.nd_bottom
+                END
+            ELSE
+                BEGIN
+                IF  rncov + oflw + new_space + ptrlist_oflw > FULLCOVERING_BD00
+                THEN
+                    BEGIN
+                    IF  (rncov = 0) AND (insert_pos = BODY_BEG_BD00)
+                    THEN
+                        trError_gg00 := e_ok
+                    ELSE
+                        trError_gg00 := e_no_more_space
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    b35get_entrykey (rnptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                (*ENDIF*) 
+                IF  oflw > 0
+                THEN
+                    BEGIN
+                    b35add_space (rnptr.np_ptr, BODY_BEG_BD00, oflw, curr_trans);
+                    IF  trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        SAPDB_PascalMove ('VBD33 ',  20,    
+                              sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                              @nptr.np_ptr^, pos,
+                              @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                        IF  trError_gg00 = e_move_error
+                        THEN
+                            BEGIN
+                            trError_gg00 := e_data_page_corrupted;
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                            END
+                        ELSE
+                            WITH nptr.np_ptr^ DO
+                                nd_bottom  := nd_bottom - gg06Align (oflw, REC_ALIGN_BD00)
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    IF  insert_pos = BODY_BEG_BD00
+                    THEN
+                        BEGIN
+                        pNode := nptr.np_ptr;
+                        pRec  := @nptr.np_ptr^.nd_body [insert_pos];
+                        SAPDB_PascalMove ('VBD33 ',  21,    
+                              sizeof (rec), sizeof (nptr.np_ptr^),
+                              @rec, 1,
+                              @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                        IF  trError_gg00 = e_move_error
+                        THEN
+                            BEGIN
+                            trError_gg00 := e_data_page_corrupted;
+                            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                                  nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                            END
+                        ELSE
+                            WITH nptr.np_ptr^ DO
+                                nd_bottom  := nd_bottom + gg06Align (new_el, REC_ALIGN_BD00)
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        insert_pos := BODY_BEG_BD00 + insert_pos - pos;
+                        b35add_space (rnptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00), curr_trans);
+                        IF  trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            pNode := rnptr.np_ptr;
+                            pRec  := @rnptr.np_ptr^.nd_body [insert_pos];
+                            SAPDB_PascalMove ('VBD33 ',  22,    
+                                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                                  @rec, 1,
+                                  @rnptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                            IF  trError_gg00 = e_move_error
+                            THEN
+                                BEGIN
+                                trError_gg00 := e_data_page_corrupted;
+                                b06dump_bad_page (trTaskId_gg00, 'd',
+                                      FILE_EXT_COR_BD00, rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                                END
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            IF  (ncov - oflw + new_space - ptrlist_oflw > FULLCOVERING_BD00) OR
+                (rncov + oflw + ptrlist_oflw > FULLCOVERING_BD00)
+            THEN
+                IF  (insert_pos = BODY_BEG_BD00) AND (rncov = 0)
+                THEN
+                    BEGIN
+                    oflw := nptr.np_ptr^.nd_bottom - BODY_BEG_BD00;
+                    SAPDB_PascalMove ('VBD33 ',  23,    
+                          sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                          @nptr.np_ptr^, BODY_BEG_BD00,
+                          @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                    rnptr.np_ptr^.nd_bottom := nptr.np_ptr^.nd_bottom;
+                    SAPDB_PascalMove ('VBD33 ',  24,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        WITH nptr.np_ptr^ DO
+                            BEGIN
+                            nd_bottom  := BODY_BEG_BD00 + gg06Align (new_el, REC_ALIGN_BD00);
+                            END
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    trError_gg00 := e_no_more_space
+                (*ENDIF*) 
+            ELSE
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    b35get_entrykey (rnptr.np_ptr, FIRST_REC_INDEX_BD00, old_rightsep, curr_trans);
+                (*ENDIF*) 
+                b35add_space (rnptr.np_ptr, BODY_BEG_BD00, oflw, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  25,    
+                          sizeof (nptr.np_ptr^), sizeof (rnptr.np_ptr^),
+                          @nptr.np_ptr^, pos,
+                          @rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                        b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                              rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1)
+                        END
+                    ELSE
+                        WITH nptr.np_ptr^ DO
+                            nd_bottom := nd_bottom - gg06Align (oflw, REC_ALIGN_BD00);
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    b35add_space (nptr.np_ptr, insert_pos, gg06Align (new_el, REC_ALIGN_BD00), curr_trans);
+                    END;
+                (*ENDIF*) 
+                IF  trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    SAPDB_PascalMove ('VBD33 ',  26,    
+                          sizeof (rec), sizeof (nptr.np_ptr^),
+                          @rec, 1,
+                          @nptr.np_ptr^, insert_pos, new_el, trError_gg00);
+                    IF  trError_gg00 = e_move_error
+                    THEN
+                        BEGIN
+                        trError_gg00 := e_data_page_corrupted;
+                        b06dump_bad_page (trTaskId_gg00, 'd',
+                              FILE_EXT_COR_BD00, nptr.np_ptr^.nd_id, nptr.np_ptr, 1)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        trError_gg00 := e_no_more_space;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_no_more_space) AND (rncov = 0)
+    THEN
+        BEGIN
+        trError_gg00    := e_ok;
+        post_rnptr     := rnptr;
+        rnptr.np_ptr   := NIL;
+        rnptr.np_cbptr := NIL;
+        b13new_node (LEAF_LEVEL_BD00, rnptr, current);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            oflw := nptr.np_ptr^.nd_bottom - insert_pos;
+            SAPDB_PascalMove ('VBD33 ',  27,    
+                  sizeof (nptr.np_ptr^), sizeof (post_rnptr.np_ptr^),
+                  @nptr.np_ptr^, insert_pos,
+                  @post_rnptr.np_ptr^, BODY_BEG_BD00, oflw, trError_gg00);
+            nptr.np_ptr^.nd_bottom := insert_pos;
+            post_rnptr.np_ptr^.nd_bottom := BODY_BEG_BD00 + gg06Align (oflw, REC_ALIGN_BD00);
+            SAPDB_PascalMove ('VBD33 ',  28,    
+                  sizeof (rec), sizeof (rnptr.np_ptr^),
+                  @rec, 1,
+                  @rnptr.np_ptr^, BODY_BEG_BD00, new_el, trError_gg00);
+            IF  trError_gg00 = e_move_error
+            THEN
+                BEGIN
+                trError_gg00 := e_data_page_corrupted;
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      nptr.np_ptr^.nd_id, nptr.np_ptr, 1);
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      rnptr.np_ptr^.nd_id, rnptr.np_ptr, 1);
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      post_rnptr.np_ptr^.nd_id, post_rnptr.np_ptr, 1)
+                END
+            ELSE
+                BEGIN
+                WITH rnptr.np_ptr^ DO
+                    BEGIN
+                    nd_pointer_list[ MAX_POINTERINDEX_BD00 ] := BODY_BEG_BD00;
+                    nd_record_cnt := nd_record_cnt + 1;
+                    nd_bottom     := BODY_BEG_BD00 + gg06Align (new_el, REC_ALIGN_BD00);
+                    nd_right      := post_rnptr.np_ptr^.nd_id;
+                    END;
+                (*ENDWITH*) 
+                post_rn_pno := post_rnptr.np_ptr^.nd_id;
+                b31pointer_list (post_rnptr.np_ptr);
+&               ifdef TRACE
+                t01page (bd_oflw, post_rnptr.np_ptr^, 1, post_rnptr.np_ptr^.nd_bottom);
+                t01page (bd_oflw, post_rnptr.np_ptr^,
+                      MAX_BOTTOM_BD00 - ((post_rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+                      sizeof (post_rnptr.np_ptr^));
+&               endif
+                bd53NewLeafIndex (rnptr.np_ptr, post_rnptr.np_ptr, post_right_sep, curr_trans);
+                IF  trError_gg00 = e_ok
+                THEN
+                    b13w_release_node (post_rnptr, current)
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        b31pointer_list (nptr.np_ptr);
+        IF  post_rn_pno = NIL_PAGE_NO_GG00
+        THEN
+            b31pointer_list (rnptr.np_ptr);
+        (*ENDIF*) 
+        nptr.np_ptr^.nd_right := rnptr.np_ptr^.nd_id;
+&       ifdef TRACE
+        t01page (bd_oflw, nptr.np_ptr^, 1, nptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, nptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((nptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (nptr.np_ptr^));
+        t01page (bd_oflw, rnptr.np_ptr^, 1, rnptr.np_ptr^.nd_bottom);
+        t01page (bd_oflw, rnptr.np_ptr^,
+              MAX_BOTTOM_BD00 - ((rnptr.np_ptr^.nd_record_cnt)*POINTERSIZE_BD00),
+              sizeof (rnptr.np_ptr^));
+&       endif
+        bd53NewLeafIndex (nptr.np_ptr, rnptr.np_ptr, new_rightsep, curr_trans);
+        IF  trError_gg00 = e_ok
+        THEN
+            WITH curr_tree_id DO
+                BEGIN
+                IF  rncov > 0
+                THEN
+                    BEGIN
+                    IF  NOT b54trepl_index (@old_rightsep.keyVal_gg00,
+                        old_rightsep.keyLen_gg00, @new_rightsep.keyVal_gg00,
+                        new_rightsep.keyLen_gg00, rnptr.np_ptr^.nd_id, lno,
+                        pIndexOrderList)
+                    THEN
+                        trError_gg00 := e_no_more_memory;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  NOT b54tadd_index (@new_rightsep.keyVal_gg00,
+                        new_rightsep.keyLen_gg00, rnptr.np_ptr^.nd_id,
+                        lno, pIndexOrderList)
+                    THEN
+                        trError_gg00 := e_no_more_memory;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                IF  (trError_gg00 = e_ok)
+                    AND (post_rn_pno <> NIL_PAGE_NO_GG00)
+                THEN
+                    IF  NOT b54tadd_index (@post_right_sep.keyVal_gg00,
+                        post_right_sep.keyLen_gg00, post_rn_pno, lno,
+                        pIndexOrderList)
+                    THEN
+                        trError_gg00 := e_no_more_memory;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 <> e_ok) AND (post_rnptr.np_ptr <> NIL)
+    THEN
+        BEGIN
+        IF  (rnptr.np_ptr <> NIL)
+        THEN
+            b13r_release_node (rnptr, current, lru_normal);
+        (*ENDIF*) 
+        rnptr := post_rnptr
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

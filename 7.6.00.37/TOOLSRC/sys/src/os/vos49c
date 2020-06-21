@@ -1,0 +1,2411 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$vos49c$
+.tt 2 $$$
+.tt 3 $R.Roedling$NT Security$1997-05-14$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : NT_Security
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 10.05.94
+.sp
+.cp 3
+Version :
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-05-14
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+           Security Descriptor:
+
+               +---------------------------------+
+               |                                 |
+               |       SECURITY DESCRIPTOR       |
+               |                                 |
+               +---------------------------------+
+               |                                 |
+               |          * Owner SID            |
+               |          * Group SID            |
+               |                                 |
+               | +-----------------------------+ |
+               | |            ACL              | |
+               | +-----------------------------+ |
+               | | +-------------------------+ | |
+               | | |          ACE            | | |
+               | | +-------------------------+ | |
+               | | +-------------------------+ | |
+               | | |          ACE            | | |
+               | | +-------------------------+ | |
+               | | +-------------------------+ | |
+               | | |          ACE            | | |
+               | | +-------------------------+ | |
+               | | +-------------------------+ | |
+               | | |          ACE            | | |
+               | | +-------------------------+ | |
+               | +-----------------------------+ |
+               |                                 |
+               +---------------------------------+
+
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+/*
+ * INCLUDE FILES
+ */
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS49C : "
+#define MF__   MOD__"UNDEFINED"
+
+#define DEFAULT_SERVICE_SD_BUFF_SIZE     512
+#define DEFAULT_SD_BUFF_SIZE             512
+#define DEFAULT_SID_SIZE                 512
+#define DEFAULT_DOMAIN_NAME_SIZE         80
+#define DEFAULT_MAKE_ABS_BUFF_SIZE       1024
+#define DEFAULT_USER_INFO_BUFF_SIZE      128
+#define DEFAULT_GROUPS_INFO_BUFF_SIZE    128
+#define DEFAULT_DEFAULT_DACL_BUFF_SIZE   256
+#define DEFAULT_LOGON_NAME_SIZE          21
+
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+#if defined(_WIN32)
+ static LONG   sql49c_lookup_account_name( PSZ                     pszNodeName,
+                                           PSZ                     pszAccountName,
+                                           PSID                    *ppSid,
+                                           PSZ                     *ppszRefDomain,
+                                           PSID_NAME_USE           psnuType );
+ static LONG   sql49c_get_textual_SID    ( PSID                    psidSID,
+                                           PSZ                     *ppszTextualSID );
+ _INLINE LONG __sql49c_get_ace_sizes     ( PUSER_ACCESS_RIGHTS_REC pAccRights,
+                                           PSID                    pSid );
+ _INLINE LONG  __sql49c_add_aces         ( PACL                    pNewDacl,
+                                           PSID                    pSid,
+                                           PUSER_ACCESS_RIGHTS_REC pAccRights );
+#endif
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+#if defined(_WIN32)
+
+LONG   sql49c_set_sync_access (VOID)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_set_sync_access"
+  #define CRASH_CLEANUP(_no,_rc) MSGCD(( ERR_SET_SYNC_ACCESS, _no, _rc ));     \
+                                 if( pWorldSid )  FreeSid  ( pWorldSid );      \
+                                 if( pTmp )       FREE_MEM ( pTmp );           \
+                                 if( pOldSD )     FREE_MEM ( pOldSD );         \
+                                 if( pNewDacl )   FREE_MEM ( pNewDacl );
+
+  ULONG                        ulSize;
+  PSECURITY_DESCRIPTOR         pOldSD            = NULL;
+  PSECURITY_DESCRIPTOR         pNewSD            = NULL;
+  PCHAR                        pBufDacl;
+  PCHAR                        pBufSacl;
+  PCHAR                        pBufOwner;
+  PCHAR                        pBufGroup;
+  ULONG                        ulNewSdSize;
+  ULONG                        ulBufDaclSize;
+  ULONG                        ulBufSaclSize;
+  ULONG                        ulBufOwnerSize;
+  ULONG                        ulBufGroupSize;
+  SECURITY_DESCRIPTOR_CONTROL  Control;
+  BOOL                         AclPresent,
+                               AclDefaulted;
+  PACL                         pOldAcl;
+  PSID                         pWorldSid         = NULL;
+  PACL                         pNewDacl;
+  ACL_SIZE_INFORMATION         AclSizeStruct;
+  SID_IDENTIFIER_AUTHORITY     WorldSidAuthority = SECURITY_WORLD_SID_AUTHORITY;
+  PCHAR                        pTmp              = NULL;
+  LONG                         lNewDaclSize,
+                               i;
+  HANDLE                       hProcessSelf;
+  LONG                         rc = NO_ERROR;
+
+  DBGIN;
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  //
+  // --- first, check for necessary privileges...
+  //
+  hProcessSelf = OpenProcess( READ_CONTROL | WRITE_DAC, FALSE,
+                              GetCurrentProcessId());
+  if ( !hProcessSelf )
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 1, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  CloseHandle( hProcessSelf );
+
+
+
+  //
+  //
+  // --- allocate space and get current dacl information
+  //
+  //
+  ulSize = DEFAULT_SD_BUFF_SIZE;
+
+  for ( ;; )
+    {
+    // --- allocate space for the current dacl
+    rc = ALLOC_MEM ( &pOldSD, ulSize );
+
+    if ( rc != NO_ERROR )
+      {
+      CRASH_CLEANUP( 2, rc );
+      DBGOUT;
+      return( rc );
+      }
+
+    // --- get current dacl information
+    if (!GetKernelObjectSecurity(GetCurrentProcess(), DACL_SECURITY_INFORMATION,
+                                 pOldSD, ulSize, &ulSize))
+      {
+      rc = GetLastError ();
+
+      if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+        {
+        CRASH_CLEANUP( 3, rc );
+        DBGOUT;
+        return ( rc );
+        }
+
+      rc = FREE_MEM ( pOldSD );
+
+      if ( rc != NO_ERROR )
+        {
+        CRASH_CLEANUP( 4, rc );
+        DBGOUT;
+        return( rc );
+        }
+      }
+    else
+      break;
+    }
+
+
+  if (!GetSecurityDescriptorDacl(pOldSD, &AclPresent, &pOldAcl, &AclDefaulted))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 5, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+
+  //
+  //
+  // --- allocate and initialize "world SID"
+  //
+  //
+
+  if (!AllocateAndInitializeSid(&WorldSidAuthority, 1, SECURITY_WORLD_RID,
+                                0, 0, 0, 0, 0, 0, 0, &pWorldSid))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 6, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  //
+  //
+  // --- build up a new ACL
+  //
+  //
+  if (AclPresent && pOldAcl)
+    {
+    if (!GetAclInformation(pOldAcl, &AclSizeStruct,
+                           sizeof(AclSizeStruct), AclSizeInformation))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 7, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    lNewDaclSize = AclSizeStruct.AclBytesInUse + sizeof(ACCESS_ALLOWED_ACE) +
+                   GetLengthSid(pWorldSid) - sizeof(DWORD);
+
+    rc = ALLOC_MEM(&pNewDacl, lNewDaclSize);
+
+    if ( rc != NO_ERROR )
+      {
+      CRASH_CLEANUP( 8, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!InitializeAcl(pNewDacl, lNewDaclSize, ACL_REVISION2))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 9, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!AddAccessAllowedAce(pNewDacl, ACL_REVISION2, SYNCHRONIZE, pWorldSid))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 10, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!GetAce(pOldAcl, 0, &pTmp))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 11, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!AddAce(pNewDacl, ACL_REVISION2, 1, pTmp,
+                AclSizeStruct.AclBytesInUse - sizeof(ACL)))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 12, rc );
+      DBGOUT;
+      return ( rc );
+      }
+    }
+  else
+    {
+    lNewDaclSize = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) +
+                   GetLengthSid(pWorldSid) - sizeof(DWORD);
+
+    rc = ALLOC_MEM(&pNewDacl, lNewDaclSize);
+
+    if ( rc != NO_ERROR )
+      {
+      CRASH_CLEANUP( 13, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!InitializeAcl(pNewDacl, lNewDaclSize, ACL_REVISION2))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 14, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!AddAccessAllowedAce(pNewDacl, ACL_REVISION2,
+                             SYNCHRONIZE, pWorldSid))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 15, rc );
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  FreeSid (pWorldSid);
+  pWorldSid = NULL;
+
+
+  //
+  //
+  // --- make the security descriptor 'absolute'
+  //
+  //
+  if (!GetSecurityDescriptorControl(pOldSD, &Control, &i))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 16, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+
+  if (Control & SE_SELF_RELATIVE)
+    {
+    // --- set default buffer sizes
+    ulNewSdSize    = sizeof(SECURITY_DESCRIPTOR);
+    ulBufDaclSize  = DEFAULT_MAKE_ABS_BUFF_SIZE / 4;
+    ulBufSaclSize  = DEFAULT_MAKE_ABS_BUFF_SIZE / 4;
+    ulBufOwnerSize = DEFAULT_MAKE_ABS_BUFF_SIZE / 4;
+    ulBufGroupSize = DEFAULT_MAKE_ABS_BUFF_SIZE / 4;
+
+    for ( ;; )
+      {
+      ulNewSdSize    = ALIGN( ulNewSdSize,    ALIGNMENT_VALUE );
+      ulBufDaclSize  = ALIGN( ulBufDaclSize,  ALIGNMENT_VALUE );
+      ulBufSaclSize  = ALIGN( ulBufSaclSize,  ALIGNMENT_VALUE );
+      ulBufOwnerSize = ALIGN( ulBufOwnerSize, ALIGNMENT_VALUE );
+      ulBufGroupSize = ALIGN( ulBufGroupSize, ALIGNMENT_VALUE );
+
+      ulSize = ulNewSdSize + ulBufDaclSize + ulBufSaclSize +
+               ulBufOwnerSize + ulBufGroupSize;
+
+      rc = ALLOC_MEM ( &pTmp, ulSize );
+
+      if ( rc != NO_ERROR )
+        {
+        CRASH_CLEANUP( 17, rc );
+        DBGOUT;
+        return( rc );
+        }
+
+      pNewSD    = (PSECURITY_DESCRIPTOR) pTmp;
+      pBufDacl  = pTmp      + ulNewSdSize;
+      pBufSacl  = pBufDacl  + ulBufDaclSize;
+      pBufOwner = pBufSacl  + ulBufSaclSize;
+      pBufGroup = pBufOwner + ulBufOwnerSize;
+
+      if (!MakeAbsoluteSD(pOldSD,
+                          pNewSD,          &ulNewSdSize,
+                          (PACL)pBufDacl,  &ulBufDaclSize,
+                          (PACL)pBufSacl,  &ulBufSaclSize,
+                          (PSID)pBufOwner, &ulBufOwnerSize,
+                          (PSID)pBufGroup, &ulBufGroupSize))
+        {
+        rc = GetLastError ();
+
+        if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+          {
+          CRASH_CLEANUP( 18, rc );
+          DBGOUT;
+          return ( rc );
+          }
+
+        rc   = FREE_MEM ( pTmp );
+        pTmp = NULL;
+
+        if ( rc != NO_ERROR )
+          {
+          CRASH_CLEANUP( 19, rc );
+          DBGOUT;
+          return( rc );
+          }
+        }
+      else
+        break;
+      }
+    }
+  else
+    {
+    pTmp = NULL;
+    }
+
+  if (!SetSecurityDescriptorDacl(pNewSD, TRUE, pNewDacl, FALSE))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 20, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  if (!SetKernelObjectSecurity(GetCurrentProcess(), DACL_SECURITY_INFORMATION,
+                               pNewSD))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 21, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  if ( pTmp )
+    {
+    rc   = FREE_MEM ( pTmp );
+    pTmp = NULL;
+
+    if ( rc != NO_ERROR )
+      {
+      CRASH_CLEANUP( 21, rc );
+      DBGOUT;
+      return( rc );
+      }
+    }
+
+  rc     = FREE_MEM ( pOldSD );
+  pOldSD = NULL;
+
+  if ( rc != NO_ERROR )
+    {
+    CRASH_CLEANUP( 22, rc );
+    DBGOUT;
+    return( rc );
+    }
+
+  rc       = FREE_MEM ( pNewDacl );
+  pNewDacl = NULL;
+
+  if ( rc != NO_ERROR )
+    {
+    CRASH_CLEANUP( 23, rc );
+    DBGOUT;
+    return( rc );
+    }
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+LONG sql49c_alloc_and_init_service_SD ( PSECURITY_DESCRIPTOR   *ppSD,
+                                        SC_HANDLE              schService )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_alloc_and_init_service_SD"
+  #ifdef CRASH_CLEANUP
+   #undef CRASH_CLEANUP
+  #endif
+  #define CRASH_CLEANUP(_no,_rc) MSGCD(( ERR_GEN_SEC_DESC_SERVICE, _no, _rc ));   \
+                                 if( pOldSD )         FREE_MEM ( pOldSD );        \
+                                 if( pADAOperSid )    FREE_MEM ( pADAOperSid );   \
+                                 if( pDomADAOperSid ) FREE_MEM ( pDomADAOperSid );\
+                                 if( *ppSD )          FREE_MEM ( *ppSD );
+
+  LONG                    rc             = NO_ERROR;
+  PSECURITY_DESCRIPTOR    pOldSD         = NULL;
+  ULONG                   ulSize         = DEFAULT_SERVICE_SD_BUFF_SIZE;
+  PSID                    pADAOperSid    = NULL;
+  PSID                    pDomADAOperSid = NULL;
+  PACL                    pNewDacl       = NULL;
+  PSID                    pOldOwnerSid   = NULL;
+  ULONG                   ulMaxDaclSize  = 0;
+  PSID                    pNewOwnerSid;
+  PCHAR                   pTmp;
+  BOOL                    AclPresent,
+                          Defaulted;
+  PACL                    pOldAcl;
+  SID_NAME_USE            snuType;
+  SID_NAME_USE            snuDomType;
+  ULONG                   ulNewOwnerSidSize;
+  ACL_SIZE_INFORMATION    AclSizeStruct;
+  CHAR                    szDomainName[MAX_COMPUTERNAME_LENGTH + 1];
+  PSZ                     pszDomainName;
+
+  DBGIN;
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    *ppSD = NULL;
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  *ppSD = NULL;
+
+  if ( sql03c_get_domain_name ( szDomainName ))
+    szDomainName[0] = '\0';
+
+  for ( ;; )
+    {
+    // --- allocate space for the security descriptor
+    rc = ALLOC_MEM ( &pOldSD, ulSize );
+
+    if ( rc != NO_ERROR )
+      {
+      pOldSD = NULL;
+      DBGOUT;
+      return( rc );
+      }
+
+    // --- now we ask for the service security descritptor
+    if (!QueryServiceObjectSecurity( schService,
+                                     OWNER_SECURITY_INFORMATION |
+                                     DACL_SECURITY_INFORMATION,
+                                     pOldSD, ulSize, &ulSize))
+      {
+      rc = GetLastError ();
+
+      if (( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+        {
+        CRASH_CLEANUP( 1, rc );
+        DBGOUT;
+        return ( rc );
+        }
+
+      rc = FREE_MEM ( pOldSD );
+
+      if ( rc != NO_ERROR )
+        {
+        pOldSD = NULL;
+        DBGOUT;
+        return( rc );
+        }
+      }
+    else
+      break;
+    }
+
+  //
+  //
+  // --- get the current DACL and Security descriptor owner
+  //
+  //
+  if (!GetSecurityDescriptorDacl (pOldSD, &AclPresent, &pOldAcl, &Defaulted)||
+      !GetSecurityDescriptorOwner(pOldSD, &pOldOwnerSid,  &Defaulted) )
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 2, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  //
+  //
+  // --- get the sid of the database administrator group
+  //
+  //
+  rc = sql49c_lookup_account_name ( NULL, DATABASE_OPERATOR_GROUP,
+                                    &pADAOperSid, &pszDomainName, &snuType );
+
+  if (( rc == NO_ERROR ) || ( rc == ERROR_NONE_MAPPED ))
+    rc = sql49c_lookup_account_name ( NULL, DOMAIN_DATABASE_OPERATOR_GROUP,
+                                      &pDomADAOperSid, NULL, &snuDomType );
+
+  if (( rc != NO_ERROR ) && ( rc != ERROR_NONE_MAPPED ))
+    {
+    CRASH_CLEANUP( 3, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  // --- is the local database administrators SID valid?
+  if (( pADAOperSid != NULL ) &&
+      ( stricmp( szDomainName, pszDomainName ) ||  // - group must be local!
+      ( snuType != SidTypeGroup  &&  snuType != SidTypeAlias )))
+    {
+    FREE_MEM ( pADAOperSid );
+    pADAOperSid   = NULL;
+    }
+
+  if ( pszDomainName )
+    FREE_MEM ( pszDomainName );
+
+  // --- is the domain database administrators SID valid?
+  if (( pDomADAOperSid  != NULL ) &&
+      ( snuDomType != SidTypeGroup  &&  snuDomType != SidTypeAlias ))
+    {
+    FREE_MEM ( pDomADAOperSid );
+    pDomADAOperSid = NULL;
+    }
+
+  if ( pADAOperSid != NULL && pDomADAOperSid != NULL )
+    {
+    FREE_MEM ( pOldSD );
+
+    //
+    // --- no special security discriptor needed!!!!!
+    //
+    *ppSD = NULL;
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  if ( pOldOwnerSid == NULL )
+    pOldOwnerSid = pADAOperSid;
+
+  if (AclPresent && pOldAcl)
+    {
+    if (!GetAclInformation(pOldAcl, &AclSizeStruct,
+                           sizeof(AclSizeStruct), AclSizeInformation))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 4, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    ulMaxDaclSize = AclSizeStruct.AclBytesInUse;
+    }
+
+  if ( pADAOperSid )
+   {
+   ulMaxDaclSize += ALIGN( GetLengthSid( pADAOperSid )  +
+                           sizeof(ACCESS_ALLOWED_ACE)   -
+                           sizeof(DWORD),
+                           ALIGNMENT_VALUE );
+   }
+  if ( pDomADAOperSid )
+   {
+   ulMaxDaclSize += ALIGN( GetLengthSid( pDomADAOperSid ) +
+                           sizeof(ACCESS_ALLOWED_ACE)     -
+                           sizeof(DWORD),
+                           ALIGNMENT_VALUE );
+   }
+
+  ulNewOwnerSidSize = ALIGN(GetLengthSid(pOldOwnerSid), ALIGNMENT_VALUE);
+
+  rc = ALLOC_MEM( ppSD, ALIGN(sizeof(SECURITY_DESCRIPTOR),ALIGNMENT_VALUE) +
+                  ulNewOwnerSidSize + ulMaxDaclSize );
+
+
+  if ( rc != NO_ERROR )
+    {
+    rc = GetLastError();
+
+    *ppSD = NULL;
+    CRASH_CLEANUP( 5, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  pNewOwnerSid = (PSID)((PCHAR)*ppSD +
+                         ALIGN(sizeof(SECURITY_DESCRIPTOR),ALIGNMENT_VALUE));
+  pNewDacl     = (PACL)((PCHAR)pNewOwnerSid + ulNewOwnerSidSize );
+
+  if ( !InitializeSecurityDescriptor( *ppSD, SECURITY_DESCRIPTOR_REVISION1 ))
+    {
+    rc = GetLastError();
+
+    CRASH_CLEANUP( 6, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  if (!CopySid ( ulNewOwnerSidSize, pNewOwnerSid, pOldOwnerSid ))
+    {
+    rc = GetLastError();
+    CRASH_CLEANUP( 7, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  if (!InitializeAcl(pNewDacl, ulMaxDaclSize, ACL_REVISION2))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 8, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  if (AclPresent && pOldAcl)
+    {
+    if (!GetAce(pOldAcl, 0, &pTmp))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 9, rc );
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!AddAce( pNewDacl, ACL_REVISION2,
+                 0, //- POSITION (must be the first ACE after 'InitializeAcl')
+                 pTmp, AclSizeStruct.AclBytesInUse - sizeof(ACL)))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 10, rc );
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  if ( pADAOperSid )
+    {
+    if (!AddAccessAllowedAce(pNewDacl, ACL_REVISION2,
+                             (SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL) &
+                             ~DELETE,
+                             pADAOperSid ))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 11, rc );
+      DBGOUT;
+      return ( rc );
+      }
+   }
+
+  if ( pDomADAOperSid )
+    {
+    if (!AddAccessAllowedAce(pNewDacl, ACL_REVISION2,
+                             (SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL) &
+                             ~DELETE,
+                             pDomADAOperSid ))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 12, rc );
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  //
+  //
+  // --- set the new access control list
+  //
+  //
+  if ( !SetSecurityDescriptorDacl ( *ppSD, TRUE, pNewDacl, FALSE ) )
+    {
+    rc = GetLastError ();
+
+    CRASH_CLEANUP( 13, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+
+  if ( !IsValidSecurityDescriptor ( *ppSD ))
+    {
+    rc = GetLastError ();
+
+    CRASH_CLEANUP( 14, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  if ( pDomADAOperSid )FREE_MEM ( pDomADAOperSid );
+  if ( pADAOperSid )   FREE_MEM ( pADAOperSid );
+  if ( pOldSD )        FREE_MEM ( pOldSD );
+
+
+  DBGOUT;
+  return (rc);
+  }
+
+/*------------------------------*/
+
+LONG sql49c_alloc_and_init_SD ( PACCESS_RIGHTS_REC     pAccess,
+                                PSECURITY_DESCRIPTOR   *ppSD )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_alloc_and_init_SD"
+  #ifdef CRASH_CLEANUP
+   #undef CRASH_CLEANUP
+  #endif
+  #define CRASH_CLEANUP(_no,_rc) MSGCD((ERR_GEN_SEC_DESC_COMMON, _no, _rc ));\
+                             if( pSystemSid )    FreeSid  ( pSystemSid );    \
+                             if( pAdminsSid )    FreeSid  ( pAdminsSid );    \
+                             if( pWorldSid )     FreeSid  ( pWorldSid );     \
+                             if( pBackupSid )    FreeSid  ( pBackupSid );    \
+                             if( pCreatorSid)    FreeSid  ( pCreatorSid);    \
+                             if( pTDacl )        FREE_MEM ( pTDacl );        \
+                             if( pTU )           FREE_MEM ( pTU );           \
+                             if( *ppSD )         FREE_MEM ( *ppSD );         \
+                             if( pADAOperSid )   FREE_MEM ( pADAOperSid );   \
+                             if( pDomADAOperSid )FREE_MEM ( pDomADAOperSid );\
+                             *ppSD = NULL;
+
+  #define ADD_ACES( _pDacl, _pSid, _Access, _ulCrashNo );                    \
+                                 rc = __sql49c_add_aces(_pDacl, _pSid,       \
+                                                       _Access );            \
+                                 if ( rc != NO_ERROR )                       \
+                                  {                                          \
+                                  CRASH_CLEANUP( _ulCrashNo, rc );           \
+                                  DBGOUT;                                    \
+                                  return ( rc );                             \
+                                  }
+
+  LONG                      rc                  = NO_ERROR;
+  BOOL                      fAddDefaultDACL     = FALSE;
+  SID_IDENTIFIER_AUTHORITY  SystemSidAuthority  = SECURITY_NT_AUTHORITY;
+  SID_IDENTIFIER_AUTHORITY  BackupSidAuthority  = SECURITY_NT_AUTHORITY;
+  SID_IDENTIFIER_AUTHORITY  WorldSidAuthority   = SECURITY_WORLD_SID_AUTHORITY;
+  SID_IDENTIFIER_AUTHORITY  CreatorSidAuthority = SECURITY_CREATOR_SID_AUTHORITY;
+  PSID                      pAdminsSid          = NULL;
+  PSID                      pADAOperSid         = NULL;
+  PSID                      pDomADAOperSid      = NULL;
+  PSID                      pSystemSid          = NULL;
+  PSID                      pCreatorSid         = NULL;
+  PTOKEN_DEFAULT_DACL       pTDacl              = NULL;
+  PTOKEN_USER               pTU                 = NULL;
+  PSID                      pWorldSid           = NULL;
+  PSID                      pBackupSid          = NULL;
+  PSID                      pTmpDescOwnerSid    = NULL;
+  PACL                      pNewDacl;
+  ULONG                     ulMaxDaclSize;
+  PSID                      pDescOwnerSid;
+  ULONG                     ulDescOwnerSidSize;
+  SID_NAME_USE              snuType;
+  SID_NAME_USE              snuDomType;
+  ACL_SIZE_INFORMATION      AclSizeStruct;
+  ACCESS_ALLOWED_ACE        *paaAllowedAce;
+  CHAR                      szDomainName[MAX_COMPUTERNAME_LENGTH + 1];
+  PSZ                       pszDomainName;
+
+  DBGIN;
+
+  *ppSD = NULL;
+
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  // --- no access right?
+  if ( !pAccess->User.ulAccess     && !pAccess->Creator.ulAccess &&
+       !pAccess->Admin.ulAccess    && !pAccess->System.ulAccess  &&
+       !pAccess->AdabasOp.ulAccess && !pAccess->BackupOp.ulAccess )
+    {
+    // --- check world access?
+    switch ( pAccess->World.ulAccess )
+      {
+      case 0 :  // - CREATE NO ACCESS SD
+
+        rc = ALLOC_MEM( ppSD, ALIGN(sizeof(SECURITY_DESCRIPTOR),ALIGNMENT_VALUE) +
+                        sizeof(ACL) );
+
+        if ( rc == NO_ERROR )
+          {
+          pNewDacl = (PACL)((PCHAR) *ppSD +
+                        ALIGN( sizeof(SECURITY_DESCRIPTOR), ALIGNMENT_VALUE ));
+
+          if (!InitializeSecurityDescriptor((PSECURITY_DESCRIPTOR) *ppSD,
+                                            SECURITY_DESCRIPTOR_REVISION1 )      ||
+              !InitializeAcl               (pNewDacl, sizeof(ACL), ACL_REVISION2)||
+              !SetSecurityDescriptorDacl   ((PSECURITY_DESCRIPTOR) *ppSD,
+                                            TRUE, (PACL) pNewDacl, FALSE ) )
+            {
+            rc = GetLastError();
+            CRASH_CLEANUP( 0, rc );
+            }
+          }
+
+        DBGOUT;
+        return( rc );
+
+      case SPECIFIC_RIGHTS_ALL |
+           STANDARD_RIGHTS_ALL:    // - CREATE WORLD ACCESS
+
+        rc = ALLOC_MEM ( ppSD, sizeof (SECURITY_DESCRIPTOR) );
+
+        if ( rc == NO_ERROR )
+          {
+          if ( !InitializeSecurityDescriptor( *ppSD, SECURITY_DESCRIPTOR_REVISION1 ) ||
+              !SetSecurityDescriptorDacl   ( *ppSD, TRUE, (PACL) NULL, FALSE ) )
+            {
+            rc = GetLastError();
+            CRASH_CLEANUP( 0, rc );
+            }
+          }
+        DBGOUT;
+        return( rc );
+      }
+    }
+
+
+  //
+  //
+  // --- get the default DACL and and the current users security identifier
+  //     (SID) associated with the process/thread access token.
+  //
+  //
+  rc = sql49c_get_token_information ( &pTU, NULL, &pTDacl);
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return ( rc );
+    }
+
+  if ( sql03c_get_domain_name ( szDomainName ))
+    szDomainName[0] = '\0';
+
+  //
+  //
+  // --- get the sid of the database administrator groups
+  //
+  //
+  rc = sql49c_lookup_account_name ( NULL, DATABASE_OPERATOR_GROUP,
+                                    &pADAOperSid, &pszDomainName, &snuType );
+
+  if (( rc == NO_ERROR ) || ( rc == ERROR_NONE_MAPPED ))
+    rc = sql49c_lookup_account_name ( NULL, DOMAIN_DATABASE_OPERATOR_GROUP,
+                                      &pDomADAOperSid, NULL, &snuDomType );
+
+  if (( rc != NO_ERROR ) && ( rc != ERROR_NONE_MAPPED ))
+    {
+    pADAOperSid = NULL;
+    CRASH_CLEANUP( 1, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  // --- is the local database administrators SID valid?
+  if (( pADAOperSid                 != NULL ) &&
+      ( stricmp( szDomainName, pszDomainName )  ||  // - group must be local!
+        pAccess->AdabasOp.ulAccess == 0           ||
+       ( snuType != SidTypeGroup  &&  snuType != SidTypeAlias )))
+    {
+    FREE_MEM ( pADAOperSid );
+    pADAOperSid                = NULL;
+    pAccess->AdabasOp.ulAccess = 0;
+    }
+  else if ( pADAOperSid == NULL )
+    pAccess->AdabasOp.ulAccess = 0;
+
+  if ( pszDomainName )
+    FREE_MEM ( pszDomainName );
+
+  // --- is the domain database administrators SID valid?
+  if (( pDomADAOperSid                != NULL ) &&
+      (( pAccess->DomAdabasOp.ulAccess == 0 )  ||
+       ( snuDomType != SidTypeGroup  &&  snuDomType != SidTypeAlias )))
+    {
+    FREE_MEM ( pDomADAOperSid );
+    pDomADAOperSid                = NULL;
+    pAccess->DomAdabasOp.ulAccess = 0;
+    }
+  else if ( pDomADAOperSid == NULL )
+    pAccess->DomAdabasOp.ulAccess = 0;
+
+  if ( pAccess->fAddDefaultDACL )
+    {
+    // --- get the size of the default DACL
+    if (!GetAclInformation(pTDacl->DefaultDacl, &AclSizeStruct,
+                           sizeof(AclSizeStruct), AclSizeInformation))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 2, rc );
+
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  //
+  //
+  // --- create a SID to represent the Admin group
+  //
+  //
+  if ((!AllocateAndInitializeSid ( &SystemSidAuthority,
+                                   1, SECURITY_LOCAL_SYSTEM_RID,
+                                   0, 0, 0, 0, 0, 0, 0, &pSystemSid ))   ||
+      (!AllocateAndInitializeSid ( &SystemSidAuthority,
+                                   2, SECURITY_BUILTIN_DOMAIN_RID,
+                                   DOMAIN_ALIAS_RID_ADMINS,
+                                   0, 0, 0, 0, 0, 0, &pAdminsSid ))      ||
+      (!AllocateAndInitializeSid ( &CreatorSidAuthority,
+                                   1, SECURITY_CREATOR_OWNER_RID,
+                                   0, 0, 0, 0, 0, 0, 0, &pCreatorSid ))  ||
+      (!AllocateAndInitializeSid ( &WorldSidAuthority,
+                                   1, SECURITY_WORLD_RID,
+                                   0, 0, 0, 0, 0, 0, 0, &pWorldSid))     ||
+      (!AllocateAndInitializeSid ( &BackupSidAuthority,
+                                   2, SECURITY_BUILTIN_DOMAIN_RID,
+                                   DOMAIN_ALIAS_RID_BACKUP_OPS,
+                                   0, 0, 0, 0, 0, 0, &pBackupSid)))
+    {
+    rc = GetLastError();
+
+    CRASH_CLEANUP( 3, rc );
+    DBGOUT;
+    return( rc );
+    }
+
+
+  //
+  //
+  // --- allocate a buffer which is used to hold the new security descriptor,
+  //     the current users SID and the new DACL.
+  //
+  //
+  if ( pAccess->fDescOwnerIsAdmin )
+    pTmpDescOwnerSid = pAdminsSid;
+  else
+    pTmpDescOwnerSid = pTU->User.Sid;
+
+  ulDescOwnerSidSize  = ALIGN(GetLengthSid(pTmpDescOwnerSid), ALIGNMENT_VALUE);
+  ulMaxDaclSize       = sizeof(ACL);
+
+  if ( pAccess->fAddDefaultDACL )
+   ulMaxDaclSize     += AclSizeStruct.AclBytesInUse;
+
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->User,       pTU->User.Sid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->Creator,    pCreatorSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->System,     pSystemSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->Admin,      pAdminsSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->World,      pWorldSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->BackupOp,   pBackupSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->AdabasOp,   pADAOperSid );
+  ulMaxDaclSize += __sql49c_get_ace_sizes(&pAccess->DomAdabasOp,pDomADAOperSid );
+
+  rc = ALLOC_MEM ( ppSD, ALIGN(sizeof(SECURITY_DESCRIPTOR), ALIGNMENT_VALUE) +
+                   ulDescOwnerSidSize + ulMaxDaclSize  );
+
+  if ( rc != NO_ERROR )
+    {
+    CRASH_CLEANUP( 4, rc );
+    DBGOUT;
+    return ( rc );
+    }
+
+  pDescOwnerSid = (PSID)((PCHAR)*ppSD +
+                         ALIGN(sizeof(SECURITY_DESCRIPTOR),ALIGNMENT_VALUE));
+  pNewDacl      = (PACL)((PCHAR)pDescOwnerSid + ulDescOwnerSidSize);
+
+
+  //
+  //
+  // --- initialize the new security descriptor and set its owner
+  //
+  //
+  if ( !InitializeSecurityDescriptor( *ppSD, SECURITY_DESCRIPTOR_REVISION1 ))
+    {
+    rc = GetLastError();
+    CRASH_CLEANUP( 5, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  if (!CopySid ( ulDescOwnerSidSize, pDescOwnerSid, pTmpDescOwnerSid ))
+    {
+    rc = GetLastError();
+    CRASH_CLEANUP( 6, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  if (!SetSecurityDescriptorOwner(*ppSD, pDescOwnerSid, 0))
+    {
+    rc = GetLastError();
+    CRASH_CLEANUP( 7, rc );
+
+    DBGOUT;
+    return( rc );
+    }
+
+  //
+  //
+  // --- initialize and construct the new access control list (DACL)
+  //
+  //
+  if (!InitializeAcl ( pNewDacl, ulMaxDaclSize, ACL_REVISION2) )
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 8, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  if ( pAccess->fAddDefaultDACL )
+    {
+    if ((!GetAce(pTDacl->DefaultDacl, 0, (PVOID*)&paaAllowedAce)) ||
+        (!AddAce(pNewDacl, ACL_REVISION2, 0, (PVOID)paaAllowedAce,
+                 AclSizeStruct.AclBytesInUse - sizeof(ACL))))
+      {
+      rc = GetLastError ();
+      CRASH_CLEANUP( 9, rc );
+
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  ADD_ACES( pNewDacl, pTU->User.Sid, &pAccess->User,        101 );
+  ADD_ACES( pNewDacl, pCreatorSid,   &pAccess->Creator,     102 );
+  ADD_ACES( pNewDacl, pAdminsSid,    &pAccess->Admin,       103 );
+  ADD_ACES( pNewDacl, pSystemSid,    &pAccess->System,      104 );
+  ADD_ACES( pNewDacl, pWorldSid,     &pAccess->World,       105 );
+  ADD_ACES( pNewDacl, pBackupSid,    &pAccess->BackupOp,    105 );
+  ADD_ACES( pNewDacl, pADAOperSid,   &pAccess->AdabasOp,    106 );
+  ADD_ACES( pNewDacl, pDomADAOperSid,&pAccess->DomAdabasOp, 107 );
+
+  //
+  //
+  // --- set the new access control list
+  //
+  //
+  if ( !SetSecurityDescriptorDacl ( *ppSD, TRUE, pNewDacl, FALSE ) )
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 10, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+
+  if ( !IsValidSecurityDescriptor ( *ppSD ))
+    {
+    rc = GetLastError ();
+    CRASH_CLEANUP( 11, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  if ( pAdminsSid )    FreeSid  ( pAdminsSid );
+  if ( pWorldSid )     FreeSid  ( pWorldSid );
+  if ( pBackupSid )    FreeSid  ( pBackupSid );
+  if ( pSystemSid )    FreeSid  ( pSystemSid );
+  if ( pCreatorSid)    FreeSid  ( pCreatorSid);
+  if ( pADAOperSid )   FREE_MEM ( pADAOperSid );
+  if ( pDomADAOperSid )FREE_MEM ( pDomADAOperSid );
+  if ( pTU )           FREE_MEM ( pTU );
+  if ( pTDacl )        FREE_MEM ( pTDacl );
+
+  DBGOUT;
+  return (rc);
+  }
+
+/*------------------------------*/
+
+LONG sql49c_get_kernel_obj_SD ( PSECURITY_DESCRIPTOR   *ppSD,
+                                HANDLE                 hObject)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_get_kernel_obj_SD"
+  LONG              rc     = NO_ERROR;
+  ULONG             ulSize;
+
+  DBGIN;
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    *ppSD = NULL;
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  rc = ALLOC_MEM ( ppSD, DEFAULT_SD_BUFF_SIZE );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return( rc );
+    }
+
+  if ( !GetKernelObjectSecurity ( hObject,
+                                  OWNER_SECURITY_INFORMATION |
+                                  DACL_SECURITY_INFORMATION,
+                                  *ppSD,
+                                  DEFAULT_SD_BUFF_SIZE,
+                                  &ulSize ))
+     {
+     if ( ulSize > 0 )
+       {
+       rc = FREE_MEM ( *ppSD );
+
+       if ( rc != NO_ERROR )
+         {
+         DBGOUT;
+         return( rc );
+         }
+
+       rc = ALLOC_MEM ( ppSD, ulSize );
+
+       if ( rc != NO_ERROR )
+         {
+         DBGOUT;
+         return( rc );
+         }
+
+       if ( !GetKernelObjectSecurity ( hObject,
+                                       OWNER_SECURITY_INFORMATION |
+                                       DACL_SECURITY_INFORMATION,
+                                       *ppSD,
+                                       ulSize,
+                                       &ulSize ))
+          {
+          rc = GetLastError();
+          FREE_MEM ( *ppSD );
+          MSGCD (( ERR_GET_SEC_DESC, rc ));
+          DBGOUT;
+          return( rc );
+          }
+       }
+     else
+       {
+       rc = GetLastError();
+       FREE_MEM ( *ppSD );
+       MSGCD (( ERR_GET_SEC_DESC, rc ));
+       DBGOUT;
+       return( rc );
+       }
+     }
+
+
+  DBGOUT;
+  return (rc);
+  }
+
+/*------------------------------*/
+
+
+LONG sql49c_set_kernel_obj_sec ( PSECURITY_DESCRIPTOR   pSD,
+                                 HANDLE                 hObject)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_set_kernel_obj_sec"
+  LONG                    rc           = NO_ERROR;
+
+  DBGIN;
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  if ( !SetKernelObjectSecurity ( hObject,
+                                  DACL_SECURITY_INFORMATION,
+                                  pSD ))
+     {
+     rc = GetLastError();
+     MSGCD (( ERR_SET_OBJ_SEC, rc ));
+     }
+
+  DBGOUT;
+  return (rc);
+  }
+
+/*------------------------------*/
+
+LONG sql49c_get_user_info ( PSZ   *ppszLogonName,
+                            PSZ   *ppszRefDomain )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_get_user_info"
+  LONG          rc           = NO_ERROR;
+  ULONG         ulBufferSize;
+  SID_NAME_USE  snuType;
+  PSZ           pszLogonName = NULL;
+
+  DBGIN;
+
+  if ( ppszLogonName != NULL )
+    *ppszLogonName = NULL;
+
+  if ( ppszRefDomain != NULL )
+    *ppszRefDomain = NULL;
+
+  ulBufferSize = DEFAULT_LOGON_NAME_SIZE;
+
+  for ( ;; )
+    {
+    rc = ALLOC_MEM ( &pszLogonName, ulBufferSize );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return (rc);
+      }
+
+    if ( !GetUserName ( pszLogonName, &ulBufferSize ))
+      {
+      rc = GetLastError ();
+
+      if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+        {
+        FREE_MEM ( pszLogonName );
+        MSGCD (( ERR_GET_USER_NAME, 1, rc ));
+
+        DBGOUT;
+        return ( rc );
+        }
+
+      rc = FREE_MEM ( pszLogonName );
+
+      if ( rc != NO_ERROR )
+        {
+        DBGOUT;
+        return( rc );
+        }
+      }
+    else
+      break;
+    }
+
+  if ( ppszRefDomain != NULL )
+    {
+    //
+    //
+    // --- get Domain name
+    //
+    //
+    rc = sql49c_lookup_account_name ( NULL, pszLogonName,
+                                      NULL, ppszRefDomain, &snuType );
+
+    if ( rc != NO_ERROR )
+      {
+      FREE_MEM ( pszLogonName );
+
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  if ( ppszLogonName != NULL )
+    *ppszLogonName = pszLogonName;
+  else
+    FREE_MEM ( pszLogonName );
+
+  DBGOUT;
+  return ( rc );
+  }
+
+
+/*------------------------------*/
+
+LONG sql49c_set_file_security ( PSZ                   pszFileName,
+                                PSECURITY_DESCRIPTOR  pSD )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_set_file_security"
+  LONG                  rc  = NO_ERROR;
+
+  DBGIN;
+
+  //
+  //
+  // --- check the platform id first
+  //
+  //
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+
+  if ( !SetFileSecurity( pszFileName,
+                         DACL_SECURITY_INFORMATION  |
+                         OWNER_SECURITY_INFORMATION, pSD ))
+    {
+    rc = GetLastError ();
+    MSGCD (( ERR_SET_FILE_OWNER, 1, rc ));
+    DBGOUT;
+    return( rc );
+    }
+
+  DBGOUT;
+  return (rc);
+  }
+
+/*------------------------------*/
+
+LONG   sql49c_get_token_information ( PTOKEN_USER          *ppTU,
+                                      PTOKEN_GROUPS        *ppTG,
+                                      PTOKEN_DEFAULT_DACL  *ppTDacl)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_get_token_information"
+  HANDLE                    hToken;
+  ULONG                     ulSize;
+  LONG                      rc = NO_ERROR;
+
+  if (ppTU    != NULL) *ppTU    = NULL;
+  if (ppTG    != NULL) *ppTG    = NULL;
+  if (ppTDacl != NULL) *ppTDacl = NULL;
+
+  if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  //
+  //
+  // --- open a handle to the access token for this thread or process
+  //
+  //
+  if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &hToken))
+    {
+    rc = GetLastError ();
+
+    if ( rc != ERROR_NO_TOKEN )
+      {
+      MSGCD (( ERR_GET_TOKEN_INFO, 1, rc ));
+      DBGOUT;
+      return ( rc );
+      }
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
+      {
+      rc = GetLastError ();
+
+      MSGCD (( ERR_GET_TOKEN_INFO, 2, rc ));
+      DBGOUT;
+      return ( rc );
+      }
+    }
+
+  if (ppTU != NULL)
+    {
+    //
+    //
+    // --- allocate space and get user information
+    //
+    //
+    ulSize = DEFAULT_USER_INFO_BUFF_SIZE;
+
+    for ( ;; )
+      {
+      // --- allocate space for the user information
+      rc = ALLOC_MEM ( ppTU, ulSize );
+
+      if ( rc != NO_ERROR )
+        {
+        CloseHandle(hToken);
+
+        *ppTU = NULL;
+        DBGOUT;
+        return( rc );
+        }
+
+      // --- now we ask for the user information
+      if (!GetTokenInformation(hToken, TokenUser, *ppTU, ulSize, &ulSize))
+        {
+        rc = GetLastError ();
+
+        if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+          {
+          CloseHandle(hToken);
+
+          FREE_MEM ( *ppTU );
+          *ppTU = NULL;
+          MSGCD (( ERR_GET_TOKEN_INFO, 3, rc ));
+          DBGOUT;
+          return ( rc );
+          }
+
+        rc = FREE_MEM ( *ppTU );
+
+        if ( rc != NO_ERROR )
+          {
+          CloseHandle(hToken);
+
+          *ppTU = NULL;
+          DBGOUT;
+          return( rc );
+          }
+        }
+      else
+        break;
+      }
+    }
+
+  if (ppTG != NULL)
+    {
+    //
+    //
+    // --- allocate space and get groups information
+    //
+    //
+    ulSize = DEFAULT_GROUPS_INFO_BUFF_SIZE;
+
+    for ( ;; )
+      {
+      // --- allocate space for the user information
+      rc = ALLOC_MEM ( ppTG, ulSize );
+
+      if ( rc != NO_ERROR )
+        {
+        if (ppTU != NULL)
+          {
+          FREE_MEM ( *ppTU );
+          *ppTU = NULL;
+          }
+        *ppTG = NULL;
+
+        CloseHandle(hToken);
+
+        DBGOUT;
+        return( rc );
+        }
+
+      // --- now we ask for the groups information
+      if (!GetTokenInformation(hToken, TokenGroups, *ppTG, ulSize, &ulSize))
+        {
+        rc = GetLastError ();
+
+        if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+          {
+          if (ppTU != NULL)
+            {
+            FREE_MEM ( *ppTU );
+            *ppTU = NULL;
+            }
+          FREE_MEM ( *ppTG );
+          *ppTG = NULL;
+          MSGCD (( ERR_GET_TOKEN_INFO, 4, rc ));
+
+          CloseHandle(hToken);
+
+          DBGOUT;
+          return ( rc );
+          }
+
+        rc = FREE_MEM ( *ppTG );
+
+        if ( rc != NO_ERROR )
+          {
+          if (ppTU != NULL)
+            {
+            FREE_MEM ( *ppTU );
+            *ppTU = NULL;
+            }
+          *ppTG = NULL;
+
+          CloseHandle(hToken);
+
+          DBGOUT;
+          return( rc );
+          }
+        }
+      else
+        break;
+      }
+    }
+
+  if (ppTDacl != NULL)
+    {
+    //
+    //
+    // --- allocate space and get default DACL
+    //
+    //
+    ulSize = DEFAULT_DEFAULT_DACL_BUFF_SIZE;
+
+    for ( ;; )
+      {
+      rc = ALLOC_MEM ( ppTDacl, ulSize );
+
+      if ( rc != NO_ERROR )
+        {
+        if (ppTU != NULL)
+          {
+          FREE_MEM ( *ppTU );
+          *ppTU = NULL;
+          }
+        if (ppTG != NULL)
+          {
+          FREE_MEM ( *ppTG );
+          *ppTG = NULL;
+          }
+        *ppTDacl = NULL;
+
+        CloseHandle(hToken);
+
+        DBGOUT;
+        return( rc );
+        }
+
+      // --- now we ask for the default DACL
+      if (!GetTokenInformation(hToken, TokenDefaultDacl, *ppTDacl, ulSize, &ulSize))
+        {
+        rc = GetLastError ();
+
+        if ( ( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+          {
+          if (ppTU != NULL)
+            {
+            FREE_MEM ( *ppTU );
+            *ppTU = NULL;
+            }
+          if (ppTG != NULL)
+            {
+            FREE_MEM ( *ppTG );
+            *ppTG = NULL;
+            }
+          FREE_MEM ( *ppTDacl );
+          *ppTDacl = NULL;
+          MSGCD (( ERR_GET_TOKEN_INFO, 5, rc ));
+
+          CloseHandle(hToken);
+
+          DBGOUT;
+          return ( rc );
+          }
+
+        rc = FREE_MEM ( *ppTDacl );
+
+        if ( rc != NO_ERROR )
+          {
+          if (ppTU != NULL)
+            {
+            FREE_MEM ( *ppTU );
+            *ppTU = NULL;
+            }
+          if (ppTG != NULL)
+            {
+            FREE_MEM ( *ppTG );
+            *ppTG = NULL;
+            }
+          *ppTDacl = NULL;
+
+          CloseHandle(hToken);
+
+          DBGOUT;
+          return( rc );
+          }
+        }
+      else
+        break;
+      }
+    }
+
+  CloseHandle(hToken);
+
+  DBGOUT;
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+LONG sql49c_user_is_admin ( BOOL *pfIsAdmin )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql49c_is_admin"
+   #ifdef CRASH_CLEANUP
+    #undef CRASH_CLEANUP
+   #endif
+   #define CRASH_CLEANUP(_no,_rc) MSGCD(( ERR_USER_IS_ADMIN, _no, _rc ));    \
+                                  if( pAdminSid ) FreeSid  ( pAdminSid );    \
+                                  if( pTG )       FREE_MEM ( pTG );
+
+   LONG                     rc                  = NO_ERROR;
+   SID_IDENTIFIER_AUTHORITY SystemSidAuthority  = SECURITY_NT_AUTHORITY;
+   PTOKEN_GROUPS            pTG                 = NULL;
+   PSID                     pAdminSid           = NULL;
+   ULONG                    ulGroup;
+
+   DBGIN;
+
+   *pfIsAdmin = FALSE;
+
+   if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+   if (!AllocateAndInitializeSid ( &SystemSidAuthority,
+                                   2, SECURITY_BUILTIN_DOMAIN_RID,
+                                   DOMAIN_ALIAS_RID_ADMINS,
+                                   0, 0, 0, 0, 0, 0, &pAdminSid ))
+     {
+     rc = GetLastError();
+
+     CRASH_CLEANUP( 1,rc );
+
+     DBGOUT;
+     return( rc );
+     }
+
+   rc = sql49c_get_token_information ( NULL, &pTG, NULL );
+
+   if ( rc != NO_ERROR )
+     {
+     CRASH_CLEANUP( 2, rc );
+
+     DBGOUT;
+     return ( rc );
+     }
+
+   //
+   // --- is the current user in the system administrators group?
+   //
+   for (ulGroup = 0; ulGroup < pTG->GroupCount; ulGroup++)
+     {
+     if (EqualSid(pTG->Groups[ulGroup].Sid, pAdminSid))
+       {
+       *pfIsAdmin = TRUE;
+       break;
+       }
+     }
+
+   if ( pAdminSid ) FreeSid  ( pAdminSid );
+   if ( pTG )       FREE_MEM ( pTG );
+
+   DBGOUT;
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+LONG sql49c_user_privilege_check ( BOOL *pfIsOk )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql49c_user_privilege_check"
+   #ifdef CRASH_CLEANUP
+    #undef CRASH_CLEANUP
+   #endif
+   #define CRASH_CLEANUP(_no,_rc) MSGCD(( ERR_USER_IS_ADMIN, _no, _rc ));         \
+                                  if( pSystemSid )    FreeSid  ( pSystemSid );    \
+                                  if( pAdminSid )     FreeSid  ( pAdminSid );     \
+                                  if( pADAOperSid )   FREE_MEM ( pADAOperSid );   \
+                                  if( pDomADAOperSid )FREE_MEM ( pDomADAOperSid );\
+                                  if( pTG )           FREE_MEM ( pTG );
+
+   LONG                     rc                  = NO_ERROR;
+   SID_IDENTIFIER_AUTHORITY SystemSidAuthority  = SECURITY_NT_AUTHORITY;
+   PTOKEN_GROUPS            pTG                 = NULL;
+   PSID                     pAdminSid           = NULL;
+   PSID                     pDomADAOperSid      = NULL;
+   PSID                     pADAOperSid         = NULL;
+   PSID                     pSystemSid          = NULL;
+   ULONG                    ulGroup;
+   SID_NAME_USE             snuType;
+   CHAR                     szDomainName[MAX_COMPUTERNAME_LENGTH + 1];
+   PSZ                      pszDomainName;
+
+   DBGIN;
+
+   *pfIsOk = FALSE;
+
+   if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+    {
+    *pfIsOk = TRUE;
+    DBGOUT;
+    return ( NO_ERROR );
+    }
+
+  if ( sql03c_get_domain_name ( szDomainName ))
+    szDomainName[0] = '\0';
+
+  //
+  // --- get the sid of the database administrator group
+  //
+  rc = sql49c_lookup_account_name ( NULL, DATABASE_OPERATOR_GROUP,
+                                    &pADAOperSid, &pszDomainName, &snuType );
+
+  if (( rc != NO_ERROR ) && ( rc != ERROR_NONE_MAPPED ))
+    {
+    pDomADAOperSid = NULL;
+    CRASH_CLEANUP( 1, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  // --- is the local database administrators SID valid?
+  if (( pADAOperSid != NULL ) &&
+      ( stricmp( szDomainName, pszDomainName ) ||  // - group must be local!
+      ( snuType != SidTypeGroup  &&  snuType != SidTypeAlias )))
+    {
+    FREE_MEM ( pADAOperSid );
+    pADAOperSid   = NULL;
+    }
+
+  if ( pszDomainName )
+    FREE_MEM ( pszDomainName );
+
+  rc = sql49c_lookup_account_name ( NULL, DOMAIN_DATABASE_OPERATOR_GROUP,
+                                    &pDomADAOperSid, NULL, &snuType );
+
+  if (( rc != NO_ERROR ) && ( rc != ERROR_NONE_MAPPED ))
+    {
+    pDomADAOperSid = NULL;
+    CRASH_CLEANUP( 2, rc );
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  // --- is the database administrators SID valid?
+  if (( pDomADAOperSid != NULL ) &&
+      ( snuType != SidTypeGroup  &&  snuType != SidTypeAlias ))
+    {
+    FREE_MEM ( pDomADAOperSid );
+    pDomADAOperSid  = NULL;
+    }
+
+
+   if ((!AllocateAndInitializeSid ( &SystemSidAuthority,
+                                    1, SECURITY_LOCAL_SYSTEM_RID,
+                                    0, 0, 0, 0, 0, 0, 0, &pSystemSid ))   ||
+       (!AllocateAndInitializeSid ( &SystemSidAuthority,
+                                    2, SECURITY_BUILTIN_DOMAIN_RID,
+                                    DOMAIN_ALIAS_RID_ADMINS,
+                                    0, 0, 0, 0, 0, 0, &pAdminSid )))
+     {
+     rc = GetLastError();
+
+     CRASH_CLEANUP( 3,rc );
+
+     DBGOUT;
+     return( rc );
+     }
+
+   rc = sql49c_get_token_information ( NULL, &pTG, NULL );
+
+   if ( rc != NO_ERROR )
+     {
+     CRASH_CLEANUP( 4, rc );
+
+     DBGOUT;
+     return ( rc );
+     }
+
+   //
+   // --- is the current user in the system administrators group?
+   //
+   for (ulGroup = 0; ulGroup < pTG->GroupCount && !(*pfIsOk); ulGroup++)
+     {
+     if (( pDomADAOperSid != NULL ) &&
+         (EqualSid(pTG->Groups[ulGroup].Sid, pDomADAOperSid)))
+       {
+       *pfIsOk = TRUE;
+       }
+     else if (( pADAOperSid    != NULL ) &&
+              (EqualSid(pTG->Groups[ulGroup].Sid, pADAOperSid)))
+       {
+       *pfIsOk = TRUE;
+       }
+     else if ((EqualSid(pTG->Groups[ulGroup].Sid, pAdminSid))  ||
+              (EqualSid(pTG->Groups[ulGroup].Sid, pSystemSid)))
+       {
+       *pfIsOk = TRUE;
+       }
+     }
+
+   if ( pAdminSid )     FreeSid  ( pAdminSid );
+   if ( pSystemSid )    FreeSid  ( pSystemSid );
+   if ( pTG )           FREE_MEM ( pTG );
+   if ( pDomADAOperSid )FREE_MEM ( pDomADAOperSid );
+   if ( pADAOperSid )   FREE_MEM ( pADAOperSid );
+
+   DBGOUT;
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+LONG sql49c_get_own_textual_SID ( PSZ *ppszTextualSID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql49c_get_own_textual_SID"
+   PTOKEN_USER               pTU = NULL;
+   LONG                      rc  = NO_ERROR;
+
+   DBGIN;
+
+   //
+   //
+   // --- check the platform id first
+   //
+   //
+   if ( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT )
+     {
+     *ppszTextualSID = NULL;
+     DBGOUT;
+     return ( NO_ERROR );
+     }
+
+   //
+   // --- get the default DACL and and the current users security identifier
+   //     (SID) associated with the process/thread access token.
+   //
+   rc = sql49c_get_token_information ( &pTU, NULL, NULL);
+
+   if ( rc != NO_ERROR )
+     {
+     *ppszTextualSID = NULL;
+     DBGOUT;
+     return ( rc );
+     }
+
+   rc =  sql49c_get_textual_SID( pTU->User.Sid, ppszTextualSID );
+
+   if ( pTU ) FREE_MEM ( pTU );
+
+
+   if ( rc != NO_ERROR )
+     {
+     *ppszTextualSID = NULL;
+     DBGOUT;
+     return( rc );
+     }
+
+   DBGOUT;
+   return( rc );
+   }
+
+#endif
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+#if defined(_WIN32)
+
+static LONG sql49c_lookup_account_name ( PSZ           pszNodeName,
+                                         PSZ           pszAccountName,
+                                         PSID          *ppSid,
+                                         PSZ           *ppszRefDomain,
+                                         PSID_NAME_USE psnuType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_lookup_account_name"
+  LONG                     rc  = NO_ERROR;
+  PSID                     pSid;
+  PSZ                      pszRefDomain;
+  ULONG                    ulDomainSize;
+  ULONG                    ulSidSize;
+
+  DBGIN;
+
+  if ( ppSid != NULL )
+    *ppSid = NULL;
+
+  if ( ppszRefDomain != NULL )
+    *ppszRefDomain = NULL;
+
+  if (( pszNodeName ) && ( pszNodeName[0] == '\0' ))
+    pszNodeName = NULL;
+
+  //
+  //
+  // --- allocate space and get account name
+  //
+  //
+  ulDomainSize = DEFAULT_DOMAIN_NAME_SIZE;
+  ulSidSize    = DEFAULT_SID_SIZE;
+
+  for ( ;; )
+    {
+    // --- allocate space
+    rc = ALLOC_MEM ( &pSid, ulSidSize );
+
+    if ( rc != NO_ERROR )
+      {
+      DBGOUT;
+      return( rc );
+      }
+
+    rc = ALLOC_MEM ( &pszRefDomain, ulDomainSize );
+
+    if ( rc != NO_ERROR )
+      {
+      FREE_MEM ( pSid );
+      DBGOUT;
+      return( rc );
+      }
+
+    // --- now we ask for the account name
+    if (!LookupAccountName( (LPSTR) pszNodeName, pszAccountName, pSid, &ulSidSize,
+                            pszRefDomain, &ulDomainSize, psnuType ) )
+      {
+      rc = GetLastError ();
+
+      if (( rc != NO_ERROR ) && ( rc != ERROR_INSUFFICIENT_BUFFER ))
+        {
+        if ( rc != ERROR_NONE_MAPPED )
+          MSGCD (( ERR_LOOKUP_ACCOUNT_NAME, 1, rc ));
+
+        FREE_MEM ( pSid );
+        FREE_MEM ( pszRefDomain );
+        DBGOUT;
+        return ( rc );
+        }
+
+      rc = FREE_MEM ( pSid );
+
+      if ( rc != NO_ERROR )
+        {
+        FREE_MEM ( pszRefDomain );
+        DBGOUT;
+        return( rc );
+        }
+
+      rc = FREE_MEM ( pszRefDomain );
+
+      if ( rc != NO_ERROR )
+        {
+        DBGOUT;
+        return( rc );
+        }
+      }
+    else
+      break;
+    }
+
+  if ( ppSid != NULL )
+    *ppSid = pSid;
+  else
+    FREE_MEM ( pSid );
+
+  if ( ppszRefDomain != NULL )
+    *ppszRefDomain = pszRefDomain;
+  else
+    FREE_MEM ( pszRefDomain );
+
+
+  DBGOUT;
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+static LONG sql49c_get_textual_SID( PSID psidSID, PSZ *ppszTextualSID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql49c_get_textual_SID"
+  ULONG                    ulNumSubAuthorities;
+  ULONG                    ulLen;
+  ULONG                    ulSubAuthorityI;
+  ULONG                    ulMaxSIDStringLen;
+  SID_IDENTIFIER_AUTHORITY siaSidAuthority;
+  LONG                     rc                     = NO_ERROR;
+
+  DBGIN;
+
+
+  //
+  //    An SID could be written in this notation as follows:
+  //
+  //     S-R-I-S-S...
+  //
+  //    In the notation shown above,
+  //
+  //    S identifies the series of digits as an SID,
+  //    R is the revision level,
+  //    I is the identifier-authority value,
+  //    S is subauthority value(s).
+  //
+  //    Example:
+  //
+  //     S-1-5-32-544
+  //
+  //    In this example,
+  //    the SID has a revision level of 1,
+  //    an identifier-authority value of 5,
+  //    first subauthority value of 32,
+  //    second subauthority value of 544.
+  //    (Note that the above Sid represents the local Administrators group)
+  //
+  //    The resulting string will take one of two forms.  If the
+  //    IdentifierAuthority value is not greater than 2^32, then the SID
+  //    will be in the form:
+  //
+  //    S-1-5-21-2127521184-1604012920-1887927527-19009
+  //      ^ ^ ^^ ^^^^^^^^^^ ^^^^^^^^^^ ^^^^^^^^^^ ^^^^^
+  //      | | |      |          |          |        |
+  //      +-+-+------+----------+----------+--------+--- Decimal
+  //
+  //    Otherwise it will take the form:
+  //
+  //    S-1-0x206C277C6666-21-2127521184-1604012920-1887927527-19009
+  //      ^ ^^^^^^^^^^^^^^ ^^ ^^^^^^^^^^ ^^^^^^^^^^ ^^^^^^^^^^ ^^^^^
+  //      |       |        |      |          |          |        |
+  //      |   Hexidecimal  |      |          |          |        |
+  //      +----------------+------+----------+----------+--------+--- Decimal
+  //
+
+
+  ulNumSubAuthorities = (DWORD)( *(GetSidSubAuthorityCount(psidSID)) );
+  siaSidAuthority     = *(GetSidIdentifierAuthority(psidSID));
+
+  //
+  // --- compute buffer length
+  //     S-SID_REVISION- + identifierauthority- + subauthorities- + NULL
+  //
+  ulMaxSIDStringLen = (15 + 12 + (12 * ulNumSubAuthorities) + 1) * sizeof(TCHAR);
+
+  rc = ALLOC_MEM ( ppszTextualSID, ulMaxSIDStringLen );
+
+  if ( rc != NO_ERROR )
+    {
+    DBGOUT;
+    return( rc );
+    }
+
+  //
+  // --- prepare S-SID_REVISION-
+  //
+  ulLen = wsprintf( *ppszTextualSID, TEXT("S-%lu"),
+                    ((PISID)psidSID)->Revision );
+
+  //
+  // --- prepare SidIdentifierAuthority
+  //
+  if ( (siaSidAuthority.Value[0] != 0) || (siaSidAuthority.Value[1] != 0) )
+    {
+    ulLen += wsprintf( *ppszTextualSID + ulLen,
+                       TEXT("-0x%02hx%02hx%02hx%02hx%02hx%02hx"),
+                       (USHORT)siaSidAuthority.Value[0],
+                       (USHORT)siaSidAuthority.Value[1],
+                       (USHORT)siaSidAuthority.Value[2],
+                       (USHORT)siaSidAuthority.Value[3],
+                       (USHORT)siaSidAuthority.Value[4],
+                       (USHORT)siaSidAuthority.Value[5] );
+    }
+  else
+    {
+    ulLen += wsprintf( *ppszTextualSID + ulLen, TEXT("-%lu"),
+                       (ULONG)(siaSidAuthority.Value[5]      )   +
+                       (ULONG)(siaSidAuthority.Value[4] <<  8)   +
+                       (ULONG)(siaSidAuthority.Value[3] << 16)   +
+                       (ULONG)(siaSidAuthority.Value[2] << 24) );
+    }
+
+  //
+  // --- loop through SidSubAuthorities
+  //
+  for ( ulSubAuthorityI = 0;
+        ulSubAuthorityI < ulNumSubAuthorities;
+        ulSubAuthorityI++ )
+  {
+  ulLen += wsprintf( *ppszTextualSID + ulLen, TEXT("-%lu"),
+                    *(GetSidSubAuthority(psidSID,ulSubAuthorityI)));
+  }
+
+  DBGOUT;
+  return ( NO_ERROR );
+  }
+
+/*------------------------------*/
+
+ _INLINE LONG __sql49c_add_ace ( PACL    pNewDacl,
+                                 PSID    pSid,
+                                 ULONG   ulAccess,
+                                 ULONG   ulAceFlags )
+   {
+   #undef  MF__
+   #define MF__  MOD__"__sql49c_add_ace"
+   ACCESS_ALLOWED_ACE *paaAllowedAce;
+
+   if ( ulAccess )
+     {
+     if ( ulAceFlags )
+       {
+       if ((!AddAccessAllowedAce( pNewDacl, ACL_REVISION2,
+                                  ulAccess, pSid)) ||
+           (!GetAce(pNewDacl, pNewDacl->AceCount - 1, (PVOID*)&paaAllowedAce)))
+         {
+         DBGOUT;
+         return (GetLastError());
+         }
+       paaAllowedAce->Header.AceFlags = (BYTE)ulAceFlags;
+       }
+     else
+       {
+       if ((!AddAccessAllowedAce( pNewDacl, ACL_REVISION2,
+                                  ulAccess, pSid)))
+         {
+         DBGOUT;
+         return (GetLastError());
+         }
+       }
+     }
+   DBGOUT;
+   return ( NO_ERROR );
+   }
+
+/*------------------------------*/
+
+ _INLINE LONG __sql49c_get_ace_sizes ( PUSER_ACCESS_RIGHTS_REC pAccRights,
+                                       PSID                    pSid )
+   {
+   #undef  MF__
+   #define MF__  MOD__"__sql49c_get_ace_sizes"
+   ULONG    ulSize = 0;
+
+  if ( pAccRights->ulAccess )
+    {
+    ulSize = ALIGN( GetLengthSid( pSid ) +
+                    sizeof(ACCESS_ALLOWED_ACE)   -
+                    sizeof(DWORD),
+                    ALIGNMENT_VALUE );
+    }
+
+  if ( pAccRights->ulInheritAccess )
+    ulSize *= 2;
+
+   DBGOUT;
+   return ( ulSize );
+   }
+
+/*------------------------------*/
+
+ _INLINE LONG __sql49c_add_aces ( PACL                    pNewDacl,
+                                  PSID                    pSid,
+                                  PUSER_ACCESS_RIGHTS_REC pAccRights )
+   {
+   #undef  MF__
+   #define MF__  MOD__"__sql49c_add_aces"
+   ACCESS_ALLOWED_ACE *paaAllowedAce;
+
+   if ( pAccRights->ulAccess )
+     {
+     if ((!AddAccessAllowedAce( pNewDacl, ACL_REVISION2,
+                                pAccRights->ulAccess, pSid)) ||
+         (!GetAce(pNewDacl, pNewDacl->AceCount - 1,
+                  (PVOID*)&paaAllowedAce)))
+       {
+       DBGOUT;
+       return (GetLastError());
+       }
+
+     if ( pAccRights->ulAceFlags )
+       paaAllowedAce->Header.AceFlags = (BYTE)pAccRights->ulAceFlags;
+
+     if ( pAccRights->ulInheritAccess )
+       {
+       if ((!AddAccessAllowedAce( pNewDacl, ACL_REVISION2,
+                                  pAccRights->ulInheritAccess, pSid)) ||
+           (!GetAce(pNewDacl, pNewDacl->AceCount - 1,
+                    (PVOID*)&paaAllowedAce)))
+         {
+         DBGOUT;
+         return (GetLastError());
+         }
+       if ( pAccRights->ulInheritAceFlags )
+         paaAllowedAce->Header.AceFlags = (BYTE)pAccRights->ulInheritAceFlags;
+       }
+     }
+
+
+   DBGOUT;
+   return ( NO_ERROR );
+   }
+#endif
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+.PA

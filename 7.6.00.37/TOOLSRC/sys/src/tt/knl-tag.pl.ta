@@ -1,0 +1,237 @@
+# @(#) knl-tag   1997-11-21
+#
+# Das Perlskript wird mehrmals taeglich aufgerufen und veranlasst
+# das Uebersetzen aller an diesem Tage mit iput hochgeschriebenen
+# Sourcen.
+# Dabei wird vor Beginn der Uebersetzung der jeweilige Entwicklungs-
+# baum mit der $OWN/.rel Sperre vor unerlaubtem Hochschreiben ge-
+# schuetzt.
+# Als Parameter kann der Entwicklungsbaum und die Tageszeit angege-
+# ben werden.
+# Also sieht der Aufruf wie folgt aus:
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+$USAGE = "usage knl-tag [ -t {frueh|tag|nacht} ]\n";
+
+# Der erste Parameter bestimmt, fuer welchen Entwicklungsbaum die
+# Uebersetzung durchgefuehrt werden soll. Moegliche Eingaben muessen
+# folgendes Format aufweisen: "V80", "V62" etc.
+# Der zweite Parameter gibt an, ob die Uebersetzung frueh, am Tage
+# oder in der Nacht erfolgt. Wurde >frueh< gewaehlt, dann werden zu-
+# saetzlich zum Modus >tag< der Kern, Utility, Diagnose und Audit mit
+# dem aktuellen Datum versehen. Im Modus >nacht< wird im Gegensatz
+# zum Modus >tag< zuerst ein imq alknl und erst dann ein ims allknl
+# durchgefuehrt, damit die Testbatterie, die den Kernel verwendet, so
+# schnell wie moeglich beginnen kann.
+#
+# Als Defaulteinstellung gilt folgendes:
+warn "Use this tool in ADABAS Developer Studio!\n" unless $OWN;
+$DIR = $OWN;
+$TIME = "tag";
+
+use Env;
+use Getopt::Std;
+
+warn "" if !getopts('d:t:');
+if (  @ARGV != 0  ) { warn "Error: Die Anzahl der Parameter ist nicht korrekt!\n", "$USAGE" }
+
+$TIME = $opt_t if defined($opt_t);
+warn $USAGE if $TIME !~ /^(frueh|tag|nacht)$/;
+
+#. /home/admin/.nprofile
+
+# Diese Sperre zeigt einen Uebersetzungslauf an!
+$LOCK = "$OWN/.lock.knl-tag";
+
+# Diese Sperre verhindert jedes iput auf den aktuellen Baum!
+$LOCK_CL = "$OWN/../.rel";
+
+if  ( -f $LOCK ) {
+    warn "\nknl-tag: Die Sperre existiert!!!\n_knl_tag laeuft also noch!\n";
+} else {
+    if ( -f $LOCK_CL ) {
+       $CL_SPERRE = "true";
+    } else {
+       system("$TOOL/Posix/touch $LOCK_CL");
+       $CL_SPERRE = "false";
+    }
+    system("$TOOL/Posix/touch $LOCK");
+
+    print "\nAufruf von _knl_tag mit folgenden Parametern:\n";
+    print "\nEntwicklungsbaum: $DIR\n";
+    print "Tageszeit:        $TIME\n";
+
+    _knl_tag($TIME);
+
+    # Entfernen der Meldedateien.
+    if ( $CL_SPERRE eq "false" ) { unlink $LOCK_CL }
+    unlink $LOCK;
+}
+
+sub qaccMake {
+    my ($speed, $target) = @_;
+    # system ("$PYTHON/python $TOOL/bin/qaccMake.py -$speed $target");
+}
+
+###########################################################################
+sub _knl_tag {
+
+	# @(#) _knl_tag	  1997-11-21
+	#
+	# Die Perlfunktion ist fuer das eigentliche Uebersetzen der
+	# Module verantwortlich. Mit Hilfe der Modi >frueh<, >tag<
+	# und >nacht< kann zum einen die Uebersetzungsreihenfolge
+	# (slow dann quick oder quick dann slow) gesteuert werden
+	# und zum anderen ein "Stempeln" vom Kern, Utility, Diagnose
+	# und Audit veranlasst werden.
+	# Zusaetzlich werden noch im Modus >nacht< Logdateien
+	# in das jeweilige $OWN Verzeichnis des entsprechenden Ent-
+	# wicklungsbaumes kopiert, damit von anderen Rechnern aus
+	# das Ende der Uebersetzung abgefragt werden kann.
+	# Diese Dateien heissen >.com-end-slow< und >.com-end-quick<.
+
+	# Aenderung 21.Oktober 93:
+	# Die Description knltools darf nur fuer das Release 3.1.3 aufge-
+	# rufen werden.
+
+	# Aenderung 28.Juli 94:
+	# Nachdem die LZU ihre Dateien ueber den Kernserver abgeben, muss
+	# eine weitere Vmake-Regel (ims allrte) ausgefuehrt werden, damit
+	# die entsprechenden Aenderungen auch nach $DBROOT ueberfuehrt wer-
+	# den.
+
+	local $TIME = shift;
+
+    print "=== BEGIN _knl_tag ",scalar localtime(),"\n";
+	# Wochentag ermitteln
+	local $WOCHENENDE;
+	local $day = (Sun,Mon,Tue,Wed,Thu,Fri,Sat)[(localtime)[6]];
+	if ( $day eq "Fri" || $day eq "Sat" || $day eq "Sun" ) {
+	   # ... es ist Wochenende ...
+	   $WOCHENENDE = "true";
+	} else {
+	   $WOCHENENDE = "false";
+	}
+
+    print "===    VAR TIME WOCHENENDE: $TIME $WOCHENENDE ",scalar localtime(),"\n";
+
+	if ( $TIME eq "frueh") {
+		local @ARGV = qw(vgg11 vut03 vxt05 vxt20);
+		do "$TOOL/adminbin/version$TOOLEXT";
+		if ( $@ ) { "Error while executing version$TOOLEXT: $@" }
+		
+		local @ARGV = ( "allknl" );
+		do "$TOOL/bin/ims$TOOLEXT";
+		if ( $@ ) { "Error while executing ims$TOOLEXT: $@" }
+                &qaccMake ('s', 'allknl');
+
+		local @ARGV = ( "allknl" );
+		do "$TOOL/bin/imq$TOOLEXT";
+		if ( $@ ) { "Error while executing imq$TOOLEXT: $@" }
+                &qaccMake ('q', 'allknl');
+	}
+	elsif ( $TIME eq "tag" ) {
+		local @ARGV = ( "allknl" );
+		do "$TOOL/bin/ims$TOOLEXT";
+		if ( $@ ) { "Error while executing ims$TOOLEXT: $@" }
+                &qaccMake ('s', 'allknl');
+		
+		local @ARGV = ( "allknl" );
+		do "$TOOL/bin/imq$TOOLEXT";
+		if ( $@ ) { "Error while executing imq$TOOLEXT: $@" }
+                &qaccMake ('q', 'allknl');
+
+		local @ARGV = ( "allsqlr" );
+		do "$TOOL/bin/imf$TOOLEXT";
+		if ( $@ ) { "Error while executing imf$TOOLEXT: $@" }
+                &qaccMake ('f', 'allsqlr');
+
+	}
+	elsif ($TIME eq "nacht" ) {
+		print "Um ".scalar localtime()." ging es los!\n";
+
+
+
+        # FAST
+		# ====
+
+		local @ARGV = ( "all" );
+		do "$TOOL/bin/imf$TOOLEXT";
+		if ( $@ ) { "Error while executing imq$TOOLEXT: $@" }
+                &qaccMake ('f', 'all');
+
+		# Schreiben der Messagedatei, die das Ende des Uebersetzungs-
+		# laufs fuer den quicken Kernel anzeugt.
+
+		system("$TOOL/Posix/touch $OWN/.com-end-fast");
+
+
+
+        # QUICK
+		# =====
+
+		local @ARGV = ( "all" );
+		do "$TOOL/bin/imq$TOOLEXT";
+		if ( $@ ) { "Error while executing imq$TOOLEXT: $@" }
+                &qaccMake ('q', 'all');
+
+		# Schreiben der Messagedatei, die das Ende des Uebersetzungs-
+		# laufs fuer den quicken Kernel anzeugt.
+
+		system("$TOOL/Posix/touch $OWN/.com-end-quick");
+
+
+
+        # SLOW
+		# ====
+
+		local @ARGV = ( "allknl" );
+		do "$TOOL/bin/ims$TOOLEXT";
+		if ( $@ ) { "Error while executing ims$TOOLEXT: $@" }
+                &qaccMake ('s', 'allknl');
+
+		# Schreiben der Messagedatei, die das Ende des Uebersetzungs-
+		# laufs fuer den slow'en Kernel anzeugt.
+
+		system("$TOOL/Posix/touch $OWN/.com-end-slow");
+
+
+
+		# Am Wochenende wird fuer das Release 3.1.2 und auch fuer
+		# das Release 6.1.1 ein faster Kern generiert und an-
+		# schliessend die Testbatterie aktiviert, um eventuelle
+		# Unterschiede zwischen den separaten Versionen so schnell
+		# wie moeglich zu ermitteln.
+
+		if ( $WOCHENENDE eq "true" ) {
+			local @ARGV = ( "allknl" );
+			do "$TOOL/bin/imf$TOOLEXT";
+			if ( $@ ) { "Error while executing imf$TOOLEXT: $@" }
+                        &qaccMake ('f', 'allknl');
+		}
+	}
+	else { warn "Fatal Error!" }
+    print "=== END   _knl_tag ",scalar localtime(),"\n";
+}
+
+__END__
+

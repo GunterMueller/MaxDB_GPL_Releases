@@ -1,0 +1,31 @@
+*   *ID* A17SEL13 DBCMD    changed on 1992-09-28-13.22.42 by ADMIN     *
+file connect ( kern test !
+CREATE TABLE T ( A CHAR (4), B CHAR (22), C FIXED (6))!
+INSERT T VALUES ('AAAA', 'GGGGGGGGGGG', 56)!
+INSERT T VALUES ('SSSS', 'FFFF', 2)!
+SELECT * FROM T !
+FETCH !
+SELECT SYSKEY, * FROM T !
+FETCH !
+PARS_THEN_EX !
+DATA !
+UPDATE T SET C = 3 WHERE SYSKEY = :A !
+B 8 FFFE000000000001
+
+DELETE T KEY SYSKEY = :B!
+B 8 FFFE000000000002
+
+NODATA !
+PARS_EXECUTE !
+SELECT SYSKEY, * FROM T !
+FETCH !
+SELECT SYSKEY, * FROM T !
+pars_then_ex !
+FETCH into :a, :b, :c, :d !
+pars_execute !
+SELECT SYSKEY, a, b FROM T ORDER BY A!
+pars_then_ex !
+FETCH into :a, :b, :c !
+pars_execute !
+drop table t !
+COMMIT RELEASE !

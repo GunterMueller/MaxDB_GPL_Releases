@@ -1,0 +1,1588 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by SAP AG, 1997$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SAP$ADABAS FOR R/3$VTT20C$
+
+.tt 2 $$$
+.tt 3 $$$1997-10-28$
+***********************************************************
+.nf
+
+
+    ========== licence begin  GPL
+    Copyright (C) 2001 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  :
+.sp
+.cp 3
+
+Created : 1997-10-28
+.sp
+.cp 3
+Version : 1997-10-28
+.sp
+.cp 3
+Release :      Date :
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+
+
+/* ============================================================ */
+/* ===============                              =============== */ 
+/* ===============         M O D U L            =============== */ 
+/* ===============                              =============== */ 
+/* ============================================================ */
+/*                                                              */
+/* Name          : check.c                                      */
+/* Aufgabe       : Tool zum Ueberpruefen der SUTs               */
+/* Erstellt am   : 12.04.1994 / Torsten Strahl                  */ 
+/* Veraendert am : 30.03.1995 / Torsten Strahl                  */
+/* Veraendert am : 10.11.1997 / Holger Becker                   */
+/*                                                              */
+/* ============================================================ */
+/* Funktionsbeschreibung :                                      */
+/*                                                              */
+/* ============================================================ */
+
+#ident "@(#)   check.c   1994-04-12   Torsten Strahl"
+
+#include <stdio.h>
+#include <time.h>
+#include <sys/stat.h>
+#include <windows.h>
+#include <direct.h>
+
+/* #define DEBUG 1 */
+
+
+
+
+#define F_OK 00
+
+#define FALSE                  0
+#define TRUE                   1
+#define RET_OK                 1
+
+#define L_NAME               100
+#define L_LINE               500
+#define L_PATH               500
+
+
+# define PATHSEP    '\\'
+
+/* ============================================================ */
+/* TYPES:                                                       */
+/* ============================================================ */
+
+typedef char     t_filename [L_NAME];
+typedef char     t_line     [L_LINE];
+typedef char     t_path     [L_PATH];
+typedef char     t_username [L_NAME];
+
+typedef struct {
+   char *src, 
+    *grp,
+	*tool, 
+	*toolshell, 
+	*toolext, 
+    *toolopt,
+	*tmp, 
+	*username, 
+	*editor,
+    *curdir,
+    *checkdir;
+   int  noput;
+   int  usediffview;
+   int  useiget;
+} t_environment;
+
+/* ============================================================ */
+/* GLOBALS:                                                     */
+/* ============================================================ */
+
+t_environment env_rec;
+
+
+/* ============================================================ */
+/* LOCALS:                                                      */
+/* ============================================================ */
+
+int consider_files (t_filename, t_path, int, int, int, int);
+int move_file (t_filename);
+int prot_handling (t_filename, int, int);
+int show_file (t_filename, t_username, int);
+int valid_difference (t_filename, t_path);
+
+int    lremove (const char *);
+int    lrename (const char *, const char *);
+int    file_exist (const char *);
+char  *lgetcwd (char *, int);
+int    lsystem (char *);
+void   LastErrInMsgbox (); 
+
+/**********************************************************/
+/* lremove, lrename, laccess, lgetcwd                     */
+/*                                                        */
+/* These function calls the API functions of the OS.      */
+/*                                                        */
+/**********************************************************/
+
+void LastErrInMsgbox ()
+{
+   LPVOID lpMsgBuf;
+   
+   FormatMessage( 
+       FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+       FORMAT_MESSAGE_FROM_SYSTEM | 
+       FORMAT_MESSAGE_IGNORE_INSERTS,
+       NULL,
+       GetLastError(),
+       0, 
+       (LPTSTR) &lpMsgBuf,
+       0,
+       NULL 
+   );
+   
+   MessageBox( NULL, (LPCTSTR)lpMsgBuf, "Error", MB_OK | MB_ICONINFORMATION );
+  
+   LocalFree( lpMsgBuf );
+}
+
+int    lremove (
+const char *filename)
+{
+   if ( DeleteFile(filename) == 0 ) 
+      return -1; 
+ 
+   return 0;
+}
+
+/* */
+
+int    lrename (
+const char * source, 
+const char * dest)
+{
+   
+   if ( MoveFile(source, dest) == 0 )
+   {
+        return -1; 
+   }
+   
+   return 0;
+}
+
+/* */
+
+int    file_exist (
+const char *filename)
+
+{
+    int attr;
+
+    attr = GetFileAttributes (filename);
+
+    if ( (attr == 0xFFFFFFFF) || 
+         (!env_rec.useiget && (attr & FILE_ATTRIBUTE_READONLY))
+       )
+    return FALSE;
+            
+
+    return TRUE;
+}
+
+/* */
+
+char * lgetcwd ( 
+char * current_dir, 
+int size)
+{
+    if ( GetCurrentDirectory (size, current_dir) == 0 )
+       return NULL;
+
+    return(current_dir);
+}
+
+/* */
+
+int    lsystem (
+char *cmd)
+{
+
+  STARTUPINFO         StartupInfo;     
+  PROCESS_INFORMATION ProcessInformation;  
+  char                ErrTxt[100];
+
+  // MessageBox ( NULL, cmd, "Debug System Call in check", 
+  //      MB_OK | MB_ICONEXCLAMATION ); 
+  
+  ZeroMemory( &StartupInfo, sizeof( StartupInfo ) ); 
+  StartupInfo.cb = sizeof(StartupInfo); 
+  
+  if (CreateProcess( NULL, cmd, NULL, NULL, FALSE, NORMAL_PRIORITY_CLASS,
+    NULL, NULL, &StartupInfo, &ProcessInformation)) 
+  { 
+    WaitForSingleObject(ProcessInformation.hProcess, INFINITE);
+    CloseHandle ( ProcessInformation.hProcess );
+  }
+  else
+  {
+    sprintf (ErrTxt, "Could not start process\nrc = %d.",GetLastError() );
+
+    // MessageBox (NULL, ErrTxt, "Error: CreateProcess", 
+    //      MB_OK | MB_ICONSTOP);
+
+    return GetLastError();
+  }
+
+  return NO_ERROR;
+}
+
+/**********************************************************/
+/* insert_tpunx                                           */
+/* This function inserts the new tpunx into sut.mac       */
+/**********************************************************/
+
+int insert_tpunx (
+t_filename filename)
+
+{
+    t_line cmd;
+    
+
+    sprintf ( cmd, "changesutmac %s", filename);
+
+    if (lsystem (cmd) != NO_ERROR)
+        return (10);
+
+    return (RET_OK);
+
+}
+
+/**********************************************************/
+/* INEW                                                   */
+/* This function calls INEW                               */
+/**********************************************************/
+
+int inew (
+t_path     path_src)
+
+{
+    t_line cmd;
+    
+
+    if (file_exist (path_src)) {
+        fprintf (stderr, "You have a own copy of %s!\n", path_src);
+        return(10);
+    }
+
+    if (env_rec.useiget) {
+        sprintf ( cmd, "inew  -e0 %s", path_src);
+    } else {
+        sprintf (cmd, "%s/Posix/touch %s", env_rec.tool, path_src);
+        lsystem (cmd);
+        sprintf ( cmd, "p4 add %s", path_src);
+    } 
+    
+    lsystem (cmd);
+    
+    if (! file_exist (path_src)) {
+        return(10);
+    }
+
+    return (RET_OK);
+}
+
+/**********************************************************/
+/* IGET                                                   */
+/* This function calls IGET                               */
+/**********************************************************/
+
+int iget (
+t_path     path_src)
+
+{
+    t_line cmd;
+    char   CurrentDir [512];
+    
+
+    if (file_exist (path_src)) {
+        fprintf (stderr, "You have a own copy of %s!\n", path_src);
+        return(10);
+    }
+
+#ifdef DEBUG
+    printf ("call: iget -e0 -m %s\n", path_src);
+#endif
+    
+    _getcwd(CurrentDir, 512);
+    if (_chdir(env_rec.tmp))
+         fprintf (stderr, "Cannot change directory to TMP!\n");
+
+    if (env_rec.useiget) {
+        sprintf ( cmd, "iget  -e0 -m %s", path_src);
+    } else {
+        sprintf ( cmd, "p4 sync %s", path_src);
+        lsystem (cmd);
+        sprintf ( cmd, "p4 edit %s", path_src);
+    } 
+
+    lsystem (cmd);
+
+    if (_chdir (CurrentDir))
+         fprintf (stderr, "Cannot change directory to %s!\n", CurrentDir);
+
+    if (!file_exist (path_src)) {
+        return(10);
+    }
+
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/* IPUT                                                   */
+/* This function calls IPUT                               */
+/**********************************************************/
+
+int iput (
+t_path     path_src)
+
+{
+    t_line cmd;
+    char   CurrentDir [512];
+    
+    _getcwd(CurrentDir, 512);
+    if (_chdir(env_rec.tmp))
+         fprintf (stderr, "Cannot change directory to TMP!\n");
+
+    if (env_rec.useiget) {
+        sprintf ( cmd, "iput %s", path_src);
+    } else {
+        sprintf (cmd, "%s -S %s/bin/p4put%s -d \"implicit submit from check\" %s", 
+                      env_rec.toolshell,
+                      env_rec.tool, env_rec.toolext, 
+                      path_src);
+    } 
+
+    if (lsystem (cmd) != NO_ERROR)
+        return(10);
+
+    if (_chdir (CurrentDir))
+         fprintf (stderr, "Cannot change directory to %s!\n", CurrentDir);
+
+    return RET_OK;
+}
+
+
+/**********************************************************/
+/* IDEL                                                   */
+/* This function calls IDEL                               */
+/**********************************************************/
+
+int idel (
+t_path     path_src)
+
+{
+    t_line cmd;
+    
+    if (env_rec.useiget) {
+        sprintf ( cmd, "idel %s", path_src);
+    } else {
+        sprintf (cmd, "%s %s/bin/pdel%s %s", 
+                      env_rec.toolshell,
+                      env_rec.tool, env_rec.toolext, 
+                      path_src);
+    }
+
+    if (lsystem (cmd) != NO_ERROR)
+        return(10);
+
+    return RET_OK;
+}
+
+
+/**********************************************************/
+/* PNXDIFF                                                */
+/* This function calls PNXDIFF                            */
+/**********************************************************/
+
+int pnxdiff (
+t_path     path_src)
+
+{
+    t_line cmd;
+    
+    sprintf (cmd, "%s %s/bin/pnxdiff%s %s", 
+                  env_rec.toolshell,
+                  env_rec.tool, env_rec.toolext, 
+                  path_src);
+
+    if (lsystem (cmd) != NO_ERROR)
+        return(10);
+
+    return RET_OK;
+}
+
+
+/**********************************************************/
+/* GET_TYP                                                */
+/* This function gets the type of the reference file.     */
+/* The type depends on the current directory and what     */
+/* reference file already exists:                         */
+/*                                                        */
+/* slow   --> punix                                       */
+/* quick  --> tpunx -> punix                              */
+/* fast   --> tpunx -> punix                              */
+/* dbuni  --> uunix -> tpunx -> punix                     */
+/* uni    --> upnix -> uunix -> tpunx -> punix            */
+/* xciuni --> cunix ->                                    */
+/**********************************************************/
+
+int get_typ (
+t_filename filename,
+t_path     type,
+int        *is_iso_test,
+int        *may_be_put,
+int        *create_tpunx)
+
+{
+    t_path   htype; 
+    int      tpunx, upnix, uunix, cunix, cpnix;
+  
+  *is_iso_test  = FALSE;
+  *may_be_put   = TRUE;  
+  *create_tpunx = FALSE;  
+
+  sprintf (htype, "../%s.tpunx", filename); tpunx = file_exist (htype);
+  sprintf (htype, "../%s.upnix", filename); upnix = file_exist (htype);
+  sprintf (htype, "../%s.uunix", filename); uunix = file_exist (htype);
+  sprintf (htype, "../%s.cunix", filename); cunix = file_exist (htype);
+  sprintf (htype, "../%s.cpnix", filename); cpnix = file_exist (htype);
+  
+
+  switch ( *env_rec.checkdir ) {
+    case 's' :
+    case 'S' :sprintf (type,  "%s.punix",  filename);
+              break;
+
+    case 'q' :
+    case 'Q' : 
+    case 'f' :
+    case 'F' :
+      if (tpunx) 
+        sprintf (type,  "%s.tpunx", filename);
+      else
+        {*may_be_put = FALSE;
+         *create_tpunx = TRUE;
+         sprintf (type,  "%s.punix", filename);
+        }
+      break;
+
+    case 'd' :
+    case 'D' : 
+      if (uunix) 
+        sprintf (type,  "%s.uunix", filename);
+      else 
+        {*may_be_put = FALSE;
+         if (tpunx)
+             sprintf (type,  "%s.tpunx", filename);
+           else  
+             sprintf (type,  "%s.punix", filename);
+        }
+      break;
+
+    case 'u' :
+    case 'U' : 
+      if (upnix) 
+        sprintf (type,  "%s.upnix", filename);
+      else 
+        {*may_be_put = FALSE;
+         if (uunix)
+             sprintf (type,  "%s.uunix", filename);
+           else if (tpunx) 
+                  sprintf (type,  "%s.tpunx", filename);
+                else
+                  sprintf (type,  "%s.punix", filename);
+        }
+      break;
+
+    case 'x' :
+    case 'X' : 
+      if (cunix) 
+        sprintf (type,  "%s.cunix", filename);
+      else 
+        {*may_be_put = FALSE;
+         if (uunix) 
+             sprintf (type,  "%s.uunix", filename);
+           else if (tpunx)
+                  sprintf (type,  "%s.tpunx", filename);
+                else
+                  sprintf (type,  "%s.punix", filename);
+        }
+      break;
+
+    case 'a' :
+    case 'A' : 
+      if (cpnix) 
+        sprintf (type,  "%s.cpnix", filename);
+      else 
+        {*may_be_put = FALSE;
+         if (cunix) 
+             sprintf (type,  "%s.cunix", filename);
+           else if (upnix)
+                  sprintf (type,  "%s.upnix", filename);
+                else if (uunix)
+                       sprintf (type,  "%s.uunix", filename);
+                     else 
+                       sprintf (type,  "%s.punix", filename);
+
+        }
+      break;
+
+    case 'l' :
+    case 'L' :
+    case 'p' :
+    case 'P' :
+      *is_iso_test = TRUE;
+      break;
+
+  default :
+    fprintf (stderr, "Not in slow, fast, quick, dbuni, xciuni or uni!!\n");
+    exit (4);
+  }
+
+return 0;
+}
+
+
+/**********************************************************/
+/* do_exe                                                 */
+/* This function performs a programm and reads its output */
+/* from a pipe.                                           */
+/**********************************************************/
+
+
+int  do_exe (char* Cmd, 
+             char* ErgLine,
+             int*  ErgLen )
+
+{
+    int				rc ;
+    int				len ;
+    DWORD			dwRead ;
+    DWORD			errcode ;
+    HANDLE			hChildStdoutRd ;
+    HANDLE			hChildStdoutWr ;
+    HANDLE			hChildStderrWr ;
+    HANDLE			hSaveStdout ;
+    HANDLE			hSaveStderr ;
+    SECURITY_ATTRIBUTES		saAttr ;
+    PROCESS_INFORMATION		piProcInfo ;
+    STARTUPINFO			siStartInfo ;
+
+
+    /*
+     *  Set the bInheritHandle flag so pipe handles are inherited.
+     */
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+
+    /*
+     * The steps for redirecting child's STDOUT:
+     *     1.  Save current STDOUT, to be restored later.
+     *     2.  Create anonymous pipe to be STDOUT for child.
+     *     3.  Set STDOUT of parent to be write handle of pipe, so
+     *         it is inherited by child.
+     */
+
+    /*
+     *  Create a pipe for the child's STDOUT.
+     */
+    if (!CreatePipe(&hChildStdoutRd, &hChildStdoutWr, &saAttr, 0))
+    {
+	return ( -2 );
+    }
+
+    /*
+     *  Create a duplicated pipe for the child's STDERR
+     *  (duplicated from child's STDOUT)
+     */
+	if (! DuplicateHandle(
+				GetCurrentProcess(),	
+                                // handle to process with handle to duplicate 
+				hChildStdoutWr,	
+                                // handle to duplicate 
+				GetCurrentProcess(),	
+                                // handle to process to duplicate to 
+				&hChildStderrWr,
+                                // pointer to duplicate handle 
+				DUPLICATE_SAME_ACCESS,	
+                                // access for duplicate handle 
+				TRUE,	
+                                // handle inheritance flag
+				DUPLICATE_SAME_ACCESS 	
+                                // optional actions   
+				) )
+	{
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	return ( -2 );
+	}
+
+
+    /*
+     *  Save the handle to the current STDOUT.
+     */
+    hSaveStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    hSaveStderr = GetStdHandle(STD_ERROR_HANDLE);
+
+    /*
+     *  Set a write handle to the pipe to be STDOUT and STDERR.
+     */
+    if (!SetStdHandle(STD_OUTPUT_HANDLE, hChildStdoutWr))
+    {
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	(void) CloseHandle(hChildStderrWr);
+	return ( -2 );
+    }
+    if (!SetStdHandle(STD_ERROR_HANDLE, hChildStderrWr))
+    {
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	(void) CloseHandle(hChildStderrWr);
+	return ( -2 );
+    }
+
+    /*
+     *  Set up members of STARTUPINFO structure.
+     */
+    memset ( &siStartInfo, 0, sizeof(STARTUPINFO) );
+    siStartInfo.cb = sizeof(STARTUPINFO);
+    siStartInfo.lpReserved = NULL;
+    siStartInfo.lpReserved2 = NULL;
+    siStartInfo.cbReserved2 = 0;
+    siStartInfo.lpDesktop = NULL;
+    siStartInfo.dwFlags = 0;
+
+    /*
+     *  Now create the child process.
+     */
+    rc = CreateProcess( NULL ,
+                        /* program                            */
+			Cmd ,		
+                        /* command line                       */
+			NULL ,		
+                        /* process security attributes        */
+			NULL ,
+                        /* primary thread security attributes */
+			TRUE ,		
+                        /* handles are inherited              */
+			0 ,
+                        /* creation flags                     */
+			NULL ,	
+                    	/* use parent's environment           */
+			NULL ,
+                        /* use parent's current directory     */
+			&siStartInfo ,	
+                        /* STARTUPINFO pointer                */
+			&piProcInfo ); 	
+                        /* receives PROCESS_INFORMATION       */
+
+    /*
+     *  After process creation, restore the saved STDOUT and STDERR.
+     */
+    if (!SetStdHandle(STD_ERROR_HANDLE, hSaveStderr))
+    {
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	(void) CloseHandle(hChildStderrWr);
+	return ( -2 );
+    }
+    if (!SetStdHandle(STD_OUTPUT_HANDLE, hSaveStdout))
+    {
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	(void) CloseHandle(hChildStderrWr);
+	return ( -2 );
+    }
+
+    /*
+     *  If the process creation failed, give an error message
+     *  AFTER stderr has been restored!
+     */
+    if ( ! rc )
+    {
+	(void) CloseHandle(hChildStdoutWr);
+	(void) CloseHandle(hChildStdoutRd);
+	(void) CloseHandle(hChildStderrWr);
+	return ( -2 );
+    }
+
+    /* 
+     *  Close the write end of the pipe before reading from the 
+     *  read end of the pipe. 
+     */
+    (void) CloseHandle(hChildStdoutWr);
+    (void) CloseHandle(hChildStderrWr);
+
+    /*
+     *  Read from pipe that is the standard output for child process.
+     */
+    for ( len = 0 ; ; )
+    {
+        if (!ReadFile(hChildStdoutRd, ErgLine , *ErgLen, &dwRead, NULL))
+	{
+
+	    if ( GetLastError() == ERROR_BROKEN_PIPE )
+		dwRead = 0 ;
+	    break ;
+	}
+	*ErgLen = dwRead ;
+	if ( *ErgLen == 0 ) break ;
+
+    }
+
+    /* 
+     *  Close the read end of the pipe.
+     */
+    (void) CloseHandle(hChildStdoutRd);
+
+    if ( WaitForSingleObject ( piProcInfo.hProcess , INFINITE ) 
+               == WAIT_FAILED )
+    {
+	return ( -2 );
+    }
+
+    if ( ! GetExitCodeProcess ( piProcInfo.hProcess , &dwRead ) )
+    {
+	return ( -2 );
+    }
+
+    CloseHandle ( piProcInfo.hThread ); 
+    CloseHandle ( piProcInfo.hProcess );
+
+    if ( dwRead == 0 ) return ( 0 );
+
+    return ( -2 );
+}
+
+/**********************************************************/
+/* trans_user                                             */
+/* This function performs ulookup and translates          */
+/* the duser into username                                */
+/**********************************************************/
+
+int  trans_user (
+             t_username sname,
+             t_username dname) 
+
+{
+ 
+   t_line  cmd;              
+   int     len;
+   char    ulookup[]     = "ulookup";
+   char    perlopt[]     = " -S ";
+   char    ulookupopt[]  = " -u ";
+
+   
+   strcpy (cmd, env_rec.toolshell);
+   strcat (cmd, perlopt);
+   strcat (cmd, ulookup);
+   strcat (cmd, env_rec.toolext);
+   strcat (cmd, ulookupopt);
+   strcat (cmd, sname);
+
+   len = sizeof(t_username);
+   if ( do_exe ( cmd, dname, &len ) || (len <= 0) ) {
+        fprintf (stderr, "unknown or ambiguous user: %s!\n", sname);
+        return (9);
+   }
+
+   dname [len] = '\0';
+
+
+   return (0);
+}
+
+/**********************************************************/
+/* MOVE_FILE                                              */
+/* This function performs an update on an referenceproto- */
+/* col, which is stored in the directory $SRC/su. This    */
+/* is necessary when a testfile provides a new output and */
+/* this output is true.                                   */
+/*                                                        */
+/* This example shows a typical occupancy for the input   */
+/* parameters. The term AK01TEST represents a file of the */
+/* SUT testbattery:                                       */
+/*                                                        */
+/* filename -> AK01TEST                                   */
+/**********************************************************/
+
+int move_file (
+t_filename filename)
+{
+    t_path   prot, pdiff, lock; 
+    t_path   path_src, type;
+    int      version = 0;
+    int      is_iso_test  = FALSE;
+    int      may_be_put   = TRUE;
+    int      create_tpunx = FALSE;
+   
+    if (env_rec.useiget) {
+        sprintf (lock,  "%s/../.rel",  env_rec.grp);
+        if (file_exist (lock)) {
+            fprintf (stderr, "GRP is locked! No put possible!\n");
+            return(10);
+        }
+    }
+    
+    sprintf (prot,  "%s.prot",  filename);
+    sprintf (pdiff, "%s.pdiff", filename);
+
+    get_typ (filename, type, &is_iso_test, &may_be_put, &create_tpunx);
+
+    sprintf (path_src, "%s\\su\\%s", env_rec.src, type);
+
+    if (iget (path_src) != RET_OK){
+        fprintf (stderr, "Cannot get %s!\n", path_src);
+        return (9);
+    }
+
+    if (lremove (path_src) != 0){
+        fprintf (stderr, "Remove of %s failed!\n", path_src);
+        return (6);
+    }
+
+    if (lrename (prot, path_src) != 0){
+        fprintf (stderr, "Rename of %s into %s failed!\n", prot, path_src);
+        return (6);
+    }
+
+
+    if (pnxdiff (path_src) != RET_OK){
+        fprintf (stderr, "Cannot pnxdiff %s!\n", path_src);
+        return (10);
+    }
+
+    if (iput (type) != RET_OK){
+        fprintf (stderr, "Cannot put %s!\n", path_src);
+        idel (path_src);
+        return (9);
+    }
+
+    if (lremove (pdiff) != 0){
+        fprintf (stderr, "Cannot delete %s!\n", pdiff);
+        return (7);
+    }
+
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/* NEW_FILE                                               */
+/* This function creates a new referenceprotocol for a    */
+/* fast kernel SUT.                                       */
+/**********************************************************/
+
+int new_file (
+t_filename filename)
+{
+    t_path   prot, pdiff; 
+    t_path   path_src, path_sut;
+
+    sprintf (prot,  "%s.prot",  filename);
+    sprintf (pdiff, "%s.pdiff", filename);
+
+    sprintf (path_src, "%s/su/%s.tpunx", env_rec.src, filename);
+    sprintf (path_sut, "../%s.tpunx", filename);
+
+    if (inew (path_src) != RET_OK){
+        fprintf (stderr, "Cannot inew %s!\n", path_src);
+        return (9);
+    }
+
+    if (lremove (path_src) != 0){
+        fprintf (stderr, "Remove of %s failed!\n", path_src);
+        return (6);
+    }
+
+    if (lrename (prot, path_src) != 0){
+        fprintf (stderr, "Rename of %s failed!\n", prot);
+        return (6);
+    }
+
+
+    if (pnxdiff (path_src) != RET_OK){
+        fprintf (stderr, "Cannot pnxdiff %s!\n", path_src);
+        return (10);
+    }
+
+    if (iput (path_src) != RET_OK){
+        fprintf (stderr, "Cannot put %s!\n", path_src);
+        return (9);
+    }
+
+    if (lremove (pdiff) != 0){
+        fprintf (stderr, "Cannot delete %s!\n", pdiff);
+        return (7);
+    }
+
+    if (insert_tpunx (filename) != RET_OK){
+        fprintf (stderr, "Cannot insert %s.tpunx into sut.mac!\n", filename);
+        return (7);
+    }
+
+
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/* PROT_HANDLING                                          */
+/* This function manages the processing of a prot- and a  */
+/* differencefile. Protocolfile could be removed, updated */
+/* or ignored.                                            */
+/*                                                        */ 
+/* This example shows a typical occupancy for the input   */
+/* parameters. The term AK01TEST represents a file of the */
+/* SUT testbattery:                                       */
+/* filename -> AK01TEST                                   */
+/**********************************************************/
+
+int prot_handling (
+t_filename filename,
+int        may_be_put, 
+int        create_tpunx) 
+{
+    t_filename core, dump, rtedump, prot, vprot, 
+               pdiff, punix, tpunx, syserr, rtcerror, 
+               interrupt;
+    int        commit, answer, go_on = TRUE, lvl_typ = FALSE;
+
+
+    if ( ( env_rec.noput == TRUE )    ||
+         ( *env_rec.checkdir == 'l' ) ||
+         ( *env_rec.checkdir == 'L' ) ) 
+       lvl_typ = TRUE;
+
+
+    sprintf (prot,     "%s.prot",      filename);
+    sprintf (pdiff,    "%s.pdiff",     filename);
+    sprintf (vprot,    "%s.vprot",     filename);
+    sprintf (core,     "%s.core",      filename);
+    sprintf (dump,     "%s.dump",      filename);
+    sprintf (rtedump,  "%s.rtedump",   filename);
+    sprintf (syserr,   "%s.syserr",    filename);
+    sprintf (rtcerror, "%s.rtcerror",  filename);
+    sprintf (interrupt,"%s.interrupt", filename);
+
+    if (lvl_typ) {
+    printf ("\n==> Quit / Delete / Nothing \n");
+    printf ("==> Command : (Q/D/<CR>)\n");
+    } else if (may_be_put) {
+           printf ("\n==> Quit / Delete / Put / Nothing \n");
+           printf ("==> Command : (Q/D/P/<CR>)\n");
+           } else if ( create_tpunx ) {
+                  printf ("\n==> Quit / Delete / Tpunx / Nothing \n");
+                  printf ("==> Command : (Q/D/T/<CR>)\n");
+                  } else {
+                    printf ("\n==> Quit / Delete / Nothing \n");
+                    printf ("==> Command : (Q/D/<CR>)\n");
+                    };
+
+
+    answer = getchar ();
+    while (go_on){
+        go_on = FALSE;
+        switch (answer){
+            case 'D' :
+            case 'd' : if (lremove (prot) != 0)
+                         fprintf (stderr, "Cannot delete %s!\n", prot);
+                       if (lremove (pdiff) != 0)
+                         fprintf (stderr, "Cannot delete %s!\n", pdiff);
+                       lremove (core); 
+                       lremove (dump); 
+                       lremove (rtedump); 
+                       lremove (vprot); 
+                       lremove (syserr); 
+                       lremove (rtcerror); 
+                       lremove (interrupt); 
+                       getchar(); 
+                       break;
+            case '\n':
+            case 'N' :
+            case 'n' : printf ("Nothing happens with %s and %s!\n", 
+                            prot, pdiff);
+                       if (answer != '\n'){
+                           getchar();
+                       }
+                       break;
+            case 'P' : 
+            case 'p' : if (lvl_typ) {
+                       answer = getchar (); go_on = TRUE;
+                       } else if (may_be_put) {
+                       move_file (filename);
+                       lremove (core); 
+                       lremove (dump); 
+                       lremove (rtedump); 
+                       lremove (vprot); 
+                       lremove (syserr); 
+                       lremove (rtcerror); 
+                       lremove (interrupt); 
+                       getchar();
+                           } else {
+                             answer = getchar (); go_on = TRUE;
+                             }
+                       break; 
+            case 't' : 
+            case 'T' : if (lvl_typ || !create_tpunx) {
+                          answer = getchar (); 
+                          go_on = TRUE;
+                       } else {
+                          getchar ();
+                          printf ("==> are you sure? (y/n)");
+                          commit = getchar ();
+                          if (commit == 'y' || commit == 'Y') {
+                             new_file (filename);
+                             lremove (core); 
+                             lremove (dump); 
+                             lremove (rtedump); 
+                             lremove (vprot); 
+                             lremove (syserr); 
+                             lremove (rtcerror); 
+                             lremove (interrupt); 
+                             getchar();
+                          } else {
+                             answer = getchar (); go_on = TRUE;
+                          }
+                       }
+                       break; 
+            case 'q' : 
+            case 'Q' : printf("quit check\n");
+                       exit(0);
+                       break; 
+            default  : answer = getchar (); go_on = TRUE;
+                       break;
+        }
+    }    
+
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/* SHOW_FILE                                              */
+/* Die Funktion liesst die Protokoll- und die Differenz-  */
+/* datei in den Editor. Der Parameter FILENAME gibt den   */
+/* Namen der zu bearbeitenden Datei ohne ein Suffix an!   */
+/**********************************************************/
+
+int show_file (
+t_filename filename,
+t_username user,
+int        setstat)
+{
+    char        *timestr;
+    struct stat buf;
+    t_line      cmd, string;
+    t_filename  prot, pdiff;
+    t_path      current_dir, start_up, type, ref;
+    t_username  tuser;
+    int         is_iso_test  = FALSE;
+    int         may_be_put   = TRUE;
+    int         create_tpunx = FALSE;
+    int         call_editor  = TRUE;
+
+    if (strcmp (env_rec.editor, "0") == 0) call_editor = FALSE;
+     
+    sprintf (prot, "%s.prot", filename);
+    sprintf (pdiff, "%s.pdiff", filename);
+
+
+    /* Die Dateien, deren Namen gerade zusammengebaut wurden, */
+    /* werden in den Editor geladen.                          */
+
+
+    if ((file_exist (prot)) && (file_exist (pdiff))){
+
+      if (setstat == TRUE) {
+
+        trans_user (user, tuser); 
+        printf ("%-18s %s\\%s\n", tuser, env_rec.curdir, filename);
+
+      }
+      else {
+
+        if (call_editor == TRUE) {
+
+        if (env_rec.toolopt != NULL) {
+
+	  if ( env_rec.usediffview == FALSE ) {
+	    sprintf (cmd, "%s %s %s/bin/opendoc%s -s -r -e %s %s/%s %s/%s", 
+		     env_rec.toolshell,
+		     env_rec.toolopt,
+		     env_rec.tool, env_rec.toolext, 
+		     env_rec.editor, 
+		     env_rec.curdir, pdiff,
+		     env_rec.curdir, prot);
+	  } else {
+	    sprintf (cmd, "%s %s %s/bin/diffview%s  %s/%s ", 
+		     env_rec.toolopt,
+		     env_rec.toolshell,
+		     env_rec.tool, env_rec.toolext, 
+		     env_rec.curdir, filename);
+	  }
+        } else {
+
+	  if ( env_rec.usediffview == FALSE ) {
+           sprintf (cmd, "%s %s/bin/opendoc%s -s -r -e %s %s/%s %s/%s", 
+                        env_rec.toolshell,
+                        env_rec.tool, env_rec.toolext, 
+                        env_rec.editor, 
+                        env_rec.curdir, pdiff,
+		        env_rec.curdir, prot);
+	  } else {
+           sprintf (cmd, "%s %s/bin/diffview%s  %s/%s ", 
+                        env_rec.toolshell,
+                        env_rec.tool, env_rec.toolext, 
+		        env_rec.curdir, filename);
+	  }
+        }
+        
+
+        lsystem (cmd);
+        }
+
+        printf ("%s\n", env_rec.curdir);
+
+        get_typ (filename, type, &is_iso_test, &may_be_put, &create_tpunx);
+        sprintf (ref, "../%s", type);
+
+        if ( is_iso_test == TRUE ) {
+        
+          printf ("No writable test(Isolation Level Test/Parse Execute Test)\n");
+
+        } else {
+
+          if (file_exist (ref)){
+             stat (ref, &buf);
+             timestr = ctime (&buf.st_mtime);
+             strncpy (string, timestr,24);
+             string[24] = '\0';
+             printf ("%s %s\n", string, type);
+          }
+        }
+
+        if (file_exist (prot)){
+           stat (prot, &buf);
+           timestr = ctime (&buf.st_mtime);
+           strncpy (string, timestr,24);
+           string[24] = '\0';
+           printf ("%s %s.prot\n", string, filename);
+        }
+
+        if (file_exist (pdiff)){
+           stat (pdiff, &buf);
+           timestr = ctime (&buf.st_mtime);
+           strncpy (string, timestr,24);
+           string[24] = '\0';
+           printf ("%s %s.pdiff\n", string, filename);
+        }
+
+        /* Verarbeitung der bestehenden Protokolle, d.h. */
+        /* loeschen, umbenennen oder ignorieren.        */
+
+        prot_handling (filename, may_be_put, create_tpunx);
+
+        if ( call_editor == TRUE ) {
+        if ( env_rec.usediffview == FALSE ) {
+        sprintf (cmd, "%s %s/bin/closedoc%s -e %s %s/%s %s/%s", 
+                     env_rec.toolshell,
+                     env_rec.tool, env_rec.toolext, 
+                     env_rec.editor, 
+                     env_rec.curdir, pdiff,
+		     env_rec.curdir, prot);
+
+        lsystem (cmd); 
+	}
+        }
+
+      }
+    }
+
+
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/* CONSIDER_FILES                                         */
+/* This function manages the processing of the single     */
+/* user tests.                                            */
+/*                                                        */
+/* This example shows a typical occupancy for the input   */
+/* parameters. The term AK01TEST represents a file of the */
+/* SUT testbattery:                                       */
+/* filename -> AK01TEST                                   */
+/* path     -> $OWN/.isut                                 */
+/* setall   -> yes or no                                  */
+/* setuser  -> yes or no                                  */
+/* setowner -> yes or no                                  */
+/**********************************************************/
+
+int consider_files (
+t_filename filename,
+t_path     isut_file,
+int        setall, 
+int        setuser, 
+int        setowner,
+int        setstat)
+{
+    FILE       *stream;
+    t_filename name;
+    t_username user;
+    t_username tuser;
+
+
+    if ((stream = fopen (isut_file, "r")) == 0){
+        fprintf (stderr, "Cannot open %s\n", isut_file);
+        return (5);
+    }
+
+    if ((!setall) && (!setuser) && (!setowner)) {
+        /* Read a special testfile */
+        show_file (filename, user, FALSE);
+    }
+    else{
+       if (setowner){
+          while (fscanf (stream, "%s %s %*[^\n]", user, name) != EOF) {
+             _strupr(user); 
+             _strupr(name);
+             if (strcmp (name, filename) == 0){
+                 trans_user (user, tuser);
+                 printf("%s is responsible for this testfile.\n", 
+                              tuser);
+                 break;
+             }
+          }
+       }
+       else{
+          /* Lesen von einzelnen Testdateien, die mit der -f Option */
+          /* ausgewaehlt werden koennen.                            */
+
+          while (fscanf (stream, "%s %s %*[^\n]", user, name) != EOF){
+             _strupr(user);
+             _strupr(name);
+             if ((setall) || (strcmp (user, env_rec.username) == 0)){
+                show_file (name, user, setstat);
+             }
+          }
+       }
+    }
+    fclose (stream);
+    return (RET_OK);
+}
+
+
+/**********************************************************/
+/*                        MAIN                            */
+/**********************************************************/
+
+void main (
+int argc, 
+char **argv)
+{
+    int         setstat, setuser, setall, setowner, err;
+    int         param_cnt;
+    int         act_param;
+    t_filename  filename;
+    t_username  username;
+    t_username  husername;
+    t_path      path;
+    t_path      current_dir;
+    t_filename  editor;
+    char        *username_ptr;
+    char        *editor_ptr;
+
+    /* Standardbelegung der Variablen */
+
+
+#ifdef DEBUG
+    printf ("check aufgerufen mit folgenden Argumenten:\n");
+    for (param_cnt = 0; param_cnt < argc; param_cnt++) 
+        printf ("  Argument %d: %s\n", param_cnt, argv[param_cnt]);
+#endif
+
+    err      = FALSE;
+    setstat  = FALSE;
+    setuser  = TRUE;
+    setall   = FALSE;
+    setowner = FALSE;
+
+    /* Lesen der Umgebungsvariablen des Entwicklungsbaums */
+
+     env_rec.src       = getenv("SRC");
+     if (env_rec.src == NULL ){
+       fprintf (stderr, "$SRC not set in environment!\n");
+       exit (3);
+     }
+
+     env_rec.grp       = getenv("GRP");
+     if (env_rec.grp == NULL ){
+       fprintf (stderr, "$GRP not set in environment!\n");
+       exit (3);
+     }
+
+     env_rec.tool      = getenv("TOOL");
+     if (env_rec.tool == NULL ){
+       fprintf (stderr, "$TOOL not set in environment!\n");
+       exit (3);
+     }
+
+     env_rec.toolshell = getenv("TOOLSHELL");
+     if (env_rec.toolshell == NULL ){
+       fprintf (stderr, "$TOOLSHELL not set in environment!\n");
+       exit (3);
+     }
+
+     env_rec.toolext   = getenv("TOOLEXT");
+     if (env_rec.toolext == NULL ){
+       fprintf (stderr, "$TOOLEXT not set in environment!\n");
+       exit (3);
+     }
+
+     env_rec.tmp       = getenv("TMP");
+     if (env_rec.tmp == NULL ){
+       fprintf (stderr, "$TMP not set in environment!\n");
+       exit (3);
+     }
+
+     username_ptr      = getenv("USERNAME");
+     if (username_ptr == NULL ){
+       fprintf (stderr, "$USERNAME not set in environment!\n");
+       exit (3);
+     }
+     env_rec.username  = strcpy (username, getenv("USERNAME"));    
+
+     editor_ptr        = getenv("EDITOR");
+     if (editor_ptr == NULL ){
+       fprintf (stderr, "$EDITOR not set in environment!\n");
+       exit (3);
+     }
+     env_rec.editor      = strcpy (editor, getenv("EDITOR"));
+
+     
+     env_rec.useiget = FALSE;
+     if ( NULL == getenv("DEPOT") ) {
+       env_rec.useiget = TRUE;
+     }
+     env_rec.editor      = strcpy (editor, getenv("EDITOR"));
+     env_rec.toolopt     = getenv("TOOLOPT");
+     env_rec.curdir      = lgetcwd(current_dir, sizeof(current_dir));
+     env_rec.checkdir    = strrchr(current_dir, PATHSEP) + 1;
+     env_rec.noput       = FALSE;
+     env_rec.usediffview = FALSE;
+
+#ifdef DEBUG     
+     printf("Folgendes Environment gelesen:\n"     );
+     printf("  SRC:       %s\n", env_rec.src       );
+     printf("  GRP:       %s\n", env_rec.grp       );
+     printf("  TOOL:      %s\n", env_rec.tool      );
+     printf("  TOOLSHELL: %s\n", env_rec.toolshell );
+     printf("  TOOLEXT:   %s\n", env_rec.toolext   );
+     printf("  TMP:       %s\n", env_rec.tmp       );
+     printf("  USER:      %s\n", username_ptr      );
+     printf("  EDITOR:    %s\n", editor_ptr        );
+     printf("  TOOLOPT:   %s\n", env_rec.toolopt   );
+     printf("  CURDIR:    %s\n", env_rec.curdir    );
+     if (env_rec.useiget) printf("  USE IGET\n");
+#endif
+
+
+     param_cnt = argc - 1; // argv[0] -> program
+     act_param = 1;
+
+     while ((act_param <= param_cnt) && !err)
+	{
+
+	if ( 0 == strcmp("-d", argv[act_param]))
+    	{
+	    env_rec.usediffview = TRUE;
+	    act_param++;
+	}
+        else if ( 0 == strcmp("-x", argv[act_param]))
+    	{
+	  /* nicht mehr genutzter Parameter                  */
+	  /* aus Gruenden der Kompatibilitaet noch vorhanden */
+	    act_param++;
+	}   
+	else if ( 0 == strcmp("-a", argv[act_param]))
+    	{
+	    setall = TRUE;
+            setuser = FALSE;
+	    act_param++;
+	}   
+        else if ( 0 == strcmp("-u", argv[act_param]))
+    	     {
+                 env_rec.username = strcpy (username, argv[act_param + 1]);    
+	         act_param = act_param + 2;
+                 _strupr(username); 
+                 if  ((*username != 'D')    ||   
+                     (*(username+1) < '0')  || 
+                     (*(username+1) > '9'))
+                 { 
+                     trans_user (username, husername);
+                     strcpy (username, husername);
+                 }        
+	     }
+             else if ( 0 == strcmp("-f", argv[act_param]))
+		  {
+		  setuser = FALSE;
+                  strcpy (filename, argv[act_param + 1]);    
+		  act_param = act_param + 2;
+		  }
+                  else if ( 0 == strcmp("-o", argv[act_param]))
+    	               {
+		       setowner = TRUE;
+		       setuser  = FALSE;
+                       strcpy (filename, argv[act_param + 1]);    
+                       act_param = act_param + 2;
+		       }
+                       else if ( 0 == strcmp("-e", argv[act_param]))
+                            {
+                            env_rec.editor = 
+                                strcpy (editor, argv[act_param + 1]);    
+	                    act_param = act_param + 2;
+                            }
+                            else if ( 0 == strcmp("-s", argv[act_param]))
+    	                         {
+                                 setstat = TRUE;
+                                 act_param++;
+                                 }   
+                                 else
+	                	   err = TRUE; 
+    }    
+		
+		
+    _strupr(username); 
+    _strupr(filename); 
+    
+
+    if (err)
+    {
+        fprintf (stderr, "usage: check [-e <editor>] [-s] [-d] [-a | -u <username> | ");
+        fprintf (stderr, "-f <filename> | -o <filename>]\n");
+        fprintf (stderr, "       -e : use <editor> to show prot and diff, 0 = no editor call\n");
+        fprintf (stderr, "       -d : use diffview to show prot and diff\n");
+        fprintf (stderr, "       -s : prints only status\n");
+        fprintf (stderr, "       -a : check all testfiles\n");
+        fprintf (stderr, "       -f : check the testfile");
+        fprintf (stderr, " <filename>\n");
+        fprintf (stderr, "       -u : check the testfiles of user");
+        fprintf (stderr, " <duser>\n");
+        fprintf (stderr, "       -o : provide owner of the testfile");
+        fprintf (stderr, " <filename>\n");
+        fprintf (stderr, "  default : check the testfiles of user");
+        fprintf (stderr, "  $LOGNAME\n");
+        exit (2);
+    }
+
+    sprintf (path, "../ISUT");
+
+    if (!file_exist (path)){
+        fprintf (stderr, "The file ISUT is not readable!\n");
+        exit (4);
+    }
+
+    /* Betrachten der einzelnen Single-User-Tests */
+    
+    consider_files (filename, path, setall, setuser, setowner, setstat);
+}
+
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :           0
+*-PRETTY-*  lines of code :           0
+*-PRETTY-*  lines in file :           0
+.pa
+

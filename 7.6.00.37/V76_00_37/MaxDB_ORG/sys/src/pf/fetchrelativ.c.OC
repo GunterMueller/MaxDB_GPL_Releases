@@ -1,0 +1,505 @@
+/*!**********************************************************************
+
+  module: fetchrelativ.c
+
+  -----------------------------------------------------------------------
+
+  responsible:  Thomas Koetter (D024584 - Thomas.Theodor.Koetter@sap.com)
+
+  special area: ODBC-Tests
+
+  description:  SQLExtendedFetch: problem when FETCH_RELATIVE proceeds
+                                  end of result set
+
+
+  -----------------------------------------------------------------------
+
+                         Copyright (c) 2000-2005 SAP AG
+
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+************************************************************************/
+
+#define PROGNAME "fetchrelativ"
+#define TABLE PROGNAME
+#define ODBCVER 0x0350
+
+#include "o3util.c"
+
+
+#define CHAR_LEN 200
+#define NUM_VALUES 7
+#define PARAMSET_SIZE 5
+
+#define ERROR_CHECK(hstmtx)      if (retcode != SQL_SUCCESS) {\
+			   SQLError(henv,\
+				    hdbc,\
+				    hstmtx,\
+				    sqlstate,\
+				    &esq_sql_code,\
+				    error_txt,\
+				    len_error_txt,\
+				    &used_error_txt);\
+			        SPRINTF(buffer, " sqlstate: %s\n", sqlstate);\
+		                PRINTF(buffer);\
+				SPRINTF(buffer," esq_sql_code: %ld\n", esq_sql_code);\
+		                PRINTF(buffer);\
+                  switch (retcode) {\
+		  case(100) :\
+			  break;\
+		  default   :\
+			  /* exit(16); */\
+			  break; } }
+
+struct valueStruct
+{
+    SDWORD  id;
+    SDWORD  idLen;
+    UCHAR   val[CHAR_LEN];
+    SDWORD  valLen;
+};
+
+VOID InitGlobals();
+RETCODE InsertValues();
+RETCODE ReadValues();
+
+/* globals */
+HENV    henv  = SQL_NULL_HENV;
+HDBC    hdbc  = SQL_NULL_HDBC;
+UCHAR sqlstate  [ 10 ];
+SDWORD esq_sql_code;
+UCHAR error_txt  [ 101 ] ;
+SWORD len_error_txt = 100;
+SWORD used_error_txt;
+
+struct valueStruct values[PARAMSET_SIZE];
+
+SQLUSMALLINT paramStatusArray[PARAMSET_SIZE];
+SQLUSMALLINT paramsProcessed;
+
+RETCODE ShowData (HSTMT hstmt)
+{
+  char dataBuffer1[50];
+  char dataBuffer2[50];
+  SQLINTEGER i1, i2;
+  SQLLEN len1, len2;
+  long ind, writtenLen;
+  RETCODE retcode;
+  char    buffer[1024];
+
+
+  retcode = SQLGetData (hstmt, 1, SQL_C_LONG,
+                        &i1, sizeof(i1), NULL);
+
+  retcode = SQLGetData (hstmt, 2, SQL_C_LONG, dataBuffer1, sizeof(dataBuffer1), &len1);
+  retcode = SQLGetData (hstmt, 3, SQL_C_LONG,
+                        &i2, sizeof(i2), NULL);
+  retcode = SQLGetData (hstmt, 4, SQL_C_LONG, dataBuffer2, sizeof(dataBuffer2), &len2);
+
+
+  SPRINTF (buffer, "%d  %d  %d  %d"CRLF, i1, len1, i2, len2);
+  PRINTF (buffer);
+
+
+}
+
+RETCODE InternalFullConnect( HENV *phenv, HDBC *phdbc )
+{
+    RETCODE retcode;
+    char    textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+
+    retcode = SQLAllocHandle( SQL_HANDLE_ENV, SQL_NULL_HANDLE, phenv );
+    SPRINTF( textBuffer,
+             "FullConnect\t -- AllocHandle (ENV) \t\t retcode: %s"CRLF,
+             cnvret(retcode) );
+    PRINTF( textBuffer );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLSetEnvAttr( *phenv, SQL_ATTR_ODBC_VERSION,
+                             (void*) SQL_OV_ODBC3, 0 );
+    SPRINTF( textBuffer,
+             "FullConnect\t -- SetEnvAttr (ODBC_VERSION) \t retcode: %s"CRLF,
+             cnvret(retcode) );
+    PRINTF( textBuffer );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    retcode = SQLAllocHandle( SQL_HANDLE_DBC, *phenv, phdbc );
+    SPRINTF( textBuffer,
+             "FullConnect\t -- AllocHandle (DBC) \t\t retcode: %s"CRLF,
+             cnvret(retcode) );
+    PRINTF( textBuffer );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }; /* if */
+
+    /* set cursor lib
+    retcode = SQLSetConnectAttr( *phdbc, SQL_ATTR_ODBC_CURSORS,
+                                 (void *) SQL_CUR_USE_ODBC, 0 );
+    SPRINTF( textBuffer,
+             "FullConnect\t -- SetConnectAttr (use cursor lib) \t retcode: %s"CRLF,
+             cnvret(retcode) );
+    PRINTF( textBuffer );
+    if (retcode != SQL_SUCCESS) {
+        return retcode;
+    }
+    */
+
+    retcode = SQLConnect( *phdbc,
+                          DBNODE, (SWORD) SQL_NTS,
+                          ODBCUSER, (SWORD) SQL_NTS,
+                          ODBCPASSW, (SWORD) SQL_NTS );
+    SPRINTF( textBuffer, "FullConnect \t -- Connect \t\t\t retcode: %s"CRLF,
+             cnvret(retcode) );
+    PRINTF( textBuffer );
+    ErrorCheck( SQL_HANDLE_DBC, *phdbc );
+
+    return retcode;
+} /* FullConnect */
+
+
+int MAIN( int argc, char **argv) {
+    char    buffer[1024];
+    RETCODE retcode;
+    HSTMT   hstmt = SQL_NULL_HSTMT, hstmt2 = SQL_NULL_HSTMT;
+    char    textBuffer[O3UTIL_TEXT_BUFFER_LEN];
+    int     i, n = 0;
+    SQLROWSETSIZE rowCount;
+    SQLUSMALLINT rowStatus;
+    char col1[12], col3[100];
+    SQLINTEGER col2, id = 1;
+    SQLLEN len1, len2, len3;
+
+    char dataBuffer[50];
+    long ind, writtenLen;
+
+
+    SQLCHAR     szColName[100];
+    SQLSMALLINT bufLen, nameLen, dataType, decDigits, nullable;
+    SQLUINTEGER colSize;
+    int testOk = TRUE;
+
+
+    StartTest( PROGNAME );
+
+    retcode = InternalFullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+  retcode = SQLAllocStmt (hdbc, &hstmt);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLAllocStmt retcode: %s"CRLF,
+           cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+
+
+
+
+  SPRINTF (buffer, "create table "TABLE" (id integer, col1 char(12), col2 integer, col3 char(30)) ", PROGNAME);
+  retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+           buffer, cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+  for (i=0; i<20; i++, id++) {
+      SPRINTF (buffer, "insert into "TABLE" values (%d, 'Hallo %d', %d, 'Unsinn') ",
+               id, id, i);
+      retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+      SPRINTF( (char*) textBuffer,
+               "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+               buffer, cnvret(retcode));
+      PRINTF( textBuffer );
+      if (retcode != SQL_SUCCESS)  goto exit;
+  }
+
+  for (i=0; i<20; i++, id++) {
+      SPRINTF (buffer, "insert into "TABLE" values (%d, 'Hallo2 %d', NULL, NULL) ",
+               id, id, PROGNAME);
+      retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+      SPRINTF( (char*) textBuffer,
+               "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+               buffer, cnvret(retcode));
+      PRINTF( textBuffer );
+      if (retcode != SQL_SUCCESS)  goto exit;
+  }
+
+  SPRINTF (buffer, "insert into "TABLE" values (%d, 'Hallo2 %d', 444, NULL) ",
+           id, id, PROGNAME);
+  retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+           buffer, cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+
+
+     retcode = SQLFreeStmt(hstmt, SQL_DROP);
+     SPRINTF(buffer, " SQLFreeStmt (SQL_DROP) retcode: %d"CRLF, retcode);
+     PRINTF(buffer);
+     ERROR_CHECK(hstmt);
+
+     retcode = SQLAllocStmt (hdbc, &hstmt);
+     SPRINTF(buffer, " SQLAllocStmt retcode: %d"CRLF, retcode);
+     PRINTF(buffer);
+     ERROR_CHECK(hstmt);
+
+  retcode = SQLSetStmtAttr (hstmt, SQL_ATTR_ROW_BIND_TYPE,
+                            SQL_BIND_BY_COLUMN,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLSetStmtAttr (hstmt, SQL_ATTR_CONCURRENCY,
+                            (SQLPOINTER) SQL_CONCUR_READ_ONLY,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+
+  retcode = SQLSetStmtAttr (hstmt, SQL_ATTR_CURSOR_TYPE,
+                            /* (SQLPOINTER) SQL_CURSOR_KEYSET_DRIVEN, */
+                            (SQLPOINTER) SQL_CURSOR_DYNAMIC,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLSetStmtAttr (hstmt, SQL_ATTR_USE_BOOKMARKS,
+                            (SQLPOINTER) SQL_UB_ON,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLSetStmtAttr (hstmt, SQL_ROWSET_SIZE,
+                            (SQLPOINTER) 1UL,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLSetStmtAttr (hstmt, 3002, /* SQL_ATTR_OPTIMIZE_CURSOR, */
+                            (SQLPOINTER) 1UL,
+                            SQL_IS_UINTEGER);
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+
+  retcode = SQLBindCol (hstmt, 1, SQL_C_LONG, &id, 0, &len2);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLBindCol (hstmt, 2, SQL_C_CHAR, col1, 12, &len1);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLBindCol (hstmt, 3, SQL_C_LONG, &col2, 0, &len2);
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLBindCol (hstmt, 4, SQL_C_CHAR, col3, 100, &len3);
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+
+  SPRINTF (buffer, "select * from "TABLE" order by id ",
+           PROGNAME);
+  retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+           buffer, cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+  /*
+  while (retcode == SQL_SUCCESS) {
+      retcode = SQLExtendedFetch (hstmt, SQL_FETCH_NEXT, 0, &rowCount, &rowStatus);
+  }
+  */
+
+  for (i=0; i<40; i++) {
+      retcode = SQLExtendedFetch (hstmt, SQL_FETCH_NEXT, 0, &rowCount, &rowStatus);
+      SPRINTF( (char*) textBuffer,
+               "Main\t -- SQLExtendedFetch retcode: %s"CRLF, cnvret(retcode));
+      PRINTF( textBuffer );
+  }
+  /* get data */
+  SPRINTF( (char*) textBuffer,
+           "col1: <%s>(%d)"CRLF, col1, len1);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col2: <%d>(%d)"CRLF, col2, len2);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col3: <%s>(%d)"CRLF, col3, len3);
+  PRINTF( textBuffer );
+
+  testOk |= strcmp ("Hallo2 40", col1) != 0;
+
+
+  /* letzte Zeile */
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, -5, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ -5) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  testOk |= strcmp ("Hallo2 35", col1) != 0;
+
+  /* get data */
+  SPRINTF( (char*) textBuffer,
+           "col1: <%s>(%d)"CRLF, col1, len1);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col2: <%d>(%d)"CRLF, col2, len2);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col3: <%s>(%d)"CRLF, col3, len3);
+  PRINTF( textBuffer );
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, 5, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ 5) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, -10, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ -10) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  testOk |= strcmp ("Hallo2 30", col1) != 0;
+
+  /* get data */
+  SPRINTF( (char*) textBuffer,
+           "col1: <%s>(%d)"CRLF, col1, len1);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col2: <%d>(%d)"CRLF, col2, len2);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col3: <%s>(%d)"CRLF, col3, len3);
+  PRINTF( textBuffer );
+
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, 5, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ 10) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_LAST, 0, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(last) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, 5, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ 5) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, -5, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ -5) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  if (retcode != SQL_SUCCESS)  goto exit;
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_RELATIVE, -2, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(relativ -2) retcode: %s"CRLF, cnvret(retcode));
+  PRINTF( textBuffer );
+
+  testOk |= strcmp ("Hallo2 35", col1) != 0;
+
+  /* get data */
+  SPRINTF( (char*) textBuffer,
+           "col1: <%s>(%d)"CRLF, col1, len1);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col2: <%d>(%d)"CRLF, col2, len2);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col3: <%s>(%d)"CRLF, col3, len3);
+  PRINTF( textBuffer );
+
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_LAST, 0, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(last)  retcode: %s"CRLF,
+           cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)  goto exit;
+
+  testOk |= strcmp ("Hallo2 41", col1) != 0;
+
+  /* get data */
+  SPRINTF( (char*) textBuffer,
+           "col1: <%s>(%d)"CRLF, col1, len1);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col2: <%d>(%d)"CRLF, col2, len2);
+  PRINTF( textBuffer );
+  SPRINTF( (char*) textBuffer,
+           "col3: <%s>(%d)"CRLF, col3, len3);
+  PRINTF( textBuffer );
+
+
+  retcode = SQLExtendedFetch (hstmt, SQL_FETCH_NEXT, 0, &rowCount, &rowStatus);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExtendedFetch(next)  retcode: %s"CRLF,
+           cnvret(retcode));
+  PRINTF( textBuffer );
+
+ exit:
+  /*    retcode = DropTable( hdbc, PROGNAME ); */
+  if (retcode != SQL_SUCCESS)
+      ERROR_CHECK (hstmt);
+
+  retcode = SQLFreeStmt(hstmt, SQL_DROP);
+  SPRINTF(buffer, " SQLFreeStmt (SQL_DROP) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLAllocStmt (hdbc, &hstmt);
+  SPRINTF(buffer, " SQLAllocStmt retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  SPRINTF (buffer, "drop table "TABLE" ",
+           PROGNAME);
+  retcode = SQLExecDirect (hstmt, buffer, SQL_NTS);
+  SPRINTF( (char*) textBuffer,
+           "Main\t -- SQLExecDirect (%s) retcode: %s"CRLF,
+           buffer, cnvret(retcode));
+  PRINTF( textBuffer );
+  if (retcode != SQL_SUCCESS)
+      ERROR_CHECK (hstmt);
+
+
+  if (testOk)
+    SPRINTF(buffer, "Test ok\n");
+  else
+    SPRINTF(buffer,"Test failed!\n");
+  PRINTF(buffer);
+
+
+  FullDisconnect( &henv, &hdbc );
+
+    EndTest( PROGNAME );
+    return 0;
+} /* MAIN */
+
+
+
+
+

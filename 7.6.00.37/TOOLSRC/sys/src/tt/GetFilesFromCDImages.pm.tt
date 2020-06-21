@@ -1,0 +1,490 @@
+#! /usr/bin/perl
+#
+# $Header: //sapdb/TOOLSRC/develop/sys/src/tt/GetFilesFromCDImages.pm.tt#10 $
+# $DateTime: 2002/04/25 11:10:12 $
+# $Change: 19899 $
+#
+# Desc: 	- copy files from CDImage server to make environment
+#			- files to copy are described in pcr_releases.xml
+#			- part of buildpackage tool		 
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+package GetFilesFromCDImages;
+
+use IO::File;
+use XML::Parser::Expat;
+use GME::XMLElement;
+use Exporter;
+import XMLParser;
+
+
+
+@ISA = ('Exporter');
+@EXPORT=('getFiles','makedir');
+
+my $image_server="p26325";
+my $XMLFile = "$ENV{'WRK'}/fast/install/pcr_releases.xml";
+my $CDImagePath = 'CD-Images/PCR_REL';
+$CDImagePath =~ s/\//\\/g if $^O =~ /mswin/i; 
+
+
+sub setErrMsgHandler{
+	my ($handler) = @_;
+	*err = $handler;
+}
+
+sub setMsgHandler{
+	my ($handler) = @_;
+	*msg = $handler;
+}
+
+
+
+sub makedir{
+    #create directory recursively
+    #on error return 0 else 1
+    my $dir=$_[0]; #arg1: directoryname
+    my $mode=$_[1];#arg2: accessrights
+	unless($mode){
+		$mode=0775; #needed to have write access under unix 
+	}
+	$_=$dir;
+	s/\\/\//g;
+	/(.*)\/$/ and (($dir ne "/") or !($dir =~ /^[a-zA-Z]:\/.*/)) and $dir=$1;#remove slash at eol
+	$_=$dir;
+    unless(-d $dir){
+		/(.*)\/[^\/]*$/  and makedir($1,$mode) or return 0;
+	
+		unless(mkdir $dir , $mode){
+			msg("cannot create $dir\n");
+			return 0;
+		}
+	}
+    return 1;
+}
+
+sub copy{
+	
+	my $src = $_[0];
+	my $dest = $_[1];
+	-f $src or err("cp: file \"$src\" not found\n") and return 0;
+	$dest =~ /^[\ ]*$/ and err("cp: there are no destination\n") and return 0;
+	if($^O =~ /.*win32.*/i){
+		$src=~s/\//\\/g;
+		$dest=~s/\//\\/g;
+		$rc=`copy $src $dest`;    
+	}
+	else{
+		$rc=`cp -p $src $dest`; 
+	}
+	#print "OUT: $rc\n";
+}
+
+sub deltree{
+	my $tree = $_[0];
+	my $rc;
+	if($^O=~/.*mswin.*/i){
+		$tree=~s/\//\\/g;
+		system("rm", "-rf", $tree);
+	}
+	else{
+		$rc= `rm -rf $tree`;
+	} 
+}
+	
+
+local @ARGV=@_;
+
+$LIBPATH="lib";
+if($^O=~/.*win32.*/i){
+	$ARCH="i386";
+	$ARCH='ia64' if exists $ENV{'BIT64'};
+	$OS="win";
+	$CDIMAGEOS='NT';
+	$LIBPATH="pgm";
+	$SOEXT="dll";
+	$OS32 = "NT\\I386";
+	$OS64 = "NT\\IA64";
+}
+elsif($^O=~/linux/i){
+	$ARCH="i386";
+	$OS="linux";
+	$SOEXT="so";
+	$OS32="UNIX/LINUX_32";
+}
+elsif($^O=~/.*aix.*/i){
+	$ARCH="ppc";
+	$SOEXT="so";
+	$OS32="UNIX/AIX_32";
+	my $outtext = `oslevel`;
+	if($outtext =~ /^5/){
+		$OS = 'aix5';
+		$OS64 = 'UNIX/AIX5_64';
+	}
+	else{
+		$OS="aix";
+		$OS64="UNIX/AIX_64";
+	}	
+}
+elsif($^O=~/.*solaris.*/i){
+	$ARCH="sparc";
+	$OS="sun";
+	$SOEXT="so";
+	$OS32="UNIX/SUNOS_32";
+	$OS64="UNIX/SUNOS_64";
+}
+elsif($^O=~/.*osf.*/i){
+	$ARCH="alpha";
+	$OS="true64";
+	$SOEXT="so";
+	$OS64="UNIX/DEC_64";
+}
+elsif($^O=~/.*hp.*/i){
+	$ARCH="hppa";
+	$OS="hpux";
+	$SOEXT="sl";
+	$OS32="UNIX/HP11_32";
+	$OS64="UNIX/HP11_64";
+}
+elsif($^O=~/svr4/i){
+	$ARCH="mips";
+	$OS="reliant";
+	$SOEXT="so";
+	$OS32="UNIX/RLX_32";
+	$OS64="UNIX/RLX_64";
+}
+
+$INSTROOT=$ENV{INSTROOT};
+$INSTROOT=~s/\\/\//g;
+$WRK=$ENV{WRK};
+$WRK=~s/\\/\//g;
+$INSTSCRIPT="insapdb";
+$PACKAGEPATH="$WRK/fast/install";
+$PACKAGEPATH =~ s/\\/\//g;
+$_RELEASE=$ENV{RELVER};
+$_RELEASE=~ s/^R([0-9])([0-9])$/$1.$2/;
+$REL4PATH=$_RELEASE;
+$REL4PATH=~s/\.//g;
+$REL4PATH=$REL4PATH.$ENV{CORRECTION_LEVEL}."0";
+$_RELEASE=$_RELEASE.".".$ENV{CORRECTION_LEVEL}.".".$ENV{BUILDPRAEFIX};
+if($ENV{BIT64} or $^O=~/.*osf.*/i){
+        $BIT="64bit";
+		$bit_num=64;
+        $^O=~/.*osf.*/i or $LIBPATH="$LIBPATH/lib64";
+}
+else{
+         $BIT="32bit";
+			 $bit_num=32;
+}
+$REL4NAME=$_RELEASE;
+$REL4NAME =~ s/\./_/g;
+
+# sub parse the XML file with release/file information and return a tree of XMLElemets
+sub ParseXMLFile {
+	my ($fh, $rc);
+	$^O=~/mswin/i && $XMLFile=~s/\//\\/g;
+	$fh = IO::File::new();
+	$rc = open ($fh, "< ".$XMLFile);
+	unless ($rc) {
+		err("cannot open ".$XMLFile."\n");
+		err("WARNING: NO XML FILE FOR OTHER RUNTIMES FOUND\n"); 
+		return 0;
+	}
+	my $Parser = XMLParser::new ();
+	my $Tree = $Parser->ParseStream ($fh);
+	$fh->close ();
+	return ($Tree);
+}	
+
+
+# sub return a subtree (XMLElement) specified by entity name and its content
+	sub getSubTree{
+	my ($tree,$type,$content)=@_;
+	$tree==0 && return 0;
+	while(1){
+		if($tree->GetType eq $type){
+			while(1){
+				if($tree->GetContent eq $content){
+					return $tree;
+				}	
+				$tree=$tree->VisitNeighbor;
+				if($tree==0){
+					err ("\"$content\" not found in type \"$type\" in XML tree\n");
+					return 0;
+				}
+			}
+			last;
+		}
+		$tree=$tree->VisitChild;
+		if($tree == 0){
+			err("entity \"$type\" not found in tree\n");
+			return 0;
+		} 
+	}
+}
+
+# return all childentities (subtrees) in a list
+
+sub getChildren{
+	my($tree)=@_;
+	$tree==0 && return;
+	$tree=$tree->VisitChild;
+	$tree==0 && return;
+	my @treelist;
+	while(1){
+		push @treelist,$tree unless($tree==0);
+		$tree=$tree->VisitNeighbor;
+		$tree ==0 && return @treelist;
+	}
+}
+
+sub getFiles{
+	my ($release,$destroot)=@_;
+	my @returnvalue;
+	$release=~/^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/ or die "wrong release format\n";
+	my $maj=$1;
+	my $min=$2;
+	my $cor=$3;
+	my $pat=$4;
+	#$maj = "0$maj" if (length($maj)==1);
+	#$min = "0$min" if (length($min)==1);
+	$cor = "0$cor" if (length($cor)==1);
+	$pat = "0$pat" if (length($pat)==1);
+	$release="$maj$min$cor$pat";
+	msg("now try to insert other precompiler runtimes...\n");
+	my $tree=ParseXMLFile();
+	$tree==0 and err("WARNING: no valid XML tree generated\n") and return 0;	
+	
+	# $tree is root of tree with XML entities
+	
+	my $subtree=getSubTree($tree,'current_release',$release);
+	$subtree=getSubTree($subtree,'os',$OS); # subtree for related os
+	$subtree=getSubTree($subtree,'arch',$ARCH);	   # subtree for related architecture 	
+	$subtree=getSubTree($subtree,'objectmode',$bit_num); # subtree for objectmode
+	$subtree == 0 && err("WARNING: no valid XML sub tree found (current_release: $release | os: $OS | arch: $ARCH | object mode | $bit_num )\n") and return 0;
+	my @oldReleaseTrees=getChildren($subtree);
+	my @releases;
+	my $count=getCDImageReleases(\@releases); 
+	my @tmp;
+	
+	
+	if ($#releases==-1){
+		msg("WARNING: NO files found on CDImages\n");
+		return 1;
+	}
+	
+	@tmp=();
+	foreach my $rel_tree (@oldReleaseTrees){
+		my $found=0;
+		foreach my $rel (@releases){
+			if($rel eq $rel_tree->GetContent){
+				push @tmp,$rel_tree;
+				$found=1;
+				last;
+			}
+		}
+		$found == 0 && err("WARNING: NO DIRECTORY FOR RELEASE ".$rel_tree->GetContent." ON CDImages FOUND\n");	
+	}
+
+	@oldReleaseTrees=@tmp;
+
+	if ($#oldReleaseTrees==-1){
+		err("WARNING: NO valid files found on CDImages\n");
+		return 1;
+	}
+	
+	foreach my $rel_tree (@oldReleaseTrees){
+		my @file_trees=getChildren($rel_tree);
+		my $rel = $rel_tree->GetContent;
+		foreach my $file_tree (@file_trees){
+			my $type=$file_tree->GetAttribute('type');
+			my $bitmode=$file_tree->GetAttribute('bit');
+			my $access=$file_tree->GetAttribute('access');
+			my $source=$file_tree->GetContent;
+			my $dest_tree=$file_tree->VisitChild;
+			my $dest;
+			$dest = $dest_tree->GetContent if($dest_tree != 0);
+			($dest=~/^\s*$/ || !defined $dest) and $dest = $source;
+			msg("get $rel \"$type\" $bitmode bit: $dest\n");
+			my $os_path;
+			if($bitmode == 64){
+				$os_path=$OS64;
+			}
+			elsif($bitmode == 32){
+				$os_path=$OS32;
+			}
+			else{
+				err("WARNING: bitmode not set! - skipping file\n");
+				next;
+			}
+			$os_path=~s/\\/\//g;
+			getit("$rel/$os_path/$source",$dest,$destroot,$access);
+			push @returnvalue,$source;
+		}
+	}
+	return @returnvalue;
+}
+
+sub getCDImageReleases{
+	my ($array_ref)=@_;
+	*returnarray=$array_ref;
+	my $counter=0;
+	if($^O=~/mswin/i){
+		my $dirs = `cmd /C dir \\\\$image_server\\$CDImagePath`;
+		# use "cmd \C" because of existing "dir.exe" in devtools 
+		$? and die "error reading dirs on cd-images: $!\n";
+		my @dirs = split "\n",$dirs;
+		foreach my $dir (@dirs){
+			$dir=~/^.*\<DIR\>\s*([0-9]*)$/ and push @returnarray,$1 and $counter++;	
+		}		
+	}
+	else{
+		my $dirs =  `rem sh $image_server \"ls -l d:/$CDImagePath\"`; 
+		$? and die "error reading dirs on cd-images: $!\n";
+		my @dirs = split "\n",$dirs;
+		foreach my $dir (@dirs){
+			$dir=~/^d.*\s([0-9]+)$/ and push @returnarray,$1 and $counter++;	
+		}
+	}
+	return $counter;
+}
+
+sub getit{
+	my ($source,$destination,$destroot,$access)=@_;
+	my $dir = $destination;
+	#$destination="$buildroot/$destination";
+	$destroot=~s/\\/\//g;
+	$dir =~ s/\\[^\\]*$//;
+	$dir =~ s/\/[^\/]*$//;
+	-d "$destroot/$dir" or makedir("$destroot/$dir") or die "cannot create dir $destroot/$dir\n";
+	if($^O=~/mswin/i){
+		$destroot=~s/\//\\/g;
+		$destination=~s/\//\\/g;
+		$source=~s/\//\\/g;
+		$dir=~s/\//\\/g;
+		my $cmd= "copy \\\\$image_server\\$CDImagePath\\$source $destroot\\$dir";
+		`$cmd`;
+		($? != 0) and err("FILE COPY ERROR: $!\n") and return;
+		$destroot=~s/\\/\//g;
+		$destination=~s/\\/\//g;
+		-f "$destroot/$destination" or err("cannot copy file \\\\$image_server\\$CDImagePath\\$source: $!\n") and return;
+	}
+	else{
+		-f "$destroot/$destination" && (unlink("$destroot/$destination") || err("ERR: cannot remove \"$destroot/$destination\"\n"));
+		`rem cp $image_server:d:/$CDImagePath/$source $destroot/$destination`;	
+		($? != 0) and err("FILE COPY ERROR: $!\n") and return 0;
+		-f "$destroot/$destination" || err("cannot copy PCR $image_server:$CDImagePath/$source: $!\n") && return;
+		if($access=~/^\d{3,4}$/){
+			`chmod $access $destroot/$destination`;
+			($? !=0 ) and err("ERROR setting access right for $destroot/$destination to $access: $!\n") and return ;
+		}
+	}
+}
+
+1;
+
+
+# following package specify XML handlers to generate XML tree
+
+package XMLParser;
+
+use Exporter;
+use XML::Parser::Expat;
+use GME::XMLElement;
+
+@ISA = ('Exporter');
+
+@Export = ('new', 'ParseFile', 'ParseStream');
+
+my %ParserHash;
+
+sub new {
+	my $self = {};
+	bless $self;
+
+	$self->{Parser} = new XML::Parser::Expat;
+	$self->{Parser}->setHandlers (
+	        Start  => \&HandleStart,
+       		Char   => \&HandleChar,
+	        End    => \&HandleEnd );
+	$self->{Current} = 0;
+	$self->{Parent} = 0;
+	$self->{Tree} = 0;
+
+	$ParserHash{$self->{Parser}} = $self;
+	return $self;
+}
+
+sub ParseFile {
+	my $self = shift;
+	my $filename = shift;	
+	$self->{Parser}->parsefile ($filename);
+	return $self->{Tree};
+}
+
+sub ParseStream {
+	my $self = shift;
+	my $fh_ref = shift;	
+	undef $bla;
+	XML::Parser::Expat::ParseStream 
+		($self->{Parser}->{Parser}, $fh_ref, $bla);
+	return $self->{Tree};
+}
+
+sub HandleStart {
+	my ($ExpatParser, $Type, %Attr) = @_;
+	my $Parser = $ParserHash{$ExpatParser};
+	$Parser->{Current} = XMLElement->new ($Type);        	
+	if ($Type eq 'sap_db_releases') {
+		# set root of tree
+		$Parser->{Tree} = $Parser->{Current};
+	}
+	else{
+		$Parser->{Current}->SetParent ($Parser->{Parent});	
+	}
+	foreach my $attrib (keys(%Attr)){
+		$Parser->{Current}->SetAttribute($attrib, $Attr{$attrib});
+	}
+	$Parser->{Parent} = $Parser->{Current};
+}
+
+sub HandleEnd {
+	my ($ExpatParser, $Type) = @_;
+	my $Parser = $ParserHash{$ExpatParser};;
+	$Parser->{Current}->Insert();
+	$Parser->{Parent} = $Parser->{Current}->GetParent();
+	$Parser->{Current} = $Parser->{Parent};
+}
+
+sub HandleChar {
+	my  ($ExpatParser, $Content) = @_;
+	my $Parser = $ParserHash{$ExpatParser};;
+
+	# don't care empty Content
+	return unless ($Content =~ /\S/);
+
+	$Content =~ /(\S+)/;
+	$Parser->{Current}->SetContent ($1);
+}
+
+1;
+

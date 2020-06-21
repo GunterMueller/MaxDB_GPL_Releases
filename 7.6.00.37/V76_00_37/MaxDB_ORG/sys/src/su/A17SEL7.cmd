@@ -1,0 +1,75 @@
+*   *ID* A17SEL7  DBCMD    changed on 1992-09-28-13.22.48 by ADMIN     *
+file connect ( kern test !
+CREATE TABLE T7 ( A CHAR (4) KEY, B CHAR (5) )!
+INSERT T7 VALUES ('aaa', 'fff')!
+INSERT T7 VALUES ('bba', 'fff')!
+INSERT T7 VALUES ('cba', 'fff')!
+SELECT * FROM T7 !
+MFETCH !
+1
+MFETCH POS (3) !
+1
+MFETCH FIRST !
+3
+MFETCH !
+1
+MFETCH POS (2) !
+3
+MFETCH PREV!
+1
+MFETCH  INTO :A, :B !
+2
+MFETCH POS (1) !
+2
+MFETCH !
+2
+MFETCH LAST  !
+4
+MFETCH !
+1
+SELECT * FROM T7 !
+PARS_THEN_EX !
+DATA !
+MFETCH  INTO :A, :B !
+1
+
+MFETCH POS (3)  INTO :A, :B !
+1
+
+MFETCH FIRST  INTO :A, :B !
+3
+
+MFETCH  INTO :A, :B !
+1
+
+MFETCH POS (:A2) !
+3
+N 10 2
+
+MFETCH POS (:A2)  INTO :A, :B !
+3
+N 10 2
+
+MFETCH PREV INTO :A, :B !
+1
+
+MFETCH  INTO :A, :B !
+2
+
+MFETCH POS (:A1)  INTO :A, :B !
+2
+N 10 1
+
+MFETCH  INTO :A, :B !
+2
+
+MFETCH LAST   INTO :A, :B !
+4
+
+MFETCH  INTO :A, :B !
+1
+
+NODATA  !
+PARS_EXECUTE  !
+drop table t7 !
+COMMIT WORK RELEASE  !

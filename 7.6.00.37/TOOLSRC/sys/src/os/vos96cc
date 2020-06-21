@@ -1,0 +1,1454 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright by   Software AG, 1993$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS96CC$
+.tt 2 $$$
+.tt 3 $R.Roedling$TCP/IP DATABASE SERVER$1997-08-01$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  : TCP/IP_DATABASE_SERVER
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1993-02-01
+.sp
+.cp 3
+Version : 1994-01-27
+.sp
+.cp 3
+Release :  7.0 	 Date : 1997-08-01
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+
+// !!!!!!!!!!!!!!!!!!!!!! work around !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//
+// The prototype of 'SetServiceBits' was not defined correctly in
+// 'lmservice.h' (Visual C++ 4.0).
+//
+//#include           <lmcons.h>
+//#include           <lmservice.h>
+//
+
+BOOL __stdcall SetServiceBits( IN SERVICE_STATUS_HANDLE hServiceStatus,
+                               IN DWORD                 dwServiceBits,
+                               IN BOOL                  bSetBitsOn,
+                               IN BOOL                  bUpdateImmediately );
+// !!!!!!!!!!!!!!!!!!!!!! work around !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS96CC : "
+#define MF__   MOD__"UNDEFINED"
+
+#define TIMEOUT                   120
+#define DIAGSIZE                  100                      // - 4KByte Pages
+
+#define OPT_SHOW_USAGE            0x001
+#define OPT_START_SERVER          0x002
+#define OPT_STOP_SERVER           0x004
+#define OPT_START_SERVICE         0x008
+#define OPT_STOP_SERVICE          0x010
+#define OPT_INSTALL_SERVICE       0x020
+#define OPT_REMOVE_SERVICE        0x040
+#define OPT_RUN                   0x080
+#define OPT_UPDATE_SERVICE        0x100
+
+
+#if defined(_WIN32)
+ #define OPTION_STRING            "sirD:RkSn:hu"
+#else
+ #define OPTION_STRING            "D:RkSh"
+#endif
+
+#define ICON_SERV                 130
+#define SM_TRAY_CALLBACK          WM_TIMER  // - do nothing
+
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+extern int                       sql80_OptInd;
+extern int                       sql80_OptErr;
+extern char*                     sql80_OptArg;
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+GLOBAL_XSERVER_REC      gxr;
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+static VOID _System sql96c_finish          ( ULONG  termcode );
+static INT          sql96c_coordinator     ( VOID );
+static INT          sql96c_server          ( VOID );
+
+#if defined(_WIN32)
+ static BOOL WINAPI   sql96c_console_ctrl_handler  ( DWORD                  dwCtrlType );
+ static VOID WINAPI   sql96c_service_ctrl_handler  ( DWORD                  dwCtrlCode );
+ static VOID          sql96c_service               ( VOID );
+ static ULONG _System sql96c_excepthandler         ( PEXCEPTION_REPORT_REC  parg );
+ static BOOL          sql96c_debugger_is_drwatson  ( VOID );
+#else
+ static LONG          sql96c_set_exit_list         ( VOID );
+#endif
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+int _CDECL main ( int argc, char  *argv[] )
+  {
+  LONG                    rc                = NO_ERROR;
+  BOOL                    fCommandError     = FALSE;
+  ULONG                   ulStrtOpt;
+  INT                     OptionChar;
+  CHAR                    szCmdLine[512];
+  INT                     i;
+  PSZ                     pszDBRoot;
+
+  #if defined(_WIN32)
+   PCHAR                  pszNodeName       = NULL;
+   SERVICE_TABLE_ENTRY    dispatchTable[]   = { { XSERV_TITLE,
+                                                (LPSERVICE_MAIN_FUNCTION)sql96c_service },
+                                                { NULL, NULL } };
+  #endif
+
+  gxr.fNTService       = FALSE;
+  gxr.OldTCPIPCoord.sd = INVALID_SOCKET;
+  gxr.TCPIPCoord.sd    = INVALID_SOCKET;
+  ulStrtOpt            = OPT_START_SERVER;
+
+  #if defined(_WIN32)
+   if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+     {
+     gxr.fNTService = TRUE;
+     ulStrtOpt      = OPT_RUN;
+     }
+  #endif
+
+  while ( (OptionChar = sql80_GetOpt ( argc, argv, OPTION_STRING )) != -1 )
+    {
+    switch ( OptionChar )
+      {
+      #if defined(_WIN32)
+       case 's' :  // --- hidden parameter
+               if ( gxr.fNTService )
+                 ulStrtOpt = OPT_START_SERVICE;
+               break;
+       case 'i' :  // --- hidden parameter
+               if ( gxr.fNTService )
+                 ulStrtOpt = OPT_INSTALL_SERVICE;
+               else
+                 fCommandError = TRUE;
+               break;
+       case 'u' :  // --- hidden parameter
+               if ( gxr.fNTService )
+                 ulStrtOpt = OPT_UPDATE_SERVICE;
+               else
+                 fCommandError = TRUE;
+               break;
+
+       case 'r' :
+               if ( gxr.fNTService )
+                 ulStrtOpt = OPT_REMOVE_SERVICE;
+               else
+                 fCommandError = TRUE;
+               break;
+       case 'D' :
+               if (( ulStrtOpt   != OPT_INSTALL_SERVICE ) &&
+                   ( ulStrtOpt   != OPT_REMOVE_SERVICE  ) &&
+                   ( pszNodeName == NULL  ))
+                 {
+                 gxr.fNTService   = FALSE;
+                 gxr.usDebugLevel = sql80_OptArg[ 0 ] - '0';
+                 }
+               else
+                 fCommandError = TRUE;
+               break;
+       case 'R' :  // --- hidden parameter
+               if ( pszNodeName  == NULL  )
+                 {
+                 gxr.fNTService = FALSE;
+                 ulStrtOpt      = OPT_RUN;
+                 }
+               else
+                 fCommandError = TRUE;
+
+               break;
+       case 'n' :
+               if ( gxr.fNTService )
+                 {
+                 pszNodeName  = sql80_OptArg;
+
+                 if ( ulStrtOpt  == OPT_RUN )     // - this option is not
+                   ulStrtOpt = OPT_START_SERVICE; //   allowed, assuming start
+                 }                                //   request.
+               else
+                 fCommandError = TRUE;
+               break;
+       case 'k' :
+               if ( gxr.fNTService )
+                 ulStrtOpt = OPT_STOP_SERVICE;
+               else
+                 ulStrtOpt = OPT_STOP_SERVER;
+               break;
+
+      #else
+       case 'i' :  // --- hidden parameter
+       case 'R' :  // --- hidden parameter
+               ulStrtOpt = OPT_RUN;
+               break;
+       case 'D' :
+               gxr.usDebugLevel  = sql80_OptArg[ 0 ] - '0';
+               break;
+       case 'k' :
+               ulStrtOpt = OPT_STOP_SERVER;
+               break;
+      #endif
+
+      case 'h' :
+              ulStrtOpt = OPT_SHOW_USAGE;
+              break;
+
+      case 'S' :  // --- hidden parameter
+              gxr.fSuppressXserverActiveMsg = TRUE;
+              break;
+      default :
+              fCommandError = TRUE;
+      }
+    }
+
+  if ( (argc - sql80_OptInd) || (fCommandError == TRUE) )
+    {
+    printf ( XSERVER_NO_VALID_OPTION );
+
+    DBGOUT;
+    return ( 1 );
+    }
+
+  if ( ulStrtOpt == OPT_SHOW_USAGE )
+    {
+    #if defined(_WIN32)
+     if ( sql02_get_platform_id() == VER_PLATFORM_WIN32_NT )
+       printf ( XSERVER_USAGE_NT );
+     else
+       printf ( XSERVER_USAGE_WIN95 );
+    #else
+     printf ( XSERVER_USAGE );
+    #endif
+
+    DBGOUT;
+    return ( 0 );
+    }
+
+  #if defined(_WIN32)
+   //
+   // --- NT Service
+   //
+   if ( gxr.fNTService )
+     {
+     if (( ulStrtOpt == OPT_INSTALL_SERVICE ) ||
+         ( ulStrtOpt == OPT_UPDATE_SERVICE ))
+       {
+       if ( sql01c_get_dbroot (&pszDBRoot) == FALSE )
+         {
+         rc != NO_ERROR;
+         MSGALL (( ERR_DBROOT_NOT_SET ));
+         }
+       else if ( ulStrtOpt == OPT_INSTALL_SERVICE )
+         rc = sql96_install_service ( pszNodeName, pszDBRoot );
+       else
+         rc = sql96_update_service ( pszNodeName, pszDBRoot );
+       }
+     else if ( ulStrtOpt == OPT_START_SERVICE )
+       {
+       rc = sql96_start_service ( pszNodeName );
+
+       if ( rc == NO_ERROR )
+         MSGCD (( INFO_XSER_STARTED ));
+       }
+     else if ( ulStrtOpt == OPT_STOP_SERVICE )
+       rc = sql96_stop_service ( pszNodeName );
+     else if ( ulStrtOpt == OPT_REMOVE_SERVICE )
+       rc = sql96_remove_service ( pszNodeName );
+     else
+       {
+       sql60_open_event_log ( XSERV_TITLE, XSERVER_DIAG_ID );
+
+       if (!StartServiceCtrlDispatcher(dispatchTable))
+         {
+         rc = GetLastError();
+
+         MSGALL (( ERR_START_SERVICE, XSERV_TITLE, rc ));
+
+         if ( rc == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT )
+           {
+           gxr.fNTService = FALSE;
+
+           rc = sql96c_server ();
+           }
+         }
+       }
+
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+
+  // --- Console application (SERVER)
+  //
+  if ( ulStrtOpt == OPT_START_SERVER )
+    {
+    szCmdLine[0] = '\0';
+
+    for ( i = 1; i < argc; i++ )
+      {
+      strcat(szCmdLine, " ");
+      strcat(szCmdLine, argv[i]);
+      }
+
+    rc = sql96_start_server ( szCmdLine, gxr.fSuppressXserverActiveMsg );
+
+    if ( rc == NO_ERROR )
+      MSGCD (( INFO_XSER_STARTED ));
+    }
+  else if ( ulStrtOpt == OPT_STOP_SERVER )
+    rc = sql96_stop_server ();
+  else
+    rc = sql96c_server ();
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+VOID  sql96c_abort ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_abort"
+  #if !defined(_WIN32)
+    EXCEPTIONREPORTRECORD  Except;
+  #endif
+
+  DBGPAS;
+
+  /*
+   * activide exception handler
+   */
+  #if defined(_WIN32)
+    RaiseException(XCPT_ABORT_EXCEPTION, 0, 0, NULL);
+  #else
+    memset ( &Except, 0, sizeof(Except) );
+    Except.ExceptionNum = XCPT_ABORT_EXCEPTION;
+    DosRaiseException (&Except);
+  #endif
+
+  // ---  should not come here
+  EXITPROCESS( 1 );
+  }
+
+/*------------------------------*/
+
+#if defined(_WIN32)
+
+ DWORD sql96c_winnt_excepthandler (LPEXCEPTION_POINTERS lpExcPtrs,
+                                   PEXCEPTION_REC       lpExcRec )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_winnt_excepthandler"
+
+   DBGPAS;
+
+   memcpy (lpExcRec, lpExcPtrs->ExceptionRecord, sizeof (EXCEPTION_REC));
+
+   return (sql96c_excepthandler (lpExcRec));
+   }
+
+ /*------------------------------*/
+
+ VOID sql96c_NewSrvState ( DWORD dwState,  ULONG ulExitCode )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_NewSrvState"
+   LONG                 rc = NO_ERROR;
+
+   DBGPAS;
+
+   switch( dwState )
+     {
+     case XSERVER_INITIALIZE:
+       gxr.ssStatus.dwCurrentState            = SERVICE_START_PENDING;
+       gxr.ssStatus.dwServiceType             = SERVICE_WIN32_OWN_PROCESS;
+       gxr.ssStatus.dwWin32ExitCode           = NO_ERROR;
+       gxr.ssStatus.dwServiceSpecificExitCode = NO_ERROR;
+       gxr.ssStatus.dwWaitHint                = 10000;
+       gxr.ssStatus.dwCheckPoint              = 0;
+       gxr.ssStatus.dwControlsAccepted        = SERVICE_ACCEPT_SHUTDOWN;
+       return;
+
+     case XSERVER_STARTING:
+       gxr.ssStatus.dwCurrentState            = SERVICE_START_PENDING;
+       gxr.ssStatus.dwWaitHint                = 30000;
+       gxr.ssStatus.dwCheckPoint++;
+       break;
+
+     case XSERVER_RUNNING:
+       gxr.ssStatus.dwControlsAccepted        = SERVICE_ACCEPT_STOP           |
+                                                SERVICE_ACCEPT_SHUTDOWN;
+
+       #if defined ( PAUSE_SERVICE_ALLOWED )
+        gxr.ssStatus.dwControlsAccepted      |= SERVICE_ACCEPT_PAUSE_CONTINUE;
+       #endif
+
+       if ( gxr.fServicePaused )
+         gxr.ssStatus.dwCurrentState          = SERVICE_PAUSED;
+       else
+         gxr.ssStatus.dwCurrentState          = SERVICE_RUNNING;
+
+       gxr.ssStatus.dwWin32ExitCode           = NO_ERROR;
+       gxr.ssStatus.dwServiceSpecificExitCode = NO_ERROR;
+       gxr.ssStatus.dwWaitHint                = 0;
+       gxr.ssStatus.dwCheckPoint              = 0;
+       break;
+
+     case XSERVER_STOPPED:
+     case XSERVER_ABORT:
+       gxr.ssStatus.dwControlsAccepted        = SERVICE_ACCEPT_STOP |
+                                                SERVICE_ACCEPT_SHUTDOWN;
+       gxr.ssStatus.dwCurrentState            = SERVICE_STOPPED;
+       gxr.ssStatus.dwWaitHint                = 0;
+       gxr.ssStatus.dwCheckPoint              = 0;
+
+
+       if ( ulExitCode != NO_ERROR )
+         {
+         gxr.ssStatus.dwWin32ExitCode           = ERROR_SERVICE_SPECIFIC_ERROR;
+         gxr.ssStatus.dwServiceSpecificExitCode = ulExitCode;
+         }
+        else
+         {
+         gxr.ssStatus.dwWin32ExitCode           = NO_ERROR;
+         gxr.ssStatus.dwServiceSpecificExitCode = NO_ERROR;
+         }
+      break;
+
+     default:
+      gxr.ssStatus.dwCheckPoint++;
+      break;
+     }
+
+
+   // Report the status of the service to the service control manager.
+   if (!SetServiceStatus ( gxr.sshStatusHandle, &gxr.ssStatus ))
+     {
+     rc = GetLastError();
+     MSGALL (( ERR_SET_SERVICE_STATUS, rc ));
+     }
+
+   return;
+   }
+#endif
+
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+#if defined(_WIN32)
+ static HICON sql96c_get_icon_from_resource( UINT id )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_get_icon_from_resource"
+   HICON                 hIcon = 0;
+   HINSTANCE             hExe;           // handle to loaded .EXE file
+   HRSRC                 hResource;      // handle for FindResource
+   HRSRC                 hMem;           // handle for LoadResource
+   BYTE                  *lpResource;    // address of resource data
+   int                   nID;            // ID of resource that best fits current screen
+
+   DBGIN;
+
+   if ( (hExe = GetModuleHandle ( NULL ))                                   &&
+       (hResource  = FindResource(hExe,MAKEINTRESOURCE(id),RT_GROUP_ICON)) &&
+       (hMem       = LoadResource(hExe, hResource))                        &&
+       (lpResource = LockResource(hMem))                                   &&
+       (nID        = LookupIconIdFromDirectoryEx((PBYTE) lpResource, TRUE,
+                                                 0, 0, LR_DEFAULTCOLOR))   &&
+       (hResource  = FindResource(hExe, MAKEINTRESOURCE(nID),
+                                  MAKEINTRESOURCE(RT_ICON)))               &&
+       (hMem       = LoadResource(hExe, hResource))                        &&
+       (lpResource = LockResource(hMem))                                   &&
+       (hIcon      = CreateIconFromResourceEx((PBYTE) lpResource,
+                                               SizeofResource(hExe,hResource),
+                                               TRUE, 0x00030000,
+                                               0, 0, LR_DEFAULTCOLOR)))
+    {
+    DBGOUT
+    return (hIcon);
+    }
+
+
+  DBGOUT
+  return (0);
+  }
+
+ /*------------------------------*/
+
+ static VOID sql96c_tray_message( HWND hWnd, UINT message)
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_tray_message"
+   NOTIFYICONDATA        tnd;
+   static HICON          hIcon = 0;
+
+   DBGIN;
+
+   if ( hIcon == 0)
+     hIcon = sql96c_get_icon_from_resource( ICON_SERV );
+
+   wsprintf(tnd.szTip, XSERVER_ACTIVE );
+
+   switch (message)
+     {
+     case NIM_ADD:
+       tnd.uFlags = NIF_MESSAGE|NIF_ICON|NIF_TIP;
+       break;
+
+     case NIM_MODIFY:
+       tnd.uFlags = NIF_TIP|NIF_ICON;
+       break;
+
+     case NIM_DELETE:
+       tnd.uFlags = 0;
+       break;
+     }
+
+   if ( hIcon )
+     {
+     tnd.uID              = (UINT)ICON_SERV;
+     tnd.cbSize           = sizeof(NOTIFYICONDATA);
+     tnd.hWnd             = hWnd;
+     tnd.uCallbackMessage = SM_TRAY_CALLBACK;
+     tnd.hIcon            = hIcon;
+     Shell_NotifyIcon(message, &tnd);
+     }
+
+   DBGOUT
+   return;
+   }
+
+ /*------------------------------*/
+
+ static VOID sql96c_service ( VOID )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_service"
+   LONG                    rc = NO_ERROR;
+   PATHNAME                szSubKey;
+   PSZ                     pszDBRoot;
+   static PATHNAME         szDBRootEnv;
+   EXCEPTION_REC           ExceptionRecord;
+   REG_ENTRY_REC           RegistryEntries[1];
+   PSZ                     pszUserName;
+   BOOL                    fOk;
+   SECURITY_ATTRIBUTES     SA;
+   ACCESS_RIGHTS_REC       Access;
+
+   DBGIN;
+
+   GUARD_EXCEPTION (&ExceptionRecord);
+
+   sql60_disable_default_device ();
+
+   // --- initialize service control
+   gxr.dwState  = XSERVER_INITIALIZE;
+   sql96c_NewSrvState( gxr.dwState, NO_ERROR );
+
+   gxr.sshStatusHandle = RegisterServiceCtrlHandler( XSERV_TITLE, sql96c_service_ctrl_handler );
+
+   if ( gxr.sshStatusHandle == 0 )
+     {
+     rc = GetLastError();
+     MSGALL (( ERR_SET_SERVICE_STATUS, rc ));
+     }
+   else
+     {
+     SetServiceBits ( gxr.sshStatusHandle,
+                      SV_TYPE_ADABAS, TRUE, TRUE );
+
+     gxr.dwState  = XSERVER_STARTING;
+     sql96c_NewSrvState( gxr.dwState, NO_ERROR );
+
+     gxr.fDebuggerIsDrWatson = sql96c_debugger_is_drwatson( );
+
+     strcpy ( szSubKey, XSERV_TITLE );
+     strcat ( szSubKey, "\\"REG_SK_SERVICE_PARAM );
+
+     szDBRootEnv[sizeof(szDBRootEnv) - 1] = '\0';
+     strcpy ( szDBRootEnv, DBROOT_ENV_VAR );
+     strcat ( szDBRootEnv, "=" );
+     pszDBRoot = szDBRootEnv + strlen(szDBRootEnv);
+
+     RegistryEntries[0].pszValueName = REG_VN_DBROOT;
+     RegistryEntries[0].pValue       = pszDBRoot;
+     RegistryEntries[0].ulValueSize  = sizeof(szDBRootEnv) - strlen(szDBRootEnv) - 1;
+     RegistryEntries[0].ulValueType  = REG_SZ;
+
+     rc = sql50_reg_get_service_values ( NULL, szSubKey, 1, RegistryEntries );
+
+     if (( rc != NO_ERROR ) || ( !pszDBRoot[0] ))
+       {
+       MSGALL (( ERR_DBROOT_NOT_SET ));
+       DBG1  (( MF__, "DBROOT must be set" ));
+       rc = ERROR_ENVVAR_NOT_FOUND;
+       }
+     else
+       {
+       // --- set DBROOT environment variable
+       _putenv ( szDBRootEnv );
+
+       // --- set SYMBOL environment variable
+       sql01c_set_symbol_path ( pszDBRoot ) ;
+
+       rc = sql49c_get_user_info ( &pszUserName, NULL );
+
+       if ( rc != NO_ERROR )
+         pszUserName = "";
+
+       sql49c_user_privilege_check ( &fOk );
+
+       if ( !fOk )
+         {
+         MSGALL (( ERR_XSER_USER_MISSING_PRIV, pszUserName ));
+         rc = ERROR_ACCESS_DENIED;
+         }
+
+       if ( rc == NO_ERROR )
+         {
+         SA.nLength              = sizeof(SECURITY_ATTRIBUTES);
+         SA.bInheritHandle       = TRUE;
+         SA.lpSecurityDescriptor = NULL;
+
+         memset ( &Access, 0, sizeof (Access) );  // - this must be done first!
+         Access.fDescOwnerIsAdmin    = FALSE;
+         Access.fAddDefaultDACL      = FALSE;
+         Access.User.ulAccess        = 0;
+         Access.Creator.ulAccess     = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+         Access.Admin.ulAccess       = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+         Access.System.ulAccess      = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+         Access.AdabasOp.ulAccess    = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+         Access.DomAdabasOp.ulAccess = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+         Access.World.ulAccess       = 0;
+         Access.BackupOp.ulAccess    = GENERIC_READ;
+
+         rc = sql49c_alloc_and_init_SD( &Access, &SA.lpSecurityDescriptor );
+         }
+
+       if ( rc == NO_ERROR )
+         rc = sql60_open_diag_file ( XSERV_DIAGNAME,
+                                     DIAGSIZE * (gxr.usDebugLevel + 1), &SA);
+
+       if ( rc == NO_ERROR )
+         rc = FREE_MEM(SA.lpSecurityDescriptor);
+
+       if ( rc == NO_ERROR )
+        rc = sql96c_coordinator ();
+       }
+
+     gxr.dwState  = XSERVER_STOPPED;
+     sql96c_NewSrvState( gxr.dwState, rc );
+     }
+
+   UNGUARD_EXCEPTION(&ExceptionRecord);
+
+   DBGOUT;
+   exit ( rc );
+   return;
+   }
+
+ /*------------------------------*/
+
+ static VOID WINAPI sql96c_service_ctrl_handler ( DWORD dwCtrlCode )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql96c_service_ctrl_handler"
+   LONG                    rc      = NO_ERROR;
+
+   DBGIN;
+
+   // Handle the requested control code.
+   //
+   switch(dwCtrlCode)
+     {
+     case SERVICE_CONTROL_STOP:         // --- Stop the service.
+     case SERVICE_CONTROL_SHUTDOWN:
+         gxr.ssStatus.dwCurrentState     = SERVICE_STOP_PENDING;
+         gxr.ssStatus.dwWin32ExitCode    = NO_ERROR;
+         gxr.ssStatus.dwWaitHint         = 30000;
+         gxr.ssStatus.dwControlsAccepted = 0;
+         gxr.ssStatus.dwCheckPoint       = 0;
+
+         // Report the status of the service to the service control manager.
+         if (!SetServiceStatus ( gxr.sshStatusHandle, &gxr.ssStatus ))
+           {
+           rc = GetLastError();
+           MSGALL (( ERR_SET_SERVICE_STATUS, rc ));
+           }
+
+         sql96_stop_server ();
+
+         return;
+
+     case SERVICE_CONTROL_PAUSE:
+         gxr.fServicePaused              = TRUE;
+         gxr.ssStatus.dwCurrentState     = SERVICE_PAUSED;
+         gxr.ssStatus.dwWin32ExitCode    = NO_ERROR;
+         gxr.ssStatus.dwCheckPoint       = 0;
+         gxr.ssStatus.dwWaitHint         = 0;
+         break;
+
+     case SERVICE_CONTROL_CONTINUE:
+         gxr.fServicePaused              = FALSE;
+         gxr.ssStatus.dwCurrentState     = SERVICE_RUNNING;
+         gxr.ssStatus.dwWin32ExitCode    = NO_ERROR;
+         gxr.ssStatus.dwCheckPoint       = 0;
+         gxr.ssStatus.dwWaitHint         = 0;
+         break;
+
+     case SERVICE_CONTROL_INTERROGATE:  // --- Update the service status.
+     default:
+         break;
+     }
+
+   // Report the status of the service to the service control manager.
+   if (!SetServiceStatus ( gxr.sshStatusHandle, &gxr.ssStatus ))
+     {
+     rc = GetLastError();
+     MSGALL (( ERR_SET_SERVICE_STATUS, rc ));
+     }
+
+   DBGOUT;
+   return;
+   }
+
+#endif
+
+/*------------------------------*/
+
+static INT sql96c_server ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_server"
+  LONG                    rc          = NO_ERROR;
+  HEV                     hevSemXserv = 0;
+  CHAR                    szOldTitle[100];
+  CHAR                    szTitle[sizeof(szOldTitle)];
+  CHAR                    szNewTitle[sizeof(szOldTitle)];
+  ULONG                   ulTimeOut   = 1000;
+  HWND                    hwndConsole = NULL;
+
+  DBGIN;
+  wsprintf( szNewTitle,"%s (%xh)", XSERV_TITLE,
+            GetCurrentProcessId() );
+
+  GetConsoleTitle ( szOldTitle, sizeof(szOldTitle));
+  SetConsoleTitle( szNewTitle );
+
+  do
+    {
+    GetConsoleTitle ( szTitle, sizeof(szTitle));
+    SLEEP(10);
+    }
+  while ( strcmp (szTitle, szNewTitle) );
+
+  hwndConsole = FindWindow(NULL, szNewTitle);
+
+  if ( hwndConsole )
+    {
+    if (( sql02_get_platform_id() != VER_PLATFORM_WIN32_NT ) &&
+        ( !gxr.usDebugLevel ))
+      {
+      ShowWindow(hwndConsole, SW_HIDE);
+      SendMessage(hwndConsole, WM_SYSCOMMAND, SC_MINIMIZE | HTCLIENT, 0L);
+      }
+    sql96c_tray_message(hwndConsole, NIM_ADD);
+    }
+
+  SetConsoleTitle( szOldTitle );
+
+  rc = sql41c_open_event_sem ( &hevSemXserv, SEM_XSERVER, "", NO_ERROR);
+
+  if (rc == NO_ERROR)
+    {
+    sql41c_close_event_sem ( hevSemXserv, XSERV_TITLE );
+
+    #if defined(_WIN32)
+      if ( hwndConsole )
+        sql96c_tray_message(hwndConsole, NIM_DELETE);
+    #endif
+
+    MSGCD (( ERR_XSER_ALREADY_RUNNING ));
+
+    DBGOUT;
+    return( 0 );
+    }
+
+  rc = sql60_open_diag_file ( XSERV_DIAGNAME,
+                              DIAGSIZE * (gxr.usDebugLevel + 1), NULL );
+
+  if ( rc != NO_ERROR )
+    {
+    #if defined(_WIN32)
+    if ( hwndConsole )
+      sql96c_tray_message(hwndConsole, NIM_DELETE);
+    #endif
+
+    DBGOUT;
+    return ( rc );
+    }
+
+  #if defined(_WIN32)
+   // --- now running as server process, change the caption bar...
+   SetConsoleTitle (XSERV_TITLE);
+  #else
+   signal ( SIGINT, SIG_IGN );
+  #endif
+
+  #if defined(_WIN32)
+   if (!SetConsoleCtrlHandler( sql96c_console_ctrl_handler, TRUE ))
+     {
+     rc = GetLastError ( );
+     if ( hwndConsole )
+       sql96c_tray_message(hwndConsole, NIM_DELETE);
+
+     DBGOUT;
+     return ( rc );
+     }
+  #endif
+
+  rc = sql96c_coordinator ();
+
+  #if defined(_WIN32)
+   if ( hwndConsole )
+     sql96c_tray_message(hwndConsole, NIM_DELETE);
+  #endif
+
+  DBGOUT;
+  return( rc );
+  }
+
+/*------------------------------*/
+
+STATIC INT sql96c_coordinator ( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_coordinator"
+  LONG                    rc        = NO_ERROR;
+  RTE_VERSION_ID          TCPIPRTEVersion;
+  #if defined(_WIN32)
+   ACCESS_RIGHTS_REC      Access;
+   PSZ                    pszUserName;
+  #endif
+
+  DBGIN;
+
+  GETPROCESSID(&gxr.pid);
+
+  gxr.hevSemXserv = INVALID_HANDLE_VALUE;
+
+  #if defined(_WIN32)
+   rc = sql49c_get_user_info ( &pszUserName, NULL );
+
+   if ( rc != NO_ERROR )
+     pszUserName = "";
+
+   rc = sql49c_set_sync_access ();
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return( rc );
+     }
+
+   gxr.WorldSA.nLength         = sizeof(gxr.WorldSA);
+   gxr.WorldSA.bInheritHandle  = TRUE;       // why not...
+
+   memset ( &Access, 0, sizeof (Access) );   // - this must be done first!
+   Access.World.ulAccess       = SPECIFIC_RIGHTS_ALL |
+                                 STANDARD_RIGHTS_ALL;
+
+   rc = sql49c_alloc_and_init_SD( &Access, &gxr.WorldSA.lpSecurityDescriptor );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return( rc );
+     }
+
+   gxr.LockSA.nLength         = sizeof(gxr.LockSA);
+   gxr.LockSA.bInheritHandle  = TRUE;       // why not...
+
+   memset ( &Access, 0, sizeof (Access) );  // - this must be done first!
+   rc = sql49c_alloc_and_init_SD( &Access, &gxr.LockSA.lpSecurityDescriptor );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return( rc );
+     }
+
+   gxr.AdminSA.nLength         = sizeof(gxr.AdminSA);
+   gxr.AdminSA.bInheritHandle  = TRUE;       // why not...
+
+   memset ( &Access, 0, sizeof (Access) );  // - this must be done first!
+   Access.Creator.ulAccess     = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+   Access.Admin.ulAccess       = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+   Access.System.ulAccess      = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+   Access.AdabasOp.ulAccess    = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+   Access.DomAdabasOp.ulAccess = SPECIFIC_RIGHTS_ALL | STANDARD_RIGHTS_ALL;
+
+   rc = sql49c_alloc_and_init_SD( &Access, &gxr.AdminSA.lpSecurityDescriptor );
+
+   if ( rc != NO_ERROR )
+     {
+     DBGOUT;
+     return( rc );
+     }
+  #endif
+
+  rc = sql41c_create_event_sem ( &gxr.hevSemXserv, SEM_XSERVER, "",
+                                 0, FALSE, &gxr.AdminSA );
+
+  if (rc == ERROR_DUPLICATE_NAME)
+    {
+    if ( gxr.fSuppressXserverActiveMsg == FALSE )
+      MSGALL(( ERR_XSER_ALREADY_RUNNING ));
+
+    DBGOUT;
+    return( 0 );
+    }
+  else if (rc != NO_ERROR)
+    {
+    DBGOUT;
+    return( rc );
+    }
+
+  #if defined(_WIN32)
+   try
+  #endif
+    {
+    #if !defined(_WIN32)
+     rc = sql96c_set_exit_list ();
+
+     if ( rc != NO_ERROR )
+       {
+       DBGOUT;
+       return ( rc );
+       }
+    #endif
+
+    if ( sql43c_tcpip_init (&TCPIPRTEVersion) == FALSE )
+      {
+      if ( sql02_this_RTE_version_is_older(&TCPIPRTEVersion) )
+        MSGALL (( ERR_WRONG_TCPIP_VERSION ))
+      else
+        MSGALL (( ERR_XSER_CANNOT_INIT_TCPIP ))
+      DBGOUT;
+      return ( 1 );
+      }
+
+    // --- Write a message to the event log (Version included)
+    //     and start the diagnostic file write cycle
+    MSGALL (( INFO_XSER_STARTED_VERSION, sql02_get_RTE_version_string() ));
+    sql60_strt_msg_wrt_cycle ( );
+
+    gxr.TCPIPCoord.ThrdCtrlHeader.Tid         = (TID)UNDEF;
+    gxr.TCPIPCoord.ThrdCtrlHeader.hThrd       = (HANDLE)INVALID_HANDLE_VALUE;
+    gxr.TCPIPCoord.ThrdCtrlHeader.lThrdPrio   = SERVER_LOOP_THRD_PRIO;
+    gxr.TCPIPCoord.ThrdCtrlHeader.ThrdState   = THRD_INITIALIZED;
+    gxr.TCPIPCoord.ThrdCtrlHeader.ulStartTime = (ULONG)UNDEF;
+
+    rc = CREATE_THREAD( &gxr.TCPIPCoord.ThrdCtrlHeader.Tid,
+                        &gxr.TCPIPCoord.ThrdCtrlHeader.hThrd,
+                        sql96t_TCPIP_coordinator,
+                        0,
+                        CREATE_THRD_SUSPENDED,
+                        TCPIP_COORD_STACK_SIZE );
+
+    if ( rc == NO_ERROR )
+      {
+      rc = RESUME_THREAD( gxr.TCPIPCoord.ThrdCtrlHeader.Tid,
+                          gxr.TCPIPCoord.ThrdCtrlHeader.hThrd );
+
+      if ( rc != NO_ERROR )
+        MSGALL (( ERR_XSER_RESUMING_THREAD, "COORDINATOR", rc));
+      }
+    else
+      MSGALL (( ERR_XSER_CREATING_THREAD, "COORDINATOR", rc));
+
+    if ( rc == NO_ERROR )
+      {
+      gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid         = (TID)UNDEF;
+      gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd       = (HANDLE)INVALID_HANDLE_VALUE;
+      gxr.OldTCPIPCoord.ThrdCtrlHeader.lThrdPrio   = SERVER_LOOP_THRD_PRIO;
+      gxr.OldTCPIPCoord.ThrdCtrlHeader.ThrdState   = THRD_INITIALIZED;
+      gxr.OldTCPIPCoord.ThrdCtrlHeader.ulStartTime = (ULONG)UNDEF;
+
+      rc = CREATE_THREAD( &gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid,
+                          &gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd,
+                          sql96o_TCPIP_coordinator,
+                          0,
+                          CREATE_THRD_SUSPENDED,
+                          TCPIP_COORD_STACK_SIZE );
+
+      if ( rc == NO_ERROR )
+        {
+        rc = RESUME_THREAD( gxr.OldTCPIPCoord.ThrdCtrlHeader.Tid,
+                            gxr.OldTCPIPCoord.ThrdCtrlHeader.hThrd );
+
+        if ( rc != NO_ERROR )
+          MSGALL (( ERR_XSER_RESUMING_THREAD, "OLDCOORDINATOR", rc));
+        }
+      else
+        MSGALL (( ERR_XSER_CREATING_THREAD, "OLDCOORDINATOR", rc));
+      }
+
+    if ( rc == NO_ERROR )
+      {
+      gxr.Requestor.ThrdCtrlHeader.Tid         = (TID)UNDEF;
+      gxr.Requestor.ThrdCtrlHeader.hThrd       = (HANDLE)INVALID_HANDLE_VALUE;
+      gxr.Requestor.ThrdCtrlHeader.lThrdPrio   = SERVER_REQUESTOR;
+      gxr.Requestor.ThrdCtrlHeader.ThrdState   = THRD_INITIALIZED;
+      gxr.Requestor.ThrdCtrlHeader.ulStartTime = (ULONG)UNDEF;
+
+      rc = CREATE_THREAD( &gxr.Requestor.ThrdCtrlHeader.Tid,
+                          &gxr.Requestor.ThrdCtrlHeader.hThrd,
+                          sql96tr_requestor,
+                          0,
+                          CREATE_THRD_SUSPENDED,
+                          REQUESTOR_STACK_SIZE );
+
+      if ( rc == NO_ERROR )
+        {
+        rc = RESUME_THREAD( gxr.Requestor.ThrdCtrlHeader.Tid,
+                            gxr.Requestor.ThrdCtrlHeader.hThrd );
+
+        if ( rc != NO_ERROR )
+          MSGALL (( ERR_XSER_RESUMING_THREAD, "REQUESTOR", rc));
+        }
+      else
+        MSGALL (( ERR_XSER_CREATING_THREAD, "REQUESTOR", rc));
+      }
+
+    #if defined(_WIN32)
+     if (( gxr.fNTService ) && ( rc == NO_ERROR ))
+       {
+       gxr.dwState = XSERVER_RUNNING;
+       sql96c_NewSrvState( gxr.dwState, NO_ERROR );
+       }
+    #endif
+
+    if ( rc == NO_ERROR )
+      rc = sql41c_wait_event_sem ( gxr.hevSemXserv, (ULONG)UNDEF, XSERV_TITLE );
+    }
+  #if defined(_WIN32)
+   finally
+     {
+     sql96c_finish(0);
+     }
+  #endif
+
+  #if defined(_WIN32)
+    if ( gxr.fNTService )
+      {
+      gxr.dwState = XSERVER_STOPPED;
+      sql96c_NewSrvState( gxr.dwState, NO_ERROR );
+      }
+  #endif
+
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+#if !defined(_WIN32)
+
+STATIC LONG sql96c_set_exit_list (VOID)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_set_exit_list"
+  LONG    rc;
+
+  DBGPAS;
+  /*
+   * Exit Handler
+   */
+  rc = DosExitList (EXLST_ADD, sql96c_finish);
+
+  if (rc != NO_ERROR)
+    {
+    DBG1  ((MF__, "Set exit handler failed %d", rc))
+    MSGALL  (( ERR_SET_EXIT_HANDLER_FAILED, rc ));
+    return (rc);
+    }
+  return (rc);
+  }
+
+#endif
+
+/*------------------------------*/
+
+#if defined(_WIN32)
+
+STATIC BOOL WINAPI sql96c_console_ctrl_handler ( DWORD dwCtrlType )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_console_ctrl_handler"
+
+  sql96_stop_server ( );
+  SLEEP ( 2000 );
+
+  DBGPAS;
+  exit(0);
+  return (FALSE);
+  }
+#endif
+
+/*------------------------------*/
+
+STATIC VOID _System sql96c_finish (ULONG  termcode)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_finish"
+
+  DBGPAS;
+
+  if ( gxr.hevSemXserv != INVALID_HANDLE_VALUE )
+    {
+    sql41c_close_event_sem ( gxr.hevSemXserv, XSERV_TITLE );
+    gxr.hevSemXserv = INVALID_HANDLE_VALUE;
+    }
+
+  sql96t_finish ();
+  sql96o_finish ();
+
+  MSGALL (( INFO_XSER_STOPPED_VERSION, sql02_get_RTE_version_string() ));
+  sql60_close_diag_file ();
+
+  #if !defined(_WIN32)
+    DosExitList (EXLST_EXIT, 0);
+  #endif
+  return;
+  }
+
+/*------------------------------*/
+
+#if defined(_WIN32)
+
+static ULONG _System sql96c_excepthandler ( PEXCEPTION_REPORT_REC  parg )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_excepthandler"
+  INT                    i;
+  PSZ                    pszPhysDiagFileName = NULL;
+
+  DBGPAS;
+
+
+  switch(parg->ExceptionNum)
+    {
+    case XCPT_IN_PAGE_ERROR            :
+    case XCPT_NONCONTINUABLE_EXCEPTION :
+    case XCPT_INVALID_DISPOSITION      :
+    case XCPT_ACCESS_VIOLATION         :
+    case XCPT_INTEGER_DIVIDE_BY_ZERO   :
+    case XCPT_FLOAT_DIVIDE_BY_ZERO     :
+    case XCPT_FLOAT_INVALID_OPERATION  :
+    case XCPT_ILLEGAL_INSTRUCTION      :
+    case XCPT_PRIVILEGED_INSTRUCTION   :
+    case XCPT_INTEGER_OVERFLOW         :
+    case XCPT_FLOAT_OVERFLOW           :
+    case XCPT_FLOAT_UNDERFLOW          :
+    case XCPT_FLOAT_DENORMAL_OPERAND   :
+    case XCPT_FLOAT_INEXACT_RESULT     :
+    case XCPT_FLOAT_STACK_CHECK        :
+    case XCPT_DATATYPE_MISALIGNMENT    :
+    case XCPT_ARRAY_BOUNDS_EXCEEDED    :
+    case XCPT_BAD_STACK                :
+    #if !defined (_WIN32)
+     case XCPT_INVALID_LOCK_SEQUENCE   :
+     case XCPT_INVALID_UNWIND_TARGET   :
+    #endif
+
+      if ( gxr.dwState != XSERVER_ABORT )
+        {
+        for (i = parg->cParameters; i < EXCEPTION_MAXIMUM_PARAMETERS; i++)
+          parg->ExceptionInfo[i] = 0;
+
+        MSGCD ((IERR_XSER_EXCEPTION, parg->ExceptionNum, parg->ExceptionAddress,
+                                     parg->ExceptionInfo[0], parg->ExceptionInfo[1],
+                                     parg->ExceptionInfo[2], parg->ExceptionInfo[3]));
+        DBG3((MF__, "EXCEPTION:%#x Addr:%#x ( %#x:%#x:%#x:%#x )",
+                     parg->ExceptionNum, parg->ExceptionAddress,
+                     parg->ExceptionInfo[0], parg->ExceptionInfo[1],
+                     parg->ExceptionInfo[2], parg->ExceptionInfo[3]));
+        }
+      break;
+
+    case XCPT_ABORT_EXCEPTION:
+      break;
+
+    case XCPT_SIGNAL:
+
+      #if defined(_WIN32)
+       switch(parg->ExceptionInfo[0])
+         {
+         case CTRL_LOGOFF_EVENT   :
+         case CTRL_CLOSE_EVENT    :
+           if ( gxr.fNTService )
+             {
+             DBG3 ((MF__, "Exception Ignored!"));
+             return(XCPT_CONTINUE_EXECUTION);
+             }
+           MSGD (( INFO_XSER_EXCEP_SIG_KILL ));
+           break;
+
+         case CTRL_SHUTDOWN_EVENT :
+           MSGD (( INFO_XSER_EXCEP_SIG_KILL ));
+           break;
+         case XCPT_SIGNAL_INTR    :
+         case XCPT_SIGNAL_BREAK   :
+         default                  :
+           if ( gxr.fNTService )
+             {
+             DBG3 ((MF__, "Exception Ignored!"));
+             return(XCPT_CONTINUE_EXECUTION);
+             }
+           break;
+         }
+      #else
+       switch(parg->ExceptionInfo[0])
+         {
+         case XCPT_SIGNAL_KILLPROC:
+           MSGCD (( INFO_XSER_EXCEP_SIG_KILL ));
+           break;
+         case XCPT_SIGNAL_INTR    :
+         case XCPT_SIGNAL_BREAK   :
+         default                  :
+           DBG3 ((MF__, "Exception Ignored!"));
+           break;
+         }
+      #endif
+      break;
+
+    default:
+      #ifdef DEBUG
+       for (i = parg->cParameters; i < EXCEPTION_MAXIMUM_PARAMETERS; i++)
+         parg->ExceptionInfo[i] = 0;
+      #endif
+
+      DBG3((MF__, "Exception Num:%#x P0:%#x P1:%#x P2:%#x P3:%#x - Default Processing",
+                   parg->ExceptionNum, parg->ExceptionInfo[0],
+                   parg->ExceptionInfo[1], parg->ExceptionInfo[2],
+                   parg->ExceptionInfo[3]));
+
+      return(XCPT_CONTINUE_SEARCH);
+    }
+
+  if ( parg->ExceptionNum == XCPT_SIGNAL ) // - termination by signal?
+    return(XCPT_CONTINUE_SEARCH);
+
+  sql60_reset_crit_section();
+
+  #if defined(_WIN32)
+   if ( gxr.dwState != XSERVER_ABORT )  // --- don't display abort
+     {                                  //     information twice
+     gxr.dwState  = XSERVER_ABORT;
+
+     sql60_get_diag_filename ( &pszPhysDiagFileName );
+
+     if ( pszPhysDiagFileName != NULL)
+       {
+       MSGCEL (( INFO_XSER_ABORTS_DIAG_INFO, pszPhysDiagFileName ));
+       MSGD   (( INFO_XSER_ABORTS ));
+       }
+     else
+       MSGALL (( INFO_XSER_ABORTS ));
+
+     if ( gxr.fNTService )
+       sql96c_NewSrvState( gxr.dwState, gxr.ulCrashRc );
+     }
+
+   sql96c_finish (0);
+
+   if ( gxr.fDebuggerIsDrWatson )
+     {
+     return(XCPT_CONTINUE_SEARCH);  // - DrWatson will write a dump file!
+     }
+  #endif
+
+  EXITPROCESS( 1 );
+  return(XCPT_CONTINUE_SEARCH);
+  }
+
+/*------------------------------*/
+
+static BOOL sql96c_debugger_is_drwatson( VOID )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql96c_debugger_is_drwatson"
+  LONG             rc = NO_ERROR;
+  PATHNAME         szDebuggerEnty;
+  REG_ENTRY_REC    RegistryEntries[1];
+
+  DBGIN;
+
+  if ( sql02_get_platform_id () == VER_PLATFORM_WIN32_NT )
+    {
+    RegistryEntries[0].pszValueName = REG_VN_AEDEBUG;
+    RegistryEntries[0].pValue       = szDebuggerEnty;
+    RegistryEntries[0].ulValueSize  = sizeof(szDebuggerEnty);
+    RegistryEntries[0].ulValueType  = REG_SZ;
+
+    rc = sql50_reg_get_values ( NULL, HKEY_LOCAL_MACHINE, REG_SK_AEDEBUG, 1, RegistryEntries );
+
+    if (rc != NO_ERROR)
+      {
+      DBGOUT;
+      return( FALSE );
+      }
+
+    strupr ( szDebuggerEnty );
+
+    if ( strstr ( szDebuggerEnty, DR_WATSON_EXENAME ) != NULL )
+      {
+      DBGOUT;
+      return( TRUE );
+      }
+    }
+
+
+  DBGOUT;
+  return( FALSE );
+  }
+
+#endif
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20

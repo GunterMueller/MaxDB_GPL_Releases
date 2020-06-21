@@ -1,0 +1,107 @@
+# @(#) version   1997-11-21   kern   admin
+#
+# Das Perlscript dient zum Aktualisieren der Strings, die von den
+# Komponenten des Kerns als Versionskennung geliefert werden.
+# Zusaetzlich werden die SenderId-Strings fuer Utility und den CI
+# erneuert.
+# Achtung: 
+# Der Kern enthaelt zwei Versionskennungen. Die eine Kennung wird
+# jeden morgen aktualisiert und ist ueber das SQL SHOW VERSION sicht-
+# bar und die andere wird jeden CL erneuert und wird ueber die
+# Konsole angezeigt.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use ICopy;
+use File::Basename;
+use File::Copy;
+
+$CLStamp = "false";
+$DATE = 1900+(localtime)[5]."-"."0"x(2-length(((localtime)[4])+1)).((localtime)[4]+1).
+		"-"."0"x(2-length((localtime)[3])).(localtime)[3]; #YYYY-MM-DD
+
+$Release = relnumk();
+($Ziffer1, $Ziffer2) = $Release =~ /(\d)\.(\d)/;
+$ID = "$Ziffer1$Ziffer2";
+
+foreach $file ( @ARGV ) {
+	stamp($file);
+}
+
+
+###########################################################################
+sub relnumk {
+
+	# Ergebnis ist die aktuelle Release-Nummer des KERNs
+	# Der Suchstring in der naechsten Zeile darf  NICHT  veraendert
+	# werden !!!
+	#	   'version.....=' 
+
+	if ( ICopy::icp("vgg11", $TMP, 0, 0, 1) ) {
+
+		open(FILE_IN, "$TMP/vgg11") || die "Can't open $TMP/vgg1 (input): $!\n";
+		while(<FILE_IN>) {
+			if ( /^\s+version\s+=\s+'KERNEL\s+(\d\.\d)/ ) { $Release=$1; last; }
+		}
+
+		close(FILE_IN);
+	}
+	else { warn "relnumk: Can't get vg11!\n" }
+	return $Release
+}
+
+###########################################################################
+stamp {
+	local $file = shift;
+	local( $path, $fname) = ICopy::GetFilePath($file, 0, 0, 1);
+	local $long_path = "$OWN/fname";
+	$temp_file = "%$file%";
+
+	if ( ! -f $long_path ) { die "Modul fehlt!" }
+	chdir(dirname($long_path)) || die "Can't change to directory dirname($long_path): $!\n";
+
+	copy($file, $temp_file);
+
+	# Taegliches Stempeln der Komponenten, die zur Kerngruppe gehoeren.
+
+	local $found;
+	open(FILE_IN, $file) || die "Can't open $file (input): $!\n";
+	open(FILE_OUT, ">$temp_file") || die "Can't open $temp_file (output): $!\n";
+	while(<FILE_IN>) {
+		$found = 1 if s/(^\s+version     =\s+'.*)(DATE 19..-..-..)';/$1DATE $DATE';/;
+		print FILE_OUT;
+	}	
+	close(FILE_IN); close(FILE_OUT);
+
+	if  ( $found ) {
+	   unlink $file; rename($temp_file, $file);
+	} else {
+	   warn "Fataler Fehler: Nicht gestempelt!\n";
+	   unlink $temp_file;
+	}
+	
+	local(@ARGV) = ( $Release, $long_path );
+	do "$TOOL/adminbin/stampl$TOOLEXT";
+	if ( $@ ) { die "Error while executing stampl: $@" }
+}
+
+
+__END__

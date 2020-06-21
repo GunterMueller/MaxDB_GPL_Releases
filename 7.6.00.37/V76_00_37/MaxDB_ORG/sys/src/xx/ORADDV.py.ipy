@@ -1,0 +1,4142 @@
+#
+# =====================================================
+# @(#) ORADDV                 7.3.0.02       2000-11-17
+# =====================================================
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+def install (session,options):
+    """Installing data dictionary tables and views
+    """
+
+    loaderCmd (session, 'SQLMODE INTERNAL')
+
+    switchToSchema (session, 'SYS')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE role_privs')
+
+    stopIfSqlNotOK (session, """
+        CREATE TABLE role_privs (
+        usermode  CHAR(11) ASCII,
+        privilege CHAR(40) ASCII)""")
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE stmt_audit_option_map')
+
+    stopIfSqlNotOK (session, """CREATE TABLE stmt_audit_option_map
+      ("OPTION#" FLOAT (18) NOT NULL,
+       name      CHAR (40) ASCII NOT NULL,
+       property  FLOAT (18) NOT NULL
+      )""")
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE table_privilege_map')
+
+    stopIfSqlNotOK (session, """
+      CREATE TABLE table_privilege_map
+      (privilege FLOAT (18)
+              CONSTRAINT table_privilege_map_pk PRIMARY KEY,
+       name      CHAR (40) ASCII NOT NULL
+      )""")
+
+    createReplaceView (session, 'SYS.ROLES',
+       """(OWNER, ROLE, PASSWORD, GRANTED, DEFAULTROLE)
+       AS SELECT O.NAME, A.NAME, NULL,  
+       DECODE(R.ROLEID, NULL, 'NO', 'YES'),
+       DECODE(R.DEFAULTROLE, NULL, 'NO', R.DEFAULTROLE) 
+       FROM SYSCATALOG.AUTHORIZATION A,
+       SYSCATALOG.AUTHORIZATION O,
+       SYSDD.USER_ROLES R
+       WHERE A.ISROLE AND
+       A.OWNERID = O.AUTHORIZATIONID AND 
+       A.AUTHORIZATIONID (+) = R.ROLEID
+       INTERNAL""")
+
+    loaderCmd (session, 'COMMIT')
+
+    loaderCmd (session, 'SQLMODE ORACLE')
+
+    switchToSchema (session, 'SYS')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    # ==================================
+    # Part 1) User Data Dictionary Views
+    # ==================================
+
+    # The following is an alphabetical reference of the data dictionary views
+    # accessible to all users of the database. Most views can be accessed by
+    # any user with the CREATE_SESSION privilege
+
+
+    createReplaceView (session, 'all_catalog', """
+           (owner, table_name, table_type)
+        AS SELECT
+            schemaname,
+            tablename,
+            EXPAND (type, 11)
+          FROM sysdd.tables
+      UNION ALL
+        SELECT
+            schemaname,
+            sequence_name,
+            'SEQUENCE   '
+          FROM sysdd.sequences""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_catalog TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_col_comments', """
+           (owner, table_name, column_name, comments)
+        AS SELECT
+            schemaname,
+            tablename,
+            columnname,
+            c_comment
+        FROM sysdd.columns""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_col_comments TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_col_privs', """
+          (grantor, grantee, table_schema, table_name, column_name,
+           privilege, grantable)
+      AS SELECT
+            grantor,
+            grantee,
+            schemaname,
+            name1,
+            name2,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NOT NULL AND grantor <> grantee""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_col_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_col_privs_made', """
+          (grantee, owner, table_name, column_name, grantor, privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            name2,
+            grantor,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NOT NULL AND grantor <> grantee
+           AND (grantor = USERGROUP OR owner = USERGROUP)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_col_privs_made TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_col_privs_recd', """
+          (grantee, owner, table_name, column_name, grantor, privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            name2,
+            grantor,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NOT NULL AND grantor <> USERGROUP
+           AND (grantee = USERGROUP OR grantee = 'PUBLIC')""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_col_privs_recd TO PUBLIC WITH GRANT OPTION')
+
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+
+        createReplaceView (session, 'all_constraints', """
+              (owner, constraint_name, constraint_type, table_name,
+               search_condition, r_owner, r_constraint_name, delete_rule, status,
+               deferrable, deferred, validated, generated, bad, rely, last_change)
+            AS SELECT
+               schemaname,
+               constraintname,
+               'C',
+               tablename,
+               c_definition,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TO_DATE (NULL)
+            FROM sysdd.constraints
+        UNION ALL SELECT
+               schemaname,
+               'C' || SUBSTR (tablename, 1, 32) || TO_CHAR (columnno),
+               'C',
+               tablename,
+               columnname || ' IS NOT NULL',
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+           FROM sysdd.columns
+           WHERE mod = 'MAN'
+        UNION ALL SELECT
+               schemaname,
+               'P' || SUBSTR (tablename, 1, 32),
+               'P',
+               tablename,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+          FROM sysdd.columns
+          WHERE keycolumnno = 1
+        UNION ALL SELECT
+               schemaname,
+               refname,
+               'R',
+               tablename,
+               columnname,
+               refschemaname,
+               EXPAND (NULL, 32),
+               DECODE (rule, 'DELETE CASCADE',  UNICODE('CASCADE'),
+                             'DELETE RESTRICT', UNICODE('NO ACTION'),
+                                                rule),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP ("DATE", "TIME")
+          FROM sysdd.foreign_keys""")
+
+    else:
+        createReplaceView (session, 'all_constraints', """
+              (owner, constraint_name, constraint_type, table_name,
+               search_condition, r_owner, r_constraint_name, delete_rule, status,
+               deferrable, deferred, validated, generated, bad, rely, last_change)
+            AS SELECT
+               schemaname,
+               constraintname,
+               'C',
+               tablename,
+               c_definition,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TO_DATE (NULL)
+            FROM sysdd.constraints
+        UNION ALL SELECT
+               schemaname,
+               'C' || SUBSTR (tablename, 1, 32) || TO_CHAR (columnno),
+               'C',
+               tablename,
+               columnname || ' IS NOT NULL',
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+           FROM sysdd.columns
+           WHERE mod = 'MAN'
+        UNION ALL SELECT
+               schemaname,
+               'P' || SUBSTR (tablename, 1, 32),
+               'P',
+               tablename,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+          FROM sysdd.columns
+          WHERE keycolumnno = 1
+        UNION ALL SELECT
+               schemaname,
+               refname,
+               'R',
+               tablename,
+               columnname,
+               refschemaname,
+               EXPAND (NULL, 32),
+               DECODE (rule, 'DELETE CASCADE',  'CASCADE',
+                             'DELETE RESTRICT', 'NO ACTION',
+                                                rule),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP ("DATE", "TIME")
+          FROM sysdd.foreign_keys""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_constraints TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_cons_columns', """
+          (owner, constraint_name, table_name, column_name, position)
+        AS SELECT
+            schemaname,
+            DECODE (type, 'KEY', 'P' || SUBSTR (tablename, 1, 32),
+                                 constraintname),
+            tablename,
+            columnname,
+            DECODE (type, 'CHECK', NULL, columnno)
+           FROM sysdd.constcolumns""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_cons_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_db_links', """
+          (owner, db_link, username, host, created)
+        AS SELECT
+            USER,
+            EXPAND (NULL,  32),
+            EXPAND (NULL,  32),
+            EXPAND (NULL, 200),
+            TIMESTAMP (NULL, NULL)
+        FROM dual
+        WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_db_links TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_def_audit_opts', """
+          (alt, aud, com, del, gra, ind, ins, loc, ren, sel, upd, ref, exe)
+        AS SELECT
+           '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-',
+           '-/-', '-/-', '-/-', '-/-', '-/-'
+          FROM dual""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_def_audit_opts TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_dependencies', """
+           (owner, name, type, referenced_owner, referenced_name, referenced_type,
+            referenced_link_name, dependency_type)
+      AS SELECT
+           schemaname,
+           tablename,
+           'VIEW        ',
+           refname,
+           reftablename,
+           'TABLE       ',
+           EXPAND (NULL, 128),
+           'HARD'
+         FROM sysdd.view_uses_table""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_dependencies TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_errors', """
+           (owner, name, type, sequence, line, position, text)
+      AS SELECT
+           USER,
+           EXPAND (NULL,  32),
+           EXPAND (NULL,  12),
+           999, 1, 1,
+           EXPAND (NULL, 4000)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_errors TO PUBLIC WITH GRANT OPTION')
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+
+    # noch aendern :
+    # num_rows, sample_size, last_analyzed, generated- Belegung
+
+    if rc == 0:
+        createReplaceView (session, 'all_indexes', """
+          (owner, index_name, index_type, table_owner, table_name, table_type,
+           uniqueness, compression, prefix_length,
+           tablespace_name, ini_trans, max_trans, initial_extent, next_extent,
+           min_extents, max_extents, pct_increase,
+           pct_threshold, include_column, freelists, freelist_groups,
+           pct_free, logging, blevel, leaf_blocks,
+           distinct_keys, avg_leaf_blocks_per_key, avg_data_blocks_per_key,
+           clustering_factor, status,
+           num_rows, sample_size, last_analyzed, degree, instances, partitioned,
+           temporary, generated, secondary, buffer_pool, user_stats, duration,
+           pct_direct_access, ityp_owner, ityp_name, parameters, global_stats)
+        AS SELECT
+            schemaname,
+            indexname,
+            'NORMAL      ',
+            schemaname,
+            tablename,
+            'TABLE',
+            DECODE (type, ' ', UNICODE('NONUNIQUE'), type),
+            'DISABLED   ',
+            SIGN (NULL),
+            'SYSTEM                        ',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'YES',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'VALID      ',
+            SIGN (NULL),
+            SIGN (NULL),
+            TO_DATE (NULL),
+            EXPAND (NULL, 40),
+            EXPAND (NULL, 40),
+            'NO ',
+            'N',
+            'N',
+            'N',
+            EXPAND (NULL,  7),
+            'NO ',
+            EXPAND (NULL, 15),
+            SIGN   (NULL),
+            EXPAND (NULL, 30),
+            EXPAND (NULL, 30),
+            EXPAND (NULL, 1000),
+            EXPAND (NULL,  3)
+        FROM sysdd.indexes
+           WHERE columnno = 1""")
+
+    else:
+        createReplaceView (session, 'all_indexes', """
+          (owner, index_name, index_type, table_owner, table_name, table_type,
+           uniqueness, compression, prefix_length,
+           tablespace_name, ini_trans, max_trans, initial_extent, next_extent,
+           min_extents, max_extents, pct_increase,
+           pct_threshold, include_column, freelists, freelist_groups,
+           pct_free, logging, blevel, leaf_blocks,
+           distinct_keys, avg_leaf_blocks_per_key, avg_data_blocks_per_key,
+           clustering_factor, status,
+           num_rows, sample_size, last_analyzed, degree, instances, partitioned,
+           temporary, generated, secondary, buffer_pool, user_stats, duration,
+           pct_direct_access, ityp_owner, ityp_name, parameters, global_stats)
+        AS SELECT
+            schemaname,
+            indexname,
+            'NORMAL      ',
+            schemaname,
+            tablename,
+            'TABLE',
+            DECODE (type, ' ', 'NONUNIQUE', type),
+            'DISABLED   ',
+            SIGN (NULL),
+            'SYSTEM                        ',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'YES',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'VALID      ',
+            SIGN (NULL),
+            SIGN (NULL),
+            TO_DATE (NULL),
+            EXPAND (NULL, 40),
+            EXPAND (NULL, 40),
+            'NO ',
+            'N',
+            'N',
+            'N',
+            EXPAND (NULL,  7),
+            'NO ',
+            EXPAND (NULL, 15),
+            SIGN   (NULL),
+            EXPAND (NULL, 30),
+            EXPAND (NULL, 30),
+            EXPAND (NULL, 1000),
+            EXPAND (NULL,  3)
+        FROM sysdd.indexes
+           WHERE columnno = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_indexes TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_ind_columns', """
+          (index_owner, index_name, table_owner, table_name,
+           column_name, column_position, column_length, descend)
+        AS SELECT
+            schemaname,
+            indexname,
+            schemaname,
+            tablename,
+            columnname,
+            columnno,
+            DECODE (datatype, 'NUMBER',    22,
+                              'FLOAT',     22,
+                              'DATE',      7,
+                              'LONG',      28,
+                                           len),
+            DECODE (sort, 'ASC', 'N   ', 'DESC', 'Y   ')
+        FROM sysdd.indexes""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_ind_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_objects', """
+          (owner, object_name, subobject_name, object_id, data_object_id,
+           object_type, created, last_ddl_time, "TIMESTAMP", status,
+           temporary, generated, secondary)
+        AS SELECT
+            owner,
+            objectname,
+            EXPAND (NULL, 32),
+            objectid,
+            SIGN (NULL),
+            EXPAND (type, 11),
+            TIMESTAMP ("DATE", "TIME"),
+            TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                            TIMESTAMP ("DATE",    "TIME"))),
+            TO_CHAR (TIMESTAMP ("DATE", "TIME"), 'YYYY-MM-DD:HH:MI:SS'),
+            'VALID  ',
+            'N',
+            'N',
+            'N'
+        FROM sysdd.objects
+        WHERE objectname <> ' '""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_objects TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_sequences', """
+          (sequence_owner, sequence_name, min_value, max_value, increment_by,
+           cycle_flag, order_flag, cache_size, last_number)
+        AS SELECT
+            schemaname,
+            sequence_name,
+            min_value,
+            max_value,
+            increment_by,
+            cycle_flag,
+            order_flag,
+            cache_size,
+            last_number
+        FROM sysdd.sequences""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_sequences TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_snapshots', """
+           (owner, name, table_name, master_view, master_owner, master,
+            master_link, can_use_log, updatable, refresh_method,
+            last_refresh, error, fr_operations, cr_operations, type,
+            "NEXT", start_with, refresh_group, update_trig, update_log,
+            query, master_rollback_seg, status, refresh_mode, prebuilt)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 128),
+           'YES',
+           'NO ',
+           EXPAND (NULL, 11),
+           TO_DATE (NULL),
+           SIGN   (NULL),
+           EXPAND (NULL, 10),
+           EXPAND (NULL, 10),
+           'FORCE   ',
+           EXPAND (NULL, 200),
+           TO_DATE (NULL),
+           SIGN   (NULL),
+           EXPAND (NULL, 30),
+           EXPAND (NULL, 30),
+           EXPAND (NULL, 254),
+           EXPAND (NULL, 30),
+           'VALID  ',
+           'NEVER   ',
+           'NO '
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_snapshots TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_source', """
+          (owner, name, type, line, text)
+      AS SELECT
+           USER,
+           EXPAND (NULL,  32),
+           EXPAND (NULL,  12),
+           1,
+           EXPAND (NULL, 4000)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_source TO PUBLIC WITH GRANT OPTION')
+
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+        createReplaceView (session, 'all_synonyms', """
+              (owner, synonym_name, table_owner, table_name, db_link)
+            AS SELECT
+                DECODE (synonymowner,
+                        'SYS', DECODE ("PUBLIC",
+                                        'YES', UNICODE('PUBLIC'),
+                                                   synonymowner),
+                        synonymowner),
+                synonymname,
+                schemaname,
+                tablename,
+                EXPAND (NULL, 128)
+              FROM sysdd.db_synonyms
+              WHERE synonymowner = USERGROUP OR "PUBLIC" = 'YES'""")
+
+    else:    
+        createReplaceView (session, 'all_synonyms', """
+              (owner, synonym_name, table_owner, table_name, db_link)
+            AS SELECT
+                DECODE (synonymowner,
+                        'SYS', DECODE ("PUBLIC",
+                                        'YES', 'PUBLIC',
+                                                   synonymowner),
+                        synonymowner),
+                synonymname,
+                schemaname,
+                tablename,
+                EXPAND (NULL, 128)
+              FROM sysdd.db_synonyms
+              WHERE synonymowner = USERGROUP OR "PUBLIC" = 'YES'""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_synonyms TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_tables', """
+          (owner, table_name, tablespace_name, cluster_name, iot_name,
+           pct_free, pct_used, ini_trans, max_trans,
+           initial_extent, next_extent, min_extents, max_extents, pct_increase,
+           freelists, freelist_groups, logging, backed_up, num_rows,
+           blocks, empty_blocks, avg_space, chain_cnt, avg_row_len,
+           avg_space_freelist_blocks, num_freelist_blocks, degree, instances,
+           cache, table_lock, sample_size, last_analyzed, partitioned,
+           iot_type, temporary, secondary, nested, buffer_pool, row_movement, global_stats,
+           user_stats, duration, skip_corrupt, monitoring)
+        AS SELECT
+            schemaname,
+            tablename,
+            'SYSTEM                        ',
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'YES',
+            'N',
+            rows,
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            EXPAND (NULL, 10),
+            EXPAND (NULL, 10),
+            'N    ',
+            'ENABLED ',
+            NVL ( NVL (sample_percent, sample_rows), 20000),
+            TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                            TIMESTAMP ("DATE",    "TIME"))),
+            'NO ',
+            EXPAND (NULL, 12),
+            'N',
+            'N',
+            'NO ',
+            EXPAND (NULL,  7),
+            EXPAND (NULL,  8),
+            EXPAND (NULL,  3),
+            'NO ',
+            EXPAND (NULL, 15),
+            EXPAND (NULL,  8),
+            EXPAND (NULL,  3)
+          FROM sysdd.tables
+            WHERE type = 'TABLE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tables TO PUBLIC WITH GRANT OPTION')
+
+    # noch aendern:
+    # LAST_ANALYZED, SAMPLE_SIZE, avg_col_len-Belegung
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+        createReplaceView (session, 'all_tab_columns', """
+                    (owner, table_name, column_name, data_type, data_type_mod,
+                    data_type_owner, data_length, data_precision, data_scale,
+                    nullable, column_id, default_length, data_default,
+                    num_distinct, low_value, high_value, density,
+                    num_nulls, num_buckets, last_analyzed, sample_size,
+                    character_set_name, char_col_decl_length, global_stats,
+                    user_stats, avg_col_len)
+            AS SELECT
+                schemaname,
+                tablename,
+                columnname,
+                DECODE (datatype, 'CHAR',    UNICODE(DECODE (code, 'BYTE', 'RAW', 'VARCHAR2')),
+                                  'FLOAT',   UNICODE(DECODE (len, NULL, 'NUMBER', 'FLOAT')),
+                                  'VARCHAR', UNICODE('VARCHAR2'),
+                                             SUBSTR (datatype, 1, 30)),
+                EXPAND (NULL,  3),
+                EXPAND (NULL, 32),
+                DECODE (datatype, 'NUMBER', 22,
+                                  'FLOAT',  22,
+                                  'DATE',    7,
+                                  'LONG',   28,
+                                            len),
+                DECODE (datatype, 'NUMBER', len, 'FLOAT', len),
+                DECODE (datatype, 'NUMBER', "DEC", 'FIXED', "DEC"),
+                SUBSTR (nullable, 1, 1),
+                columnno,
+                DECODE (datatype, 'NUMBER', LENGTH (LTRIM ("DEFAULT")),
+                                  'FLOAT',  LENGTH (LTRIM ("DEFAULT")),
+                                            LENGTH ("DEFAULT"))
+                +
+                DECODE (mod, 'OPT', 0, 1),
+                "DEFAULT",
+                distinctvalues,
+                EXPAND (NULL, 32),
+                EXPAND (NULL, 32),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                SIGN (NULL),
+                EXPAND ('CHAR_CS', 44),
+                DECODE (datatype, 'CHAR',    len,
+                                  'VARCHAR', len, NULL),
+                EXPAND (NULL,  3),
+                'NO ',
+                SIGN (NULL)
+              FROM sysdd.columns""")
+    
+    else:
+        createReplaceView (session, 'all_tab_columns', """
+                    (owner, table_name, column_name, data_type, data_type_mod,
+                    data_type_owner, data_length, data_precision, data_scale,
+                    nullable, column_id, default_length, data_default,
+                    num_distinct, low_value, high_value, density,
+                    num_nulls, num_buckets, last_analyzed, sample_size,
+                    character_set_name, char_col_decl_length, global_stats,
+                    user_stats, avg_col_len)
+            AS SELECT
+                schemaname,
+                tablename,
+                columnname,
+                DECODE (datatype, 'CHAR',    DECODE (code, 'BYTE', 'RAW', 'VARCHAR2'),
+                                  'FLOAT',   DECODE (len, NULL, 'NUMBER', 'FLOAT'),
+                                  'VARCHAR', 'VARCHAR2',
+                                             SUBSTR (datatype, 1, 30)),
+                EXPAND (NULL,  3),
+                EXPAND (NULL, 32),
+                DECODE (datatype, 'NUMBER', 22,
+                                  'FLOAT',  22,
+                                  'DATE',    7,
+                                  'LONG',   28,
+                                            len),
+                DECODE (datatype, 'NUMBER', len, 'FLOAT', len),
+                DECODE (datatype, 'NUMBER', "DEC", 'FIXED', "DEC"),
+                SUBSTR (nullable, 1, 1),
+                columnno,
+                DECODE (datatype, 'NUMBER', LENGTH (LTRIM ("DEFAULT")),
+                                  'FLOAT',  LENGTH (LTRIM ("DEFAULT")),
+                                            LENGTH ("DEFAULT"))
+                +
+                DECODE (mod, 'OPT', 0, 1),
+                "DEFAULT",
+                distinctvalues,
+                EXPAND (NULL, 32),
+                EXPAND (NULL, 32),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                SIGN (NULL),
+                EXPAND ('CHAR_CS', 44),
+                DECODE (datatype, 'CHAR',    len,
+                                  'VARCHAR', len, NULL),
+                EXPAND (NULL,  3),
+                'NO ',
+                SIGN (NULL)
+              FROM sysdd.columns""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tab_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_tab_comments', """
+          (owner, table_name, table_type, comments)
+        AS SELECT
+            schemaname,
+            tablename,
+            EXPAND (type, 11),
+            c_comment
+        FROM sysdd.tables
+          WHERE type = 'TABLE' OR  type = 'VIEW'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tab_comments TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_tab_privs', """
+          (grantor, grantee, table_schema, table_name, privilege, grantable)
+      AS SELECT
+            grantor,
+            grantee,
+            schemaname,
+            name1,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NULL AND grantor <> grantee""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tab_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_tab_privs_made', """
+          (grantee, owner, table_name, grantor, privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            grantor,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NULL AND grantor <> grantee
+           AND (grantor = USERGROUP OR owner = USERGROUP)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tab_privs_made TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_tab_privs_recd', """
+          (grantee, owner, table_name, grantor, privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            grantor,
+            EXPAND (RTRIM (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NULL AND grantor <> grantee
+           AND (grantee = USERGROUP OR grantee = 'PUBLIC')""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_tab_privs_recd TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_triggers', """
+          (owner, trigger_name, trigger_type, triggering_event,
+           table_owner, base_object_type, table_name, column_name,
+           referencing_names, when_clause,
+           status, description, action_type, trigger_body)
+      AS SELECT
+           owner,
+           triggername,
+           'AFTER EACH ROW  ',
+           EXPAND (
+           DECODE (SUBSTR (insert, 1, 1) ||
+                   SUBSTR (update, 1, 1) ||
+                   SUBSTR (delete, 1, 1),
+                   'YNN', 'INSERT',
+                   'NYN', 'UPDATE',
+                   'NNY', 'DELETE',
+                   'YYN', 'INSERT OR UPDATE',
+                   'YNY', 'INSERT OR DELETE',
+                   'NYY', 'UPDATE OR DELETE',
+                   'YYY', 'INSERT OR UPDATE OR DELETE',
+                          'ERROR'), 75),
+           schemaname,
+           'TABLE           ',
+           tablename,
+           EXPAND (NULL,   32),
+           EXPAND (NULL,   87),
+           EXPAND (NULL, 4000),
+           'ENABLED ',
+           c_definition,
+           EXPAND (NULL,   11),
+           definition
+         FROM sysdd.triggers""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_triggers TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_trigger_cols', """
+          (trigger_owner, trigger_name,
+           table_owner, table_name, column_name, column_list, column_usage)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           'NO ',
+           EXPAND (NULL, 17)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_trigger_cols TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_users', """
+          (username, user_id, created)
+        AS SELECT
+            name,
+            userid,
+            createdate
+        FROM syscatalog.authorization where isuser or isusergroup""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_users TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'all_views', """
+           (owner, view_name, text_length, text,
+            type_text_length, type_text, oid_text_length, oid_text,
+            view_type_owner, view_type)
+        AS SELECT
+            schemaname,
+            tablename,
+            len,
+            definition,
+            SIGN   (NULL),
+            EXPAND (NULL, 200),
+            SIGN   (NULL),
+            EXPAND (NULL, 200),
+            EXPAND (NULL,  30),
+            EXPAND (NULL,  30)
+        FROM sysdd.views""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON all_views TO PUBLIC WITH GRANT OPTION')
+
+
+    if sqlOK (session, """
+            SELECT tablename FROM sysdd.tables
+             WHERE tablename = UPPER('audit_actions')
+               AND schemaname = 'SYS'"""):
+        stopIfSqlNotOK (session, 'DROP TABLE audit_actions')
+
+    if not sqlOK (session, """SELECT tablename FROM sysdd.tables
+             WHERE tablename = UPPER('audit_actions')
+               AND schemaname = 'SYS'"""):
+        stopIfSqlNotOK (session, """
+                CREATE TABLE audit_actions
+                    (action FLOAT (18) NOT NULL,
+                    name   CHAR  (27) NOT NULL)""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON audit_actions TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (0,  'UNKNOWN')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (1,  'CREATE TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (2,  'INSERT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (3,  'SELECT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (4,  'CREATE CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (5,  'ALTER CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (6,  'UPDATE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (7,  'DELETE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (8,  'DROP CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (9,  'CREATE INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (10, 'DROP INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (11, 'ALTER INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (12, 'DROP TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (13, 'CREATE SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (14, 'ALTER SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (15, 'ALTER TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (16, 'DROP SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (17, 'GRANT OBJECT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (18, 'REVOKE OBJECT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (19, 'CREATE SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (20, 'DROP SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (21, 'CREATE VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (22, 'DROP VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (23, 'VALIDATE INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (26, 'LOCK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (27, 'UNDEFINED')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (28, 'RENAME')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (29, 'COMMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (30, 'AUDIT OBJECT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (31, 'NOAUDIT OBJECT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (32, 'CREATE DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (33, 'DROP DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (34, 'CREATE DATABASE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (35, 'ALTER DATABASE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (36, 'CREATE ROLLBACK SEG')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (37, 'ALTER ROLLBACK SEG')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (38, 'DROP ROLLBACK SEG')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (39, 'CREATE TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (40, 'ALTER TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (41, 'DROP TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (42, 'ALTER SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (43, 'ALTER USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (49, 'ALTER SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (60, 'LOGON')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (61, 'LOGOFF')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (62, 'CLEANUP')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (63, 'SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (64, 'AUDIT SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (65, 'NOAUDIT SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (66, 'AUDIT DEFAULT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (67, 'NOAUDIT DEFAULT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (68, 'GRANT SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (69, 'REVOKE SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (70, 'CREATE PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (71, 'DROP PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (72, 'CREATE PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (73, 'DROP PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO audit_actions VALUES (80, 'USER COMMENT')""")
+
+
+
+    createReplaceView (session, 'dictionary', """ (table_name, comments)
+    AS SELECT
+         tablename,
+         c_comment
+      FROM sysdd.tables
+      WHERE schemaname = 'SYS'
+        AND (   tablename LIKE 'USER%'
+             OR tablename LIKE 'ALL%'
+             OR tablename LIKE 'DBA%'
+             OR tablename IN ('AUDIT_ACTIONS', 'COLUMN_PRIVILEGES', 'DICTIONARY',
+                              'DICT_COLUMNS', 'DUAL', 'GLOBAL_NAME',
+                              'INDEX_HISTOGRAM', 'INDEX_STATS', 'RESOURCE_COST',
+                              'ROLE_ROLE_PRIVS', 'ROLE_SYS_PRIVS',
+                              'ROLE_TAB_PRIVS', 'SESSION_PRIVS', 'SESSION_ROLES'))""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dictionary TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'dict_columns', """ (table_name, column_name, comments)
+    AS SELECT
+         tablename,
+         columnname,
+         c_comment
+      FROM sysdd.columns
+      WHERE schemaname = 'SYS'
+        AND (   tablename LIKE 'USER%'
+             OR tablename LIKE 'ALL%'
+             OR tablename LIKE 'DBA%'
+             OR tablename IN ('AUDIT_ACTIONS', 'DICTIONARY', 'DICT_COLUMNS',
+                               'DUAL'))""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dict_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'exceptions', """
+          (row_id, owner, table_name, "CONSTRAINT")
+      AS SELECT
+           1,
+           USER,
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON exceptions TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'global_name', """
+          (global_name)
+      AS SELECT s.serverdb || '.' || s.servernode
+           FROM sysdd.serverdbs s""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON global_name TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'public_dependency', """
+          (object_id, referenced_object_id)
+      AS SELECT
+           o.objectid,
+           d.objectid
+         FROM sysdd.tables o, sysdd.tables d, sysdd.view_uses_table v
+         WHERE v.schemaname = o.schemaname AND v.tablename    = o.tablename
+           AND v.refname    = d.schemaname AND v.reftablename = d.tablename""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON public_dependency TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'resource_cost', """
+          (resource_name, unit_cost)
+      AS SELECT
+           EXPAND (NULL, 32),
+           0
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON resource_cost TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'role_role_privs', """
+          (role, granted_role, admin_option)
+      AS SELECT
+           name1,
+           grantee,
+           'NO '
+         FROM sysdd.privileges
+         WHERE type = 'ROLE'
+           AND grantee IN (SELECT "NAME" FROM syscatalog.authorization where isrole)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON role_role_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'role_sys_privs', """
+          (role, privilege, admin_option)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 40),
+           'NO '
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON role_sys_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'role_tab_privs', """
+          (role, owner, table_name, column_name, privilege, grantable)
+      AS SELECT
+           USER,
+           USER,
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 40),
+           'NO '
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON role_tab_privs TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'ALTER SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('STANDARD', 'CREATE DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'ALTER SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'UNLIMITED TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('RESOURCE', 'CREATE TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'AUDIT SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'RESTRICTED SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'MANAGE TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'UNLIMITED TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'BECOME USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'BACKUP ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'LOCK ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'COMMENT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'SELECT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'INSERT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'UPDATE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DELETE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'SELECT ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'GRANT ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'AUDIT ANY')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER DATABASE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'FORCE TRANSACTION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'FORCE ANY TRANSACTION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'EXECUTE ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER RESOURCE COST')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ANALYZE ANY')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'GRANT ANY PRIVILEGE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'CREATE ANY SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'ALTER ANY SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('DBA',      'DROP ANY SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'AUDIT SYSTEM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'RESTRICTED SESSION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'MANAGE TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'UNLIMITED TABLESPACE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'BECOME USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP USER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ROLLBACK SEGMENT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'BACKUP ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'LOCK ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'COMMENT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'SELECT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'INSERT ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'UPDATE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DELETE ANY TABLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY CLUSTER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY INDEX')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP PUBLIC SYNONYM')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY VIEW')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'SELECT ANY SEQUENCE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP PUBLIC DATABASE LINK')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'GRANT ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY ROLE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'AUDIT ANY')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER DATABASE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'FORCE TRANSACTION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'FORCE ANY TRANSACTION')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'EXECUTE ANY PROCEDURE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY TRIGGER')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP PROFILE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER RESOURCE COST')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ANALYZE ANY')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'GRANT ANY PRIVILEGE')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'CREATE ANY SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'ALTER ANY SNAPSHOT')""")
+
+    stopIfSqlNotOK (session, """INSERT INTO role_privs VALUES ('SYSDBA',   'DROP ANY SNAPSHOT')""")
+
+
+    createReplaceView (session, 'session_privs', """
+       AS SELECT privilege FROM sys.role_privs, syscatalog.authorization u
+       WHERE DECODE(rawtohex(u.ISSYSDBA), '01', 'SYSDBA', 
+                                DECODE (u.USERKIND, x'01', 'DBA', 
+                                                    x'02', 'RESOURCE', 
+                                                    x'03', 'STANDARD', 
+                                                    x'04', 'SYSDBA', 
+                                                    'UNKNOWN')) 
+                    = role_privs.usermode
+         AND u.name = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON session_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'session_roles', """
+       (role)
+       AS SELECT session_roles
+       FROM sysdd.session_roles""")
+
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON session_roles TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON stmt_audit_option_map TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (3,   'ALTER SYSTEM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (4,   'SYSTEM AUDIT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (5,   'CREATE SESSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (6,   'ALTER SESSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (7,   'RESTRICTED SESSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (8,   'TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (9,   'CLUSTER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (10,  'CREATE TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (11,  'ALTER TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (12,  'MANAGE TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (13,  'DROP TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (14,  'TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (15,  'UNLIMITED TABLESPACE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (16,  'USER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (17,  'ROLLBACK SEGMENT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (18,  'CLASS', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (19,  'INDEX', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (20,  'CREATE USER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (21,  'BECOME USER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (22,  'ALTER USER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (23,  'DROP USER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (24,  'SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (25,  'PUBLIC SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (26,  'VIEW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (27,  'SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (28,  'DATABASE LINK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (29,  'PUBLIC DATABASE LINK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (30,  'CREATE ROLLBACK SEGMENT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (31,  'ALTER ROLLBACK SEGMENT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (32,  'DROP ROLLBACK SEGMENT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (33,  'ROLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (34,  'DIMENSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (35,  'PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (36,  'TRIGGER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (37,  'PROFILE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (38,  'DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (39,  'SUMMARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (40,  'CREATE TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (41,  'CREATE ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (42,  'ALTER ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (43,  'BACKUP ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (44,  'DROP ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (45,  'LOCK ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (46,  'COMMENT ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (47,  'SELECT ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (48,  'INSERT ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (49,  'UPDATE ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (50,  'DELETE ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (53,  'GRANT ANY TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (54,  'ALTER TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (55,  'BACKUP TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (56,  'DROP TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (57,  'LOCK TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (58,  'COMMENT TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (60,  'CREATE CLUSTER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (61,  'CREATE ANY CLUSTER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (62,  'ALTER ANY CLUSTER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (63,  'DROP ANY CLUSTER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (65,  'SELECT TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (66,  'INSERT TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (67,  'UPDATE TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (68,  'DELETE TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (69,  'GRANT TABLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (70,  'CREATE INDEX', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (71,  'CREATE ANY INDEX', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (72,  'ALTER ANY INDEX', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (73,  'DROP ANY INDEX', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (77,  'NOT EXISTS', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (80,  'CREATE SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (81,  'CREATE ANY SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (82,  'DROP ANY SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (83,  'SYDBA', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (84,  'SYSOPER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (85,  'CREATE PUBLIC SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (86,  'DROP PUBLIC SYNONYM', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (87,  'EXISTS', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (90,  'CREATE VIEW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (91,  'CREATE ANY VIEW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (92,  'DROP ANY VIEW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (100, 'GRANT ANY VIEW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (103, 'ALTER SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (104, 'SELECT SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (105, 'CREATE SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (106, 'CREATE ANY SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (107, 'ALTER ANY SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (108, 'DROP ANY SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (109, 'SELECT ANY SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (111, 'GRANT SEQUENCE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (115, 'CREATE DATABASE LINK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (120, 'CREATE PUBLIC DATABASE LINK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (121, 'DROP PUBLIC DATABASE LINK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (125, 'CREATE ROLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (126, 'DROP ANY ROLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (127, 'GRANT ANY ROLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (128, 'ALTER ANY ROLE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (130, 'AUDIT ANY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (131, 'SYSTEM GRANT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (135, 'ALTER DATABASE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (138, 'FORCE TRANSACTION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (139, 'FORCE ANY TRANSACTION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (140, 'CREATE PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (141, 'CREATE ANY PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (142, 'ALTER ANY PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (143, 'DROP ANY PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (144, 'EXECUTE ANY PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (145, 'GRANT ANY PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (146, 'EXECUTE PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (147, 'GRANT PROCEDURE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (151, 'CREATE TRIGGER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (152, 'CREATE ANY TRIGGER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (153, 'ALTER ANY TRIGGER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (154, 'DROP ANY TRIGGER', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (155, 'TRUNCATE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (157, 'CREATE DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (158, 'DROP DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (160, 'CREATE PROFILE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (161, 'ALTER PROFILE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (162, 'DROP PROFILE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (163, 'ALTER RESOURCE COST', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (165, 'ANALYZE ANY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (165, 'GRANT ANY PRIVILEGE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (171, 'ALTER SNAPSHOT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (172, 'CREATE SNAPSHOT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (173, 'CREATE ANY SNAPSHOT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (174, 'ALTER ANY SNAPSHOT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (175, 'DROP ANY SNAPSHOT', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (176, 'NETWORK', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (177, 'CREATE ANY DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (178, 'DROP ANY DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (179, 'GRANT DIRECTORY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (180, 'CREATE TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (181, 'CREATE ANY TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (182, 'ALTER ANY TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (183, 'DROP ANY TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (184, 'EXECUTE ANY TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (185, 'GRANT LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (187, 'GRANT TYPE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (188, 'CREATE LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (189, 'CREATE ANY LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (190, 'ALTER ANY LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (191, 'DROP ANY LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (192, 'EXECUTE ANY LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (193, 'EXECUTE LIBRARY', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (194, 'WRITEDOWN DBLOW', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (195, 'READUP DBHIGH', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (196, 'WRITEUP DBHIGH', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (197, 'WRITEDOWN', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (198, 'READUP', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (199, 'WRITEUP', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (210, 'REWRITE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (211, 'GLOBAL REWRITE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (214, 'CREATE DIMENSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (215, 'CREATE ANY DIMENSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (216, 'ALTER ANY DIMENSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (217, 'DROP ANY DIMENSION', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (218, 'MANAGE ANY QUEUE', 1)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (219, 'ENQUEUE ANY QUEUE', 1)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (220, 'DEQUEUE ANY QUEUE', 1)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (221, 'CONTEXT', 1)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (224, 'CREATE ANY OUTLINE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (225, 'ALTER ANY OUTLINE', 0)""")
+
+    stopIfSqlNotOK (session, """INSERT INTO stmt_audit_option_map VALUES (226, 'DROP ANY OUTLINE', 0)""")
+
+   
+#   createReplaceView (session, 'table_privileges', """
+#           (grantee, owner, table_name, grantor,
+#      select_priv, insert_priv, delete_priv, update_priv,
+#      references_priv, alter_priv, index_priv,
+#      created)
+#   AS SELECT
+#       grantee,
+#       schemaname,
+#       name1,
+#       grantor,
+#       DECODE (INSTR (privileges, 'SEL'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'INS'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'DEL'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'UPD'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'REF'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'ALT'), 0, 'N', 'Y'),
+#       DECODE (INSTR (privileges, 'IND'), 0, 'N', 'Y'),
+#       TIMESTAMP ("DATE", "TIME")
+#   FROM sysdd.privileges
+#      WHERE name2 IS NULL AND grantee <> grantor""")
+
+#   stopIfSqlNotOK (session, 'GRANT ALL ON table_privileges TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON table_privilege_map TO PUBLIC WITH GRANT OPTION')
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (0,  'ALTER')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (1,  'AUDIT')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (2,  'COMMENT')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (3,  'DELETE')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (4,  'GRANT')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (5,  'INDEX')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (6,  'INSERT')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (7,  'LOCK')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (8,  'RENAME')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (9,  'SELECT')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (10, 'UPDATE')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (11, 'REFERENCES')""")
+
+    stopIfSqlNotOK (session, """ INSERT INTO table_privilege_map VALUES (12, 'EXECUTE')""")
+
+    createReplaceView (session, 'user_audit_trail', """
+      (os_username, username, userhost, terminal, "TIMESTAMP",
+       owner, obj_name, action, action_name, new_owner, new_name,
+       obj_privilege, sys_privilege, admin_option, grantee, audit_option,
+       ses_actions, logoff_time, logoff_lread, logoff_pread,
+       logoff_lwrite, logoff_dlock, comment_text, sessionid, entryid,
+       statementid, returncode, priv_used, object_label, session_label)
+  AS SELECT EXPAND (NULL, 254),
+            EXPAND (NULL,  32),
+            EXPAND (NULL, 254),
+            EXPAND (NULL, 254),
+            SYSDATE,
+            EXPAND (NULL,  32),
+            EXPAND (NULL, 128),
+            0,
+            aa.name,
+            EXPAND (NULL,  32),
+            EXPAND (NULL, 128),
+            EXPAND (NULL,  16),
+            EXPAND (NULL,  40),
+            'N',
+            EXPAND (NULL,  32),
+            EXPAND (NULL,  40),
+            EXPAND (NULL,  19),
+            SYSDATE,
+            0,
+            0,
+            0,
+            EXPAND (NULL,  40),
+            EXPAND (NULL, 254),
+            0,
+            0,
+            0,
+            0,
+            EXPAND (NULL,  40),
+            NULL,
+            NULL
+        FROM dual, audit_actions aa
+        WHERE 0 = 1 AND 0 = aa.action""")
+
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_audit_trail TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_audit_object', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                owner, obj_name, action_name, new_owner, new_name,
+                ses_actions, comment_text, sessionid, entryid, statementid,
+                returncode, priv_used, object_label, session_label
+           FROM user_audit_trail
+           WHERE action BETWEEN   1 AND  16
+              OR action BETWEEN  19 AND  29
+              OR action BETWEEN  32 AND  41
+              OR action = 43
+              OR action BETWEEN  51 AND  99
+              OR action = 103
+              OR action BETWEEN 110 AND 113
+              OR action BETWEEN 116 AND 121""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_audit_object TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_audit_session', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                action_name, logoff_time, logoff_lread, logoff_pread,
+                logoff_lwrite, logoff_dlock,
+                sessionid, returncode, session_label
+           FROM user_audit_trail
+           WHERE action BETWEEN 100 AND 102""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_audit_session TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_audit_statement', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                owner, obj_name, action_name, new_name, obj_privilege,
+                sys_privilege, admin_option, grantee, audit_option,
+                ses_actions, comment_text, sessionid, entryid,
+                statementid, returncode, priv_used, session_label
+           FROM user_audit_trail
+           WHERE action IN (17, 18, 30, 31, 49, 104,
+                            105, 106, 107, 108, 109, 114, 115)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_audit_statement TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_catalog', """
+        AS SELECT table_name, table_type
+             FROM all_catalog
+               WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_catalog TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_clusters', """
+          (cluster_name, tablespace_name,
+           pct_free, pct_used, key_size, ini_trans, max_trans,
+           initial_extent, next_extent, min_extents, max_extents, pct_increase,
+           freelists, freelist_groups, avg_blocks_per_key,
+           cluster_type, function, hashkeys,
+           degree, instances, cache, buffer_pool, single_table)
+        AS SELECT
+            EXPAND (NULL, 32),
+            'SYSTEM                        ',
+            0,
+            0,
+            0,
+            0,
+            999999999999999999,
+            0,
+            0,
+            0,
+            999999999999999999,
+            0,
+            SIGN (NULL),
+            SIGN (NULL),
+            0,
+            EXPAND (NULL,  5),
+            EXPAND (NULL,  7),
+            0,
+            EXPAND (NULL, 10),
+            EXPAND (NULL, 10),
+            'N    ',
+            EXPAND (NULL,  7),
+            'N    '
+        FROM dual
+           WHERE 1 = 0""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_clusters TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_clu_columns', """
+          (cluster_name, clu_column_name, table_name, tab_column_name)
+        AS SELECT
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 200)
+        FROM dual
+           WHERE 1 = 0""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_clu_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_col_comments', """
+        AS SELECT table_name, column_name, comments
+              FROM all_col_comments
+               WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_col_comments TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_col_privs', """
+          (grantee, owner, table_name, column_name, grantor,
+           privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            name2,
+            grantor,
+            EXPAND (RTRIM  (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NOT NULL AND grantor <> grantee
+           AND (schemaname = USERGROUP OR grantor = USERGROUP OR grantee = USERGROUP)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_col_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_col_privs_made', """
+       AS SELECT grantee, table_name, column_name, grantor, privilege, grantable
+            FROM all_col_privs_made
+            WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_col_privs_made TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_col_privs_recd', """
+       AS SELECT owner, table_name, column_name, grantor, privilege, grantable
+            FROM all_col_privs_recd
+            WHERE grantee = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_col_privs_recd TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_constraints', """
+       AS SELECT *
+            FROM all_constraints
+            WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_constraints TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_cons_columns', """
+       AS SELECT *
+            FROM all_cons_columns
+            WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_cons_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_db_links', """
+          (db_link, username, password, host, created)
+       AS SELECT
+            EXPAND (NULL, 128),
+            EXPAND (NULL,  32),
+            EXPAND (NULL,  30),
+            EXPAND (NULL, 254),
+            TO_DATE (NULL)
+        FROM dual
+        WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_db_links TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_dependencies', """
+      AS SELECT name, type, referenced_owner, referenced_name, referenced_type,
+                referenced_link_name, SIGN (NULL) schemaid, dependency_type
+           FROM all_dependencies
+           WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_dependencies TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_errors', """
+      AS SELECT name, type, sequence, line, position, text
+           FROM all_errors
+           WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_errors TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_extents', """
+          (segment_name, segment_type, tablespace_name, partition_name,
+          extent_id, bytes, blocks)
+       AS SELECT
+            EXPAND (NULL, 81),
+            EXPAND (NULL, 17),
+            'SYSTEM                        ',
+            EXPAND (NULL, 32),
+            0,
+            0,
+            0
+            FROM dual
+            WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_extents TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_free_space', """
+          (tablespace_name, file_id, block_id, bytes, blocks, relative_fno)
+       AS SELECT
+            'SYSTEM                        ',
+            1,
+            2,
+            unused_pages*to_number("VALUE"),
+            unused_pages,
+            SIGN (NULL)
+            FROM sysdd.serverdb_stats, sysdd.ACTIVECONFIGURATION x
+            WHERE x.PARAMETERNAME = '_PAGE_SIZE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_free_space TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_indexes', """
+       AS SELECT index_name, index_type, table_owner, table_name,
+                 table_type, uniqueness, compression, prefix_length,
+                 tablespace_name, ini_trans, max_trans,
+                 initial_extent, next_extent, min_extents, max_extents,
+                 pct_increase, pct_threshold, include_column, freelists,
+                 freelist_groups, pct_free, logging, blevel, leaf_blocks,
+                 distinct_keys, avg_leaf_blocks_per_key, avg_data_blocks_per_key,
+                 clustering_factor, status, num_rows, sample_size,
+                 last_analyzed, degree, instances, partitioned,
+                 temporary, generated, secondary, buffer_pool, user_stats, duration,
+                 pct_direct_access, ityp_owner, ityp_name, parameters, global_stats
+            FROM all_indexes
+            WHERE table_owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_indexes TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_ind_columns', """
+       AS SELECT index_name, table_name,
+                 column_name, column_position, column_length, descend
+            FROM all_ind_columns
+            WHERE table_owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_ind_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_objects', """
+        AS SELECT
+           object_name, subobject_name, object_id, data_object_id,
+           object_type, created, last_ddl_time, "TIMESTAMP", status,
+           temporary, generated, secondary
+          FROM all_objects
+          WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_objects TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_object_size', """
+          (name, type, source_size, parsed_size, code_size, error_size)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 12),
+           0,
+           0,
+           0,
+           0
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_object_size TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_obj_audit_opts', """
+          (object_name, object_type,
+           alt, aud, com, del, gra, ind, ins, loc, ren, sel,
+           upd, ref, exe, cre, rea, wri)
+        AS SELECT
+            tablename,
+            'TABLE',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-'
+         FROM sysdd.tables
+           WHERE type = 'TABLE' AND schemaname = USERGROUP
+        UNION ALL SELECT
+            tablename,
+            'VIEW  ',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-'
+         FROM sysdd.views
+           WHERE schemaname = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_obj_audit_opts TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_resource_limits', """
+          (resource_name, limit)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 40)
+         FROM dual""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_resource_limits TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_role_privs', """
+          (username, granted_role, admin_option, default_role, os_granted)
+      AS SELECT
+           USER,
+           "ROLE",
+           'NO ',
+           DEFAULTROLE,
+           'NO '
+         FROM sys.roles
+         WHERE owner = USER OR GRANTED = 'YES'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_role_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_segments', """
+          (segment_name, partition_name, segment_type, tablespace_name, bytes, blocks,
+           extents, initial_extent, next_extent, min_extents, max_extents,
+           pct_increase, freelists, freelist_groups, buffer_pool)
+        AS SELECT
+            EXPAND (tablename, 81),
+            EXPAND (NULL, 32),
+            'TABLE            ',
+            'SYSTEM                        ',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL)
+        FROM sysdd.tables
+        WHERE schemaname = USERGROUP AND type = 'TABLE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_segments TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_sequences', """
+        AS SELECT sequence_name, min_value, max_value, increment_by,
+                      cycle_flag, order_flag, cache_size, last_number
+             FROM all_sequences
+             WHERE sequence_owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_sequences TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_snapshots', """
+        AS SELECT * FROM all_snapshots
+             WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_snapshots TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_snapshot_logs', """
+          (log_owner, master, log_table, log_trigger, rowids,
+           primary_key, filter_columns, current_snapshots, snapshot_id)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL,  3),
+           EXPAND (NULL,  3),
+           EXPAND (NULL,  3),
+           TO_DATE (NULL),
+           SIGN (NULL)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_snapshot_logs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_source', """
+      AS SELECT name, type, line, text
+         FROM all_source
+         WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_source TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_synonyms', """
+          (synonym_name, table_owner, table_name, db_link)
+        AS SELECT
+            synonymname,
+            schemaname,
+            tablename,
+            EXPAND (NULL, 128)
+        FROM sysdd.synonyms""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_synonyms TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_sys_privs', """
+          (username, privilege, admin_option)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 40),
+           'NO '
+         FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_sys_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tables', """
+       AS SELECT
+          table_name, tablespace_name, cluster_name, iot_name,
+           pct_free, pct_used, ini_trans, max_trans,
+           initial_extent, next_extent, min_extents, max_extents, pct_increase,
+           freelists, freelist_groups, logging, backed_up, num_rows,
+           blocks, empty_blocks, avg_space, chain_cnt, avg_row_len,
+           avg_space_freelist_blocks, num_freelist_blocks, degree, instances,
+           cache, table_lock, sample_size, last_analyzed, partitioned,
+           iot_type, temporary, secondary, nested, buffer_pool, row_movement, global_stats,
+           user_stats, duration, skip_corrupt, monitoring
+       FROM all_tables
+      WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tables TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tablespaces', """
+          (tablespace_name, initial_extent, next_extent, min_extents, max_extents,
+           pct_increase, min_extlen, status, contents, logging, extent_management,
+           allocation_type)
+         AS SELECT
+           'SYSTEM                        ',
+           999999999999999999,
+           0,
+           1,
+           1,
+           0,
+           0,
+           'UNDEFINED',
+           EXPAND (NULL,  9),
+           EXPAND (NULL,  9),
+           EXPAND (NULL, 10),
+           EXPAND (NULL,  9)
+         FROM dual
+            WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tablespaces TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tab_columns', """
+        AS SELECT table_name, column_name, data_type, data_type_mod,
+                  data_type_owner, data_length, data_precision,
+                  data_scale, nullable, column_id, default_length,
+                  data_default, num_distinct, low_value, high_value, density,
+                  num_nulls, num_buckets, last_analyzed, sample_size,
+                  character_set_name, char_col_decl_length, global_stats,
+                  user_stats, avg_col_len
+             FROM all_tab_columns
+             WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tab_columns TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tab_comments', """
+        AS SELECT table_name, table_type, comments
+              FROM all_tab_comments
+             WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tab_comments TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tab_privs', """
+          (grantee, owner, table_name, grantor, privilege, grantable)
+      AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            grantor,
+            EXPAND (RTRIM  (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+         FROM sysdd.new_privileges
+         WHERE name2 IS NULL AND grantor <> grantee
+           AND schemaname = USERGROUP OR grantor = USERGROUP OR grantee = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tab_privs TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tab_privs_made', """
+        AS SELECT grantee, table_name, grantor, privilege, grantable
+             FROM all_tab_privs_made
+             WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tab_privs_made TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_tab_privs_recd', """
+        AS SELECT owner, table_name, grantor, privilege, grantable
+             FROM all_tab_privs_recd
+             WHERE grantee = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_tab_privs_recd TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_triggers', """
+      AS SELECT trigger_name, trigger_type, triggering_event,
+                table_owner, base_object_type, table_name, column_name,
+                referencing_names, when_clause,
+                status, description, action_type, trigger_body
+           FROM all_triggers
+           WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_triggers TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_trigger_cols', """
+      AS SELECT * FROM all_trigger_cols
+           WHERE trigger_owner = USERGROUP OR table_owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_trigger_cols TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_ts_quotas', """
+          (tablespace_name, bytes, max_bytes, blocks, max_blocks)
+       AS SELECT
+            'SYSTEM                        ',
+            0,
+            999999999999999999,
+            0,
+            999999999999999999
+            FROM dual
+            WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_ts_quotas TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_users', """
+          (username, user_id, account_status, lock_date, expiry_date,
+           default_tablespace, temporary_tablespace, created,
+           initial_rsrc_consumer_group, external_name)
+        AS SELECT
+            name,
+            userid,
+            EXPAND (NULL, 30),
+            TO_DATE (NULL),
+            TO_DATE (NULL),
+            'SYSTEM                        ',
+            'SYSTEM                        ',
+            CREATEDATE,
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 200)
+        FROM syscatalog.authorization
+           WHERE name = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_users TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'user_views', """
+        AS SELECT
+            view_name, text_length, text,
+            type_text_length, type_text, oid_text_length, oid_text,
+            view_type_owner, view_type
+        FROM all_views
+          WHERE owner = USERGROUP""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON user_views TO PUBLIC WITH GRANT OPTION')
+
+
+
+
+    # =================================
+    # Part 2) DBA Data Dictionary Views
+    # =================================
+
+    # The following data dictionary views are restricted. They can be accessed
+    # only by users with the dba privilege
+
+
+    createReplaceView (session, 'dba_2pc_neighbors', """
+          (local_tran_id, in_out, "DATABASE", dbuser_owner,
+           interface, dbid, "SESS#", branch)
+      AS SELECT
+           EXPAND (NULL,  22),
+           'OUT',
+           EXPAND (NULL, 128),
+           USER,
+           'N',
+           EXPAND (NULL,  16),
+           0,
+           EXPAND (NULL, 128)
+         FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_2pc_neighbors TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_2pc_pending', """
+        (local_tran_id, global_tran_id, state, mixed, advice, tran_comment,
+         fail_time, force_time, retry_time, os_user, os_terminal,
+         host, db_user, "COMMIT#")
+      AS SELECT
+           EXPAND (NULL,  22),
+           EXPAND (NULL, 169),
+           EXPAND (NULL,  16),
+           EXPAND (NULL,   3),
+           'C',
+           EXPAND (NULL, 254),
+           SYSDATE,
+           SYSDATE,
+           SYSDATE,
+           EXPAND (NULL, 254),
+           EXPAND (NULL, 254),
+           EXPAND (NULL, 254),
+           USER,
+           EXPAND (NULL,  16)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_2pc_pending TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_audit_trail', """
+          (os_username, username, userhost, terminal, "TIMESTAMP",
+           owner, obj_name, action, action_name, new_owner, new_name,
+           obj_privilege, sys_privilege, admin_option, grantee, audit_option,
+           ses_actions, logoff_time, logoff_lread, logoff_pread,
+           logoff_lwrite, logoff_dlock, comment_text, sessionid, entryid,
+           statementid, returncode, priv_used, object_label, session_label)
+      AS SELECT EXPAND (NULL, 254),
+                EXPAND (NULL,  32),
+                EXPAND (NULL, 254),
+                EXPAND (NULL, 254),
+                SYSDATE,
+                EXPAND (NULL,  32),
+                EXPAND (NULL, 128),
+                0,
+                aa.name,
+                EXPAND (NULL,  32),
+                EXPAND (NULL, 128),
+                EXPAND (NULL,  16),
+                EXPAND (NULL,  40),
+                'N',
+                EXPAND (NULL,  32),
+                EXPAND (NULL,  40),
+                EXPAND (NULL,  19),
+                SYSDATE,
+                0,
+                0,
+                0,
+                EXPAND (NULL,  40),
+                EXPAND (NULL, 254),
+                0,
+                0,
+                0,
+                0,
+                EXPAND (NULL,  40),
+                NULL,
+                NULL
+            FROM dual, audit_actions aa
+            WHERE 0 = 1 AND 0 = aa.action""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_audit_trail TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_audit_exists', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                owner, obj_name, action_name, new_owner, new_name,
+                obj_privilege, sys_privilege, grantee,
+                sessionid, entryid, statementid, returncode
+           FROM dba_audit_trail
+           WHERE returncode IN (942, 943, 959, 1418, 1432, 1434, 1435,
+                                1534, 1917, 1918, 1919, 2019, 2024, 2289,
+                                4042, 4043, 4080, 1, 951, 955, 957, 1430,
+                                1433, 1452, 1471, 1535, 1543, 1758, 1920,
+                                1921, 1922, 2239, 2264, 2266, 2273, 2292,
+                                2297, 2378, 2379, 2382, 4081, 12006, 12325)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_audit_exists TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_audit_object', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                owner, obj_name, action_name, new_owner, new_name,
+                ses_actions, comment_text, sessionid, entryid, statementid,
+                returncode, priv_used, object_label, session_label
+           FROM dba_audit_trail
+           WHERE action BETWEEN   1 AND  16
+              OR action BETWEEN  19 AND  29
+              OR action BETWEEN  32 AND  41
+              OR action = 43
+              OR action BETWEEN  51 AND  99
+              OR action = 103
+              OR action BETWEEN 110 AND 113
+              OR action BETWEEN 116 AND 121""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_audit_object TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_audit_session', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                action_name, logoff_time, logoff_lread, logoff_pread,
+                logoff_lwrite, logoff_dlock, sessionid, returncode, session_label
+           FROM dba_audit_trail
+           WHERE action BETWEEN 100 AND 102""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_audit_session TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_audit_statement', """
+      AS SELECT os_username, username, userhost, terminal, "TIMESTAMP",
+                owner, obj_name, action_name, new_name, obj_privilege,
+                sys_privilege, admin_option, grantee, audit_option,
+                ses_actions, comment_text, sessionid, entryid, statementid,
+                returncode, priv_used, session_label
+           FROM dba_audit_trail
+           WHERE action IN (17, 18, 30, 31, 49, 104, 105,
+                            106, 107, 108, 109, 114, 115)""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_audit_statement TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_blockers', """
+          (holding_session)
+      AS SELECT 0 FROM dual WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_blockers TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_catalog', """
+          (owner, table_name, table_type)
+        AS SELECT
+            schemaname,
+            tablename,
+            EXPAND (type, 11)
+        FROM sysdd.db_tables
+      UNION ALL SELECT
+            schemaname,
+            sequence_name,
+            'SEQUENCE   '
+        FROM sysdd.db_sequences""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_catalog TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_clusters', """
+          (owner, cluster_name, tablespace_name,
+           pct_free, pct_used, key_size, ini_trans, max_trans,
+           initial_extent, next_extent, min_extents, max_extents, pct_increase,
+           freelists, freelist_groups, avg_blocks_per_key,
+           cluster_type, function, hashkeys,
+           degree, instances, cache, buffer_pool, single_table)
+        AS SELECT
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            'SYSTEM                        ',
+            0,
+            0,
+            0,
+            0,
+            999999999999999999,
+            0,
+            0,
+            0,
+            999999999999999999,
+            0,
+            SIGN (NULL),
+            SIGN (NULL),
+            0,
+            EXPAND (NULL,  5),
+            EXPAND (NULL, 15),
+            0,
+            EXPAND (NULL, 10),
+            EXPAND (NULL, 10),
+            'N    ',
+            EXPAND (NULL,  7),
+            'N    '
+        FROM dual
+           WHERE 1 = 0""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_clusters TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_clu_columns', """
+          (owner, cluster_name, clu_column_name, table_name, tab_column_name)
+        AS SELECT
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32)
+        FROM dual
+           WHERE 1 = 0""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_clu_columns TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_col_comments', """
+           (owner, table_name, column_name, comments)
+        AS SELECT
+            schemaname,
+            tablename,
+            columnname,
+            c_comment
+        FROM sysdd.db_columns""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_col_comments TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_col_privs', """
+          (grantee, owner, table_name, column_name, grantor, privilege, grantable)
+        AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            name2,
+            grantor,
+            EXPAND (RTRIM  (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+        FROM sysdd.db_new_privileges
+           WHERE name2 IS NOT NULL""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_col_privs TO PUBLIC')
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+
+        createReplaceView (session, 'dba_constraints', """
+              (owner, constraint_name, constraint_type, table_name,
+               search_condition, r_owner, r_constraint_name, delete_rule, status,
+               deferrable, deferred, validated, generated, bad, rely, last_change)
+            AS SELECT
+               schemaname,
+               constraintname,
+               'C',
+               tablename,
+               c_definition,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TO_DATE (NULL)
+            FROM sysdd.db_constraints
+        UNION ALL SELECT
+               schemaname,
+               'C' || SUBSTR (tablename, 1, 32) || TO_CHAR (columnno),
+               'C',
+               tablename,
+               columnname || ' IS NOT NULL',
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+           FROM sysdd.db_columns
+           WHERE mod = 'MAN'
+        UNION ALL SELECT
+               schemaname,
+               'P' || SUBSTR (tablename, 1, 32) || TO_CHAR (keycolumnno),
+               'P',
+               tablename,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+          FROM sysdd.db_columns
+          WHERE keycolumnno IS NOT NULL
+        UNION ALL SELECT
+               schemaname,
+               refname,
+               'R',
+               tablename,
+               columnname,
+               refschemaname,
+               EXPAND (NULL, 32),
+               DECODE (rule, 'DELETE CASCADE',  'CASCADE',
+                             'DELETE RESTRICT', 'NO ACTION',
+                                                rule),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP ("DATE", "TIME")
+          FROM sysdd.db_foreign_keys""")
+    
+    else:
+        createReplaceView (session, 'dba_constraints', """
+              (owner, constraint_name, constraint_type, table_name,
+               search_condition, r_owner, r_constraint_name, delete_rule, status,
+               deferrable, deferred, validated, generated, bad, rely, last_change)
+            AS SELECT
+               schemaname,
+               constraintname,
+               'C',
+               tablename,
+               c_definition,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TO_DATE (NULL)
+            FROM sysdd.db_constraints
+        UNION ALL SELECT
+               schemaname,
+               'C' || SUBSTR (tablename, 1, 32) || TO_CHAR (columnno),
+               'C',
+               tablename,
+               columnname || ' IS NOT NULL',
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+           FROM sysdd.db_columns
+           WHERE mod = 'MAN'
+        UNION ALL SELECT
+               schemaname,
+               'P' || SUBSTR (tablename, 1, 32) || TO_CHAR (keycolumnno),
+               'P',
+               tablename,
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL, 32),
+               EXPAND (NULL,  9),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'GENERATED NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                               TIMESTAMP ("DATE",    "TIME")))
+          FROM sysdd.db_columns
+          WHERE keycolumnno IS NOT NULL
+        UNION ALL SELECT
+               schemaname,
+               refname,
+               'R',
+               tablename,
+               columnname,
+               refschemaname,
+               EXPAND (NULL, 32),
+               DECODE (rule, 'DELETE CASCADE',  'CASCADE',
+                             'DELETE RESTRICT', 'NO ACTION',
+                                                rule),
+               'ENABLED ',
+               'NOT DEFERRABLE',
+               'IMMEDIATE',
+               'VALIDATED    ',
+               'USER NAME',
+               EXPAND (NULL, 3),
+               EXPAND (NULL, 4),
+               TIMESTAMP ("DATE", "TIME")
+          FROM sysdd.db_foreign_keys""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_constraints TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_cons_columns', """
+          (owner, constraint_name, table_name, column_name, position)
+        AS SELECT
+            schemaname,
+            constraintname,
+            tablename,
+            columnname,
+            DECODE (type, 'CHECK', NULL, columnno)
+           FROM sysdd.db_constcols""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_cons_columns TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_data_files', """
+          (file_name, file_id, tablespace_name, bytes, blocks, status)
+        AS SELECT
+           EXPAND (NULL, 72),
+           1,
+            'SYSTEM                        ',
+           0, 0,
+           'AVAILABLE'
+        FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_data_files TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_db_links', """
+          (owner, db_link, username, password, host, created)
+        AS SELECT
+            USER,
+            EXPAND (NULL,  32),
+            EXPAND (NULL,  32),
+            EXPAND (NULL,  32),
+            EXPAND (NULL, 200),
+            TO_DATE (NULL)
+        FROM dual
+        WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_db_links TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_ddl_locks', """
+          (session_id, owner, name, type, mode_held, mode_requested)
+      AS SELECT
+           0,
+           USER,
+           '                              ',
+           '                                        ',
+           'NONE     ',
+           'EXCLUSIVE'
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_ddl_locks TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_dependencies', """
+           (owner, name, type, referenced_owner, referenced_name, referenced_type,
+            referenced_link_name, dependency_type)
+      AS SELECT
+           schemaname,
+           tablename,
+           'VIEW        ',
+           refname,
+           reftablename,
+           'TABLE       ',
+           EXPAND (NULL, 128),
+           'HARD'
+         FROM sysdd.db_view_uses_table""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_dependencies TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_dml_locks', """
+          (session_id, owner, name, mode_held, mode_requested,
+           last_convert, blocking_others)
+      AS SELECT
+           0,
+           USER,
+           '                              ',
+           'NONE         ',
+           'EXCLUSIVE    ',
+           SYSDATE,
+           EXPAND (NULL, 40)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_dml_locks TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_errors', """
+      AS SELECT *
+      FROM all_errors""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_errors TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_exp_files', """
+          (exp_version, exp_type, file_name, user_name, "TIMESTAMP")
+        AS SELECT
+           0,
+           'CUMULATIVE ',
+           EXPAND (NULL, 100),
+           USER,
+           SYSDATE
+        FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_exp_files TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_exp_objects', """
+          (owner, object_name, object_type,
+           cumulative, incremental, export_version)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 12),
+           SYSDATE,
+           SYSDATE,
+           0
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_exp_objects TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_exp_version', """
+      AS SELECT 0 exp_version FROM dual""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_exp_version TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_extents', """
+          (owner, segment_name, segment_type, tablespace_name,
+           extent_id, file_id, block_id, bytes, blocks,
+           relative_fno, partition_name)
+        AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 81),
+           EXPAND (NULL, 17),
+           'SYSTEM                        ',
+           0,
+           0,
+           0,
+           0,
+           0,
+           SIGN (NULL),
+           EXPAND (NULL, 32)
+        FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_extents TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_free_space', """
+          (tablespace_name, file_id, block_id, bytes, blocks, relative_fno)
+        AS SELECT
+            'SYSTEM                        ',
+            1,
+            2,
+            unused_pages*to_number("VALUE"),
+            unused_pages,
+            SIGN (NULL)
+            FROM sysdd.serverdb_stats, sysdd.ACTIVECONFIGURATION x
+            WHERE x.PARAMETERNAME = '_PAGE_SIZE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_free_space TO PUBLIC')
+
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+
+        createReplaceView (session, 'dba_indexes', """
+              (owner, index_name, index_type, table_owner, table_name, table_type,
+               uniqueness, compression, prefix_length,
+               tablespace_name, ini_trans, max_trans, initial_extent, next_extent,
+               min_extents, max_extents, pct_increase,
+               pct_threshold, include_column, freelists, freelist_groups,
+               pct_free, logging, blevel, leaf_blocks,
+               distinct_keys, avg_leaf_blocks_per_key, avg_data_blocks_per_key,
+               clustering_factor, status,
+               num_rows, sample_size, last_analyzed, degree, instances, partitioned,
+               temporary, generated, secondary, buffer_pool, user_stats, duration,
+               pct_direct_access, ityp_owner, ityp_name, parameters, global_stats)
+            AS SELECT
+                schemaname,
+                indexname,
+                'NORMAL      ',
+                schemaname,
+                tablename,
+                'TABLE',
+                DECODE (type, ' ', UNICODE('NONUNIQUE'), type),
+                'DISABLED   ',
+                SIGN (NULL),
+                'SYSTEM                        ',
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                'YES',
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                'VALID      ',
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                EXPAND (NULL, 40),
+                EXPAND (NULL, 40),
+                'NO ',
+                'N',
+                'N',
+                'N',
+                EXPAND (NULL,  7),
+                'NO ',
+                EXPAND (NULL, 15),
+                SIGN   (NULL),
+                EXPAND (NULL, 30),
+                EXPAND (NULL, 30),
+                EXPAND (NULL, 1000),
+                EXPAND (NULL,  3)
+            FROM sysdd.db_indexes
+              where columnno = 1""")
+    
+    else:
+        createReplaceView (session, 'dba_indexes', """
+              (owner, index_name, index_type, table_owner, table_name, table_type,
+               uniqueness, compression, prefix_length,
+               tablespace_name, ini_trans, max_trans, initial_extent, next_extent,
+               min_extents, max_extents, pct_increase,
+               pct_threshold, include_column, freelists, freelist_groups,
+               pct_free, logging, blevel, leaf_blocks,
+               distinct_keys, avg_leaf_blocks_per_key, avg_data_blocks_per_key,
+               clustering_factor, status,
+               num_rows, sample_size, last_analyzed, degree, instances, partitioned,
+               temporary, generated, secondary, buffer_pool, user_stats, duration,
+               pct_direct_access, ityp_owner, ityp_name, parameters, global_stats)
+            AS SELECT
+                schemaname,
+                indexname,
+                'NORMAL      ',
+                schemaname,
+                tablename,
+                'TABLE',
+                DECODE (type, ' ', 'NONUNIQUE', type),
+                'DISABLED   ',
+                SIGN (NULL),
+                'SYSTEM                        ',
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                'YES',
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                'VALID      ',
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                EXPAND (NULL, 40),
+                EXPAND (NULL, 40),
+                'NO ',
+                'N',
+                'N',
+                'N',
+                EXPAND (NULL,  7),
+                'NO ',
+                EXPAND (NULL, 15),
+                SIGN   (NULL),
+                EXPAND (NULL, 30),
+                EXPAND (NULL, 30),
+                EXPAND (NULL, 1000),
+                EXPAND (NULL,  3)
+            FROM sysdd.db_indexes
+              where columnno = 1""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_indexes TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_ind_columns', """
+          (index_owner, index_name, table_owner, table_name,
+           column_name, column_expression,
+           column_position, column_length, descend)
+        AS SELECT
+            schemaname,
+            indexname,
+            schemaname,
+            tablename,
+            columnname,
+            EXPAND (NULL, 40),
+            columnno,
+            DECODE (datatype, 'NUMBER', 22,
+                              'FLOAT',  22,
+                              'DATE',   7,
+                              'LONG',   28,
+                                        len),
+            DECODE (sort, 'ASC', 'N   ', 'DESC', 'Y   ')
+        FROM sysdd.db_indexes""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_ind_columns TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_locks', """
+          (session_id, lock_type, mode_held, mode_requested,
+           lock_id1, lock_id2, last_convert, blocking_others)
+      AS SELECT
+           0,
+           'LS',
+           'NONE',
+           'NONE',
+           0,
+           0,
+           TO_DATE (NULL),
+           EXPAND (NULL, 40)
+         FROM dual WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_locks TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_objects', """
+          (owner, object_name, subobject_name, object_id, data_object_id,
+           object_type, created, last_ddl_time, "TIMESTAMP", status,
+           temporary, generated, secondary)
+        AS SELECT
+            owner,
+            objectname,
+            EXPAND (NULL, 32),
+            objectid,
+            SIGN (NULL),
+            EXPAND (type, 11),
+            TIMESTAMP ("DATE", "TIME"),
+            TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                            TIMESTAMP ("DATE",    "TIME"))),
+            TO_CHAR (TIMESTAMP ("DATE", "TIME"), 'YYYY-MM-DD:HH:MI:SS'),
+            'VALID  ',
+            'N',
+            'N',
+            'N'
+        FROM sysdd.db_objects
+        WHERE objectname <> ' '""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_objects TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_object_size', """
+          (owner, name, type, source_size, parsed_size, code_size, error_size)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 12),
+           0,
+           0,
+           0,
+           0
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_object_size TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_obj_audit_opts', """
+          (owner, object_name, object_type,
+           alt, aud, com, del, gra, ind, ins, loc, ren, sel,
+           upd, ref, exe, cre, rea, wri)
+        AS SELECT
+            schemaname,
+            tablename,
+            'TABLE      ',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-'
+         FROM sysdd.db_tables
+            WHERE type = 'TABLE'
+        UNION ALL SELECT
+            schemaname,
+            tablename,
+            'VIEW       ',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-',
+            '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-', '-/-'
+        FROM sysdd.db_views""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_obj_audit_opts TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_priv_audit_opts', """
+          (user_name, proxy_name, privilege, success, failure)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 30),
+           EXPAND (NULL, 40),
+           EXPAND (NULL, 10),
+           EXPAND (NULL, 10)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_priv_audit_opts TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_profiles', """
+          (profile, resource_name, resource_type, limit)
+      AS SELECT
+           USER,
+           EXPAND (NULL, 32),
+           EXPAND (NULL,  8),
+           EXPAND (NULL, 40)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_profiles TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_roles', """
+          (role, password_required)
+      AS SELECT
+           "ROLE",
+           EXPAND ("PASSWORD", 8)
+         FROM sys.roles""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_roles TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_role_privs', """
+          (grantee, granted_role, admin_option, default_role)
+      AS SELECT
+           GRANTEE,
+           ROLE,
+           'NO ',
+           DEFAULTROLE
+         FROM sysdd.db_roles""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_role_privs TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_rollback_segs', """
+          (segment_name, owner, tablespace_name, segment_id, file_id, block_id,
+           initial_extent, next_extent, min_extents, max_extents,
+           pct_increase, status, instance_num, relative_fno)
+        AS SELECT
+           EXPAND (NULL, 30),
+           USER,
+           'SYSTEM                        ',
+           0,
+           0,
+           0,
+           0,
+           0,
+           0,
+           0,
+           0,
+           ' ',
+           0,
+           0
+        FROM dual
+           WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_rollback_segs TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_segments', """
+          (owner, segment_name, partition_name, segment_type, tablespace_name,
+           header_file, header_block, bytes, blocks, extents,
+           initial_extent, next_extent, min_extents, max_extents,
+           pct_increase, freelists, freelist_groups, relative_fno, buffer_pool)
+        AS SELECT
+            schemaname,
+            EXPAND (tablename, 81),
+            EXPAND (NULL, 32),
+            'TABLE            ',
+            'SYSTEM                        ',
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL)
+        FROM sysdd.db_tables
+        WHERE type = 'TABLE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_segments TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_sequences', """
+          (sequence_owner, sequence_name, min_value, max_value, increment_by,
+           cycle_flag, order_flag, cache_size, last_number)
+        AS SELECT
+            schemaname,
+            sequence_name,
+            min_value,
+            max_value,
+            increment_by,
+            cycle_flag,
+            order_flag,
+            cache_size,
+            last_number
+        FROM sysdd.db_sequences""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_sequences TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_snapshots', """
+           (owner, name, table_name, master_view, master_owner, master,
+            master_link, can_use_log, updatable, refresh_method,
+            last_refresh, error, fr_operations, cr_operations, type,
+            "NEXT", start_with, refresh_group, update_trig, update_log,
+            query, master_rollback_seg, status, refresh_mode, prebuilt)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 128),
+           'YES',
+           'NO ',
+           TO_DATE (NULL),
+           SIGN (NULL),
+           'FORCE   ',
+           EXPAND (NULL, 200),
+           TO_DATE (NULL),
+           SIGN (NULL),
+           EXPAND (NULL, 11),
+           EXPAND (NULL, 30),
+           EXPAND (NULL, 30),
+           EXPAND (NULL, 254),
+           EXPAND (NULL, 10),
+           EXPAND (NULL, 10),
+           EXPAND (NULL, 30),
+           'VALID  ',
+           'NEVER   ',
+           'NO '
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_snapshots TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_snapshot_logs', """
+          (log_owner, master, log_table, log_trigger, rowids,
+           primary_key, filter_columns, current_snapshots, snapshot_id)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL,  3),
+           EXPAND (NULL,  3),
+           EXPAND (NULL,  3),
+           TO_DATE (NULL),
+           SIGN (NULL)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_snapshot_logs TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_source', """
+          (owner, name, type, line, text)
+      AS SELECT
+           USER,
+           EXPAND (NULL,  32),
+           EXPAND (NULL,  12),
+           1,
+           EXPAND (NULL, 200)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_source TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_stmt_audit_opts', """
+          (user_name, proxy_name, audit_option, success, failure)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 40),
+           EXPAND (NULL, 10),
+           EXPAND (NULL, 10)
+        FROM dual
+          WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_stmt_audit_opts TO PUBLIC')
+
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+
+        createReplaceView (session, 'dba_synonyms', """
+              (owner, synonym_name, table_owner, table_name, db_link)
+            AS SELECT
+                DECODE (synonymowner,
+                        'SYS', DECODE ("PUBLIC",
+                                        'YES', UNICODE('PUBLIC'),
+                                               synonymowner),
+                        synonymowner),
+                synonymname,
+                schemaname,
+                tablename,
+                EXPAND (NULL, 128)
+            FROM sysdd.db_synonyms""")
+    
+    else:
+        createReplaceView (session, 'dba_synonyms', """
+              (owner, synonym_name, table_owner, table_name, db_link)
+            AS SELECT
+                DECODE (synonymowner,
+                        'SYS', DECODE ("PUBLIC",
+                                        'YES', 'PUBLIC',
+                                                   synonymowner),
+                        synonymowner),
+                synonymname,
+                schemaname,
+                tablename,
+                EXPAND (NULL, 128)
+            FROM sysdd.db_synonyms""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_synonyms TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_sys_privs', """
+          (grantee, privilege, admin_option)
+      AS SELECT
+           USER,
+           EXPAND (' ', 40),
+           'NO '
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_sys_privs TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_tables', """
+          (owner, table_name, tablespace_name, cluster_name, iot_name,
+           pct_free, pct_used, ini_trans, max_trans,
+           initial_extent, next_extent, min_extents, max_extents, pct_increase,
+           freelists, freelist_groups, logging, backed_up, num_rows,
+           blocks, empty_blocks, avg_space, chain_cnt, avg_row_len,
+           avg_space_freelist_blocks, num_freelist_blocks, degree, instances,
+           cache, table_lock, sample_size, last_analyzed, partitioned, iot_type,
+           temporary, secondary, nested, buffer_pool, row_movement, global_stats,
+           user_stats, duration, skip_corrupt, monitoring)
+        AS SELECT
+            schemaname,
+            tablename,
+            'SYSTEM                        ',
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            'YES',
+            'N',
+            rows,
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            SIGN (NULL),
+            EXPAND (NULL, 10),
+            EXPAND (NULL, 10),
+            'N',
+            'ENABLED ',
+            NVL ( NVL (sample_percent, sample_rows), 20000),
+            TIMESTAMP (NVL (TIMESTAMP (alterdate, altertime),
+                            TIMESTAMP ("DATE",    "TIME"))),
+            'NO ',
+            EXPAND (NULL, 12),
+            'N',
+            'N',
+            'NO ',
+            EXPAND (NULL,  7),
+            EXPAND (NULL,  8),
+            EXPAND (NULL,  3),
+            'NO ',
+            EXPAND (NULL, 15),
+            EXPAND (NULL,  8),
+            EXPAND (NULL,  3)
+          FROM sysdd.db_tables
+            WHERE type = 'TABLE'""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_tables TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_tablespaces', """
+          (tablespace_name, initial_extent, next_extent, min_extents, max_extents,
+           pct_increase, min_extlen, status, contents, logging, extent_management,
+           allocation_type, plugged_in
+           )
+         AS SELECT
+           'SYSTEM                        ',
+           999999999999999999,
+           0,
+           1,
+           1,
+           0,
+           0,
+           'UNDEFINED',
+           EXPAND (NULL,  9),
+           EXPAND (NULL,  9),
+           EXPAND (NULL, 10),
+           EXPAND (NULL,  9),
+           EXPAND (NULL,  3)
+         FROM dual
+           WHERE 0=1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_tablespaces TO PUBLIC')
+
+
+    rc = sqlRC (session, """SELECT PARAMETERNAME 
+        FROM SYSDD.ACTIVECONFIGURATION 
+        WHERE PARAMETERNAME = '_UNICODE'
+        AND "VALUE" = 'YES'""")
+
+    if rc == 0:
+
+        createReplaceView (session, 'dba_tab_columns', """
+                    (owner, table_name, column_name, data_type, data_type_mod,
+                    data_type_owner, data_length, data_precision, data_scale,
+                    nullable, column_id, default_length, data_default,
+                    num_distinct, low_value, high_value, density,
+                    num_nulls, num_buckets, last_analyzed, sample_size,
+                    character_set_name, char_col_decl_length, global_stats,
+                    user_stats, avg_col_len)
+            AS SELECT
+                schemaname,
+                tablename,
+                columnname,
+                DECODE (datatype, 'CHAR',    UNICODE(DECODE (code, 'BYTE', 'RAW', 'VARCHAR2')),
+                                  'FLOAT',   UNICODE(DECODE (len, NULL, 'NUMBER', 'FLOAT')),
+                                  'VARCHAR', UNICODE('VARCHAR2'),
+                                             SUBSTR (datatype, 1, 30)),
+                EXPAND (NULL,  3),
+                EXPAND (NULL, 32),
+                DECODE (datatype, 'NUMBER', 22,
+                                  'FLOAT',  22,
+                                  'DATE',    7,
+                                  'LONG',   28,
+                                            len),
+                DECODE (datatype, 'NUMBER', len, 'FLOAT', len),
+                DECODE (datatype, 'NUMBER', "DEC", 'FIXED', "DEC"),
+                SUBSTR (nullable, 1, 1),
+                columnno,
+                DECODE (datatype, 'NUMBER', LENGTH (LTRIM ("DEFAULT")),
+                                  'FLOAT',  LENGTH (LTRIM ("DEFAULT")),
+                                            LENGTH ("DEFAULT"))
+                +
+                DECODE (mod, 'OPT', 0, 1),
+                "DEFAULT",
+                distinctvalues,
+                EXPAND (NULL, 32),
+                EXPAND (NULL, 32),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                SIGN (NULL),
+                EXPAND ('CHAR_CS', 44),
+                DECODE (datatype, 'CHAR',    len,
+                                  'VARCHAR', len, NULL),
+                EXPAND (NULL,  3),
+                'NO ',
+                SIGN (NULL)
+              FROM sysdd.db_columns""")
+    
+    else:
+        createReplaceView (session, 'dba_tab_columns', """
+                    (owner, table_name, column_name, data_type, data_type_mod,
+                    data_type_owner, data_length, data_precision, data_scale,
+                    nullable, column_id, default_length, data_default,
+                    num_distinct, low_value, high_value, density,
+                    num_nulls, num_buckets, last_analyzed, sample_size,
+                    character_set_name, char_col_decl_length, global_stats,
+                    user_stats, avg_col_len)
+            AS SELECT
+                schemaname,
+                tablename,
+                columnname,
+                DECODE (datatype, 'CHAR',    DECODE (code, 'BYTE', 'RAW', 'VARCHAR2'),
+                                  'FLOAT',   DECODE (len, NULL, 'NUMBER', 'FLOAT'),
+                                  'VARCHAR', 'VARCHAR2',
+                                             SUBSTR (datatype, 1, 30)),
+                EXPAND (NULL,  3),
+                EXPAND (NULL, 32),
+                DECODE (datatype, 'NUMBER', 22,
+                                  'FLOAT',  22,
+                                  'DATE',    7,
+                                  'LONG',   28,
+                                            len),
+                DECODE (datatype, 'NUMBER', len, 'FLOAT', len),
+                DECODE (datatype, 'NUMBER', "DEC", 'FIXED', "DEC"),
+                SUBSTR (nullable, 1, 1),
+                columnno,
+                DECODE (datatype, 'NUMBER', LENGTH (LTRIM ("DEFAULT")),
+                                  'FLOAT',  LENGTH (LTRIM ("DEFAULT")),
+                                            LENGTH ("DEFAULT"))
+                +
+                DECODE (mod, 'OPT', 0, 1),
+                "DEFAULT",
+                distinctvalues,
+                EXPAND (NULL, 32),
+                EXPAND (NULL, 32),
+                SIGN (NULL),
+                SIGN (NULL),
+                SIGN (NULL),
+                TO_DATE (NULL),
+                SIGN (NULL),
+                EXPAND ('CHAR_CS', 44),
+                DECODE (datatype, 'CHAR',    len,
+                                  'VARCHAR', len, NULL),
+                EXPAND (NULL,  3),
+                'NO ',
+                SIGN (NULL)
+              FROM sysdd.db_columns""")
+    
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_tab_columns TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_tab_comments', """
+          (owner, table_name, table_type, comments)
+        AS SELECT
+            schemaname,
+            tablename,
+            EXPAND (type, 11),
+            c_comment
+        FROM sysdd.db_tables""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_tab_comments TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_tab_privs', """
+          (grantee, owner, table_name, grantor, privilege, grantable)
+        AS SELECT
+            grantee,
+            schemaname,
+            name1,
+            grantor,
+            EXPAND (RTRIM  (privileges, '+'), 40),
+            DECODE (INSTR (privileges, '+'), 0, 'NO', 'YES')
+        FROM sysdd.db_new_privileges
+           WHERE name2 IS NULL""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_tab_privs TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_triggers', """
+          (owner, trigger_name, trigger_type, triggering_event,
+           table_owner, base_object_type, table_name, column_name,
+           referencing_names, when_clause,
+           status, description, action_type, trigger_body)
+      AS SELECT
+           schemaname,
+           triggername,
+           'AFTER EACH ROW  ',
+           DECODE (SUBSTR (insert, 1, 1) ||
+                   SUBSTR (update, 1, 1) ||
+                   SUBSTR (delete, 1, 1),
+                   'YNN', 'INSERT',
+                   'NYN', 'UPDATE',
+                   'NNY', 'DELETE',
+                   'YYN', 'INSERT OR UPDATE',
+                   'YNY', 'INSERT OR DELETE',
+                   'NYY', 'UPDATE OR DELETE',
+                   'YYY', 'INSERT OR UPDATE OR DELETE',
+                          EXPAND ('ERROR', 75)),
+           schemaname,
+           'TABLE           ',
+           tablename,
+           EXPAND (NULL,  32),
+           EXPAND (NULL,  87),
+           EXPAND (NULL, 200),
+           'ENABLED ',
+           c_definition,
+           EXPAND (NULL, 11),
+           NULL
+         FROM sysdd.db_triggers""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_triggers TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_trigger_cols', """
+          (trigger_owner, trigger_name,
+           table_owner, table_name, column_name, column_list, column_usage)
+      AS SELECT
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           EXPAND (NULL, 32),
+           'NO ',
+           EXPAND (NULL, 17)
+         FROM dual
+         WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_trigger_cols TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_ts_quotas', """
+          (tablespace_name, username, bytes, max_bytes, blocks, max_blocks)
+       AS SELECT 'SYSTEM                        ',
+                 USER,
+                 0,
+                 999999999999999999,
+                 0,
+                 999999999999999999
+            FROM dual
+            WHERE 0 = 1""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_ts_quotas TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_users', """
+          (username, user_id, password, account_status, lock_date, expiry_date,
+           default_tablespace, temporary_tablespace, created, profile,
+           initial_rsrc_consumer_group, external_name)
+        AS SELECT
+            name,
+            userid,
+            EXPAND (NULL, 30),
+            EXPAND (NULL, 30),
+            TO_DATE (NULL),
+            TO_DATE (NULL),
+            'SYSTEM                        ',
+            'SYSTEM                        ',
+            CREATEDATE,
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 32),
+            EXPAND (NULL, 200)
+        FROM syscatalog.authorization where isuser or isusergroup""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_users TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_views', """
+           (owner, view_name, text_length, text,
+            type_text_length, type_text, oid_text_length, oid_text,
+            view_type_owner, view_type)
+        AS SELECT
+            schemaname,
+            tablename,
+            len,
+            definition,
+            SIGN   (NULL),
+            EXPAND (NULL, 200),
+            SIGN   (NULL),
+            EXPAND (NULL, 200),
+            EXPAND (NULL,  30),
+            EXPAND (NULL,  30)
+        FROM sysdd.db_views""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_views TO PUBLIC')
+
+
+    createReplaceView (session, 'dba_waiters', """
+          (waiting_session, holding_session, type, mode_held, mode_requested,
+           lock_id1, lock_id2)
+            AS SELECT
+                r.session,
+                h.session,
+                EXPAND (NULL, 26),
+                h.lockmode,
+                r.reqmode,
+                r.rowid,
+                h.rowid
+               FROM sysdba.lockstatistics r, sysdba.lockstatistics h
+               WHERE r.reqmode IS NOT NULL AND r.lockmode IS     NULL
+                 AND h.reqmode IS     NULL AND h.lockmode IS NOT NULL
+                 AND h.tableid = r.tableid
+                 AND (
+                      h.rowid = r.rowid AND
+                         (h.lockmode = 'ROW_EXCLUSIVE' OR r.reqmode = 'ROW_EXCLUSIVE')
+                      OR
+                      (h.lockmode = 'ROW_EXCLUSIVE' AND r.reqmode = 'TAB_SHARE')
+                      OR
+                      (h.lockmode = 'TAB_SHARE' AND r.reqmode = 'ROW_EXCLUSIVE')
+                      OR
+                      h.lockmode = 'SYS_EXCLUSIVE'
+                      OR
+                      r.reqmode = 'SYS_EXCLUSIVE'
+                      OR
+                      h.lockmode = 'TAB_EXCLUSIVE'
+                      OR
+                      r.reqmode = 'TAB_EXCLUSIVE')
+      """)
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON dba_waiters TO PUBLIC')
+
+    createReplaceView (session, '"V$NLS_PARAMETERS"', """
+        (parameter, "VALUE") AS
+      SELECT EXPAND ('NLS_CURRENCY',           30), '$'
+        FROM dual
+      UNION
+      SELECT EXPAND ('NLS_NUMERIC_CHARACTERS', 30), '.,'
+        FROM dual
+      UNION
+      SELECT EXPAND ('NLS_DATE_FORMAT',        30), date_format
+        FROM sysdd.connectparameters
+      UNION
+      SELECT EXPAND ('NLS_DATE_LANGUAGE',      30), 'ENG'
+        FROM dual""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON "V$NLS_PARAMETERS" TO PUBLIC')
+
+
+    loaderCmd (session, 'COMMIT')
+
+    loaderCmd (session, 'SQLMODE INTERNAL')
+
+    switchToDefaultSchema (session, options)
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

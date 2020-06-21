@@ -1,0 +1,123 @@
+#!/usr/bin/perl
+# @(#) newerfile    1995-08-01  Holger Becker
+#
+# findet Module mit einem neueren Datum auf einem weiter hinten 
+# liegendem Releas-Baum 
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Std;
+use File::Copy;
+use DUser;
+
+
+do "$TOOLVARS";
+
+if (!getopts('vlh') || $opt_h) {
+
+    print <DATA>;
+    exit 1;
+}
+
+print "START  newerfile\n" if $opt_v;
+
+$FileList = "$TMP/newerfile.dat";
+$StatFile = "statfile.PROT";
+$NewerFileProt = "newerfile.prt";
+
+
+if ($opt_l) {
+    print "  >> search 'newer file warning' on $WRK/fast/prot/kernel.shm.p0\n" if $opt_v;
+    copy ("$WRK/fast/prot/kernel.shm.p0", "$FileList");
+} else {
+    print "  >> run imf to get 'newer file warning'\n" if $opt_v;
+    open(SAVEOUT, ">&STDOUT");
+    open(STDOUT, ">$FileList");
+    @ARGV = ("-n", "kernel");
+    do "$TOOL/bin/imf$TOOLEXT";
+    if ( $@ ) { die "Error while executing imf$TOOLEXT: $@" }
+    close(STDOUT);
+    open(STDOUT, ">&SAVEOUT");
+}
+
+
+print "  >> analyze $FileList output\n" if $opt_v;
+open(FILE_IN, "<$FileList"); 
+while(<FILE_IN>) {
+    if (/WARNING: newer file on later VMAKE_PATH/) {
+	$_ = <FILE_IN>;
+	if ( /\((.*) on (\\\\P\d*\\V\d*\\).*\)/i ) {
+	    print "  >>> found $1 \ton $2\n" if $opt_v;
+	    push @ModulList, $1;
+	    push @NodeList,  $2;
+	}
+    }
+}
+close(FILE_IN);
+unlink("$FileList");
+
+print "  >> search last user\n" if $opt_v;
+open (OUTFILE,">$NewerFileProt") || die "Can't open $NewerFileProt";
+foreach $Modul (@ModulList) {
+    $LastUser = "UNKNOWN";
+    $Node     = shift @NodeList;
+    open(FILE_IN, "<$Node$StatFile") || die "can't open $Node$StatFile";
+    while (<FILE_IN>) {
+	/(.*?) (.*?)  (.*?) (.*)\((.*):(.*)\)/;
+	# $1 timestamp, $1 date, $2 time, $3 file, $4 status $5 Rechner, $6 duser
+	local($file, $status, $duser);
+	$file = $3; $status = $4; $duser = $6;
+	if ( ($file =~ /$Modul/i) && ($status = "UNLOCKED") ) {
+	    $LastUser = $duser;
+	}
+    }
+    close(FILE_IN);
+
+    if (  $LastUser eq "UNKOWN" ) {
+	@UserName = ();
+    } else {
+	print "  >> get username for $LastUser\n" if $opt_v;
+	@UserName = DUser::userlookup($LastUser);
+    }
+
+    print "  >> $Modul unlocked by $LastUser (@UserName)\n" if $opt_v;
+
+    print OUTFILE "$Modul changed on $Node by $LastUser (@UserName)\n";
+}
+close (OUTFILE);
+
+print "END newerfile see $NewerFileProt for results\n" if $opt_v;
+
+__DATA__
+
+
+  USAGE:  newerfile [-hvl]
+
+    try to find newer files on later VMAKE_PATH
+
+  OPTIONS:
+    
+    -h  : prints this help screen
+    -v  : verbose mode
+    -l  : worked on last make protokol
+

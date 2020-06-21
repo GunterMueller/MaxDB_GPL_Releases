@@ -1,0 +1,12 @@
+*   *ID* A16UPD1  DBCMD    changed on 1992-09-28-13.22.39 by ADMIN     *
+file CONNECT ( KERN TEST !
+CREATE TABLE T ( F1 FIXED(4), F2 FIXED (4), F3 FIXED(4))!
+INSERT T VALUES (6,4,9)!
+DATA!
+PARS_THEN_EX!
+UPDATE T SET F1 = 9, F3 = :A WHERE F2 = 4 !
+N 4 335
+
+NODATA !
+rollback WORK RELEASE !
+pars_execute !

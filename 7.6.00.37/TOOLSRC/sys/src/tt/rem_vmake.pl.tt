@@ -1,0 +1,658 @@
+#!/usr/bin/perl
+#
+# rem_vmake.pl [-fast | -slow | -quick] [ -free ]
+#              [ -uselocaldev ] [ -bit64 ]
+#              [ -os name ] [ -host name ]
+#              [ -e cmd ]
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Getopt::Long;
+use lcmake;
+use SDB::Remote::WebMake;
+
+#
+#########################
+# PTS 1107022
+sub addIPAddress
+{
+  chomp ( local($local_host) = `hostname` );
+  local($lh_name, $lh_aliases, $lh_addrtype, $lh_length, @lh_addr) = gethostbyname($local_host);
+  local($ipA,$ipB,$ipC,$ipD) = unpack('C4', $lh_addr[0]);
+#  print "IP Address of $local_host = $ipA.$ipB.$ipC.$ipD\n";
+  if ($usewebmode)
+  {
+  	$remote_cmd .= "&src_dir=$ipA.$ipB.$ipC.${ipD}:";
+  }
+  else
+  {
+    $remote_cmd .= "$ipA.$ipB.$ipC.$ipD ";
+  }
+}
+#
+#########################
+sub addLocaldev
+{
+	if ( defined $uselocaldev ) {
+		$local_own  = $OWN;
+		$local_own  =~ s/\\/\//g;
+		$remote_cmd .= "$local_own//";
+	} else {
+		$remote_cmd .= "X";
+	}
+	$remote_cmd .= " " unless ($usewebmode);
+}
+#
+#########################
+sub addBit64
+{
+	if ( defined $bit64 ) {
+		
+		if ($usewebmode)
+		{
+			$remote_cmd .= "&bit64=1";
+		}
+		else
+		{
+			$remote_cmd .= "BIT64 ";
+		}
+	}
+}
+
+#
+#########################
+sub getMakeVersion
+{
+	my $makeversion="";
+	if ( defined $ENV{'IGMEVERSION'} )
+	{
+		$makeversion = $ENV{IGMEVERSION};
+	}
+	else
+	{
+		if ( defined $ENV{'LC_VER_STR'} && ($ENV{'LC_VER_STR'} =~ /^\d\.\d/) &&
+		! (defined $ENV{'USE_REM_IGME'} || ($ENV{'RELVER'} =~ /TOOL/)))
+		{
+			if ($ENV{'LC_VER_STR'} =~ /^(\d)\.?(\d)\.(.*)$/)
+			{
+				$makeversion = "$1.$2.$3";
+				$makeversion =~ tr /a-z/A-Z/;
+			}
+			else
+			{
+				die "wrong format of environtment variable 'LC_VER_STR'\n";
+			}
+		}
+		elsif ( defined($ENV{RELVER})
+		  && defined($ENV{CORRECTION_LEVEL}) )
+		{
+			$makeversion="$ENV{RELVER}";
+			$makeversion =~ s/R(\d)(\d+)/$1.$2/;
+			if ( length($ENV{CORRECTION_LEVEL}) < 2 )
+			{
+				$makeversion .= ".0$ENV{CORRECTION_LEVEL}";
+			}
+			else
+			{
+				$makeversion .= ".$ENV{CORRECTION_LEVEL}";
+			}
+			if (defined $ENV{'USE_REM_IGME'} || ($ENV{'RELVER'} =~ /TOOL/) )
+			{
+				$makeversion .= ".develop";
+			}
+			else
+			{
+				if ( $ENV{'LC_STATE'} =~ /RAMP/ )
+				{
+					if ( length($ENV{'BUILDPRAEFIX'}) < 2 )
+					{
+						$makeversion .= ".0$ENV{'BUILDPRAEFIX'}";
+					}
+					else
+					{
+						$makeversion .= ".$ENV{'BUILDPRAEFIX'}";
+					}	
+				}
+				else
+				{	
+					$makeversion .= ".$ENV{'LC_STATE'}";
+				}
+			}
+		}
+		if ( $makeversion =~ /7\.([367])\.00\.dev/i )
+		{
+			$makeversion = "7.$1.dev";
+		}
+		elsif ( ($makeversion =~ /7\.3\.dev/i ) && ( $ENV{CORRECTION_LEVEL} == 1 ))
+		{
+			$makeversion = "7.3.01.dev";
+		}
+		
+	}
+	return $makeversion;
+	
+}
+
+#
+#########################
+sub addMakeVersion
+{
+	unless ($usewebmode)
+	{
+		if (defined $ENV{'USE_REM_IGME'} || ($ENV{'RELVER'} =~ /TOOL/) || $host eq $REMUSER_HOST{'ia64'} )
+		{
+			$remote_cmd .= "IGME ";
+		}
+		else
+		{
+			$remote_cmd .= "MAKE ";
+		}
+	}
+		
+	$remote_cmd .="&release=" if ($usewebmode);
+	$remote_cmd .= getMakeVersion();
+	$remote_cmd .= " " unless ($usewebmode);
+}
+
+#
+#########################
+sub addAPOInfos
+{
+	if ( defined $ENV{BRANCH_INFO} ) {
+		if ( $usewebmode )
+		{ addparam_to_cmd("branch=$ENV{BRANCH_INFO}"); }
+		else
+		{addparam_to_cmd("branch=apo/$ENV{BRANCH_INFO}"); }
+	} else {
+		print STDERR "Missing evironment variable BRANCH_INFO \n";
+		die;
+	}
+
+	if ( defined $platform )
+	{
+		local @ARGV = ("-apo_src", $OWN, "-platform", $platform);
+		my $lc_count = undef;
+		do "vmakeEnv.pl";
+		eval { $lcversion=vmakeEnv::getformatedLCVERSION(); };
+		if ($@)
+		{
+			print "Error: can't determine version infomation for '$platform':\n  $@\n";
+			die;
+		}
+		
+		eval { $lc_count=vmakeEnv::substitute_LastOK(); };
+		if ($@)
+		{
+			print ("Warning: Can't find out LC_POOL count - use 'LastBuild'\n");
+			$lc_count = "LastBuild";
+		}
+		addparam_to_cmd("lcversion=$lcversion");
+		addparam_to_cmd("lcpool_count=$lc_count");
+	}
+	else
+	{
+		if ( defined $ENV{LCVERSION} ) {
+			addparam_to_cmd("lcversion=$ENV{LCVERSION}");
+		}
+		elsif ( $ENV{$LCROOT} =~ /[\/\\](SAPDB_\d*_b\d\d)$/i )
+		{
+			addparam_to_cmd("lcversion=$1");
+		}
+		else {
+			print STDERR "Missing evironment variable LCVERSION and wrong environment variable LCROOT\n";
+			die;
+		}
+	}
+	
+	if ( defined $ENV{P4CLIENT} ) {
+   		my $hostname = `hostname`;
+		chomp $hostname;
+		addparam_to_cmd("p4client=$ENV{P4CLIENT}") unless ( $hostname eq $ENV{P4CLIENT});
+	} else {
+		print STDERR "Missing evironment variable P4CLIENT\n";
+		die;
+	}
+	
+	if ( defined $ENV{APO_COM_SHORT} ) {
+		addparam_to_cmd("apo_com_short=$ENV{APO_COM_SHORT}");
+	} else {
+		print STDERR "Missing evironment variable APO_COM_SHORT \n";
+		die;
+	}
+	if ( defined $ENV{APO_PATCH_LEVEL} ) {
+		addparam_to_cmd("apo_patch_level=$ENV{APO_PATCH_LEVEL}");
+	} else {
+		print STDERR "Missing evironment variable APO_PATCH_LEVEL \n";
+		die;
+	}
+	if ( defined $ENV{RELSTAT} ) {
+		addparam_to_cmd("relstat=$ENV{RELSTAT}");
+	} else {
+		print STDERR "Missing evironment variable RELSTAT \n";
+		die;
+	}
+	if (($ENV{RELSTAT} eq "PROD") && (defined $ENV{LATEST_CHANGE}) )
+	{
+		addparam_to_cmd("changelist=$ENV{LATEST_CHANGE}");
+	}
+}
+
+#
+#########################
+$fast = $slow = $quick = $free = $uselocaldev =$os = $host = $bit64 = undef;
+$opt_fast = $opt_slow = $opt_quick = $opt_free = $opt_uselocaldev =$opt_os = $opt_host = $opt_bit64 = undef;
+$opt_hosttype = $hosttype = $debug = undef;
+my $action      = "start";
+$usewebmode=undef;
+@webmake_call = ();
+
+@tmp=@ARGV;
+@ARGV=();
+@cmd_opts=();
+my $found_opt_e = 0;
+foreach (@tmp) {
+	    if ( ( $found_opt_e == 0 ) && ($_ ne "-e") )
+ 		{
+ 			  push @ARGV, $_;
+        } else {
+        	  if (($_ =~ /^-e$/)  && ( $found_opt_e == 0 ))
+        	  { $found_opt_e = 1; }
+        	  else
+        	  { push @cmd_opts, $_; }
+       }
+}
+
+GetOptions ('fast!', 'slow!', 'quick!', 'free!', 'uselocaldev!', 'bit64!', 'action:s', 'os:s', 'host:s', 'platform:s', 'hosttype:s', 'debug:s' );
+
+
+$os          = $opt_os          if ( defined $opt_os );
+$host        = $opt_host        if ( defined $opt_host );
+$uselocaldev = $opt_uselocaldev if ( defined $opt_uselocaldev );
+$bit64       = $opt_bit64       if ( defined $opt_bit64 );
+$platform    = $opt_platform    if ( defined $opt_platform );
+$hosttype    = $opt_hosttype    if ( defined $opt_hosttype );
+$debug       = $opt_debug       if ( defined $opt_debug );
+if ( defined $opt_action )
+{
+	if ($opt_action =~ /kill/ )
+	{
+		$action = "stop";
+	}
+	elsif ($opt_action =~ /cleanup/ )
+	{
+		$action = "clean";
+	}
+	elsif ($opt_action =~ /prot/ )
+	{
+		$action = "prot";
+	}
+	elsif ($opt_action =~ /term/ )
+	{
+		$action = "term";
+	}
+	elsif ($opt_action =~ /dir/ )
+	{
+		$action = "dir";
+		$hosttype = 'web';
+	}
+	elsif ($opt_action =~ /cmd/ )
+	{
+		$action = "cmd";
+	}
+}
+
+if ( !defined $host ) {
+	do "$ENV{'TOOL'}\\bin\\remuser_mach$ENV{'TOOLEXT'}";
+	$host = $REMUSER_HOST{$os};
+}
+if ( ! defined $host )
+{
+	print STDERR "missing remote host specification\n" ;
+	die;
+}
+
+if ($host =~ '(.*)/ssh$') {
+    $host = $1;
+    $usessh = 1;
+}
+
+if ( ($hosttype =~ /web/i) && ($REMUSER_HOSTMODE{$host} !~ /web/i))
+{
+	print STDERR "$host doesn't support web make\n" ;
+	die;
+}
+
+if ( $REMUSER_HOSTMODE{$host} =~ /web/i )
+{
+	$usewebmode = 1;
+}
+
+#
+# build compilation mode ( only one out of fast, slow, quick survives... )
+# if none is given command is handled directly...
+#
+if ( defined $opt_fast ) {
+	$opt_slow = undef;
+	$opt_quick = undef;
+}
+if ( defined $opt_slow ) {
+	$opt_fast = undef;
+	$opt_quick = undef;
+}
+if ( defined $opt_quick ) {
+	$opt_fast = undef;
+	$opt_slow = undef;
+}
+if ( defined $opt_free ) {
+	$opt_fast = undef;
+	$opt_quick = undef;
+	$opt_slow = undef;
+}
+
+if ($usessh) {
+    if (-x "$TOOL/bin/plink.exe") {
+        $remshell = "plink.exe  -l remuser -pw Remuser $host";
+    }
+    else {
+        $remshell = "ssh $host -l remuser";
+    }
+}
+else {
+    $remshell = "rsh $host -l remuser";
+}
+
+# PTS 1107022
+if ( defined $ENV{"REM_PARALLEL"} )
+{
+  $title = "$platform: remuser@".$host;
+
+  if ( defined $bit64 )
+  {
+	 $title .= " 64BIT";
+  }
+  else
+  {
+	 $title .= " 32BIT";
+  }
+  if ( defined $uselocaldev )
+  {
+	 $title .= " USING LOCAL SOURCES";
+  }
+  else
+  {
+	 $title .= " IGNORED OWN (NO LOCAL SOURCES)";
+  }
+  if ($ENV{APOMAKE})
+  {
+	 $title .= " apo/$ENV{BRANCH_INFO}";
+     if ( defined $ENV{LCVERSION} )
+	 {
+        $title .= " LC=$ENV{LCVERSION}";
+     }
+	 elsif ( $ENV{$LCROOT} =~ /[\/\\](SAPDB_\d*_b\d\d)$/i )
+	 {
+		$title .= " LC=$1";
+	 }
+	 $title .= " $ENV{APO_COM_SHORT}";
+  }
+  else
+  {
+  	$title .= " ".getMakeVersion();
+  }
+
+  if ( $ENV{"REM_PARALLEL"} eq "Start_Xterm" )
+  {
+	 $remote_cmd = "start \"$title\" /MIN cmd /c \"$remshell ";
+  }
+  else
+  {
+	 $remote_cmd = "start \"$title\" cmd /c \"$remshell ";
+	 @webmake_call = ("start", "\"$title\"", "cmd", "/c");
+  }
+}
+else
+{
+  $remote_cmd = "$remshell ";
+}
+
+if ($usewebmode)
+{
+	# look for internet explorer
+	$remote_cmd = "http://${host}:1080/cgi-perl/".( (defined $ENV{REM_TEST_SCRIPT})? $ENV{REM_TEST_SCRIPT} : "cgicall4") . ".pl?user=$USERNAME";
+}
+else
+{
+	if ( $host eq $REMUSER_HOST{'ia64'} )
+	{
+	  if ( $ENV{'NEW_REMMAKE'} )
+	  {
+	  	$remote_cmd .= "( perl D:\\SAPdevelop\\remuser\\remcall_ia64_new.pl $USERNAME ";
+	  }
+	  else
+	  {
+	  	$ENV{'USE_REM_IGME'} = "yes";
+	  	$remote_cmd .= "( perl D:\\SAPdevelop\\remuser\\remcall_ia64.pl $USERNAME ";
+	  }
+	}
+	else
+	{
+	  my $remperl;
+	  if ($ENV{REM_TOOLSHELL})
+	  { $remperl = $ENV{REM_TOOLSHELL}}
+	  elsif ($ENV{APOMAKE})
+	  { $remperl = "/devtool/local/bin/perl" }	
+	  else
+	  { $remperl = "/usr/bin/perl" }	
+	
+	  $remote_cmd .= "( $remperl -S /rel/TOOL/tool/bin/remcall.pl $USERNAME ";
+	}
+}
+
+addIPAddress();
+addLocaldev();
+
+if ($ENV{APOMAKE})
+{
+	addAPOInfos();
+	if ($usewebmode)
+	{
+		addparam_to_cmd("type=lcapps");
+		$remote_cmd .= "&action=$action";
+		addBit64();
+		if (($action !~ /^cmd$/) && ($cmd_opts[0] =~ /^(lc.*)\.pl/))
+		{
+			shift @cmd_opts;
+			$remote_cmd .= "&cmd=$1.pl";
+		}
+	}
+}
+else
+{
+	addBit64();
+	addMakeVersion();
+	if ($usewebmode)
+	{
+		$remote_cmd .= "&lc_state=$ENV{'LC_STATE'}";
+		$remote_cmd .= "&platform=$platform" if (defined $platform);
+		$remote_cmd .= "&action=$action";
+		$remote_cmd .= "&ignoreown=1" unless ( defined $uselocaldev);
+	}
+	# profile=old&cmd=imf.pl&cmdparam=--mail&cmdparam=irconf.lnk
+	
+	# default is make (imf imq, ims)
+	unless (($action =~ /term|cmd/i) && ($usewebmode))
+	{
+		$remote_cmd .= "&cmd=" if ($usewebmode);
+		if (($action =~ /prot|term/i) && ($usewebmode))
+		{
+			my $protcall = shift @cmd_opts;
+			chomp $protcall;
+			$remote_cmd .= "$protcall"
+		}
+		else
+		{
+			$remote_cmd .= "imf" if ( defined $opt_fast );
+			$remote_cmd .= "ims" if ( defined $opt_slow );
+			$remote_cmd .= "imq" if ( defined $opt_quick );
+		}
+		if ($usewebmode)
+		{ $remote_cmd .= ".pl"; }
+		else
+		{ $remote_cmd .= " "; }
+	}
+	# cut ipf|ipq|ips
+	if ($action !~ /^cmd$/)
+	{ @cmd_opts = lcmake::CreateQualifiedTargetList(@cmd_opts); }
+}
+if (($usewebmode) && ($action=~ /^cmd|term$/))
+{ 
+	$remote_cmd .= "&silent=1"; 
+}
+	
+
+foreach (@cmd_opts)
+{
+	
+	if ($usewebmode)
+	{		
+		$remote_cmd .= "&cmdparam=". SDB::Remote::WebMake::convert_to_httpstring($_);	
+	}
+	else
+	{	$remote_cmd .= "$_ "; }
+}
+$remote_cmd .= ")" unless ($usewebmode) ;
+
+
+if ( $usewebmode && defined $debug )
+{	$remote_cmd .= "&debug=$debug";	}
+
+push @webmake_call,  "$TOOLSHELL $TOOL\\bin\\weblcmake.pl -pause $host \"$remote_cmd\"" if ( $usewebmode );
+
+
+if ( defined $ENV{REM_PARALLEL} )
+{
+	unless ( $usewebmode )
+	{
+		if ( $ENV{"REM_PARALLEL"} eq "Start_Xterm" )
+		{	$remote_cmd .= "\"";  }
+		else
+		{	$remote_cmd .= " && pause\""; }
+	}
+}
+
+if ( defined $DEBUGREM_VMAKE ) {
+    print $remote_cmd;
+}
+if ($usewebmode)
+{
+	if ( ($hosttype =~ /web/i) || ($ENV{'REMDEFAULTMODE'} =~ /web/i) || ($action =~ /prot/i)  )
+	{
+		if ($ENV{'REM_DEFAULT_BROWSER'} =~ /firefox/i)
+		{
+			SDB::Remote::WebMake::add_to_all_adresses($remote_cmd);
+		}
+		else
+		{
+			require OLE;
+			import OLE;
+			print STDERR "Start Internet Explorer ...";
+			my $explorer = CreateObject OLE 'InternetExplorer.Application'
+							or die "Couldn't create new instance of Explorer App!!";
+			$explorer->Navigate("$remote_cmd");
+			$explorer->{'Visible'} = 1;
+			$explorer->{'Active'}  = 1;
+			# theatermode to switch to foreground
+			$explorer->{'TheaterMode'}  = 1;
+			$explorer->{'TheaterMode'}  = 0;
+			print STDERR "\n";
+		}
+	}
+	else
+	{
+		if (defined $ENV{"REM_PARALLEL"} && ($ENV{"REM_PARALLEL"} !~ /Start_Xterm/i) )
+		{			
+			print "Call:".( join "\n", @webmake_call) ."\n" if ($debug > 2);
+			system(@webmake_call);
+		}
+		else
+		{
+		
+			#$remote_cmd .= "&silent=1"; ???
+			SDB::Remote::WebMake::run_make($host,$remote_cmd);
+		}
+	}
+}
+else
+{
+	if ( ($host eq $REMUSER_HOST{'ia64'}) &&  $ENV{'NEW_REMMAKE'} )
+	{
+	  $remote_own=undef;
+	  open(PIPE, "$remote_cmd |") || die "Can't open pipe for $remote_cmd\n";
+	  while (<PIPE>)
+	  {
+	  	$line = $_;
+	  	print "$line";
+	  	if ($line =~ /Remote make started in (\S+)\s*$/)
+	  	{
+	  		$remote_own = $1;
+	  		last;
+	  	}
+	  }
+	  close (PIPE);
+	  if ($remote_own =~ /\S:(.*)$/)
+	  {
+	  	$remote_own = "\\\\$host\\$1";
+	  	open (PROTFILE, "<$remote_own/prot/make.log") or die "can't open file $remote_own/prot/make.log:$?";
+		while (1)
+		{
+			$line=<PROTFILE>;
+			if ($line)
+			{
+				print "$line";
+				last if ($line=~ /Remote make finished/);
+			}
+			else
+			{
+				sleep 1;
+			}
+		}
+		close PROTFILE;		  	
+	  }
+	}
+	else
+	{
+        # print "*** $remote_cmd\n";
+		system($remote_cmd);
+	}
+}
+
+sub addparam_to_cmd
+{
+	my $parameter = shift;
+	if ($usewebmode)
+	{
+		$remote_cmd .= "&$parameter";	
+	}
+	else
+	{	$remote_cmd .= "$parameter "; }
+}

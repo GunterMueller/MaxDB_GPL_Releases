@@ -1,0 +1,4349 @@
+Ad 8
+.bm 8
+.fm 4
+.bt $Copyright by Software AG, 1996$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$veo06c$
+.tt 2 $$$
+.tt 3 $$                                       $1997-06-16$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       virtual_file
+=========
+.sp
+Purpose :       Virtual File for Applications
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+	PROCEDURE
+		sqlfopenp (
+			VAR fname       : tsp_vfilename;
+			datakind        : tsp5_rte_datakind;
+			filemode        : tsp5_rte_filemode;
+			buffering       : tsp5_rte_buffering_kind;
+			VAR fhandle     : tsp_int4;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlfclosep (
+			fhandle         : tsp_int4;
+			option          : tsp5_rte_closeoption;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlfreadp (
+			fhandle         : tsp_int4;
+			VAR buf         : tsp_moveobj;
+			bufsize         : tsp_longint;
+			VAR outlen      : tsp_longint;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlfwritep (
+			fhandle         : tsp_int4;
+			VAR buf         : tsp_moveobj;
+			inlen           : tsp_longint;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlfseekp (
+			fhandle         : tsp_int4;
+			distance        : tsp_longint;
+			whence          : tsp5_rte_seekkind;
+			VAR err         : tsp5_rte_filerror);
+
+	PROCEDURE
+		sqlftellp (
+			fhandle         : tsp_int4;
+			VAR filepos     : tsp_longint;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlfinfop (
+			VAR fname       : tsp_vfilename;
+			VAR finfo       : tsp5_rte_fileinfo;
+			VAR err         : tsp5_rte_fileerror);
+
+	PROCEDURE
+		sqlferasep (
+			VAR fname       : tsp_vfilename;
+			VAR err         : tsp5_rte_fileerror);
+
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : D.Dittmar
+.sp
+.cp 3
+Created : 1996-07-01
+.sp
+.cp 3
+Version : 1996-07-01
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-06-16
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+
+/*LINTLIBRARY*/
+
+#define MOD__ "veo06c: "
+
+/*
+ * Convention for macro names:
+ *      *_OS : macro hides differences between operating systems
+ *      *_V  : virtual method dispatch
+ *      *_INL: inline functions
+ *      *_DBG: debugging and testing
+ */
+
+
+#define vf_t_tape               6
+#define vf_t_directory          7
+
+#ifdef	DEBUG
+#if defined (_WIN32)
+#define MSG_DBG(x)  { }
+#define MSG_DBG(x)  { }
+#define TRCIN       { }
+#define TRCIN_P(x)  { }
+#define TRCOUT      { }
+#define TRCOUT_P(x) { }
+#define TRCPAS      { }
+#define TRCPAS_P(x) { }
+#else
+#define MSG_DBG(x) {  x ; }
+#define TRCIN      { sqldbglbl=MF__; sqldbgwrite  ("--> called\n"); \
+      sqldbglbl=0;}
+#define TRCIN_P(x) { sqldbglbl=MF__; sqldbgwrite  ("--> called: \n"); \
+      sqldbgwrite x; sqldbglbl=0;}
+#define TRCOUT     { sqldbglbl=MF__; sqldbgwrite  ("<-- returning\n"); \
+      sqldbglbl=0; }
+#define TRCOUT_P(x){ sqldbglbl=MF__; sqldbgwrite x; \
+      sqldbgwrite  ("<-- returning: \n"); sqldbglbl=0;}
+#define TRCPAS     { sqldbglbl=MF__; sqldbgwrite  ("-- passed -->\n"); \
+      sqldbglbl=0; sqldbglbl=0;}
+#define TRCPAS_P(x){ sqldbglbl=MF__; sqldbgwrite x; sqldbglbl=0;}
+#endif
+#else
+#define MSG_DBG(x)  { }
+#define MSG_DBG(x)  { }
+#define TRCIN       { }
+#define TRCIN_P(x)  { }
+#define TRCOUT      { }
+#define TRCOUT_P(x) { }
+#define TRCPAS      { }
+#define TRCPAS_P(x) { }
+#endif
+
+
+/**\
+--------------------------------------- MF__ MOD__ (local imports)
+\**/
+
+#if defined (_WIN32)
+LONG sql06_io_read ( HFILE     hfDevice,
+                            ULONG     ulDevType,
+                            PVOID     pBlockPtr,
+                            ULONG     ulBlockLength,
+                            PULONG    pulBytesRead );
+
+LONG sql06_io_write ( HFILE     hfDevice,
+                             ULONG     ulDevType,
+                             PVOID     pBlockPtr,
+                             ULONG     ulBlockLength,
+                             PULONG    pulBytesWritten );
+
+BOOLEAN sql06c_handle_known_errors ( const char*        pszName,
+                                         LONG                rc,
+                                         PCHAR               pcErrText);
+
+LONG sql44c_get_dev_type_by_filename ( PSZ pszName );
+BOOL sql44c_subst_log_parts ( PSZ  pszOutName, PSZ  pszInName );
+
+#define EO06_EXPAND_VARS_OS(in, out, err) err = \
+    sql44c_subst_log_parts (out, (char*)in)
+
+#else
+
+void sql48_change_log (const char* in_name, char*out_name, BOOLEAN* error);
+#define EO06_EXPAND_VARS_OS(in, out, err) sql48_change_log (in, out, &err)
+char *sqlerrs (void);
+
+#endif
+/**\
+--------------------------------------- MF__ MOD__ (local declarations)
+\**/
+
+#if defined (LINT)
+#define USEVAR_DBG(var)     var
+#else
+#define USEVAR_DBG(var)
+#endif
+#define SWITCH_ERROR_DBG(str,val)
+#define OUT_OF_ENUM_INL(val, low, high)     (val > high)
+    /* MACRO MF__ MOD__ (OUT_OF_ENUM_INL) */
+typedef unsigned char byte;
+typedef struct FileT FileT;
+#define eo06_VALIDPOS(file)     (file->filePos >= 0)
+static void eo06_osError (tsp5_rte_fileerror *ferror);
+static void eo06_lockError (tsp5_rte_fileerror *ferror);
+static tsp_longint eo06_writeBufferedText (FileT* file, const byte* buf,
+    tsp_longint bufLen, tsp5_rte_fileerror* err);
+
+#if defined (_WIN32)
+static LONG    eo06c_tape_open         ( const char*         tapeName,
+                                            FileT*              file,
+                                            tsp5_rte_fileerror*  ferror,
+                                            BOOLEAN             reading);
+
+static LONG    eo06c_con_open          (const char*                 fname,
+                                        FileT*                      file,
+                                        tsp5_rte_fileerror*          ferror);
+
+static LONG    eo06c_pipe_write_open   (const char*                 fname,
+                                        FileT*                      file,
+                                        tsp5_rte_fileerror*          ferror);
+
+static LONG    eo06c_pipe_read_open    (const char           *HostFileName,
+                                         FileT               *file,
+                                         tsp5_rte_fileerror   *ferror);
+
+
+ static LONG eo06c_init_dlt_tape       ( FileT   *file ) ;
+
+ static LONG eo06c_get_drive_info      ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror);
+
+ static LONG eo06c_get_media_info      ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror);
+
+ static LONG eo06c_init_tape_dev       ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror);
+
+ static LONG eo06c_tape_rewind         ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror);
+
+ static LONG eo06c_tape_locking        ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror,
+                                          ULONG                ulOperation );
+
+ static LONG eo06c_tape_loading        ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror,
+                                          ULONG                ulOperation );
+
+ static LONG eo06c_tape_write_mark     ( FileT   *file,
+                                          tsp5_rte_fileerror        *ferror);
+#endif
+
+/**\
+--------------------------------------- MF__ MOD__ (errors)
+\**/
+
+static char File_At_End_ErrText [] ="End of file";
+static char File_Not_Eraseable_ErrText [] = "File not deletable";
+static char File_Not_Found_ErrText [] = "File not found";
+static char File_Open_For_Read_ErrText [] = "File open for read only";
+static char File_Open_For_Write_ErrText [] = "File open for write only";
+static char Invalid_Handle_ErrText [] = "Invalid handle";
+static char Invalid_Parameter_ErrText [] = "Parameter error: ";
+static char No_Reg_File_ErrText [] = "Not a regular file";
+static char Out_Of_Memory_ErrText [] = "Out of memory";
+static char No_Seek_ErrText [] = "Seek not allowed";
+static char File_Not_Lockable_ErrText [] = "File cannot be locked";
+static char Seek_Range_ErrText [] = "Seek out of range";
+static char Invalid_FileType_ErrText [] = "File type invalid for this operation";
+static char Check_Before_Read_ErrText [] = "Check filetype before first read";
+static char Invalid_Open_ErrText [] = "Invalid combination of open parameters";
+static char Pagesize_Not_OK_ErrText [] = "Page size given %d, required %d";
+
+/**\
+--------------------------------------- MF__ MOD__ (NT)
+\**/
+
+#if defined (_WIN32)
+#include <windows.h>
+
+typedef HANDLE          OSFileHandleT;
+#define invalidHandleC  INVALID_HANDLE_VALUE
+#define errorResultC    (-1)
+#define envVarCharC     '%'
+#define eolMarkerSizeC  2
+
+#define eo06_ISLINK_OS(xstat)       FALSE
+
+static BOOLEAN
+eo06_fileOpenWin32 (
+    const char* fname,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    FileT* file,
+    tsp5_rte_fileerror *ferror);
+
+static void eo06_fileClose (
+    FileT* file,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror* err);
+
+#define E06_FILEOPEN_OS(fname, fileMode, buffering, file, ferror) eo06_fileOpenWin32\
+    (fname, fileMode, buffering, file, ferror)
+
+#if defined BIT64
+typedef __int64 LargeIntegerT;
+#else
+#include <largeint.h>
+typedef LARGE_INTEGER LargeIntegerT;
+#endif
+
+#define eo06_LONG_X_LONG_2_LARGE_OS(longVal1, longVal2, calcOK) \
+    EnlargedIntegerMultiply (longVal1, longVal2)
+#define eo06_LARGE_MINUS_LONG(large, longVal) \
+    LargeIntegerAdd (large, ConvertLongToLargeInteger (-longVal))
+
+#define eo06_LONGSEEK_UNBUFFERED eo06_longseekUnbuffered
+#define eo06_LONGSEEK_BUFFERED_READ eo06_longseekBufferedRead
+#define eo06_LONGSEEK_BUFFERED_WRITE eo06_longseekBufferedWrite
+#define SPECIAL_LONGSEEK
+
+#else
+
+/**\
+--------------------------------------- MF__ MOD__ (unix variants)
+\**/
+
+#include <assert.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <fcntl.h>
+
+typedef int             OSFileHandleT;
+#define invalidHandleC   (-1)
+#define systemCallErrorC (-1)
+#define envVarCharC     '$'
+#define eolMarkerSizeC  1
+
+    /* TYPE MF__ MOD__ (lstat_function_eo06) */
+typedef int eo06_lstat_function (const char*, struct stat*);
+#if defined (S_ISLNK)
+#define SYMLINKS_SUPPORTED
+extern int lstat (const char*, struct stat*);
+static eo06_lstat_function* eo06_lstat = (eo06_lstat_function*) lstat;
+    /* FUNCTIONP MF__ MOD__ (eo06_lstat) */
+#define eo06_ISLINK_OS(xstat)       S_ISLNK(xstat.st_mode)
+    /* MACRO MF__ MOD__ (eo06_ISLINK_OS) */
+#else
+static eo06_lstat_function* eo06_lstat = (eo06_lstat_function*) stat;
+#define eo06_ISLINK_OS(xstat)       FALSE
+#endif
+
+    #undef MF__
+    #define MF__ MOD__"eo06_lockFileUnix"
+static BOOLEAN
+eo06_lockFileUnix (
+    OSFileHandleT osHandle,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_fileerror *ferror)
+{
+    int         osRC;
+    short       lockType;
+    struct flock lockInfo;
+
+    TRCIN;
+    if (SP5VF_READ == fileMode) {
+        return TRUE;
+        /*lockType = F_RDLCK;*/
+    }
+    else {
+        lockType = F_WRLCK;
+    }
+    lockInfo.l_type = lockType;
+    lockInfo.l_whence = 0;
+    lockInfo.l_start = 0;
+    lockInfo.l_len = 0;
+    lockInfo.l_pid = 1;
+    osRC = fcntl (osHandle, F_GETLK , &lockInfo);
+    lockInfo.l_type = lockType;
+    osRC = fcntl (osHandle, F_SETLK , &lockInfo);
+    if (0 != osRC) {
+        eo06_lockError (ferror);
+    }
+    osRC = fcntl (osHandle, F_GETLK , &lockInfo);
+    TRCOUT;
+    return (osRC == 0);
+}
+
+/*------------------------------*/
+
+static BOOLEAN
+eo06_fileOpenUnix (
+    const char* fname,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    FileT* file,
+    tsp5_rte_fileerror *ferror);
+
+static void eo06_fileClose (
+    FileT* file,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror* err);
+
+#define E06_FILEOPEN_OS(fname, fileMode, buffering, file, ferror) eo06_fileOpenUnix\
+    (fname, fileMode, buffering, file, ferror)
+
+#if defined (BIT64) || defined (_IBMR2)
+
+#if defined (_IBMR2)
+/* special compiler defined type for 64 bit integer */
+typedef long long LargeIntegerT;
+#define SPECIAL_LONGSEEK
+#else
+/* long is 64 bits */
+typedef long LargeIntegerT;
+#endif
+
+#define eo06_LONG_X_LONG_2_LARGE_OS(longVal1, longVal2, calcOK) \
+    ((LargeIntegerT) (longVal1) * (LargeIntegerT) (longVal2))
+#define eo06_LARGE_MINUS_LONG(large, longVal) ((large) - (LargeIntegerT) (longVal))
+
+#else
+
+/* no 64 bit integer */
+typedef long LargeIntegerT;
+
+    #undef MF__
+    #define MF__ MOD__"eo06_32bit_longXlong2large"
+static long
+eo06_32bit_longXlong2large (long val1, long val2, BOOLEAN* calcOK)
+{
+    long result;
+
+    TRCIN;
+    result = val1 * val2;
+    if (val2 == 0) {
+        *calcOK = TRUE;
+	TRCOUT_P (("result: %ld\n", 0));
+        return 0;
+    }
+    if ((result / val2) != val1) {
+        *calcOK = FALSE;
+    }
+    else {
+        *calcOK = TRUE;
+    }
+    TRCOUT_P (("result: %ld (%s)\n", result, *calcOK ? "OK" : "ERROR"));
+    return result;
+}
+
+/*------------------------------*/
+
+#define eo06_LONG_X_LONG_2_LARGE_OS(longVal1, longVal2, calcOK) \
+    eo06_32bit_longXlong2large (longVal1, longVal2, calcOK)
+#define eo06_LARGE_MINUS_LONG(large, longVal) ((large) - (LargeIntegerT) (longVal))
+
+#endif
+
+#if defined SPECIAL_LONGSEEK
+
+#define eo06_LONGSEEK_UNBUFFERED eo06_longseekUnbuffered
+#define eo06_LONGSEEK_BUFFERED_READ eo06_longseekBufferedRead
+#define eo06_LONGSEEK_BUFFERED_WRITE eo06_longseekBufferedWrite
+
+#else
+
+/* use ordinary seek */
+#define eo06_LONGSEEK_UNBUFFERED eo06_seekUnbuffered
+#define eo06_LONGSEEK_BUFFERED_READ eo06_seekBufferedRead
+#define eo06_LONGSEEK_BUFFERED_WRITE eo06_seekBufferedWrite
+
+#endif
+
+
+#endif  /* defined (_WIN32) */
+
+/**\
+--------------------------------------- MF__ MOD__ (Memory class)
+\**/
+
+#define slotsPerChunkC  8
+#define lotsOfMemoryC   1
+
+typedef struct MemChunkT {
+    /* TYPE MF__ MOD__ (MemChunkT) */
+    void* ptr [slotsPerChunkC];
+    char memory [lotsOfMemoryC];
+} MemChunkT;
+
+typedef struct ChunkMemT {
+    /* TYPE MF__ MOD__ (ChunkMemT) */
+    MemChunkT** chunks;
+    int bytesPerItem;
+    int slotsInUse;
+    int maxSlot;
+    int chunksInUse;
+    int chunksAvailable;
+} ChunkMemT;
+
+#define firstValidHandleC       1
+
+#define alignmentC      8
+#define chunkGrowRateC  8
+#define HANDLE_TO_POINTER_INL(mem,handle) (mem->chunks [handle / slotsPerChunkC]\
+    ->ptr [handle % slotsPerChunkC])
+    /* MACRO MF__ MOD__ (HANDLE_TO_POINTER_INL) */
+
+static tsp_int4 eo06_allocSlot (ChunkMemT* memory, int byteSize);
+
+    #undef MF__
+    #define MF__ MOD__"eo06_initMemory"
+static BOOLEAN
+eo06_initMemory (
+    ChunkMemT* memory,
+    int bytesPerItem)
+{
+    TRCIN;
+    memory->chunks = (MemChunkT**) malloc (chunkGrowRateC * sizeof (MemChunkT*));
+    if (memory->chunks == NULL) {
+        TRCOUT;
+        return FALSE;
+    }
+    if ((bytesPerItem % alignmentC) != 0) {
+        bytesPerItem += alignmentC - (bytesPerItem % alignmentC);
+    }
+    memory->bytesPerItem = bytesPerItem;
+    memory->slotsInUse = 0;
+    memory->maxSlot = 0;
+    memory->chunksInUse = 0;
+    memory->chunksAvailable = chunkGrowRateC;
+    /* use first slot so 0 is not passed to client */
+    eo06_allocSlot (memory, bytesPerItem);
+    TRCOUT;
+    return TRUE;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_addChunk"
+static BOOLEAN
+eo06_addChunk (
+    ChunkMemT* memory,
+    int* chunkIndex,
+    int* slotIndex)
+{
+    int i;
+    int bytesPerChunk;
+    MemChunkT* chunk;
+    MemChunkT** newChunks;
+
+    TRCIN;
+    if (memory->chunksInUse == memory->chunksAvailable) {
+        /* realloc */
+        newChunks = (MemChunkT**) realloc (memory->chunks,
+            (memory->chunksAvailable + chunkGrowRateC) * sizeof (MemChunkT*));
+        if (newChunks == NULL) {
+          TRCOUT;
+	  return FALSE;
+        }
+        memory->chunks = newChunks;
+        memory->chunksAvailable += chunkGrowRateC;
+    }
+    *chunkIndex = memory->chunksInUse;
+    bytesPerChunk = sizeof (MemChunkT) - lotsOfMemoryC
+        + (slotsPerChunkC * memory->bytesPerItem);
+    chunk = (MemChunkT*) malloc (bytesPerChunk);
+    if (chunk == NULL) {
+      TRCOUT;
+      return FALSE;
+    }
+    memset (chunk, '\0', bytesPerChunk);
+    for (i = 0; i < slotsPerChunkC; ++i) {
+        chunk->ptr [i] = NULL;
+    }
+    memory->chunks [*chunkIndex] = chunk;
+    ++memory->chunksInUse;
+    memory->maxSlot += slotsPerChunkC;
+    *slotIndex = 0;
+    TRCOUT;
+    return TRUE;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_allocSlot"
+static tsp_int4
+eo06_allocSlot (
+    ChunkMemT* memory,
+    int byteSize)
+{
+    tsp_int4 result = UNDEF;
+    MemChunkT* chunk;
+    int chunkIndex;
+    int slotIndex;
+    int found = FALSE;
+
+    TRCIN;
+    if (memory->chunks == NULL) {
+        if (!eo06_initMemory (memory, byteSize)) {
+          TRCOUT;
+	  return UNDEF;
+        }
+    }
+    if (memory->slotsInUse == memory->maxSlot) {
+        if (!eo06_addChunk (memory, &chunkIndex, &slotIndex)) {
+          TRCOUT;
+	  return UNDEF;
+        }
+    }
+    else {
+        /* find free slot */
+        for(chunkIndex = 0; (chunkIndex < memory->chunksInUse) && !found; ++chunkIndex) {
+            chunk = memory->chunks [chunkIndex];
+            for(slotIndex = 0; (slotIndex < slotsPerChunkC) && !found; ++slotIndex) {
+                if (chunk->ptr [slotIndex] == NULL) {
+                    found = TRUE;
+                }
+            }
+        }
+        /* undo last loop increment */
+        --chunkIndex;
+        --slotIndex;
+    }
+    chunk = memory->chunks [chunkIndex];
+    chunk->ptr [slotIndex] = chunk->memory
+        + (slotIndex * memory->bytesPerItem);
+    ++memory->slotsInUse;
+    result = (chunkIndex * slotsPerChunkC) + slotIndex;
+    TRCOUT;
+    return result;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_getPointer"
+static FileT*
+eo06_getPointer (
+    ChunkMemT* memory,
+    tsp_int4 handle)
+{
+    if ((firstValidHandleC <= handle) && (handle < memory->maxSlot)) {
+      return (FileT*)HANDLE_TO_POINTER_INL (memory, handle);
+    }
+    else {
+      return NULL;
+    }
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_freeSlot"
+static void
+eo06_freeSlot (
+    ChunkMemT* memory,
+    tsp_int4 handle)
+{
+    TRCPAS_P (("handle %d\n", handle));;
+    if ((firstValidHandleC <= handle) && (handle < memory->maxSlot)) {
+        HANDLE_TO_POINTER_INL (memory, handle) = NULL;
+        --memory->slotsInUse;
+    }
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_nextUsedHandle"
+static BOOLEAN
+eo06_nextUsedHandle (
+    ChunkMemT* memory,
+    tsp_int4* handle)
+{
+    int chunkIndex;
+    int slotIndex;
+    MemChunkT* chunk;
+    int found = FALSE;
+
+    TRCIN;
+    if (*handle < firstValidHandleC) {
+        *handle = firstValidHandleC;
+    }
+    chunkIndex = *handle / slotsPerChunkC;
+    slotIndex = *handle % slotsPerChunkC;
+    /* walk current chunk */
+    chunk = memory->chunks [chunkIndex];
+    for (; (slotIndex < slotsPerChunkC) && !found; ++slotIndex) {
+        if (chunk->ptr [slotIndex] != NULL) {
+            found = TRUE;
+        }
+    }
+    /* walk remaining chunks */
+    if (!found) {
+        for (; (chunkIndex < memory->chunksInUse) && !found; ++chunkIndex) {
+            for (slotIndex = 0; (slotIndex < slotsPerChunkC) && !found; ++slotIndex) {
+                if (chunk->ptr [slotIndex] != NULL) {
+                    found = TRUE;
+                }
+            }
+        }
+    }
+    if (found) {
+        *handle = (chunkIndex / slotsPerChunkC) + slotIndex;
+    }
+    else {
+        *handle = UNDEF;
+    }
+    TRCOUT;
+    return (BOOLEAN) found;
+}
+
+/**\
+--------------------------------------- MF__ MOD__ (common)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_putInt"
+static void
+eo06_putInt (
+    char* buf,
+    int value,
+    int digits)
+{
+    for (; digits > 0; --digits) {
+        buf [digits-1] = (char)((value % 10) + '0');
+        value /= 10;
+    }
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_trimLen"
+static int
+eo06_trimLen (
+    const char* str,
+    int len)
+{
+    while (len > 0) {
+        if (str [len - 1] != ' ') {
+	  return len;
+        }
+    --len;
+    }
+    return 0;
+}
+
+/*------------------------------*/
+
+static void
+eo06_padLen (
+    char* str,
+    int bufLen)
+{
+    int len;
+
+    len = strlen ((char*)str);
+    if (len < bufLen) {
+        memset (str + len, ' ', bufLen - len);
+    }
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_cookName"
+static const char*
+eo06_cookName (
+    char* nameBuf,
+    const char* rawFName,
+    int len)
+{
+    BOOLEAN notOK;
+    BOOLEAN nullTerminated;
+    const char* result;
+
+    /*TRCIN;*/
+
+    if (len == UNDEF) {
+        len = strlen ((char*)rawFName);
+        nullTerminated = TRUE;
+    }
+    else {
+        nullTerminated = (BOOLEAN)(rawFName [len] == '\0');
+    }
+    if (memchr (rawFName, envVarCharC, len) != NULL) {
+        EO06_EXPAND_VARS_OS (rawFName, nameBuf, notOK);
+	TRCPAS_P (("from %s to %s\n", rawFName, nameBuf));
+        result = nameBuf;
+    }
+    else {
+        if (nullTerminated) {
+            result = rawFName;
+        }
+        else {
+            /* make a null terminated copy */
+            memcpy (nameBuf, rawFName, len);
+            nameBuf [len] = '\0';
+            result = nameBuf;
+        }
+    }
+    /*TRCOUT;*/
+    return result;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_ferror"
+static void
+eo06_ferror (
+    tsp5_rte_fileerror *ferror,
+    const char* errText)
+{
+    ferror->sp5fe_result = VF_NOTOK;
+    strcpy (ferror->sp5fe_text, errText);
+    TRCPAS_P (("VF_NOTOK: '%s'\n", errText));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_eofError"
+static void
+eo06_eofError (
+    tsp5_rte_fileerror *ferror)
+{
+    ferror->sp5fe_result = VF_EOF;
+    strcpy (ferror->sp5fe_text, File_At_End_ErrText);
+    TRCPAS_P (("VF_EOF: '%s'\n",File_At_End_ErrText ));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_lockError"
+static void
+eo06_lockError (
+    tsp5_rte_fileerror *ferror)
+{
+    ferror->sp5fe_result = VF_NOTOK;
+    strcpy (ferror->sp5fe_text, File_Not_Lockable_ErrText);
+    TRCPAS_P (("VF_NOTOK: '%s'\n",File_Not_Lockable_ErrText ));
+}
+
+/*------------------------------*/
+
+#if defined (_WIN32)
+
+    #undef MF__
+    #define MF__ MOD__"eo06_osError"  /* WIN32 */
+static void
+eo06_osError (
+    tsp5_rte_fileerror *ferror)
+{
+    LONG        rc = GetLastError ();
+
+    ferror->sp5fe_result = VF_NOTOK;
+    if (!sql06c_handle_known_errors ("", rc, ferror->sp5fe_text)) {
+        sprintf (ferror->sp5fe_text, "OS error: [%d]", GetLastError ());
+    }
+    TRCPAS_P (("VF_NOTOK: '%s'\n", ferror->sp5fe_text));
+}
+#else
+/*------------------------------*/
+
+
+    #undef MF__
+    #define MF__ MOD__"eo06_osError"  /* UNIX */
+static void
+eo06_osError (
+    tsp5_rte_fileerror *ferror)
+{
+    ferror->sp5fe_result = VF_NOTOK;
+    sprintf (ferror->sp5fe_text, "OS error: '%s'", sqlerrs ());
+    TRCPAS_P (("VF_NOTOK: '%s'\n", ferror->sp5fe_text));
+}
+#endif
+/*------------------------------*/
+
+
+    #undef MF__
+    #define MF__ MOD__"eo06_seekError"
+static void
+eo06_seekError (
+    tsp5_rte_fileerror *ferror)
+{
+    if (errno == EINVAL) {
+        eo06_osError (ferror);
+    }
+    else {
+        ferror->sp5fe_result = VF_NOSEEK;
+        strcpy (ferror->sp5fe_text, No_Seek_ErrText);
+    }
+    TRCPAS_P (("VF_NOSEEK: '%s'\n", ferror->sp5fe_text));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_paramError"
+static void
+eo06_paramError (
+    tsp5_rte_fileerror *ferror,
+    const char * paramName)
+{
+    ferror->sp5fe_result = VF_NOTOK;
+    strcpy (ferror->sp5fe_text, Invalid_Parameter_ErrText);
+    strcat (ferror->sp5fe_text, paramName);
+    TRCPAS_P (("VF_NOTOK: '%s'\n", ferror->sp5fe_text));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_pagesizeError"
+static void
+eo06_pagesizeError (
+    tsp5_rte_fileerror *ferror,
+    int pageSizeGiven,
+    int pageSizeRead)
+{
+    ferror->sp5fe_result = VF_NOTOK;
+    sprintf (ferror->sp5fe_text, (char*)Pagesize_Not_OK_ErrText, 
+             pageSizeGiven, pageSizeRead);
+    TRCPAS_P (("VF_NOTOK: '%s'\n", ferror->sp5fe_text));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_clearError"
+static void
+eo06_clearError (
+    tsp5_rte_fileerror *ferror)
+{
+    ferror->sp5fe_result = VF_OK;
+    ferror->sp5fe_warning = SP5VFW_NO_WARNING;
+    ferror->sp5fe_text [0] = '\0';
+}
+
+/*------------------------------*/
+
+/**\
+--------------------------------------- MF__ MOD__ (File class)
+\**/
+
+static ChunkMemT allFilesV = {NULL, 0, 0, 0, 0, 0};
+
+typedef tsp_longint eo06_readFT (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC);
+
+typedef tsp_longint eo06_writeFT (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err);
+
+typedef void eo06_flushFT (
+    FileT* file,
+    tsp5_rte_fileerror* err);
+
+typedef void eo06_seekFT (
+    FileT* file,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err);
+
+typedef void eo06_longseekFT (
+    FileT* file,
+    LargeIntegerT distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err);
+
+typedef void eo06_closeFT (
+    FileT* file,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror* err);
+
+typedef struct FileClassT {
+    /* TYPE MF__ MOD__ (FileClassT) */
+    const char*         className;
+    eo06_readFT*        lowLevelReadFunction;  
+    eo06_readFT*        readFunction;
+    eo06_writeFT*       writeFunction;
+    eo06_flushFT*       flushFunction;
+    eo06_seekFT*        seekFunction;
+    eo06_longseekFT*    longseekFunction;
+    eo06_closeFT*       closeFunction;
+} FileClassT;
+
+typedef struct CacheT {
+    /* TYPE MF__ MOD__ (CacheT) */
+    byte* membase;      /* memory to be freed                    */
+    byte* mem;          /*                                       */
+    int current;        /* index of the current character in mem */
+    int extent;         /* number of characters loaded into mem  */
+    int memSize;        /* size of mem                           */
+} CacheT;
+
+struct FileT {
+    /* TYPE MF__ MOD__ (FileT) */
+    FileClassT *        class;
+    OSFileHandleT       osHandle;
+    CacheT              cache;
+    tsp_longint         filePos;
+#if defined (_WIN32)
+    LONG                lDevType;
+    ULONG               ulTapeFeatures;
+    ULONG               ulMaxTapeBlkSize;
+    BOOLEAN             fECC;
+    BOOLEAN             fCompression;
+    BOOLEAN             fDataPadding;
+#endif
+};
+
+#define eo06_ISWRITER_V(file)   (file->class->writeFunction != eo06_writeReadStream)
+#define eo06_LOW_LEVEL_READ_V(file, buf, len, err, forC) (file->class->lowLevelReadFunction \
+    (file, buf, len, err, forC))
+#define eo06_READ_V(file, buf, len, err, forC) (file->class->readFunction \
+    (file, buf, len, err, forC))
+#define eo06_WRITE_V(file, buf, len, err) (file->class->writeFunction \
+    (file, buf, len, err))
+#define eo06_FLUSH_V(file, err) (file->class->flushFunction (file, err))
+#define eo06_SEEK_V(file, distance, whence, err) (file->class->seekFunction \
+    (file, distance, whence, err))
+#define eo06_LONGSEEK_V(file, distance, whence, err) (file->class->longseekFunction \
+    (file, distance, whence, err))
+#define eo06_CLOSE_V(file, options, err) (file->class->closeFunction \
+    (file, options, err))
+
+    #undef MF__
+    #define MF__ MOD__"eo06_readWriteStream"
+static tsp_longint /*ARGSUSED*/
+eo06_readWriteStream (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC)
+{
+    TRCIN;
+    USEVAR_DBG (file);
+    USEVAR_DBG (buf);
+    USEVAR_DBG (bufLen);
+    USEVAR_DBG (forC);
+    eo06_ferror (err, File_Open_For_Write_ErrText);
+    TRCOUT;
+    return UNDEF;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeReadStream"
+static tsp_longint
+eo06_writeReadStream ( /*ARGSUSED*/
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    TRCIN;
+    USEVAR_DBG (file);
+    USEVAR_DBG (buf);
+    USEVAR_DBG (bufLen);
+    eo06_ferror (err, File_Open_For_Read_ErrText);
+    TRCOUT;
+    return UNDEF;
+}
+
+/*------------------------------*/
+
+#if defined (_WIN32)
+
+    #undef MF__
+    #define MF__ MOD__"eo06_readUnbufferedBinary"   /* WIN32 */
+static tsp_longint /*ARGSUSED*/
+eo06_readUnbufferedBinary (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC)
+{
+    LONG        rc;
+    ULONG       bytesRead;
+
+    TRCIN;
+    USEVAR_DBG (forC);
+    rc = sql06_io_read ( (HFILE)file->osHandle, file->lDevType,
+                         buf, bufLen, &bytesRead );
+    switch (rc) {
+    case NO_ERROR:
+        if (bytesRead == 0) {
+            eo06_eofError (err);
+        }
+        break;
+    case ERROR_HANDLE_EOF:
+    case ERROR_NO_DATA_DETECTED:
+    case ERROR_FILEMARK_DETECTED:
+    case ERROR_END_OF_MEDIA:
+    case ERROR_PIPE_NOT_CONNECTED:
+    case ERROR_BROKEN_PIPE:
+        eo06_eofError (err);
+        break;
+    default:
+        bytesRead = 0;
+        eo06_osError (err);
+        break;
+    }
+    TRCOUT;
+    return (tsp_longint)bytesRead;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeUnbufferedBinary"  /* WIN32 */
+static tsp_longint
+eo06_writeUnbufferedBinary (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    LONG        rc;
+    ULONG       bytesWritten;
+
+    TRCIN;
+    if (bufLen > 0) {
+        rc = sql06_io_write ((HFILE)file->osHandle, DT_UNKNOWN,
+            (void*)buf, bufLen, &bytesWritten);
+        if ((rc != NO_ERROR) || ((tsp_longint)bytesWritten != bufLen)) {
+            eo06_osError (err);
+        }
+    }
+    TRCOUT;
+    return (tsp_longint) bytesWritten;
+}
+
+/*------------------------------*/
+
+#else
+    #undef MF__
+    #define MF__ MOD__"eo06_readUnbufferedBinary"   /* UNIX */
+static tsp_longint /*ARGSUSED*/
+eo06_readUnbufferedBinary (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC)
+{
+    tsp_longint bytesRead;
+
+    TRCIN;
+    USEVAR_DBG (forC);
+    bytesRead = read (file->osHandle, buf, (unsigned) bufLen);
+    switch (bytesRead) {
+        case systemCallErrorC:
+            eo06_osError (err);
+            bytesRead = 0;
+            break;
+        case 0:
+            eo06_eofError (err);
+            break;
+        default:
+            /* OK */
+            if (eo06_VALIDPOS (file)) {
+                file->filePos += bytesRead;
+            }
+            break;
+    }
+    TRCOUT;
+    return bytesRead;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeUnbufferedBinary"  /* UNIX */
+static tsp_longint
+eo06_writeUnbufferedBinary (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    int bytesWritten = 0;
+
+    TRCIN;
+    if (bufLen > 0) {
+        bytesWritten = write (file->osHandle, (char*) buf, bufLen);
+        if (bytesWritten != bufLen) {
+            eo06_osError (err);
+            bytesWritten = 0;
+        }
+        else {
+            if (eo06_VALIDPOS (file)) {
+                file->filePos += bytesWritten;
+            }
+        }
+    }
+    TRCOUT;
+    return bytesWritten;
+}
+
+/*------------------------------*/
+
+#endif
+
+    #undef MF__
+    #define MF__ MOD__"eo06_readBufferedBinary"
+static tsp_longint
+eo06_readBufferedBinary (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC)
+{
+    CacheT*             cache = &file->cache;
+    tsp_longint         bytesRead = 0;
+    tsp_longint         partRead;
+    BOOLEAN             atEnd = FALSE;
+    tsp_longint         oldPos = file->filePos;
+
+    TRCIN;
+    /* cache -> client */
+    partRead = min (bufLen, cache->extent - cache->current);
+    if (partRead > 0) {
+        memcpy (buf, cache->mem + cache->current, partRead);
+        cache->current += partRead;
+        buf += partRead;
+        bytesRead += partRead;
+        bufLen -= partRead;
+    }
+
+    /* file -> client */
+    if (bufLen > cache->memSize) {
+        partRead = eo06_LOW_LEVEL_READ_V (file, buf,
+            bufLen, err, forC);
+        buf += partRead;
+        bytesRead =+ partRead;
+        bufLen = 0; /* partRead < bufLen: at end of file */
+        if (err->sp5fe_result == VF_EOF) {
+            atEnd = TRUE;
+        }
+    }
+
+    /* file -> cache */
+    if ((bufLen > 0) && !atEnd) {
+        cache->current = 0;
+        cache->extent = eo06_LOW_LEVEL_READ_V (file, cache->mem,
+            cache->memSize, err, forC);
+        if (cache->extent > 0) {
+            /* cache -> client */
+            partRead = min (bufLen, cache->extent - cache->current);
+            memcpy (buf, cache->mem + cache->current, partRead);
+            cache->current += partRead;
+            bytesRead += partRead;
+        }
+    }
+    if ((err->sp5fe_result == VF_EOF) && (bytesRead > 0)) {
+        eo06_clearError (err);
+    }
+    if (oldPos >= 0) {
+        file->filePos = oldPos + bytesRead;
+    }
+    TRCOUT;
+    return bytesRead;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeBufferedBinary"
+static tsp_longint
+eo06_writeBufferedBinary (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    CacheT*             cache = &file->cache;
+    tsp_longint         bytesWritten;
+    tsp_longint         oldPos = file->filePos;
+
+    TRCIN;
+    if (bufLen <= min (bufLen, cache->memSize - cache->current)) {
+        /* client -> cache */
+        memcpy (cache->mem + cache->current, buf, bufLen);
+        cache->current += bufLen;
+        bytesWritten = bufLen;
+    }
+    else {
+        /* cache -> file */
+        eo06_writeUnbufferedBinary (file, cache->mem, cache->current, err);
+        if (err->sp5fe_result == VF_OK) {
+            cache->current = 0;
+            /* client -> file */
+            bytesWritten = eo06_writeUnbufferedBinary (file, buf, bufLen, err);
+        }
+    }
+    if (oldPos >= 0) {
+        file->filePos = oldPos + bytesWritten;
+    }
+    TRCOUT;
+    return bytesWritten;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeUnbufferedText"
+static tsp_longint
+eo06_writeUnbufferedText (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    tsp_longint bytesWritten;
+
+    TRCIN;
+    bytesWritten = eo06_writeBufferedText (file, buf, bufLen, err);
+    if (err->sp5fe_result == VF_OK) {
+        eo06_FLUSH_V (file, err);
+    }
+    TRCOUT;
+    return bytesWritten;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_readBufferedText"
+static tsp_longint
+eo06_readBufferedText (
+    FileT* file,
+    byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err,
+    BOOLEAN forC)
+{
+    CacheT*             cache = &file->cache;
+    BOOLEAN             finished = FALSE;
+    tsp_longint         bytesRead = 0;
+    tsp_longint         partRead;
+    byte*               posNL;
+    tsp_longint         oldPos = file->filePos;
+
+    TRCIN;
+    if (forC) {
+        --bufLen;
+    }
+    while (!finished) {
+        if ((cache->extent - cache->current) > 0) {
+            /* find nl */
+            posNL = (byte*)memchr (cache->mem + cache->current, '\n',
+                cache->extent - cache->current);
+            if (posNL == NULL) {
+                partRead = cache->extent - cache->current;
+            }
+            else {
+                partRead = posNL - cache->mem - cache->current;
+                finished = TRUE;
+            }
+
+            /* copy to buf */
+            if (partRead > bufLen) {
+                partRead = bufLen;
+                finished = TRUE;
+                posNL = NULL;
+            }
+            memcpy (buf, cache->mem + cache->current, partRead);
+            cache->current += partRead;
+            if (posNL != NULL) {
+                ++cache->current;
+            }
+            buf += partRead;
+            bytesRead += partRead;
+            bufLen -= partRead;
+        }
+        /* read more data */
+        if (!finished) {
+            cache->current = 0;
+            cache->extent = eo06_LOW_LEVEL_READ_V (file, cache->mem,
+                cache->memSize, err, forC);
+            if (err->sp5fe_result != VF_OK) {
+                finished = TRUE;
+            }
+        }
+    }
+    if (posNL == NULL) {
+        err->sp5fe_warning = SP5VFW_NO_EOL_FOUND;
+    }
+    if ((err->sp5fe_result == VF_EOF) && (bytesRead > 0)) {
+        err->sp5fe_result = VF_OK;
+    }
+    if (err->sp5fe_result == VF_OK) {
+        if (oldPos >= 0) {
+            file->filePos = oldPos + bytesRead;
+        }
+	/*#if defined (_WIN32), allow DOS files under UNIX*/
+        if ((bytesRead > 0) && (buf [-1] == '\r')) {
+            /* get rid of CR/LF combination */
+            --bytesRead;
+            --buf;
+        }
+        if (forC) {
+            buf[0] = '\0';
+        }
+        else {
+            buf [0] = ' ';
+        }
+    }
+    TRCOUT;
+    return bytesRead;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_writeBufferedText"
+static tsp_longint
+eo06_writeBufferedText (
+    FileT* file,
+    const byte* buf,
+    tsp_longint bufLen,
+    tsp5_rte_fileerror* err)
+{
+    tsp_longint         bytesWritten;
+    CacheT*             cache = &file->cache;
+    tsp_longint         oldPos = file->filePos;
+
+    TRCIN;
+    if (bufLen < 0) {
+        bufLen = strlen ((char*)buf);
+    }
+    bytesWritten = eo06_writeBufferedBinary (file, buf, bufLen, err);
+    if (err->sp5fe_result == VF_OK) {
+        if ((cache->memSize - cache->current) < eolMarkerSizeC) {
+            eo06_FLUSH_V (file, err);
+        }
+        if (err->sp5fe_result == VF_OK) {
+            if (oldPos >= 0) {
+                file->filePos = oldPos + bytesWritten + 1;
+            }
+#if defined (_WIN32)
+            cache->mem [cache->current] = '\r';
+            ++cache->current;
+            if (eo06_VALIDPOS (file)) {
+                ++file->filePos;
+            }
+#endif
+            cache->mem [cache->current] = '\n';
+            ++cache->current;
+        }
+    }
+    TRCOUT;
+    return bytesWritten;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_flushDummy"
+static void /*ARGSUSED*/
+eo06_flushDummy (
+    FileT* file,
+    tsp5_rte_fileerror* err)
+{
+    USEVAR_DBG (file);
+    USEVAR_DBG (err);
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_flushBuffer"
+static void
+eo06_flushBuffer (
+    FileT* file,
+    tsp5_rte_fileerror* err)
+{
+    CacheT* cache = &file->cache;
+
+    eo06_writeUnbufferedBinary (file, cache->mem, cache->current, err);
+    cache->current = 0;
+}
+
+/*------------------------------*/
+
+#if defined (_WIN32)
+
+    #undef MF__
+    #define MF__ MOD__"eo06_seekUnbuffered"  /* WIN32 */
+static void
+eo06_seekUnbuffered (
+    FileT* file,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    DWORD seekResult;
+    DWORD method;
+    static DWORD whence2method[] = {FILE_BEGIN, FILE_CURRENT, FILE_END};
+
+    TRCIN;
+    method = whence2method [whence];
+    seekResult = SetFilePointer (file->osHandle, distance, NULL, method);
+    if (seekResult == errorResultC) {
+        eo06_seekError (err);
+        file->filePos = UNDEF;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#else
+
+    #undef MF__
+    #define MF__ MOD__"eo06_seekUnbuffered"  /* UNIX */
+static void
+eo06_seekUnbuffered (
+    FileT* file,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    int         seekResult;
+    struct stat statRecord;
+    int         osRC;
+
+    TRCIN;
+    seekResult = lseek (file->osHandle, distance, whence);
+    if (seekResult == systemCallErrorC) {
+        eo06_seekError (err);
+        file->filePos = UNDEF;
+    }
+    else {
+        switch (whence) {
+            case SP5VF_SEEK_BEGIN:
+                file->filePos = distance;
+                break;
+            case SP5VF_SEEK_CUR:
+                if (eo06_VALIDPOS (file)) {
+                    file->filePos += distance;
+                }
+                break;
+            case SP5VF_SEEK_END:
+                osRC = fstat (file->osHandle, &statRecord);
+                if (osRC == systemCallErrorC) {
+                    file->filePos = UNDEF;
+                }
+                else {
+                    file->filePos = statRecord.st_size + distance;
+                }
+                break;
+        }
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#endif
+
+    #undef MF__
+    #define MF__ MOD__"eo06_seekBufferedRead"
+static void
+eo06_seekBufferedRead (
+    FileT* file,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    TRCIN;
+    if (whence == SP5VF_SEEK_CUR) {
+        /* physical file pos is post logical filepos */
+        distance -= file->cache.extent - file->cache.current;
+    }
+    eo06_seekUnbuffered (file, distance, whence, err);
+    if (err->sp5fe_result == VF_OK) {
+        /* empty cache */
+        file->cache.extent = 0;
+        file->cache.current = 0;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_seekBufferedWrite"
+static void
+eo06_seekBufferedWrite (
+    FileT* file,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    TRCIN;
+    eo06_FLUSH_V(file, err);
+    if (err->sp5fe_result == VF_OK) {
+        eo06_seekUnbuffered (file, distance, whence, err);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#if defined (SPECIAL_LONGSEEK)
+
+#if defined (_WIN32)
+
+    #undef MF__
+    #define MF__ MOD__"eo06_longseekUnbuffered"  /* WIN32 */
+typedef struct {DWORD LowPart; DWORD HighPart;} LargeDistanceT;
+
+static void
+eo06_longseekUnbuffered (
+    FileT* file,
+    LargeIntegerT distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+#if defined BIT64
+	LargeDistanceT *LargeDistance;
+#endif
+    DWORD seekResult;
+    DWORD method;
+    static DWORD whence2method[] = {FILE_BEGIN, FILE_CURRENT, FILE_END};
+
+    TRCIN;
+    method = whence2method [whence];
+
+#if defined BIT64
+	LargeDistance = (LargeDistanceT *) &distance;
+    seekResult = SetFilePointer (file->osHandle, LargeDistance->LowPart,
+        &(LargeDistance->HighPart), method);
+#else
+    seekResult = SetFilePointer (file->osHandle, distance.LowPart,
+        &distance.HighPart, method);
+#endif
+    if (seekResult == errorResultC) {
+        eo06_seekError (err);
+        file->filePos = UNDEF;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#else
+
+    #undef MF__
+    #define MF__ MOD__"eo06_longseekUnbuffered"  /* UNIX */
+static void
+eo06_longseekUnbuffered (
+    FileT* file,
+    LargeIntegerT distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    int         seekResult;
+    struct stat statRecord;
+    int         osRC;
+
+    TRCIN;
+    seekResult = llseek (file->osHandle, distance, whence);
+    if (seekResult == systemCallErrorC) {
+        eo06_seekError (err);
+        file->filePos = UNDEF;
+    }
+    else {
+        file->filePos = UNDEF;
+        /* should really calculate new filepos, but this is a
+           tsp_longint and does not support large files */
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#endif
+
+    #undef MF__
+    #define MF__ MOD__"eo06_longseekBufferedRead"
+static void
+eo06_longseekBufferedRead (
+    FileT* file,
+    LargeIntegerT distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    TRCIN;
+    if (whence == SP5VF_SEEK_CUR) {
+        /* physical file pos is post logical filepos */
+        distance = eo06_LARGE_MINUS_LONG (distance,
+            file->cache.extent - file->cache.current);
+    }
+    eo06_longseekUnbuffered (file, distance, whence, err);
+    if (err->sp5fe_result == VF_OK) {
+        /* empty cache */
+        file->cache.extent = 0;
+        file->cache.current = 0;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_longseekBufferedWrite"
+static void
+eo06_longseekBufferedWrite (
+    FileT* file,
+    LargeIntegerT distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror* err)
+{
+    TRCIN;
+    eo06_FLUSH_V(file, err);
+    if (err->sp5fe_result == VF_OK) {
+        eo06_longseekUnbuffered (file, distance, whence, err);
+    }
+    TRCOUT;
+}
+#endif
+/*------------------------------*/
+
+
+static FileClassT eo06_readUnbufferedBinaryVMT = {
+    "readUnbufferedBinary",
+    eo06_readUnbufferedBinary,
+    eo06_readUnbufferedBinary,
+    eo06_writeReadStream,
+    eo06_flushDummy,
+    eo06_seekUnbuffered,
+    eo06_LONGSEEK_UNBUFFERED,
+    eo06_fileClose
+};
+
+static FileClassT eo06_writeUnbufferedBinaryVMT = {
+    "writeUnbufferedBinary",
+    eo06_readWriteStream,
+    eo06_readWriteStream,
+    eo06_writeUnbufferedBinary,
+    eo06_flushBuffer,
+    eo06_seekUnbuffered,
+    eo06_LONGSEEK_UNBUFFERED,
+    eo06_fileClose
+};
+
+static FileClassT eo06_readwriteUnbufferedBinaryVMT = {
+    "readwriteUnbufferedBinary",
+    eo06_readUnbufferedBinary,
+    eo06_readUnbufferedBinary,
+    eo06_writeUnbufferedBinary,
+    eo06_flushBuffer,
+    eo06_seekUnbuffered,
+    eo06_LONGSEEK_UNBUFFERED,
+    eo06_fileClose
+};
+
+static FileClassT eo06_readBufferedBinaryVMT = {
+    "readBufferedBinary",
+    eo06_readUnbufferedBinary,
+    eo06_readBufferedBinary,
+    eo06_writeReadStream,
+    eo06_flushDummy,
+    eo06_seekBufferedRead,
+    eo06_LONGSEEK_BUFFERED_READ,
+    eo06_fileClose
+};
+
+static FileClassT eo06_writeBufferedBinaryVMT = {
+    "writeBufferedBinary",
+    eo06_readWriteStream,
+    eo06_readWriteStream,
+    eo06_writeBufferedBinary,
+    eo06_flushBuffer,
+    eo06_seekBufferedWrite,
+    eo06_LONGSEEK_BUFFERED_WRITE,
+    eo06_fileClose
+};
+
+static FileClassT eo06_readUnbufferedTextVMT = {
+    "readUnbufferedText",
+    eo06_readUnbufferedBinary,
+    eo06_readBufferedText, /* reading text always buffered */
+    eo06_writeReadStream,
+    eo06_flushDummy,
+    eo06_seekUnbuffered,
+    eo06_LONGSEEK_UNBUFFERED,
+    eo06_fileClose
+};
+
+static FileClassT eo06_writeUnbufferedTextVMT = {
+    "writeUnbufferedText",
+    eo06_readWriteStream,
+    eo06_readWriteStream,
+    eo06_writeUnbufferedText,
+    eo06_flushBuffer,
+    eo06_seekUnbuffered,
+    eo06_LONGSEEK_UNBUFFERED,
+    eo06_fileClose
+};
+
+static FileClassT eo06_readBufferedTextVMT = {
+    "readBufferedText",
+    eo06_readUnbufferedBinary,
+    eo06_readBufferedText,
+    eo06_writeReadStream,
+    eo06_flushDummy,
+    eo06_seekBufferedRead,
+    eo06_LONGSEEK_BUFFERED_READ,
+    eo06_fileClose
+};
+
+static FileClassT eo06_writeBufferedTextVMT = {
+    "writeBufferedText",
+    eo06_readWriteStream,
+    eo06_readWriteStream,
+    eo06_writeBufferedText,
+    eo06_flushBuffer,
+    eo06_seekBufferedWrite,
+    eo06_LONGSEEK_BUFFERED_WRITE,
+    eo06_fileClose
+};
+
+static FileClassT* classDesc [3] [2] [2] = {
+    /* dim 0: SP5VF_READ/SP5VF_WRITE/SP5VF_READWRITE    */
+    /* dim 1: SP5VF_TEXT/SP5VF_BINARY   */
+    /* dim 2: unbuffered/buffered */
+{{&eo06_readUnbufferedTextVMT, &eo06_readBufferedTextVMT},
+ {&eo06_readUnbufferedBinaryVMT, &eo06_readBufferedBinaryVMT}},
+{{&eo06_writeUnbufferedTextVMT, &eo06_writeBufferedTextVMT},
+ {&eo06_writeUnbufferedBinaryVMT, &eo06_writeBufferedBinaryVMT}},
+{{NULL, NULL},
+ {&eo06_readwriteUnbufferedBinaryVMT, NULL}},
+};
+
+#define unbufferedC     FALSE
+#define bufferedC       TRUE
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fileClass"
+static FileClassT*
+eo06_fileClass (
+    tsp5_rte_datakind dataKind,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind bufKind)
+{
+    FileClassT* result;
+    int buffering;
+
+    if (fileMode == SP5VF_APPEND) {
+        fileMode = SP5VF_WRITE;
+    }
+    if (bufKind == SP5BK_BUFFERED) {
+        buffering = bufferedC;
+    }
+    else {
+        buffering = unbufferedC;
+    }
+    result = classDesc [fileMode] [dataKind] [buffering];
+    TRCPAS_P (("class '%s'\n", result->className));
+    return result;
+}
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfopen)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_openArgsOK"
+static BOOLEAN
+eo06_openArgsOK (
+    tsp5_rte_datakind dataKind,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    if (OUT_OF_ENUM_INL (dataKind, SP5VF_TEXT, SP5VF_BINARY)) {
+        eo06_paramError (ferror, "data kind");
+        TRCOUT;
+	return FALSE;
+    }
+    if (OUT_OF_ENUM_INL (fileMode, SP5VF_READ, SP5VF_APPEND)) {
+        eo06_paramError (ferror, "file mode");
+        TRCOUT;
+	return FALSE;
+    }
+    if (OUT_OF_ENUM_INL (buffering, BK_NORMAL, SP5BK_DISKSYNCED)) {
+        eo06_paramError (ferror, "buffering");
+        TRCOUT;
+	return FALSE;
+    }
+    TRCOUT;
+    return TRUE;
+}
+
+/*------------------------------*/
+
+static BOOLEAN
+eo06_allocCacheMem (
+    CacheT *cache,
+    int bufferSize,
+    BOOLEAN aligned)
+{
+    static const int memAlignmentC = 4096;
+    unsigned long memAlias;
+
+    if (UNDEF != bufferSize) {
+        if (aligned) {
+            cache->membase = malloc (bufferSize + memAlignmentC);
+            if (cache->membase != NULL) {
+                memAlias = (unsigned long) cache->membase;
+                memAlias = (((memAlias + memAlignmentC - 1) / memAlignmentC)
+                            * memAlignmentC);
+                cache->mem = (byte*) memAlias;
+            }
+        }
+        else {
+            cache->membase = malloc (bufferSize);
+            cache->mem = cache->membase;
+        }
+        if (cache->membase == NULL) {
+            return FALSE;
+        }
+        cache->memSize = bufferSize;
+    }
+    else {
+        cache->membase = NULL;
+        cache->mem = NULL;
+        cache->memSize = 0;
+    }
+    cache->current = 0;
+    cache->extent = 0;
+    return TRUE;
+}
+
+/*------------------------------*/
+
+#define standardCacheSizeC      4096
+#define smallCacheSizeC          255
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlfopen"
+static void
+eo06_sqlfopen (
+    const char *fname,
+    tsp5_rte_datakind dataKind,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    tsp_int4 *fileHandle,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT*      file;
+    int         bufferSize = UNDEF;
+
+    TRCIN_P (("'%s' datakind %d  filemode %d  buffering %d\n",
+	      fname, dataKind, fileMode, buffering));
+    eo06_clearError (ferror);
+    if (!eo06_openArgsOK (dataKind, fileMode, buffering, ferror)) {
+      TRCOUT;
+      return;
+    }
+    /* get file struct */
+    *fileHandle = eo06_allocSlot (&allFilesV, sizeof (FileT));
+    if (*fileHandle == UNDEF) {
+        eo06_ferror (ferror, Out_Of_Memory_ErrText);
+        TRCOUT;
+	return;
+    }
+    file = eo06_getPointer (&allFilesV, *fileHandle);
+
+    if (SP5VF_TEXT == dataKind) {
+        if (SP5VF_READ == fileMode) {
+            buffering = SP5BK_BUFFERED;
+            bufferSize = standardCacheSizeC;
+        }
+        else {
+            /* a small buffer is required, as eo06_writeUnbufferedText   */
+            /* uses eo06_writeBufferedText to concatenate the Text       */
+            /* and the newline                                          */
+            bufferSize = smallCacheSizeC;
+        }
+    }
+    else if (SP5BK_BUFFERED == buffering) {
+        bufferSize = standardCacheSizeC;
+    }
+    E06_FILEOPEN_OS (fname, fileMode, buffering, file, ferror);
+    if (ferror->sp5fe_result != VF_OK) {
+        eo06_freeSlot (&allFilesV, *fileHandle);
+        *fileHandle = UNDEF;
+        TRCOUT;
+	return;
+    }
+
+    file->class = eo06_fileClass (dataKind, fileMode, buffering);
+    if (file->class == NULL) {
+        eo06_freeSlot (&allFilesV, *fileHandle);
+        *fileHandle = UNDEF;
+	eo06_ferror (ferror, Invalid_Open_ErrText);
+        TRCOUT;
+	return;
+    }
+
+    /* initialize cache */
+    if (!eo06_allocCacheMem (&file->cache, bufferSize, FALSE)) {
+        sqlfclosec (*fileHandle, SP5VF_CLOSE_NORMAL, ferror);
+        eo06_ferror (ferror, Out_Of_Memory_ErrText);
+        *fileHandle = UNDEF;
+    }
+    file->filePos = 0;
+    TRCOUT_P (("handle %d\n", *fileHandle));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfopenc"
+void
+sqlfopenc (
+    const char *rawFName,
+    tsp5_rte_datakind dataKind,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    tsp_int4 *fileHandle,
+    tsp5_rte_fileerror *ferror)
+{
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    eo06_sqlfopen (eo06_cookName (nameBuf, rawFName, UNDEF),
+        dataKind, fileMode, buffering, fileHandle, ferror);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfopenp"
+void
+sqlfopenp (
+    const tsp_vfilename rawFName,
+    tsp5_rte_datakind dataKind,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    tsp_int4 *fileHandle,
+    tsp5_rte_fileerror *ferror)
+{
+    char trimmedBuf [FILENAME_MAX];
+    char nameBuf [FILENAME_MAX];
+    int nameLen;
+
+    TRCIN;
+    nameLen = eo06_trimLen (rawFName, sizeof (tsp_vfilename));
+    memcpy (trimmedBuf, rawFName, nameLen);
+    trimmedBuf [nameLen] = '\0';
+
+    eo06_sqlfopen (eo06_cookName (nameBuf, trimmedBuf, nameLen),
+        dataKind, fileMode, buffering, fileHandle, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+static boolean
+eo06_page0_io (
+    FileT* file,
+    tsp5_rte_filemode fileMode,
+    tsp_int4* bufferSize,
+    tsp5_rte_fileerror *ferror)
+{
+    BOOLEAN ok;
+    tsp_longint bytesTransferred;
+    CacheT* cache = &file->cache;
+
+    /* nt: set blocksize */
+    switch (fileMode) {
+    case SP5VF_READ:
+    case SP5VF_READWRITE:
+        bytesTransferred = eo06_READ_V (file, cache->mem,
+                                        cache->memSize, ferror, FALSE);
+        if (ferror->sp5fe_result != 0) {
+            ok = FALSE;
+        }
+        else {
+            int bufferSizeRead;
+
+            bufferSizeRead = ((byte)cache->mem [2] << 8) + (byte) cache->mem [3];
+            if (bufferSizeRead == *bufferSize) {
+                ok = TRUE;
+            }
+            else {
+                eo06_pagesizeError (ferror, *bufferSize, bufferSizeRead);
+                *bufferSize = bufferSizeRead;
+                ok = FALSE;
+            }
+        }
+        break;
+    case SP5VF_WRITE:
+        memset (cache->mem, '\0', cache->memSize);
+        cache->mem [2] = (byte) (*bufferSize >> 8);
+        cache->mem [3] = (byte) (*bufferSize & 0xff);
+        eo06_WRITE_V (file, cache->mem, cache->memSize, ferror);
+        ok = (ferror->sp5fe_result == 0);
+        break;
+    case SP5VF_APPEND:
+    default:
+        /* not suitable for saves or devspaces */
+        ok = FALSE;
+        break;
+    }
+    return ok;
+}    
+
+/*------------------------------*/
+
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlfsaveopen"
+static void
+eo06_sqlfsaveopen (
+    const char *fname,
+    tsp5_rte_filemode fileMode,
+    tsp_int4* bufferSize,
+    tsp_int4 *fileHandle,
+    void** bufptr,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT*      file;
+
+    TRCIN_P (("'%s' filemode %d\n",
+	      fname, fileMode));
+    eo06_clearError (ferror);
+    if (!eo06_openArgsOK (SP5VF_BINARY, fileMode, SP5BK_UNBUFFERED, ferror)) {
+      TRCOUT;
+      return;
+    }
+    if (*bufferSize <= 0) {
+        eo06_paramError (ferror, "buffersize");
+        TRCOUT;
+        return;
+    }
+    /* get file struct */
+    *fileHandle = eo06_allocSlot (&allFilesV, sizeof (FileT));
+    if (*fileHandle == UNDEF) {
+        eo06_ferror (ferror, Out_Of_Memory_ErrText);
+        TRCOUT;
+	return;
+    }
+    file = eo06_getPointer (&allFilesV, *fileHandle);
+
+    E06_FILEOPEN_OS (fname, fileMode, SP5BK_UNBUFFERED, file, ferror);
+    if (ferror->sp5fe_result != VF_OK) {
+        eo06_freeSlot (&allFilesV, *fileHandle);
+        *fileHandle = UNDEF;
+        TRCOUT;
+	return;
+    }
+
+    file->class = eo06_fileClass (SP5VF_BINARY, fileMode, SP5BK_UNBUFFERED);
+    if (file->class == NULL) {
+        eo06_freeSlot (&allFilesV, *fileHandle);
+        *fileHandle = UNDEF;
+	eo06_ferror (ferror, Invalid_Open_ErrText);
+        TRCOUT;
+	return;
+    }
+
+    /* initialize cache */
+    if (!eo06_allocCacheMem (&file->cache, *bufferSize, TRUE)) {
+        sqlfclosec (*fileHandle, SP5VF_CLOSE_NORMAL, ferror);
+        eo06_ferror (ferror, Out_Of_Memory_ErrText);
+        *fileHandle = UNDEF;
+        return;
+    }
+    file->filePos = 0;
+    *bufptr = file->cache.mem;
+
+    /* page0_io */
+    if (!eo06_page0_io (file, fileMode, bufferSize, ferror)) {
+        tsp5_rte_fileerror dummyError;
+
+        sqlfclosec (*fileHandle, SP5VF_CLOSE_NORMAL, &dummyError);
+        *fileHandle = UNDEF;
+        *bufptr = NULL;
+        TRCOUT;
+	return;
+    }
+    TRCOUT_P (("handle %d\n", *fileHandle));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfsaveopenc"
+void
+sqlfsaveopenc (
+    const char *rawFName,
+    tsp5_rte_filemode fileMode,
+    tsp_int4* buffersize,
+    tsp_int4 *fileHandle,
+    void** bufptr,
+    tsp5_rte_fileerror *ferror)
+{
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    eo06_sqlfsaveopen (eo06_cookName (nameBuf, rawFName, UNDEF),
+        fileMode, buffersize, fileHandle, bufptr, ferror);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfsaveopenp"
+void
+sqlfsaveopenp (
+    const tsp_vfilename rawFName,
+    tsp5_rte_filemode fileMode,
+    tsp_int4* buffersize,
+    tsp_int4 *fileHandle,
+    void** bufptr,
+    tsp5_rte_fileerror *ferror)
+{
+    char trimmedBuf [FILENAME_MAX];
+    char nameBuf [FILENAME_MAX];
+    int nameLen;
+
+    TRCIN;
+    nameLen = eo06_trimLen (rawFName, sizeof (tsp_vfilename));
+    memcpy (trimmedBuf, rawFName, nameLen);
+    trimmedBuf [nameLen] = '\0';
+
+    eo06_sqlfsaveopen (eo06_cookName (nameBuf, trimmedBuf, nameLen),
+        fileMode, buffersize, fileHandle, bufptr, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfclose)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfclosec"
+void
+sqlfclosec (
+    tsp_int4 fileHandle,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT* file;
+
+    TRCIN_P (("handle %d, option %d\n", fileHandle, option));
+    eo06_clearError (ferror);
+    if (OUT_OF_ENUM_INL (option, SP5VF_CLOSE_NORMAL, SP5VF_CLOSE_NEXT_TAPE)) {
+        eo06_paramError (ferror, "option");
+        TRCOUT;
+	return;
+    }
+
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file == NULL) {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+        TRCOUT;
+	return;
+    }
+
+    eo06_FLUSH_V (file, ferror);
+    if (file->cache.mem != NULL) {
+        free (file->cache.mem);
+    }
+    eo06_CLOSE_V (file, option, ferror);
+    eo06_freeSlot (&allFilesV, fileHandle);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfclosep"
+void
+sqlfclosep (
+    tsp_int4 fileHandle,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    sqlfclosec (fileHandle, option, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfread)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlfread"
+static void
+eo06_sqlfread (
+    tsp_int4 fileHandle,
+    void* buf,
+    tsp_longint bufSize,
+    tsp_longint* outLen,
+    tsp5_rte_fileerror *ferror,
+    BOOLEAN forC)
+{
+    FileT* file;
+
+    TRCIN;
+    eo06_clearError (ferror);
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file != NULL) {
+        *outLen = eo06_READ_V (file, buf, bufSize, ferror, forC);
+    }
+    else {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+        *outLen = 0;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfreadc"
+void
+sqlfreadc (
+    tsp_int4 fileHandle,
+    void* buf,
+    tsp_longint bufSize,
+    tsp_longint* outLen,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    eo06_sqlfread (fileHandle, buf, bufSize, outLen, ferror, TRUE);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfreadp"
+void
+sqlfreadp (
+    tsp_int4 fileHandle,
+    void* buf,
+    tsp_longint bufSize,
+    tsp_longint* outLen,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    eo06_sqlfread (fileHandle, buf, bufSize, outLen, ferror, FALSE);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfwrite)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfwritec"
+void
+sqlfwritec (
+    tsp_int4 fileHandle,
+    const void* buf,
+    tsp_longint inLen,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT* file;
+
+    TRCIN;
+    eo06_clearError (ferror);
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file != NULL) {
+        eo06_WRITE_V (file, buf, inLen, ferror);
+    }
+    else {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfwritep"
+void
+sqlfwritep (
+    tsp_int4 fileHandle,
+    const void* buf,
+    tsp_longint inLen,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    sqlfwritec (fileHandle, buf, inLen, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfseek)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfseekc"
+void
+sqlfseekc (
+    tsp_int4 fileHandle,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT* file;
+
+    TRCIN_P (("handle %d, distance %ld  whence %d\n",
+	      fileHandle, distance, whence));
+    eo06_clearError (ferror);
+    if (OUT_OF_ENUM_INL (whence, SP5VF_SEEK_BEGIN, SP5VF_SEEK_END)) {
+        eo06_paramError (ferror, "whence");
+        TRCOUT;
+	return;
+    }
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file != NULL) {
+        eo06_SEEK_V (file, distance, whence, ferror);
+    }
+    else {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfseekp"
+void
+sqlfseekp (
+    tsp_int4 fileHandle,
+    tsp_longint distance,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    sqlfseekc (fileHandle, distance, whence, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlflongseekc"
+void
+sqlflongseekc (
+    tsp_int4 fileHandle,
+    tsp_longint distance,
+    tsp_longint recordCount,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT* file;
+    LargeIntegerT large;
+    BOOLEAN calcOK = TRUE;
+
+    TRCIN_P (("handle %d, distance %ld, recordcount %ld, whence %d\n",
+	      fileHandle, distance, recordCount, whence));
+    eo06_clearError (ferror);
+    if (OUT_OF_ENUM_INL (whence, SP5VF_SEEK_BEGIN, SP5VF_SEEK_END)) {
+        eo06_paramError (ferror, "whence");
+        TRCOUT;
+	return;
+    }
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file != NULL) {
+        large = eo06_LONG_X_LONG_2_LARGE_OS (distance, recordCount, &calcOK);
+        if (calcOK) {
+            eo06_LONGSEEK_V (file, large, whence, ferror);
+        }
+        else {
+            eo06_ferror (ferror, Seek_Range_ErrText);
+        }
+    }
+    else {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlflongseekp"
+void
+sqlflongseekp (
+    tsp_int4 fileHandle,
+    tsp_longint distance,
+    tsp_longint recordCount,
+    tsp5_rte_seekkind whence,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    sqlflongseekc (fileHandle, distance, recordCount, whence, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlftell)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"sqlftellc"
+void
+sqlftellc (
+    tsp_int4 fileHandle,
+    tsp_longint *pos,
+    tsp5_rte_fileerror *ferror)
+{
+    FileT* file;
+
+    TRCIN_P (("handle %d\n", fileHandle));
+    eo06_clearError (ferror);
+    file = eo06_getPointer (&allFilesV, fileHandle);
+    if (file != NULL) {
+        if (eo06_VALIDPOS (file)) {
+            *pos = file->filePos;
+        }
+        else {
+            eo06_seekError (ferror);
+        }
+    }
+    else {
+        eo06_ferror (ferror, Invalid_Handle_ErrText);
+    }
+    TRCOUT_P (("result pos %ld\n", *pos));
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlftellp"
+void
+sqlftellp (
+    tsp_int4 fileHandle,
+    tsp_longint *pos,
+    tsp5_rte_fileerror *ferror)
+{
+    TRCIN;
+    sqlftellc (fileHandle, pos, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlferase)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlferase"  /* WIN32 */
+#if defined (_WIN32)
+static void
+eo06_sqlferase (
+    const char *fname,
+    tsp5_rte_fileerror *ferror)
+{
+    int         rc;
+    LONG        attribute;
+    ULONG       dummy1;
+    ULONG       dummy2;
+
+    TRCIN_P (("filename '%s'\n", fname));
+    eo06_clearError (ferror);
+    /* check file for regular file. if true delete file */
+    rc = sql44c_get_file_info ((char*)fname, &attribute, &dummy1, &dummy2);
+
+    if (( rc == NO_ERROR ) &&
+        !(attribute &= FILE_DIRECTORY) &&
+        !(attribute &= FILE_READONLY)) {
+        if (!DeleteFile(fname)) {
+            eo06_osError (ferror);
+        }
+    }
+    else {
+        eo06_ferror (ferror, No_Reg_File_ErrText);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#else
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlferase"  /* UNIX */
+static void
+eo06_sqlferase (
+    const char *fname,
+    tsp5_rte_fileerror *ferror)
+{
+    struct stat         xstat;
+    int                 rc;
+
+    TRCIN_P (("filename '%s'\n", fname));
+    eo06_clearError (ferror);
+    rc = stat (fname, &xstat);
+    if (rc != 0) {
+        eo06_ferror (ferror, File_Not_Found_ErrText);
+        TRCOUT;
+	return;
+    }
+    if (S_ISREG(xstat.st_mode)) {
+        rc = unlink (fname);
+        if (rc != 0) {
+            eo06_ferror (ferror, File_Not_Eraseable_ErrText);
+        }
+    }
+    else {
+        eo06_ferror (ferror, No_Reg_File_ErrText);
+    }
+    TRCOUT;
+}
+#endif
+/*------------------------------*/
+
+
+    #undef MF__
+    #define MF__ MOD__"sqlferasec"
+void
+sqlferasec (
+    const char *rawFName,
+    tsp5_rte_fileerror *ferror)
+{
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    eo06_sqlferase (eo06_cookName (nameBuf, rawFName, UNDEF), ferror);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlferasep"
+void
+sqlferasep (
+    const tsp_vfilename rawFName,
+    tsp5_rte_fileerror *ferror)
+{
+    int nameLen;
+    char trimmedBuf [FILENAME_MAX];
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    nameLen = eo06_trimLen (rawFName, sizeof (tsp_vfilename));
+    memcpy (trimmedBuf, rawFName, nameLen);
+    trimmedBuf [nameLen] = '\0';
+
+    eo06_sqlferase (eo06_cookName (nameBuf, trimmedBuf, nameLen), ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlfinfo)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillUnknown"
+static void
+eo06_fillUnknown (
+    tsp5_rte_fileinfo *finfo)
+{
+    finfo->sp5fi_writeable = FALSE;
+    finfo->sp5fi_is_link = FALSE;
+    finfo->sp5fi_size = 0;
+    finfo->sp5fi_size_x = 0;
+    memset (finfo->sp5fi_date_modified, '0', sizeof (tsp_date));
+    memset (finfo->sp5fi_time_modified, '0', sizeof (tsp_time));
+    finfo->sp5fi_media_kind = vf_t_unknown;
+}
+
+/*------------------------------*/
+
+#if defined (_WIN32)
+#define FILE_READ (STANDARD_RIGHTS_READ | FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+#define FILE_WRITE (STANDARD_RIGHTS_WRITE | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillPrivilegesWin32"
+static void
+eo06_fillPrivilegesWin32 (
+    tsp5_rte_fileinfo *finfo,
+    const char* fname)
+{
+#if !defined (USE_SECURITY)
+    HANDLE fhandle;
+
+    TRCIN;
+    /* try read */
+    fhandle = CreateFile (fname, GENERIC_READ, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, 0, 0);
+    if (fhandle == invalidHandleC) {
+        finfo->sp5fi_readable = FALSE;
+    }
+    else {
+        finfo->sp5fi_readable = TRUE;
+        CloseHandle (fhandle);
+    }
+    /* try write */
+    fhandle = CreateFile (fname, GENERIC_WRITE, 0,
+        NULL, OPEN_EXISTING, 0, 0);
+    if (fhandle == invalidHandleC) {
+        finfo->sp5fi_writeable = FALSE;
+    }
+    else {
+        finfo->sp5fi_writeable = TRUE;
+        CloseHandle (fhandle);
+    }
+#else
+    BOOLEAN infoOK;
+    SECURITY_DESCRIPTOR* securityDesc;
+    DWORD lengthRequired;
+    HANDLE currentUser = NULL;
+    HANDLE impersonator = NULL;
+    GENERIC_MAPPING genericMapping;
+    PRIVILEGE_SET privilegeSet;
+    DWORD setLength;
+    DWORD grantedAccess = 0;
+    BOOLEAN accessStatus = FALSE;
+    DWORD rc;
+
+    TRCIN;
+    finfo->sp5fi_readable = FALSE;
+    finfo->sp5fi_writeable = FALSE;
+    infoOK = GetFileSecurity(fname, DACL_SECURITY_INFORMATION, NULL, 0, &lengthRequired);
+    securityDesc = (SECURITY_DESCRIPTOR*) GlobalAlloc (GPTR, lengthRequired);
+    infoOK = GetFileSecurity(fname, DACL_SECURITY_INFORMATION, securityDesc,
+        lengthRequired, &lengthRequired);
+
+    if (infoOK) {
+        infoOK =ImpersonateSelf (SecurityImpersonation);
+        infoOK = OpenThreadToken (GetCurrentThread(), TOKEN_IMPERSONATE | TOKEN_QUERY,
+            FALSE, &currentUser);
+
+    }
+    if (infoOK) {
+        IsValidSecurityDescriptor (securityDesc);
+        rc = GetLastError();
+        setLength = sizeof (privilegeSet);
+        infoOK = AccessCheck(securityDesc, currentUser,
+            FILE_READ /*| GENERIC_WRITE*/, &genericMapping, &privilegeSet,
+            &setLength, &grantedAccess, &accessStatus);
+    }
+    if (!infoOK) {
+        rc = GetLastError ();
+    }
+    RevertToSelf();
+    CloseHandle (impersonator);
+    CloseHandle (currentUser);
+    GlobalFree (securityDesc);
+#endif
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+const DWORD halfMAXDWORD = MAXDWORD / 2;
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillSizeWin32"
+static void
+eo06_fillSizeWin32 (
+    tsp5_rte_fileinfo *finfo,
+    WIN32_FIND_DATA* ntInfo)
+{
+    int overflow;
+
+    TRCIN;
+    if (ntInfo->nFileSizeLow <= halfMAXDWORD) {
+        finfo->sp5fi_size = ntInfo->nFileSizeLow;
+        overflow = 0;
+    }
+    else {
+        finfo->sp5fi_size = ntInfo->nFileSizeLow - halfMAXDWORD;
+        overflow = 1;
+    }
+    finfo->sp5fi_size_x = ntInfo->nFileSizeHigh + overflow;
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillTimeWin32"
+static void
+eo06_fillTimeWin32 (
+    tsp5_rte_fileinfo *finfo,
+    FILETIME ftime)
+{
+    FILETIME localTime;
+    SYSTEMTIME systemTime;
+
+    TRCIN;
+    FileTimeToLocalFileTime (&ftime, &localTime);
+    FileTimeToSystemTime (&localTime, &systemTime);
+    memset (finfo->sp5fi_date_modified, ' ', sizeof (tsp_date));
+    memset (finfo->sp5fi_time_modified, ' ', sizeof (tsp_time));
+
+    eo06_putInt (finfo->sp5fi_date_modified, systemTime.wYear, 4);
+    eo06_putInt (finfo->sp5fi_date_modified + 4, systemTime.wMonth, 2);
+    eo06_putInt (finfo->sp5fi_date_modified + 6, systemTime.wDay, 2);
+
+    eo06_putInt (finfo->sp5fi_time_modified, systemTime.wHour, 2);
+    eo06_putInt (finfo->sp5fi_time_modified + 2, systemTime.wMinute, 2);
+    eo06_putInt (finfo->sp5fi_time_modified + 4, systemTime.wSecond, 2);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+static tsp_vf_type FileType_os2sp[] = {
+  vf_t_unknown,         /* DT_UNKNOWN   */
+  vf_t_raw,             /* DT_CONOUT    */
+  vf_t_raw,             /* DT_CONIN     */
+  vf_t_raw,             /* DT_PRN       */
+  vf_t_raw,             /* DT_LPTx      */
+  vf_t_raw,             /* DT_COMx      */
+  vf_t_file,            /* DT_OTHER     */
+  vf_t_tape_norew,      /* DT_TAPE      */
+  vf_t_raw,             /* DT_DRIVE     */
+  vf_t_pipe,            /* DT_PIPE      */
+  vf_t_raw              /* DT_NUL       */
+};
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillMediaWin32"
+static void
+eo06_fillMediaWin32 (
+    tsp5_rte_fileinfo *finfo,
+    DWORD attributes,
+    const char* fname)
+{
+    TRCIN;
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+        finfo->sp5fi_media_kind = vf_t_directory;
+    else {
+        finfo->sp5fi_media_kind = FileType_os2sp [
+            sql44c_get_dev_type_by_filename ((char*)fname)];
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlfinfo"  /* WIN32 */
+static void
+eo06_sqlfinfo (
+    const char *fname,
+    tsp5_rte_fileinfo *finfo,
+    tsp5_rte_fileerror *ferror)
+{
+    HANDLE fhandle;
+    WIN32_FIND_DATA ntInfo;
+
+    TRCIN;
+    eo06_clearError (ferror);
+    fhandle = FindFirstFile (fname, &ntInfo);
+    if (fhandle == INVALID_HANDLE_VALUE) {
+        finfo->sp5fi_exists = FALSE;
+        eo06_fillUnknown (finfo);
+    }
+    else {
+        finfo->sp5fi_exists = TRUE;
+        /* is link */
+        finfo->sp5fi_is_link = FALSE;
+        /* privileges */
+        eo06_fillPrivilegesWin32 (finfo, fname);
+        /* size */
+        eo06_fillSizeWin32 (finfo, &ntInfo);
+        /* date */
+        eo06_fillTimeWin32 (finfo, ntInfo.ftLastWriteTime);
+        /* media */
+        eo06_fillMediaWin32 (finfo, ntInfo.dwFileAttributes, fname);
+        FindClose (fhandle);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+#else
+    #undef MF__
+    #define MF__ MOD__"eo06_fillPrivilegesUnix"
+static void
+eo06_fillPrivilegesUnix (
+    tsp5_rte_fileinfo *finfo,
+    struct stat *xstat)
+{
+    unsigned short userID;
+    unsigned short groupID;
+
+    TRCIN;
+    userID = geteuid ();
+    groupID = getegid ();
+
+    if ((userID == xstat->st_uid) && (xstat->st_mode & S_IRUSR)) {
+        finfo->sp5fi_readable = TRUE;
+    }
+    else if ((groupID == xstat->st_gid) && (xstat->st_mode & S_IRGRP)) {
+        finfo->sp5fi_readable = TRUE;
+    }
+    else if (xstat->st_mode & S_IROTH) {
+        finfo->sp5fi_readable = TRUE;
+    }
+    else {
+        finfo->sp5fi_readable = FALSE;
+    }
+
+    if ((userID == xstat->st_uid) && (xstat->st_mode & S_IWUSR)) {
+        finfo->sp5fi_writeable = TRUE;
+    }
+    else if ((groupID == xstat->st_gid) && (xstat->st_mode & S_IWGRP)) {
+        finfo->sp5fi_writeable = TRUE;
+    }
+    else if (xstat->st_mode & S_IWOTH) {
+        finfo->sp5fi_writeable = TRUE;
+    }
+    else {
+        finfo->sp5fi_writeable = FALSE;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillTimeUnix"
+static void
+eo06_fillTimeUnix (
+    tsp5_rte_fileinfo *finfo,
+    time_t ftime)
+{
+    struct tm* tmbuf;
+
+    TRCIN;
+    tmbuf = localtime (&ftime);
+
+    eo06_putInt (finfo->sp5fi_date_modified, tmbuf->tm_year + 1900, 4);
+    eo06_putInt (finfo->sp5fi_date_modified + 4, tmbuf->tm_mon + 1, 2);
+    eo06_putInt (finfo->sp5fi_date_modified + 6, tmbuf->tm_mday, 2);
+
+    eo06_putInt (finfo->sp5fi_time_modified, tmbuf->tm_hour, 4);
+    eo06_putInt (finfo->sp5fi_time_modified + 4, tmbuf->tm_min, 2);
+    eo06_putInt (finfo->sp5fi_time_modified + 6, tmbuf->tm_sec, 2);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillDirectoryInfoUnix"
+static void
+eo06_fillDirectoryInfoUnix (
+    tsp5_rte_fileinfo *finfo)
+{
+    finfo->sp5fi_size_x = 0;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fillMediaUnix"
+static void /*ARGSUSED*/
+eo06_fillMediaUnix (
+    tsp5_rte_fileinfo *finfo,
+    const char* fname,
+    struct stat *xstat)
+{
+    TRCIN;
+    if (xstat->st_mode & S_IFDIR) {
+        finfo->sp5fi_media_kind = vf_t_directory;
+        eo06_fillDirectoryInfoUnix (finfo);
+    }
+    else if ((xstat->st_mode & S_IFBLK) || (xstat->st_mode & S_IFCHR)) {
+        finfo->sp5fi_media_kind = vf_t_raw;
+    }
+    else if (xstat->st_mode & S_IFIFO) {
+        finfo->sp5fi_media_kind = vf_t_pipe;
+    }
+    else if (xstat->st_mode & S_IFREG) {
+        finfo->sp5fi_media_kind = vf_t_file;
+    }
+    else {
+        finfo->sp5fi_media_kind = vf_t_unknown;
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_sqlfinfo"  /* UNIX */
+void
+eo06_sqlfinfo (
+    const char *fname,
+    tsp5_rte_fileinfo *finfo,
+    tsp5_rte_fileerror *ferror)
+{
+    int         rc;
+    struct stat xstat;
+
+    TRCIN;
+    eo06_clearError (ferror);
+    rc = eo06_lstat (fname, &xstat);
+    if (rc != 0) {
+        finfo->sp5fi_exists = FALSE;
+        eo06_fillUnknown (finfo);
+        /* check errno to set ferror */
+    }
+    else {
+        finfo->sp5fi_exists = TRUE;
+        /* is link */
+        if (eo06_ISLINK_OS(xstat)) {
+            finfo->sp5fi_is_link = TRUE;
+            stat (fname, &xstat);
+        }
+        else
+            finfo->sp5fi_is_link = FALSE;
+        /* privileges */
+        eo06_fillPrivilegesUnix (finfo, &xstat);
+        /* size */
+        finfo->sp5fi_size = xstat.st_size;
+        finfo->sp5fi_size_x = 0;
+        /* date */
+        eo06_fillTimeUnix (finfo, xstat.st_mtime);
+        /* media */
+        eo06_fillMediaUnix (finfo, fname, &xstat);
+    }
+    TRCOUT;
+}
+#endif
+/*------------------------------*/
+
+
+    #undef MF__
+    #define MF__ MOD__"sqlfinfoc"
+void
+sqlfinfoc (
+    const char *rawFName,
+    tsp5_rte_fileinfo *finfo,
+    tsp5_rte_fileerror *ferror)
+{
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    eo06_sqlfinfo (eo06_cookName (nameBuf, rawFName, UNDEF), finfo, ferror);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlfinfop"
+void
+sqlfinfop (
+    const tsp_vfilename rawFName,
+    tsp5_rte_fileinfo *finfo,
+    tsp5_rte_fileerror *ferror)
+{
+    int nameLen;
+    char trimmedBuf [FILENAME_MAX];
+    char nameBuf [FILENAME_MAX];
+
+    TRCIN;
+    nameLen = eo06_trimLen (rawFName, sizeof (tsp_vfilename));
+    memcpy (trimmedBuf, rawFName, nameLen);
+    trimmedBuf [nameLen] = '\0';
+
+    eo06_sqlfinfo (eo06_cookName (nameBuf, trimmedBuf, nameLen), finfo, ferror);
+
+    eo06_padLen (ferror->sp5fe_text, MAXERRORTEXT);
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+/**\
+--------------------------------------- MF__ MOD__ (sqlffinish)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"sqlffinishc"
+void
+sqlffinishc (void)
+{
+    tsp_int4 handle;
+    tsp5_rte_fileerror err;
+
+    TRCIN;
+    handle = UNDEF;
+    while (eo06_nextUsedHandle (&allFilesV, &handle)) {
+        sqlfclosec (handle, SP5VF_CLOSE_NORMAL, &err);
+    }
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"sqlffinishp"
+void
+sqlffinishp (void)
+{
+    TRCIN;
+    sqlffinishc ();
+    TRCOUT;
+}
+
+/*------------------------------*/
+
+/**\
+--------------------------------------- MF__ MOD__ (NT specifics)
+\**/
+
+#if defined (_WIN32)
+
+ #define TAPE_ERROR_RETRY                          2
+ #define MAX_TAPE_LOAD_RETRY_TIME                 60
+
+ #if defined (KERNEL)
+  #define  SECURITY_ATTR        &kgs.AdminSA
+ #else
+  #define  SECURITY_ATTR        NULL
+ #endif
+
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fileOpenWin32"
+static BOOLEAN
+eo06_fileOpenWin32 (
+    const char* fname,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    FileT* file,
+    tsp5_rte_fileerror *ferror)
+{
+    int                 openFlags = 0;
+    DWORD               accessMode;
+    DWORD               shareMode;
+    DWORD               creationMode;
+    DWORD               attributes;
+    BOOLEAN             reading;
+
+    TRCIN;
+    switch (fileMode) {
+        case SP5VF_READ:
+            accessMode = GENERIC_READ;
+            shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+            creationMode = OPEN_EXISTING;
+            reading = TRUE;
+            break;
+        case SP5VF_WRITE:
+            accessMode = GENERIC_WRITE;
+            shareMode = 0;
+            creationMode = CREATE_ALWAYS;
+            reading = FALSE;
+            break;
+        case SP5VF_READWRITE:
+            accessMode = GENERIC_READ | GENERIC_WRITE ;
+            shareMode = 0;
+            creationMode = OPEN_ALWAYS;
+            reading = FALSE;
+            break;
+        case SP5VF_APPEND:
+            accessMode = GENERIC_WRITE;
+            shareMode = 0;
+            creationMode = OPEN_ALWAYS;
+            reading = FALSE;
+            break;
+        default:
+            SWITCH_ERROR_DBG ("Invalid file mode", fileMode);
+            break;
+    }
+    if (SP5BK_DISKSYNCED == buffering)
+        attributes = FILE_FLAG_WRITE_THROUGH;
+    else
+        attributes = 0;
+    file->lDevType = sql44c_get_dev_type_by_filename ((char*)fname);
+    switch (file->lDevType) {
+        case DT_OTHER:
+        case DT_NUL:
+            file->osHandle = CreateFile (fname, accessMode, shareMode, 0,
+                creationMode, attributes, NULL);
+            if (file->osHandle == invalidHandleC) {
+                eo06_osError (ferror);
+            }
+            if ((file->osHandle != invalidHandleC) && (fileMode == SP5VF_APPEND)) {
+                SetFilePointer (file->osHandle, 0, NULL, FILE_END);
+            }
+            break;
+        case DT_TAPE:
+            eo06c_tape_open (fname, file, ferror, reading);
+            break;
+        case DT_PIPE:
+            if (reading) {
+                eo06c_pipe_read_open (fname, file, ferror);
+            }
+            else {
+                eo06c_pipe_write_open (fname, file, ferror);
+            }
+            break;
+        case DT_CON:
+            if (!reading) {
+                eo06c_con_open (fname, file, ferror);
+            }
+            else {
+                /* error */
+            }
+            break;
+        case DT_CONIN:
+            if (reading) {
+                eo06c_con_open (fname, file, ferror);
+            }
+            else {
+                /* error */
+            }
+            break;
+        default:
+            SWITCH_ERROR_DBG ("invalid device type %d", file->lDevType);
+            break;
+    }
+    TRCOUT;
+    return (file->osHandle != invalidHandleC);
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fileClose"   /* WIN32 */
+static void
+eo06_fileClose (
+    FileT* file,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror *ferror)
+{
+    tsp5_rte_fileerror  dummyError;
+    tsp5_rte_fileerror* usedferror = ferror;
+    BOOLEAN             ok;
+    
+    if (file->lDevType == DT_TAPE ) {
+        eo06_clearError (&dummyError);
+        if (eo06_ISWRITER_V (file)) {
+            eo06c_tape_write_mark (file, ferror);
+        }
+        if (ferror->sp5fe_result != 0) {
+            usedferror = &dummyError;
+        }
+
+        if ((option == SP5VF_CLOSE_REWIND) || (option == SP5VF_CLOSE_NEXT_TAPE)) {
+            eo06c_tape_rewind(file, usedferror );
+        }
+        if (ferror->sp5fe_result != 0) {
+            usedferror = &dummyError;
+        }
+
+        eo06c_tape_locking(file, usedferror, TAPE_UNLOCK);
+        if ((ferror->sp5fe_result == 0) && (option == SP5VF_CLOSE_NEXT_TAPE)) {
+            /* unload tape so next open loads new tape */
+            eo06c_tape_loading(file, &dummyError , TAPE_UNLOAD);
+            if (dummyError.sp5fe_result != 0) {
+                ferror->sp5fe_warning = SP5VFW_NO_NEXT_TAPE;
+            }
+        }
+    }
+    else if (file->lDevType == DT_PIPE ) {
+        FlushFileBuffers(file->osHandle);
+    }
+    ok = CloseHandle (file->osHandle);
+    if (!ok) {
+        eo06_osError (usedferror);
+    }
+}
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_tape_open"
+static LONG eo06c_tape_open (
+    const char*         tapeName,
+    FileT*              file,
+    tsp5_rte_fileerror*  ferror,
+    BOOLEAN             reading)
+{
+    APIRET             rc = NO_ERROR;
+    LONG               lError;
+    TRCIN;
+
+    DBG3 ((MF__, "Open tape '%s'", tapeName ));
+
+    file->osHandle = CreateFile( tapeName,
+                                          GENERIC_READ | GENERIC_WRITE,
+                                          0,
+                                          SECURITY_ATTR,
+                                          OPEN_EXISTING,
+                                          0,
+                                          NULL);
+    if ( file->osHandle == INVALID_HANDLE_VALUE ) {
+        rc = GetLastError();
+        ferror->sp5fe_result = VF_NOTOK;
+        file->osHandle = INVALID_HANDLE_VALUE;
+        if (sql06c_handle_known_errors (tapeName, rc, ferror->sp5fe_text) == FALSE ) {
+            DBG1 (( MF__, "Cannot open tape '%s', rc = %d", tapeName, rc    ));
+            MSGD (( ERR_OPEN, tapeName, rc                                  ));
+            sql46c_build_error_string (ferror->sp5fe_text, ERRMSG_VF_OPEN,  rc  );
+        }
+     }
+   else /* -- no error */ {
+       eo06c_init_dlt_tape (file);
+
+       if ( ((lError = eo06c_get_drive_info(file, ferror)) == VF_OK )
+           && ((lError = eo06c_tape_loading  (file, ferror, TAPE_LOAD))
+                                                               == VF_OK )
+           && ((lError = eo06c_tape_locking  (file, ferror, TAPE_LOCK))
+                                                               == VF_OK )
+           && ((lError = eo06c_get_media_info(file, ferror)) == VF_OK )
+           && ((lError = eo06c_init_tape_dev (file, ferror)) == VF_OK ))
+           {
+             /* OK */
+           }
+
+        if (lError == VF_NOTOK) {
+            eo06c_tape_locking(file, ferror , TAPE_UNLOCK);
+        }
+    }
+
+    DBG3 (( MF__, "lError              %d", lError ));
+
+    TRCOUT;
+    return (ferror->sp5fe_result);
+}
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_con_open"
+static LONG eo06c_con_open (
+    const char*                 fname,
+    FileT                       *file,
+    tsp5_rte_fileerror*          ferror)
+{
+    APIRET      rc     = NO_ERROR;
+
+    TRCIN;
+
+    if (file->lDevType == DT_CONIN ) {
+        file->osHandle = GetStdHandle(STD_INPUT_HANDLE);
+    }
+    else {
+        file->osHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+
+    if (file->osHandle == INVALID_HANDLE_VALUE ) {
+        rc                = GetLastError();
+        ferror->sp5fe_result = VF_NOTOK;
+        file->osHandle    = INVALID_HANDLE_VALUE;
+
+        DBG1 (( MF__, "Cannot open file '%s', rc = %d", fname, rc));
+        MSGD (( ERR_OPEN, fname, rc ));
+        sql46c_build_error_string (ferror->sp5fe_text, ERRMSG_VF_OPEN, rc);
+    }
+
+    TRCOUT;
+    return (ferror->sp5fe_result);
+}
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_pipe_write_open"
+static LONG eo06c_pipe_write_open (
+    const char*                 fname,
+    FileT*                      file,
+    tsp5_rte_fileerror*         ferror)
+{
+      APIRET       rc      = NO_ERROR;
+      PATHNAME     szPhysFileName;
+      ULONG        ulPipeBuffSize;
+
+      TRCIN;
+
+      sql44c_subst_log_parts (szPhysFileName, (char*)fname);
+      ulPipeBuffSize = KBYTE_64;
+      file->osHandle = CreateNamedPipe( szPhysFileName,
+                                               PIPE_ACCESS_OUTBOUND,
+                                               PIPE_TYPE_BYTE
+                                               | PIPE_READMODE_BYTE
+                                               | PIPE_WAIT,
+                                               1,
+                                               ulPipeBuffSize,
+                                               ulPipeBuffSize,
+                                               INFINITE,
+                                               NULL);
+
+    if (file->osHandle == INVALID_HANDLE_VALUE) {
+        rc = GetLastError();
+    }
+
+    if (rc == NO_ERROR) {
+        if (!ConnectNamedPipe(file->osHandle, NULL)) {
+            rc = GetLastError();
+            CloseHandle(file->osHandle);
+        }
+    }
+    else if (rc == ERROR_PIPE_BUSY) {
+        file->osHandle = CreateFile(szPhysFileName,
+                                            GENERIC_WRITE,
+                                            FILE_SHARE_READ,
+                                            NULL,
+                                            OPEN_EXISTING,
+                                            FILE_ATTRIBUTE_NORMAL,
+                                            NULL );
+
+        if (file->osHandle == INVALID_HANDLE_VALUE ) {
+            rc = GetLastError();
+        }
+        else {
+            rc = NO_ERROR;
+        }
+    }
+
+    if ( rc != NO_ERROR ) {
+        ferror->sp5fe_result = VF_NOTOK;
+        file->osHandle = INVALID_HANDLE_VALUE;
+
+        if ( sql06c_handle_known_errors ( fname,
+                                      rc , ferror->sp5fe_text ) == FALSE )
+        {
+            DBG1 (( MF__, "Cannot open file '%s', rc = %d", fname, rc ));
+            MSGD (( ERR_OPEN, fname, rc                               ));
+            sql46c_build_error_string (ferror->sp5fe_text, ERRMSG_VF_OPEN,  rc );
+        }
+    }
+    else { /* -- no error */
+        DBG3 ((MF__, "Open file '%s'", fname));
+    }
+
+    DBG3 (( MF__, "lError              %d", ferror->sp5fe_result));
+
+    TRCOUT;
+    return (ferror->sp5fe_result);
+}
+
+/*------------------------------*/
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_pipe_read_open"
+static LONG eo06c_pipe_read_open (const  char*  hostFileName,
+                             FileT  *file,
+                             tsp5_rte_fileerror        *ferror)
+  {
+  APIRET       rc     = NO_ERROR;
+  LONG         lError = VF_OK;
+  PATHNAME     szPhysFileName;
+  ULONG        ulPipeBuffSize = sizeof(VF_BLOCK) * 2;
+
+
+    TRCIN;
+
+  sql44c_subst_log_parts ( szPhysFileName, (char*)hostFileName );
+
+   file->osHandle = CreateNamedPipe( szPhysFileName,
+                                               PIPE_ACCESS_INBOUND,
+                                               PIPE_TYPE_BYTE     |
+                                               PIPE_READMODE_BYTE |
+                                               PIPE_WAIT,
+                                               1,
+                                               ulPipeBuffSize,
+                                               ulPipeBuffSize,
+                                               INFINITE,
+                                               NULL);
+
+   if (file->osHandle == INVALID_HANDLE_VALUE )
+     rc = GetLastError();
+
+   if (rc == NO_ERROR)
+     {
+     if (!ConnectNamedPipe(file->osHandle, NULL))
+       {
+       rc = GetLastError();
+       CloseHandle(file->osHandle);
+       }
+     }
+   else if (rc == ERROR_PIPE_BUSY)
+     {
+     file->osHandle = CreateFile( szPhysFileName,
+                                            GENERIC_READ,
+                                            FILE_SHARE_WRITE,
+                                            NULL,
+                                            OPEN_EXISTING,
+                                            FILE_ATTRIBUTE_NORMAL,
+                                            NULL );
+
+     if (file->osHandle == INVALID_HANDLE_VALUE )
+       rc = GetLastError();
+     else
+       rc = NO_ERROR;
+     }
+
+  if ( rc != NO_ERROR )
+    {
+    lError            = VF_NOTOK;
+    file->osHandle = INVALID_HANDLE_VALUE;
+
+    if ( sql06c_handle_known_errors ( hostFileName,
+                                      rc , ferror->sp5fe_text ) == FALSE )
+      {
+      DBG1 (( MF__, "Cannot open file '%s', rc = %d", hostFileName, rc ));
+      MSGD (( ERR_OPEN, hostFileName, rc                               ));
+      sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_OPEN, rc  );
+      }
+    }
+  else /* -- no error */
+    {
+    }
+
+  TRCOUT;
+  return (lError);
+  }
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_init_dlt_tape"
+static LONG eo06c_init_dlt_tape ( FileT  *file )
+{
+
+  APIRET                     rc             = NO_ERROR;
+  INT                        Retry          = TAPE_ERROR_RETRY;
+
+  TRCIN;
+
+  /*
+   * --- try to load tape.
+   *     it's needed by some tape drives (DLT) as first operation
+   *     Daniel 28.02.97: changed to TAPE_LOCK as
+   *            TAPE_LOAD rewinds tape
+   */
+  do
+    {
+    rc = PrepareTape ( file->osHandle, TAPE_LOCK , FALSE);
+    }
+  while (( rc == ERROR_MEDIA_CHANGED        ||
+           rc == ERROR_END_OF_MEDIA         ||
+           rc == ERROR_BEGINNING_OF_MEDIA   ||
+           rc == ERROR_IO_DEVICE            ||
+           rc == ERROR_BUS_RESET            ) && --Retry);
+  /*
+   * --- no error handling, ignore all errors
+   */
+
+  TRCOUT;
+  return ( TRUE );
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_get_drive_info"
+static LONG eo06c_get_drive_info ( FileT  *file,
+                                    tsp5_rte_fileerror        *ferror)
+  {
+
+   APIRET                     rc         = NO_ERROR;
+   LONG                       lError     = VF_OK;
+   INT                        Retry      = TAPE_ERROR_RETRY;
+   TAPE_GET_DRIVE_PARAMETERS  DriveInfo;
+   DWORD                      dwInfoSize;
+
+   TRCIN;
+
+   /*
+    *  --- get tape device information
+    */
+   do
+     {
+     dwInfoSize  = sizeof ( DriveInfo );
+     memset ( &DriveInfo, 0, sizeof(DriveInfo));
+
+     rc = GetTapeParameters( file->osHandle,
+                             GET_TAPE_DRIVE_INFORMATION,
+                             &dwInfoSize, &DriveInfo );
+     }
+   while (( rc == ERROR_BUS_RESET          ||
+            rc == ERROR_IO_DEVICE          ||
+            rc == ERROR_END_OF_MEDIA       ||
+            rc == ERROR_BEGINNING_OF_MEDIA ||
+            rc == ERROR_MEDIA_CHANGED )    && --Retry);
+
+   if (( rc != NO_ERROR )                 &&
+       ( rc != ERROR_MEDIA_CHANGED )      &&
+       ( rc != ERROR_END_OF_MEDIA )       &&
+       ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+       ( rc != ERROR_INVALID_FUNCTION ))
+     {
+     lError            = VF_NOTOK;
+
+     if ( sql06c_handle_known_errors ( "unknown",
+                                       rc , ferror->sp5fe_text ) == FALSE )
+       {
+       DBG1 (( MF__, ERRMSG_VF_TAPE_PARAM ));
+       MSGD (( ERR_TAPE_PARAM, rc         ));
+       sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_PARAM, rc );
+       }
+
+     TRCOUT;
+     return (lError);
+     }
+   else if ( rc != ERROR_INVALID_FUNCTION )
+     {
+     file->ulMaxTapeBlkSize = DriveInfo.MaximumBlockSize;
+     file->fECC             = DriveInfo.ECC;
+     file->fCompression     = DriveInfo.Compression;
+     file->fDataPadding     = DriveInfo.DataPadding;
+     file->ulTapeFeatures   = 0;
+
+     if (( DriveInfo.FeaturesHigh & TAPE_DRIVE_SET_COMPRESSION ) &&
+         ( DriveInfo.FeaturesLow  & TAPE_DRIVE_COMPRESSION ))
+       file->ulTapeFeatures |= TAPE_SET_COMPRESSION;
+     if (( DriveInfo.FeaturesHigh & TAPE_DRIVE_SET_ECC ) &&
+         ( DriveInfo.FeaturesLow  & TAPE_DRIVE_ECC ))
+       file->ulTapeFeatures |= TAPE_SET_ECC;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_SET_BLOCK_SIZE )
+       file->ulTapeFeatures |= TAPE_SET_BLOCK_SIZE;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_LOCK_UNLOCK )
+       file->ulTapeFeatures |= TAPE_LOCK_UNLOCK;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_LOAD_UNLOAD )
+       file->ulTapeFeatures |= TAPE_LOAD_UNLOAD;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_REPORT_SMKS )
+       file->ulTapeFeatures |= TAPE_REPORT_SMKS;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_WRITE_LONG_FMKS )
+       file->ulTapeFeatures |= TAPE_WRITE_LONG_FMKS;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_WRITE_SHORT_FMKS )
+       file->ulTapeFeatures |= TAPE_WRITE_SHORT_FMKS;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_WRITE_FILEMARKS )
+       file->ulTapeFeatures |= TAPE_WRITE_FILEMARKS;
+     if ( DriveInfo.FeaturesHigh & TAPE_DRIVE_WRITE_MARK_IMMED )
+       file->ulTapeFeatures |= TAPE_WRITE_MARK_IMMED;
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_get_media_info"
+static LONG eo06c_get_media_info ( FileT  *file,
+                                    tsp5_rte_fileerror        *ferror)
+  {
+
+   APIRET                     rc         = NO_ERROR;
+   LONG                       lError     = VF_OK;
+   INT                        Retry      = TAPE_ERROR_RETRY;
+   TAPE_GET_MEDIA_PARAMETERS  MediaInfo;
+   DWORD                      dwInfoSize;
+
+   TRCIN;
+
+   do
+     {
+     /*
+      *  --- get media information
+      */
+     dwInfoSize  = sizeof ( MediaInfo );
+     memset ( &MediaInfo, 0, sizeof(MediaInfo));
+
+     rc = GetTapeParameters( file->osHandle,
+                             GET_TAPE_MEDIA_INFORMATION,
+                             &dwInfoSize, &MediaInfo );
+     }
+   while (( rc == ERROR_BUS_RESET            ||
+            rc == ERROR_IO_DEVICE            ||
+            rc == ERROR_END_OF_MEDIA         ||
+            rc == ERROR_BEGINNING_OF_MEDIA   ||
+            rc == ERROR_MEDIA_CHANGED ) && --Retry);
+
+   if (( rc != NO_ERROR )                 &&
+       ( rc != ERROR_MEDIA_CHANGED )      &&
+       ( rc != ERROR_END_OF_MEDIA )       &&
+       ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+       ( rc != ERROR_INVALID_FUNCTION ))
+     {
+     lError            = VF_NOTOK;
+
+     if ( sql06c_handle_known_errors ( "unknown",
+                                       rc , ferror->sp5fe_text ) == FALSE )
+       {
+       DBG1 (( MF__, ERRMSG_VF_TAPE_PARAM ));
+       MSGD (( ERR_TAPE_PARAM, rc         ));
+       sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_PARAM, rc );
+       }
+     TRCOUT;
+     return (lError);
+     }
+   else if ( rc != ERROR_INVALID_FUNCTION )
+     {
+     if ( MediaInfo.PartitionCount > 1)
+       MSGD (( INFO_TAPE_WRONG_PART_CNT ));
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_init_tape_dev"
+static LONG eo06c_init_tape_dev( FileT *file,
+                                  tsp5_rte_fileerror        *ferror)
+  {
+
+   APIRET                     rc         = NO_ERROR;
+   LONG                       lError     = VF_OK;
+   INT                        Retry      = TAPE_ERROR_RETRY;
+   TAPE_SET_DRIVE_PARAMETERS  DriveInfo;
+   TAPE_SET_MEDIA_PARAMETERS  MediaInfo;
+   char*                        TapeCompressEnabled;
+
+   TRCIN;
+
+   DriveInfo.ECC                = file->fECC;
+   DriveInfo.Compression        = file->fCompression;
+   DriveInfo.DataPadding        = file->fDataPadding;
+   DriveInfo.ReportSetmarks     = FALSE;
+   DriveInfo.EOTWarningZoneSize = 0;
+
+   if ( file->ulTapeFeatures & TAPE_SET_COMPRESSION )
+     {
+     rc = GETENV ( TAPE_COMPRESS_ENV_VAR, &TapeCompressEnabled );
+
+     if (( rc == NO_ERROR )  && ( *TapeCompressEnabled )  &&
+         ( ! strcmp ( "OFF", strupr ( TapeCompressEnabled ))))
+       DriveInfo.Compression  = FALSE;
+     else
+       DriveInfo.Compression  = TRUE;
+     }
+
+   if ( file->ulTapeFeatures & TAPE_SET_ECC )
+     DriveInfo.ECC = TRUE;
+
+
+   do
+     {
+     rc = SetTapeParameters( file->osHandle,
+                             SET_TAPE_DRIVE_INFORMATION,
+                             &DriveInfo );
+     }
+   while (( rc == ERROR_BUS_RESET            ||
+            rc == ERROR_IO_DEVICE            ||
+            rc == ERROR_END_OF_MEDIA         ||
+            rc == ERROR_BEGINNING_OF_MEDIA   ||
+            rc == ERROR_MEDIA_CHANGED ) && --Retry);
+
+   if (( rc != NO_ERROR )                 &&
+       ( rc != ERROR_MEDIA_CHANGED )      &&
+       ( rc != ERROR_END_OF_MEDIA )       &&
+       ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+       ( rc != ERROR_INVALID_FUNCTION ))
+     {
+     lError            = VF_NOTOK;
+
+     if ( sql06c_handle_known_errors ( "unknown",
+                                       rc , ferror->sp5fe_text ) == FALSE )
+       {
+       DBG1 (( MF__, ERRMSG_VF_TAPE_PARAM ));
+       MSGD (( ERR_TAPE_PARAM, rc         ));
+       sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_PARAM, rc );
+       }
+     TRCOUT;
+     return (lError);
+     }
+
+   if ( ( file->ulMaxTapeBlkSize != 0 )  &&
+       ( file->ulTapeFeatures & TAPE_SET_BLOCK_SIZE ))
+     {
+     if ( file->ulMaxTapeBlkSize < sizeof (tsp_buf) )
+       MediaInfo.BlockSize = file->ulMaxTapeBlkSize;
+     else
+       MediaInfo.BlockSize = sizeof (tsp_buf);
+
+     do
+       {
+       rc = SetTapeParameters( file->osHandle,
+                               SET_TAPE_MEDIA_INFORMATION,
+                               &MediaInfo );
+       }
+     while (( rc == ERROR_BUS_RESET            ||
+              rc == ERROR_IO_DEVICE            ||
+              rc == ERROR_END_OF_MEDIA         ||
+              rc == ERROR_BEGINNING_OF_MEDIA   ||
+              rc == ERROR_MEDIA_CHANGED ) && --Retry);
+
+     if (( rc != NO_ERROR )                 &&
+         ( rc != ERROR_MEDIA_CHANGED )      &&
+         ( rc != ERROR_END_OF_MEDIA )       &&
+         ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+         ( rc != ERROR_INVALID_FUNCTION ))
+       {
+       lError            = VF_NOTOK;
+
+       if ( sql06c_handle_known_errors ( "unknown",
+                                         rc , ferror->sp5fe_text ) == FALSE )
+         {
+         DBG1 (( MF__, ERRMSG_VF_TAPE_PARAM ));
+         MSGD (( ERR_TAPE_PARAM, rc         ));
+         sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_PARAM, rc );
+         }
+       TRCOUT;
+       return (lError);
+       }
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_tape_rewind"
+static LONG eo06c_tape_rewind( FileT  *file,
+                                tsp5_rte_fileerror        *ferror)
+  {
+
+   APIRET       rc      = NO_ERROR;
+   LONG         lError  = VF_OK;
+   INT          Retry   = TAPE_ERROR_RETRY;
+
+   TRCIN;
+
+   do
+     {
+     rc = SetTapePosition(file->osHandle, TAPE_REWIND,
+                          0, 0, 0, FALSE);
+     }
+   while (( rc == ERROR_BUS_RESET          ||
+            rc == ERROR_IO_DEVICE          ||
+            rc == ERROR_MEDIA_CHANGED ) && --Retry);
+
+   if (( rc != NO_ERROR ) && ( rc != ERROR_MEDIA_CHANGED ))
+     {
+     lError            = VF_NOTOK;
+
+     if ( sql06c_handle_known_errors ( "unknown",
+                                       rc, ferror->sp5fe_text ) == FALSE)
+       {
+       DBG1 (( MF__, ERRMSG_VF_REWIND_TAPE ));
+       MSGD (( ERR_REWIND_TAPE, rc         ));
+       sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_REWIND_TAPE, rc );
+       }
+     TRCOUT;
+     return (lError);
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_tape_locking"
+static LONG eo06c_tape_locking ( FileT  *file,
+                                  tsp5_rte_fileerror        *ferror,
+                                  ULONG               ulOperation )
+  {
+
+   APIRET       rc          = NO_ERROR;
+   LONG         lError      = VF_OK;
+   INT          Retry       = TAPE_ERROR_RETRY;
+
+   TRCIN;
+
+   if ( file->ulTapeFeatures & TAPE_LOCK_UNLOCK )
+     {
+     do
+       {
+       rc = PrepareTape ( file->osHandle, ulOperation, FALSE);
+       }
+     while (( rc == ERROR_BUS_RESET            ||
+              rc == ERROR_IO_DEVICE            ||
+              rc == ERROR_END_OF_MEDIA         ||
+              rc == ERROR_BEGINNING_OF_MEDIA   ||
+              rc == ERROR_MEDIA_CHANGED ) && --Retry);
+
+     if (( rc != NO_ERROR )                 &&
+         ( rc != ERROR_MEDIA_CHANGED )      &&
+         ( rc != ERROR_END_OF_MEDIA )       &&
+         ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+         ( rc != ERROR_INVALID_FUNCTION ))
+       {
+       lError            = VF_NOTOK;
+       file->osHandle = INVALID_HANDLE_VALUE;
+
+       if ( sql06c_handle_known_errors ( "unknown",
+                                         rc, ferror->sp5fe_text ) == FALSE)
+         {
+         DBG1 (( MF__, ERRMSG_VF_TAPE_LOCK_UNLOCK ));
+         MSGD (( ERR_TAPE_LOCK_UNLOCK, rc ));
+         sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_LOCK_UNLOCK, rc );
+         }
+       TRCOUT;
+       return (lError);
+       }
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+/*------------------------------*/
+
+static BOOL eo06c_tape_in_drive (FileT* file)
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql65k_tape_in_drive"
+  APIRET                     rc             = NO_ERROR;
+  BOOL                       result;
+
+  DBGIN;
+  rc = GetTapeStatus (file->osHandle);
+#if defined (DEBUG)
+  DBG1 ((MF__, "GetTapeStatus: %d", rc));
+#endif
+  switch ( rc )
+    {
+    case ERROR_NOT_READY:
+    case ERROR_MEDIA_CHANGED:
+    case ERROR_NO_MEDIA_IN_DRIVE:
+      result = FALSE;
+      break;
+    default:
+      result = TRUE;
+      break;
+    }
+  DBGOUT;
+  return result;
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_tape_loading"
+static LONG eo06c_tape_loading ( FileT  *file,
+                                  tsp5_rte_fileerror        *ferror,
+                                  ULONG               ulOperation )
+  {
+
+   APIRET       rc          = NO_ERROR;
+   INT          Retry       = TAPE_ERROR_RETRY;
+   LONG         lError      = VF_OK;
+
+   TRCIN;
+
+  if ( file->ulTapeFeatures & TAPE_LOAD_UNLOAD )
+    {
+    if (( ulOperation == TAPE_LOAD) && eo06c_tape_in_drive (file))
+      {
+      DBG1 ((MF__, "tape already loaded"));
+      return TRUE;
+      }
+    do
+      {
+      rc = PrepareTape ( file->osHandle, ulOperation , FALSE);
+      if ( ulOperation == TAPE_LOAD && rc == ERROR_NO_MEDIA_IN_DRIVE )
+        {
+        INT WaitSec  = MAX_TAPE_LOAD_RETRY_TIME ;
+        do
+          {
+          SLEEP(1000) ;
+          rc = PrepareTape ( file->osHandle, ulOperation , FALSE);
+          }
+        while ( --WaitSec && rc == ERROR_NO_MEDIA_IN_DRIVE ) ;
+        }
+      }
+    while (( rc == ERROR_MEDIA_CHANGED        ||
+             rc == ERROR_END_OF_MEDIA         ||
+             rc == ERROR_BEGINNING_OF_MEDIA   ||
+             rc == ERROR_IO_DEVICE            ||
+             rc == ERROR_BUS_RESET            ) && --Retry);
+
+     if (( rc != NO_ERROR )                 &&
+         ( rc != ERROR_MEDIA_CHANGED )      &&
+         ( rc != ERROR_END_OF_MEDIA )       &&
+         ( rc != ERROR_BEGINNING_OF_MEDIA ) &&
+         ( rc != ERROR_INVALID_FUNCTION ))
+       {
+       lError            = VF_NOTOK;
+       file->osHandle = INVALID_HANDLE_VALUE;
+
+       if ( sql06c_handle_known_errors ( "unknown",
+                                         rc, ferror->sp5fe_text ) == FALSE)
+         {
+         DBG1 (( MF__, ERRMSG_VF_TAPE_LOAD_UNLOAD ));
+         MSGD (( ERR_TAPE_LOAD_UNLOAD, rc ));
+         sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_LOAD_UNLOAD, rc );
+         }
+       TRCOUT;
+       return ( FALSE );
+       }
+     }
+   else
+   if ( ulOperation == TAPE_UNLOAD )
+     {                            /* autoloader in use, don't ignore error */
+       sql46c_build_error_string ( ferror->sp5fe_text, "operation not supported",  0 );
+       TRCOUT;
+       return ( VF_NOTOK );
+     }
+   TRCOUT;
+   return (VF_OK);
+  }
+
+/*------------------------------*/
+
+  #undef  MF__
+  #define MF__ MOD__"eo06c_tape_write_mark"
+static LONG eo06c_tape_write_mark( FileT  *file,
+                                    tsp5_rte_fileerror        *ferror)
+  {
+
+   APIRET       rc             = NO_ERROR;
+   LONG         lError         = VF_OK;
+   LONG         lCount         = 1;
+   DWORD        dwOperation    = 0;
+   BOOLEAN         fRetImmediate  = TRUE;
+   INT          Retry          = TAPE_ERROR_RETRY;
+
+   TRCIN;
+
+   if ( file->ulTapeFeatures & TAPE_WRITE_LONG_FMKS )
+     dwOperation = TAPE_LONG_FILEMARKS;
+   else if ( file->ulTapeFeatures & TAPE_WRITE_SHORT_FMKS )
+     dwOperation = TAPE_SHORT_FILEMARKS;
+   else if ( file->ulTapeFeatures & TAPE_WRITE_FILEMARKS )
+     dwOperation = TAPE_FILEMARKS;
+   else
+     {
+     TRCOUT;
+     return ( VF_OK );
+     }
+
+   if ( file->ulTapeFeatures & TAPE_WRITE_MARK_IMMED )
+     fRetImmediate  = FALSE;
+
+   do
+     {
+     rc = WriteTapemark (file->osHandle, dwOperation, lCount, FALSE);
+     }
+   while (( rc == ERROR_BUS_RESET ||
+            rc == ERROR_IO_DEVICE ) && --Retry);
+
+   if (( rc != NO_ERROR ) && ( rc != ERROR_INVALID_FUNCTION ))
+     {
+     lError            = VF_NOTOK;
+     file->osHandle = INVALID_HANDLE_VALUE;
+
+     if ( sql06c_handle_known_errors ( "unknown",
+                                       rc, ferror->sp5fe_text ) == FALSE)
+       {
+       DBG1 (( MF__, ERRMSG_VF_TAPE_WRITE_MARK ));
+       MSGD (( ERR_TAPE_WRITE_MARK, rc ));
+       sql46c_build_error_string ( ferror->sp5fe_text, ERRMSG_VF_TAPE_WRITE_MARK, rc );
+       }
+     TRCOUT;
+     return (lError);
+     }
+
+   TRCOUT;
+   return (lError);
+  }
+
+#else
+
+/**\
+--------------------------------------- MF__ MOD__ (Unix specifics)
+\**/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fileOpenUnix"
+static BOOLEAN
+eo06_fileOpenUnix (
+    const char* fname,
+    tsp5_rte_filemode fileMode,
+    tsp5_rte_buffering_kind buffering,
+    FileT* file,
+    tsp5_rte_fileerror *ferror)
+{
+    int openFlags = 0;
+
+    switch (fileMode) {
+        case SP5VF_READ:
+            openFlags = O_RDONLY;
+            break;
+        case SP5VF_WRITE:
+            openFlags = O_WRONLY | O_CREAT | O_TRUNC;
+            break;
+        case SP5VF_READWRITE:
+	    openFlags = O_RDWR | O_CREAT;
+	    break;
+        case SP5VF_APPEND:
+            openFlags = O_WRONLY | O_CREAT;
+            break;
+        default:
+            SWITCH_ERROR_DBG ("Invalid file mode", fileMode);
+            break;
+    }
+    if ((buffering == SP5BK_DISKSYNCED) && (openFlags & O_WRONLY)) {
+        openFlags |= O_SYNC;
+    }
+
+    /* open file */
+    file->osHandle = open (fname, openFlags, 0666);
+    if (file->osHandle == invalidHandleC) {
+        eo06_osError (ferror);
+    }
+    else {
+        /* lock file */
+        eo06_lockFileUnix (file->osHandle, fileMode, ferror);
+        if (VF_OK != ferror->sp5fe_result) {
+            close (file->osHandle);
+            file->osHandle = invalidHandleC;
+        }
+    }
+    /* append */
+    if ((file->osHandle != invalidHandleC) && (SP5VF_APPEND == fileMode)) {
+        lseek (file->osHandle, 0, SEEK_END);
+    }
+    TRCOUT;
+    return (file->osHandle != invalidHandleC);
+}
+
+/*------------------------------*/
+
+#if defined (SCO)
+
+#include <sys/tape.h>
+#define SIMPLE_REWIND_OS        1
+#define REWIND_COMMAND_OS       MT_REWIND
+ 
+#elif defined (SVR4) && defined (I386)
+
+#include <sys/tape.h>
+#define SIMPLE_REWIND_OS        1
+#define REWIND_COMMAND_OS       T_RWD
+ 
+#elif defined (_IBMR2)
+
+#include <sys/tape.h>
+#define COMPLEX_REWIND_OS       1
+#define REWIND_COMMAND_OS       STIOCTOP
+static struct stop rewindCommandStructC = {STREW, 1};
+ 
+#elif defined (HPUX) || defined (OSF1) || defined (SVR4) || defined (SOLARIS)
+
+#include <sys/ioctl.h>
+#include <sys/mtio.h>
+#define COMPLEX_REWIND_OS       1
+#define REWIND_COMMAND_OS       MTIOCTOP
+static struct mtop rewindCommandStructC = {MTREW, 1};
+ 
+#else
+#error "Must define something to include tape header"
+#endif
+
+    #undef MF__
+    #define MF__ MOD__"eo06_rewindTapeUnix"
+static BOOLEAN
+eo06_rewindTapeUnix (
+    FileT* file)
+{
+    struct stat statInfo;
+    BOOLEAN ok = TRUE;
+    int rc;
+
+    fstat (file->osHandle, &statInfo);
+    if (S_ISCHR (statInfo.st_mode)) {
+        errno = 0;
+#if defined (SIMPLE_REWIND_OS)
+        rc = ioctl (file->osHandle, REWIND_COMMAND_OS);
+#else
+        rc = ioctl (file->osHandle, REWIND_COMMAND_OS, &rewindCommandStructC);
+#endif
+        if ((rc == systemCallErrorC) && (errno != EINVAL)) {
+            ok = FALSE;
+        }
+    }
+    return ok;
+}
+
+/*------------------------------*/
+
+    #undef MF__
+    #define MF__ MOD__"eo06_fileClose"          /* UNIX */
+static void
+eo06_fileClose (
+    FileT* file,
+    tsp5_rte_closeoption option,
+    tsp5_rte_fileerror *ferror)
+{
+    BOOLEAN rewindOK = TRUE ; /*IST 1997-04-24 */
+    BOOLEAN closeOK;
+
+    if ((option == SP5VF_CLOSE_REWIND) || (option == SP5VF_CLOSE_NEXT_TAPE)) {
+        rewindOK = eo06_rewindTapeUnix (file);
+    }
+    closeOK = (close (file->osHandle) != systemCallErrorC);
+    if (!closeOK) {
+        eo06_osError (ferror);
+    }
+    else {
+        if (!rewindOK) {
+            eo06_osError (ferror);
+        }
+        /* tape loader not implemented */
+        if (option == SP5VF_CLOSE_NEXT_TAPE) {
+            ferror->sp5fe_warning = SP5VFW_NO_NEXT_TAPE;
+        }
+    }
+}
+
+#endif
+
+.CM *-END-* code ----------------------------------------
+.sp 2
+***********************************************************
+*-PRETTY-*  statements    :
+*-PRETTY-*  lines of code :
+*-PRETTY-*  lines in file :
+.pa

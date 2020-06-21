@@ -1,0 +1,611 @@
+(* @(#)pascl/semutil.P
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+ *)
+
+(* semutil.p *)
+
+(* define *)
+
+#include "../common/csg.def"
+#include "../common/hdg.def"
+#include "../pascl/sflags.def"
+
+
+(* import *)
+
+#include "../common/globals.i"
+#include "../common/opcode.i"
+#include "../common/csg.h"
+#include "../common/csg.i"
+#include "../common/fold.h"
+#include "../common/stab.h"
+#include "../common/utilities.h"
+#include "../common/_shifts.h"
+#include "../pascl/globals1.i"
+#include "../pascl/symtab.h"
+#include "../pascl/p1m2.h"
+#include "../pascl/initialize.h"
+
+
+(* export *)
+
+#include "../pascl/semutil.h"
+
+
+function ConstExp (tree:integer):integer;
+external;
+(* routines *)
+
+
+procedure StackError
+   (p: ParseStackRange);
+
+begin
+   g1 [p] := -1;
+   SubType [p] := VoidType;
+   TypeType [p] := VoidType;
+end  (* StackError *);
+
+
+function IsOrdinal
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   case STab [t].SType of
+      CharacterType,
+      CharType,
+      UcharType,
+      ShortType,
+      UshortType,
+      IntegerType,
+      BooleanType,
+      EnumerativeType: begin
+         IsOrdinal := true;
+      end;
+      otherwise begin
+         IsOrdinal := false;
+      end;
+   end;
+end  (* IsOrdinal *);
+
+
+function IsIntegral
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   case STab [t].SType of
+      CharType,
+      UcharType,
+      ShortType,
+      UshortType,
+      UlongType,
+      LongType,
+      IntegerType: begin
+         IsIntegral := true;
+      end;
+      otherwise begin
+         IsIntegral := false;
+      end;
+   end;
+end  (* IsIntegral *);
+
+
+function IsEnum
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsEnum := (STab [t].SType = EnumerativeType);
+end  (* IsEnum *);
+
+
+function IsFile
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsFile := STab [t].SType = FileType;
+end  (* IsFile *);
+
+
+function IsTextFile
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsTextFile := t = TextPtr;
+end  (* IsTextFile *);
+
+function IsCharFile
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsCharFile := STab [t].SComponent = CharPtr;
+end  (* IsCharFile *);
+
+
+function SubRange
+   (t: SymbolTableRange)
+   : boolean;
+
+var lastt: SymbolTableRange;
+
+begin
+   lastt := t;
+   if STab [t].SType > 0 then begin
+   while STab [t].SType > 0 do begin
+      lastt := t;
+      t := STab [t].SType;
+   end;
+   if (STab [lastt].SLowRange = 0) and (STab [lastt].SHighRange = 0) then
+      SubRange := false
+   else
+      SubRange := true
+   end else begin
+      SubRange := false
+   end;
+end; (* SubRange *)
+
+
+function IsPac
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsPac :=
+      (STab [t].SType = ArrayType) and
+      (PrimType(STab [t].SElement) = CharPtr) and
+      (not SubRange(STab [t].SElement)) and
+      (GetFlag (t, PackedFlag));
+end;
+
+
+function IsCharArray
+   (t: SymbolTableRange)
+   : boolean;
+
+begin
+   IsCharArray :=
+      (STab [t].SType = ArrayType) and (STab [t].SElement = CharPtr);
+end  (* IsCharArray *);
+
+
+function LengthOfCharArray
+   (t: SymbolTableRange)
+   : integer;
+
+begin
+   t := STab [t].SIndex;
+   LengthOfCharArray := STab [t].SHighRange - STab [t].SLowRange + 1;
+end  (* LengthOfCharArray *);
+
+
+function IsLval
+   (NodeIndex: HdgRange)
+   : boolean;
+
+begin
+   IsLval := MinorOperator = LoadOp;
+end  (* IsLval *);
+
+
+function IsSet
+   (typ: SymbolTableRange)
+   : boolean;
+
+begin
+   IsSet := STab [typ].SType = SetType;
+end  (* IsSet *);
+
+
+function IsPointer
+   (typ: SymbolTableRange)
+   : boolean;
+
+begin
+   IsPointer := STab [typ].SType = PointerType;
+end  (* IsPointer *);
+
+
+function IsStructured
+   (typ: SymbolTableRange)
+   : boolean;
+
+begin
+   case STab [typ].SType of
+      ArrayType,
+      RecordType,
+      FileType,
+      SetType,
+      StringType: begin
+         IsStructured := true;
+      end;
+      CharType,
+      UcharType,
+      ShortType,
+      UshortType,
+      IntegerType,
+      UlongType,
+      LongType,
+      BooleanType,
+      CharacterType,
+      EnumerativeType,
+      FloatType,
+      DoubleType,
+      PointerType: begin
+         IsStructured := false;
+      end;
+      otherwise begin
+         PasCerror ('unexpected type - IsStructured');
+      end;
+   end;
+end  (* IsStructured *);
+
+
+function IsCallRange
+   (NodeIndex: HdgRange)
+   : boolean;
+
+var
+   s: STRING;
+
+begin
+   s := 'sql__setrang';
+   if MinorOperator = ConvertOp then
+      NodeIndex := Unary1operand;	(* skip ConvertOp *)
+   IsCallRange := (MinorOperator = Sys0Op) and
+      (Ls1parameter = EnterString (s [0], 12));
+end; (* IsCallRange *)
+
+
+function SkipCallRange
+   (NodeIndex: HdgRange)
+   : HdgRange;
+
+begin
+   if MinorOperator = ConvertOp then
+      NodeIndex := Unary1operand;	(* skip ConvertOp *)
+   NodeIndex := Ls2operand;		(* skip Sys0Op *)
+   NodeIndex := ListHeadField;		(* skip ExpList *)
+   NodeIndex := Unary1operand;		(* skip StorepOp *)
+   if MinorOperator = ConvertOp then
+      NodeIndex := Unary1operand;	(* skip ConvertOp *)
+   SkipCallRange := NodeIndex;
+end; (* SkipCallRange *)
+
+procedure CharToPac
+   (NodeIndex: HdgRange);
+
+var
+   s: STRING;
+
+begin
+   s [0] := chr (ConstExp(NodeIndex));
+   OperatorField := shl(node,HdgOpSize) + LitOp;
+   NextLink := -1;
+   TailLink := -1;
+   TypeField := PacPtr;
+   Node1parameter := EnterString (s [0], 1);
+   Node2parameter := 1;
+end  (* CharToPac *);
+
+
+function IsString
+   (typ: SymbolTableRange)
+   : boolean;
+
+begin
+   IsString := STab [typ].SType = StringType;
+end  (* IsString *);
+
+
+function LengthOfString
+   (t: SymbolTableRange)
+   : integer;
+
+begin
+   LengthOfString := STab [t].SLength -1;
+end  (* LengthOfString *);
+
+
+procedure PacToString
+   (NodeIndex: HdgRange);
+
+var
+   i,
+   len: integer;
+   s: STRING;
+
+begin
+   GetString (Node1parameter, s [0]);
+   len := Node2parameter;
+   for i := len downto 1 do begin
+      s [i] := s [i-1];
+   end;
+   s [0] := chr (len);
+   TypeField := StringPtr;
+   Node1parameter := EnterString (s [0], len + 1);
+   Node2parameter := len + 1;
+end  (* PacToString *);
+
+
+procedure CharToString
+   (NodeIndex: HdgRange);
+
+var
+   s: STRING;
+
+begin
+   s [0] := chr (1);
+   s [1] := chr (ConstExp(NodeIndex));
+   OperatorField := shl(node,HdgOpSize) + LitOp;
+   NextLink := -1;
+   TailLink := -1;
+   TypeField := StringPtr;
+   Node1parameter := EnterString (s [0], 2);
+   Node2parameter := 2;
+end  (* CharToString *);
+
+
+function EvalConvert
+   (NewType: SymbolTableRange;
+    NodeIndex: HdgRange)
+   : HdgRange;
+
+var
+   OldType: SymbolTableRange;
+
+begin
+   if NodeIndex = -1 then begin
+      EvalConvert := NodeIndex
+   end
+   else begin
+      OldType := TypeField;
+      if OldType = NewType then begin
+         EvalConvert := NodeIndex;
+      end
+      else begin
+         case STab [OldType].SType of
+            PointerType: begin
+	       EvalConvert := FoldUnary (ConvertOp, NewType, NodeIndex);
+            end;
+            CharacterType: begin
+               if IsCharArray (NewType) then begin
+                  CharToPac (NodeIndex);
+                  TypeField := NewType;
+                  EvalConvert := NodeIndex;
+               end
+               else if IsString (NewType) then begin
+                  CharToString (NodeIndex);
+                  TypeField := NewType;
+                  EvalConvert := NodeIndex;
+               end
+               else begin
+                  EvalConvert := FoldUnary (ConvertOp, NewType, NodeIndex);
+               end;
+            end;
+            ArrayType: begin
+               if OldType = PacPtr then begin
+                  case STab [NewType].SType of
+                     ArrayType: begin
+		        if (STab[STab[NewType].SIndex].SLowRange <> 1) and
+			   (not control ['y']) then begin
+			   ErrorMsg(143,-1);
+		        end;
+                        TypeField := NewType;
+                        EvalConvert := NodeIndex;
+                     end;
+                     StringType: begin
+                        PacToString (NodeIndex);
+                        EvalConvert := NodeIndex;
+                     end;
+                     otherwise begin
+                        EvalConvert := NodeIndex;
+                     end;
+                  end;
+               end
+               else begin
+                  EvalConvert := NodeIndex;
+               end;
+            end;
+            StringType: begin
+               EvalConvert := NodeIndex;
+            end;
+            FileType,
+            RecordType,
+            SetType: begin
+               PasCerror ('illegal type - EvalConvert');
+            end;
+            otherwise begin
+               EvalConvert := FoldUnary (ConvertOp, NewType, NodeIndex);
+            end;
+         end  (* case *);
+      end  (* if *);
+   end  (* if *);
+end  (* EvalConvert *);
+
+
+procedure CheckCall
+   (NodeIndex: HdgRange;
+    col: integer);
+
+begin
+   if Ls2operand = -1 then begin
+      if Ls2parameter <> 0 then begin
+         ErrorMsg (8, col);
+      end;
+   end
+   else begin
+      if ListSizeFieldOf (Ls2operand) <> Ls2parameter then begin
+         ErrorMsg (8, col);
+      end;
+   end;
+end  (* CheckCall *);
+
+
+function CompatibleTypes
+   (ptyp1,
+    ptyp2: SymbolTableRange)
+   : boolean;
+
+begin
+   if ptyp1 = ptyp2 then begin
+      CompatibleTypes := true;
+   end
+   else begin
+      case STab [ptyp1].SType of
+         CharType,
+	 UcharType,
+         ShortType,
+	 UshortType,
+	 UlongType,
+	 LongType,
+         IntegerType: begin
+            case STab [ptyp2].SType of
+               CharType,
+	       UcharType,
+               ShortType,
+	       UshortType,
+	       UlongType,
+	       LongType,
+               IntegerType: begin
+                  CompatibleTypes := true;
+               end;
+               otherwise begin
+                  CompatibleTypes := false;
+               end;
+            end;
+         end;
+         otherwise begin
+            CompatibleTypes := false;
+         end;
+      end;
+   end;
+end  (* CompatibleTypes *);
+
+
+function ContainsFile;
+
+var
+    retval : boolean;
+    rtype,			(* Type of symbol *)
+    rkind : integer;		(* Kind of symbol *)
+
+begin
+    retval := false;
+    if p > 0 then begin
+	rtype := STab [p].SType;
+	rkind := STab [p].SKind;
+	if rtype = RecordType then begin
+	    if rkind = TypeDcl then
+		retval := GetFlag (p, FileFlag)
+	    else if rkind = RecordVariantDcl then
+		retval := (GetFlag (p, FileFlag)) or
+			  (ContainsFile (STab[p].SNextVariant));
+	    end
+	else begin
+	    if (IsFile (p)) or (ContainsFile (rtype)) then
+		retval := true
+	    else if rkind = RecordElementDcl then
+		retval := ContainsFile (STab [p].SNextField);
+	    end;
+	end;
+    ContainsFile := retval;
+end;	(* ContainsFile *)
+
+
+function FileInRec;
+
+begin
+    if (STab[p].SType = RecordType) and (GetFlag (p, FileFlag)) then
+	FileInRec := true
+    else
+	FileInRec := false;
+end;
+
+function IsNegative;
+
+var
+    cast : record
+	case integer of
+	    1:
+		(db : double );
+	    2:
+		(lo : integer;
+		hi : integer);
+	    3:
+		(l : long );
+	    end;
+
+begin
+    IsNegative := false;
+    case STab [TypeField].SType of
+        CharType,
+	UcharType,
+        ShortType,
+	UshortType,
+        IntegerType: begin
+	    if Node1parameter < 0 then
+	       IsNegative := true;
+	    end;
+	LongType,
+	UlongType: begin
+	    cast.lo := Node1parameter;
+	    cast.hi := Node2parameter;
+	    if cast.l < 0 then
+	       IsNegative := true;
+	    end;
+        FloatType,
+        DoubleType: begin
+	    cast.lo := Node1parameter;
+	    cast.hi := Node2parameter;
+	    if cast.db < 0.0 then
+	       IsNegative := true;
+	    end;
+    end;
+end;
+
+procedure FillVar(six: SymbolTableRange);
+var
+   t: HdgRange;
+begin
+   if IsStructured(PrimType(STab[six].SType)) or
+      (STab[six].SType = FloatPtr) or
+      (STab[six].SType = LongPtr) or
+      (STab[six].SType = DoublePtr) then
+      begin
+      t := node3 (IdOp, STab[six].SType, six, 0);
+      t := UnaryExpression (ConvertOp, AnyPacPtr, t, 0, 0);
+      HdgFillList := LinkChain(HdgFillList, t);
+      STab [SymPtr].SSubClass := UninitializedVar;
+      end
+   else
+      begin
+      StartupInit;
+      t := node3 (LitOp, IntegerPtr, FillWord, 0);
+      t := UnaryExpression (ConvertOp, STab[six].SType, t, 0, 0);
+      OutputInit(six, t);
+      STab [SymPtr].SSubClass := InitializedVar;
+      end;
+end;

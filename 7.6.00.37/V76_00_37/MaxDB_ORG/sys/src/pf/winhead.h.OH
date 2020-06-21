@@ -1,0 +1,478 @@
+/*
+
+
+
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+
+
+*/
+#ifdef WIN32
+#define GetDOSEnvironment GetEnvironmentStrings
+#define WIN
+#endif
+#include "hdexcept.h"
+#include <WINDOWS.H>
+#ifndef ODBCVER /* Standard is ODBC Version 2.5 */
+#define ODBCVER 0x0351
+#endif
+#include <sql.h>
+#include <sqlext.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <malloc.h>
+
+#ifndef LOCALS
+/* BEGIN Environment dependent settings */
+#define DATASOURCENAME "SAPODBCTest"
+#define SERVERDB   "V73"
+#define SERVERNODE ""
+#define SUPERUID "SUPERDBA"
+#define SUPERPWD "ADMIN"
+/* END Environment dependent settings */
+
+#define USERNAME SUPERUID
+#define PASSWORD SUPERPWD
+#define DBNODE   DATASOURCENAME
+
+#define ODBCUSER  "ODBC"
+#define ODBCPASSW "ODBC"
+#define ODBCUSERLONG  "ODBC_USER_MIT_MEHR_ALS_18_ZEICHEN"
+#define ODBCPASSWLONG "ODBC_USER_MIT_MEHR_ALS_18_ZEICHEN"
+#define CONTROLUSER "DBA"
+#define CONTROLPASSWORD "DBA"
+#define DEFAULTS
+#endif
+
+#define GREPWEG "GREPWEG :"
+#define QUALIFIER_LEN 64
+#define OWNER_LEN 64
+#define NAME_LEN 64
+#define TABLENAME_LEN NAME_LEN
+#define COLUMNNAME_LEN 64
+#define TYPE_LEN 128
+#define TYPENAME_LEN TYPE_LEN
+#define REMARKS_LEN 254
+#define DATATYPE_LEN 0
+#define PRECISION_LEN 0
+#define LENGTH_LEN 0
+#define SCALE_LEN 0
+#define RADIX_LEN 0
+#define NULLABLE_LEN 0
+#define INDEX_QUALIFIER_LEN 64
+#define INDEX_NAME_LEN 64
+#define COLLATION_LEN 2
+
+#define WIN_BUFSIZE 600
+#define ERROR_TEXT_LEN 511
+
+typedef struct {
+   int OutputToFile;
+   int OutputToScreen;
+   int OutputLong;
+   int OutputTime;
+} TraceOutputType;
+
+static TraceOutputType glob = {1, 1, 1, 0};
+
+#define EXIT(x, y) exit(x)
+#define STRLEN(s1) strlen((char*)s1)
+#define STRCPY(s1,s2) strcpy((char*)s1,(char*)s2)
+#define STRNCPY(s1,s2,n) strncpy((char*)s1,(char*)s2,n)
+#define STRCAT(s1,s2) strcat((char*)s1,(char*)s2)
+#define STRNCAT(s1,s2,n) strncat((char*)s1,(char*)s2,n)
+#define STRCMP(s1,s2) strcmp((char*)s1,(char*)s2)
+#define MEMSET memset
+#define MEMCPY memcpy
+#define MALLOC malloc
+#define FREE   free
+#define SPRINTF sprintf
+#define PRINTF(xbuffer) printf("%s", (char*)xbuffer)
+
+#define CRLF "\n"
+
+#define DRIVER_FILE_NAME "sqlod32.dll"
+
+int CheckDriverPath() {
+	int    rc = 1;
+#ifdef _WIN32
+    HENV   henv;
+    HDBC   hdbc;
+    SWORD  length;
+    UCHAR  driverName[255];
+    UCHAR *dbroot = getenv( "DBROOT" );
+    UCHAR  rightPath[255];
+
+    if (dbroot != NULL) {
+        RETCODE ret;
+        strcpy( rightPath, dbroot );
+        strcat( rightPath, "\\pgm\\" );
+        strcat( rightPath, DRIVER_FILE_NAME );
+        SQLAllocEnv( &henv );
+        SQLAllocConnect( henv, &hdbc );
+        ret = SQLConnect(hdbc, DBNODE, SQL_NTS, ODBCUSER, SQL_NTS,
+                         ODBCPASSW, SQL_NTS );
+        if (ret == SQL_SUCCESS) {
+            SQLGetInfo( hdbc, 20001 /*SQL_DRIVER_PATH */,
+                        driverName, sizeof(driverName)-1, &length );
+            rc = (stricmp( driverName, rightPath ) == 0);
+            if (!rc) {
+                UCHAR buffer[1024];
+                SPRINTF( buffer,
+                         "CheckDriverPath: Warning !!! Invalid Driver %s instead of %s registered.\n",
+                         driverName, rightPath );
+                PRINTF( buffer );
+            }; /* if */
+            SQLDisconnect( hdbc );
+        } else {
+            PRINTF( "CheckDriverPath: Connect failed\n" );
+        }; /* else */
+    } else {
+        PRINTF( "CheckDriverPath: DBROOT == NULL\n" );
+        rc = 0;
+    }; /* else */
+
+    SQLFreeConnect( hdbc );
+    SQLFreeEnv( henv );
+#endif /* _WIN32 */
+
+    return rc;
+} /* CheckDriverPath */
+
+UCHAR FAR *cnvret(RETCODE retcode);
+
+#define WHCASESTRING(buffer, x) \
+case (x): {\
+STRCPY((char*)buffer, #x);\
+break;\
+}
+
+UCHAR FAR *cnvret(RETCODE retcode)
+{
+   static UCHAR str[30];
+   switch(retcode) {
+      WHCASESTRING(str, SQL_ERROR);
+      WHCASESTRING(str, SQL_INVALID_HANDLE);
+      WHCASESTRING(str, SQL_NEED_DATA);
+      WHCASESTRING(str, SQL_NO_DATA_FOUND);
+      WHCASESTRING(str, SQL_SUCCESS);
+      WHCASESTRING(str, SQL_SUCCESS_WITH_INFO);
+      WHCASESTRING(str, SQL_STILL_EXECUTING);
+      default: {
+	 STRCPY(str, "*** invalid ***");
+	 break;
+      }
+   }
+   return (str);
+}
+
+UCHAR FAR *GetODBCFunctionName(WORD fn)
+{
+   static UCHAR str[40];
+   switch(fn) {
+WHCASESTRING(str, SQL_API_SQLALLOCCONNECT     );
+WHCASESTRING(str, SQL_API_SQLALLOCENV         );
+WHCASESTRING(str, SQL_API_SQLALLOCHANDLE      );
+WHCASESTRING(str, SQL_API_SQLALLOCHANDLESTD   );
+WHCASESTRING(str, SQL_API_SQLALLOCSTMT        );
+WHCASESTRING(str, SQL_API_SQLBINDCOL          );
+WHCASESTRING(str, SQL_API_SQLBINDPARAM        );
+WHCASESTRING(str, SQL_API_SQLBINDPARAMETER    );
+WHCASESTRING(str, SQL_API_SQLBULKOPERATIONS   );
+WHCASESTRING(str, SQL_API_SQLCANCEL           );
+WHCASESTRING(str, SQL_API_SQLCLOSECURSOR      );
+WHCASESTRING(str, SQL_API_SQLCOLATTRIBUTES    );
+WHCASESTRING(str, SQL_API_SQLCOLUMNS          );
+WHCASESTRING(str, SQL_API_SQLCONNECT          );
+WHCASESTRING(str, SQL_API_SQLCOPYDESC         );
+WHCASESTRING(str, SQL_API_SQLDATASOURCES      );
+WHCASESTRING(str, SQL_API_SQLDESCRIBECOL      );
+WHCASESTRING(str, SQL_API_SQLDISCONNECT       );
+WHCASESTRING(str, SQL_API_SQLDRIVERS         );
+WHCASESTRING(str, SQL_API_SQLENDTRAN         );
+WHCASESTRING(str, SQL_API_SQLERROR           );
+WHCASESTRING(str, SQL_API_SQLEXECDIRECT      );
+WHCASESTRING(str, SQL_API_SQLEXECUTE         );
+WHCASESTRING(str, SQL_API_SQLFETCH           );
+WHCASESTRING(str, SQL_API_SQLFETCHSCROLL     );
+WHCASESTRING(str, SQL_API_SQLFREECONNECT     );
+WHCASESTRING(str, SQL_API_SQLFREEENV         );
+WHCASESTRING(str, SQL_API_SQLFREEHANDLE      );
+WHCASESTRING(str, SQL_API_SQLFREESTMT        );
+WHCASESTRING(str, SQL_API_SQLGETCONNECTATTR  );
+WHCASESTRING(str, SQL_API_SQLGETCONNECTOPTION );
+WHCASESTRING(str, SQL_API_SQLGETCURSORNAME   );
+WHCASESTRING(str, SQL_API_SQLGETDATA         );
+WHCASESTRING(str, SQL_API_SQLGETDESCFIELD    );
+WHCASESTRING(str, SQL_API_SQLGETDESCREC      );
+WHCASESTRING(str, SQL_API_SQLGETDIAGFIELD    );
+WHCASESTRING(str, SQL_API_SQLGETDIAGREC      );
+WHCASESTRING(str, SQL_API_SQLGETENVATTR      );
+WHCASESTRING(str, SQL_API_SQLGETFUNCTIONS    );
+WHCASESTRING(str, SQL_API_SQLGETINFO         );
+WHCASESTRING(str, SQL_API_SQLGETSTMTATTR     );
+WHCASESTRING(str, SQL_API_SQLGETSTMTOPTION   );
+WHCASESTRING(str, SQL_API_SQLGETTYPEINFO     );
+WHCASESTRING(str, SQL_API_SQLNUMRESULTCOLS   );
+WHCASESTRING(str, SQL_API_SQLPARAMDATA       );
+WHCASESTRING(str, SQL_API_SQLPREPARE         );
+WHCASESTRING(str, SQL_API_SQLPUTDATA         );
+WHCASESTRING(str, SQL_API_SQLROWCOUNT        );
+WHCASESTRING(str, SQL_API_SQLSETCONNECTATTR  );
+WHCASESTRING(str, SQL_API_SQLSETCONNECTOPTION );
+WHCASESTRING(str, SQL_API_SQLSETCURSORNAME   );
+WHCASESTRING(str, SQL_API_SQLSETDESCFIELD    );
+WHCASESTRING(str, SQL_API_SQLSETDESCREC      );
+WHCASESTRING(str, SQL_API_SQLSETENVATTR      );
+WHCASESTRING(str, SQL_API_SQLSETPARAM        );
+WHCASESTRING(str, SQL_API_SQLSETSTMTATTR     );
+WHCASESTRING(str, SQL_API_SQLSETSTMTOPTION   );
+WHCASESTRING(str, SQL_API_SQLSPECIALCOLUMNS  );
+WHCASESTRING(str, SQL_API_SQLSTATISTICS      );
+WHCASESTRING(str, SQL_API_SQLTABLES          );
+WHCASESTRING(str, SQL_API_SQLTRANSACT        );
+
+WHCASESTRING(str, SQL_API_SQLDRIVERCONNECT   );
+
+
+
+
+
+
+
+
+
+
+
+
+
+WHCASESTRING(str, SQL_API_SQLBROWSECONNECT   );
+WHCASESTRING(str, SQL_API_SQLCOLUMNPRIVILEGES);
+
+WHCASESTRING(str, SQL_API_SQLDESCRIBEPARAM   );
+WHCASESTRING(str, SQL_API_SQLEXTENDEDFETCH   );
+WHCASESTRING(str, SQL_API_SQLFOREIGNKEYS     );
+WHCASESTRING(str, SQL_API_SQLMORERESULTS     );
+WHCASESTRING(str, SQL_API_SQLNATIVESQL       );
+WHCASESTRING(str, SQL_API_SQLNUMPARAMS       );
+WHCASESTRING(str, SQL_API_SQLPARAMOPTIONS    );
+WHCASESTRING(str, SQL_API_SQLPRIMARYKEYS     );
+WHCASESTRING(str, SQL_API_SQLPROCEDURECOLUMNS);
+WHCASESTRING(str, SQL_API_SQLPROCEDURES      );
+WHCASESTRING(str, SQL_API_SQLSETPOS          );
+WHCASESTRING(str, SQL_API_SQLSETSCROLLOPTIONS);
+WHCASESTRING(str, SQL_API_SQLTABLEPRIVILEGES );
+      default: {
+	 STRCPY(str, "*** invalid ***");
+	 break;
+      }
+   }
+   return str;
+}
+
+void printtime(time_t *ltime);
+
+void printtime(time_t *ltime)
+{
+   if (glob.OutputTime) {
+      struct tm *ltm;
+      char buffer[50];
+      time(ltime);
+      ltm = localtime(ltime);
+      strftime(buffer, sizeof(buffer), "19%y-%m-%d %H:%M:%S"CRLF, ltm);
+      PRINTF(buffer);
+   }
+}
+
+RETCODE DescribeColAll(SQLHSTMT hstmt);
+
+RETCODE DescribeColAll(SQLHSTMT hstmt)
+{
+   RETCODE retcode;
+   SWORD col;
+   SWORD pccol=0;
+   UCHAR szColName[33];
+   SWORD pcbColName, pfSqlType, pibScale, pfNullable;
+   SQLULEN pcbColDef;
+   char szMsg[100];
+   retcode = SQLNumResultCols (hstmt, &pccol);
+   SPRINTF(szMsg,"DescribeColAll (%d)"CRLF, pccol);
+   PRINTF(szMsg);
+   SPRINTF(szMsg," COLNAME LEN TYPE PRECISION SCALE NULLABLE"CRLF);
+   PRINTF(szMsg);
+   for (col=1; col <= pccol && retcode == SQL_SUCCESS; col++ ) {
+      retcode = SQLDescribeCol (hstmt, col, szColName, sizeof(szColName),
+         &pcbColName, &pfSqlType, &pcbColDef, &pibScale, &pfNullable);
+      SPRINTF(szMsg, " %7s %3d %4d %9ld %5d %8d "CRLF, szColName, pcbColName, pfSqlType, pcbColDef, pibScale, pfNullable);
+      PRINTF(szMsg);
+   }
+   return(retcode);
+}
+
+RETCODE GetColAll(SQLHSTMT hstmt);
+
+RETCODE GetColAll(SQLHSTMT hstmt)
+{
+   RETCODE retcode;
+   SWORD col, pccol;
+   char szMsg[100];
+   SPRINTF(szMsg, "GetColAll"CRLF);
+   PRINTF(szMsg);
+   retcode = SQLNumResultCols (hstmt, &pccol);
+   if (retcode == SQL_SUCCESS) {
+      for (col=1; col <= pccol; col++) {
+         SQLLEN fDesc;
+         UCHAR FAR* pHostVar;
+         SQLLEN cbHostVar;
+         retcode = SQLColAttributes(hstmt, col, SQL_COLUMN_DISPLAY_SIZE,
+            NULL, 0, NULL, &fDesc);
+         if (retcode == SQL_SUCCESS) {
+            if (fDesc >= 0)
+               pHostVar = MALLOC((fDesc+1));
+            else
+               pHostVar = NULL;
+            if (pHostVar) {
+               retcode = SQLGetData (hstmt, col, SQL_C_CHAR, (PTR)pHostVar,
+                  fDesc+1, &cbHostVar);
+               if (retcode == SQL_SUCCESS) {
+                  if (STRLEN(pHostVar) > sizeof(szMsg))
+                     pHostVar[sizeof(szMsg) -1] = '\0';
+                  SPRINTF(szMsg, "%s", pHostVar);
+                  PRINTF(szMsg);
+               }
+               else {
+                  SPRINTF(szMsg, "%s", cnvret(retcode));
+                  PRINTF(szMsg);
+               }
+               PRINTF(":");
+               FREE(pHostVar);
+            }
+            else {
+               SPRINTF(szMsg, "MALLOC Faild"CRLF);
+               PRINTF(szMsg);
+               return(SQL_ERROR);
+            }
+         }
+      }
+      PRINTF(CRLF);
+   }
+   return(retcode);
+}
+
+#define MAKECOLATRIBUTETYPE(x) UCHAR sz##x[TABLENAME_LEN+1];\
+SWORD FAR cb##x;\
+SQLLEN FAR f##x
+
+#define SQLCOLATTRIBUTES(x) retcode = SQLColAttributes(hstmt, icol, x, \
+sz##x, sizeof(sz##x), &cb##x, &f##x);\
+if (retcode != SQL_SUCCESS && retcode != SQL_SUCCESS_WITH_INFO)\
+     return(1);
+
+#define PRINTCHARVALUE(x,l) SPRINTF(buffer, "%-*s, ", l, sz##x);\
+PRINTF(buffer);
+
+#define PRINTNUMERICVALUE(x) SPRINTF(buffer, "%3d,", f##x);\
+PRINTF(buffer)
+
+int DisplayColAttributes(SQLHSTMT hstmt)
+{
+  RETCODE retcode;
+  SWORD cols, icol;
+  SWORD *pccol = &cols;
+  char buffer[512];
+
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_NAME);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_DISPLAY_SIZE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_TYPE_NAME);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_TYPE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_LENGTH);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_SCALE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_PRECISION);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_NULLABLE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_CASE_SENSITIVE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_MONEY);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_SEARCHABLE);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_UNSIGNED);
+  MAKECOLATRIBUTETYPE(SQL_COLUMN_UPDATABLE);
+
+  retcode = SQLNumResultCols (hstmt, pccol);
+  SPRINTF(buffer, " SQLNumResultCols (%d) retcode: %d"CRLF, cols, retcode);
+  PRINTF(buffer);
+  if (retcode == SQL_SUCCESS || retcode == SQL_SUCCESS_WITH_INFO) {
+    SPRINTF(buffer, "COL  TYPE_NAME           TYP LEN SCA PRE DIS NUL CAS MON SEA UNS UPD COLUMNAME"CRLF );
+    PRINTF(buffer);
+    for (icol = 1; icol <= cols; icol++) {
+      SQLCOLATTRIBUTES(SQL_COLUMN_NAME);
+      SQLCOLATTRIBUTES(SQL_COLUMN_TYPE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_LENGTH);
+      SQLCOLATTRIBUTES(SQL_COLUMN_SCALE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_PRECISION);
+      SQLCOLATTRIBUTES(SQL_COLUMN_DISPLAY_SIZE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_NULLABLE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_CASE_SENSITIVE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_MONEY);
+      SQLCOLATTRIBUTES(SQL_COLUMN_SEARCHABLE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_UNSIGNED);
+      SQLCOLATTRIBUTES(SQL_COLUMN_UPDATABLE);
+      SQLCOLATTRIBUTES(SQL_COLUMN_TYPE_NAME);
+
+      SPRINTF(buffer, "%3d, ", icol);
+      PRINTF(buffer);
+
+      PRINTCHARVALUE(SQL_COLUMN_TYPE_NAME, 18);
+      PRINTNUMERICVALUE(SQL_COLUMN_TYPE);
+      PRINTNUMERICVALUE(SQL_COLUMN_LENGTH);
+      PRINTNUMERICVALUE(SQL_COLUMN_SCALE);
+      PRINTNUMERICVALUE(SQL_COLUMN_PRECISION);
+      PRINTNUMERICVALUE(SQL_COLUMN_DISPLAY_SIZE);
+      PRINTNUMERICVALUE(SQL_COLUMN_NULLABLE);
+      PRINTNUMERICVALUE(SQL_COLUMN_CASE_SENSITIVE);
+      PRINTNUMERICVALUE(SQL_COLUMN_MONEY);
+      PRINTNUMERICVALUE(SQL_COLUMN_SEARCHABLE);
+      PRINTNUMERICVALUE(SQL_COLUMN_UNSIGNED);
+      PRINTNUMERICVALUE(SQL_COLUMN_UPDATABLE);
+      PRINTCHARVALUE(SQL_COLUMN_NAME, TABLENAME_LEN);
+
+      SPRINTF(buffer, CRLF);
+      PRINTF(buffer);
+    }
+  }
+  return 1;
+}
+
+UCHAR FAR* MakeLongName(UCHAR FAR *szShortName, UCHAR FAR *szLongName, DWORD cbNumberOfChars);
+
+UCHAR FAR* MakeLongName(UCHAR FAR *szShortName, UCHAR FAR *szLongName, DWORD cbNumberOfChars)
+{
+  int i=0;
+  if ( szLongName ) {
+    if (szShortName) {
+      STRCPY(szLongName, szShortName);
+      i = STRLEN(szLongName);
+    }
+    for (; i < cbNumberOfChars; i++)
+      szLongName[i] = (UCHAR)('0' + ((i+1)%10));
+    szLongName[cbNumberOfChars] = '\0';
+  }
+  return szLongName;
+}
+

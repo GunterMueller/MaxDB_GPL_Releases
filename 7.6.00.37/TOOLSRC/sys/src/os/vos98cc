@@ -1,0 +1,419 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $COPYRIGHT SAP AG, 1988-2002$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $NME$Project Distributed Database System$VOS98CC$
+.tt 2 $$$
+.tt 3 $$PUTPARAM$1997-02-07$
+***********************************************************
+.nf
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2002 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+.fo
+.nf
+.sp
+Module  :       PUTPARAM / RENPARAM
+=========
+.sp
+Purpose :       Get configuration values from the XPARAM-File
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : R.Roedling
+.sp
+.cp 3
+Created : 1994-05-13
+.sp
+.cp 3
+Version : 1994-05-13
+.sp
+.cp 3
+Release :  6.2 	 Date : 1997-02-07
+.br
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/* PRETTY */
+
+/*
+ * INCLUDE FILES
+ */
+
+/*
+ *  DEFINES
+ */
+#define MOD__  "VOS98CC : "
+#define MF__   MOD__"UNDEFINED"
+
+#define  ARGS   3
+
+/*
+ *  MACROS
+ */
+
+
+/*
+ *  LOCAL TYPE AND STRUCT DEFINITIONS
+ */
+
+
+/*
+ * EXTERNAL VARIABLES
+ */
+
+
+/*
+ *  EXPORTED VARIABLES
+ */
+
+
+/*
+ * LOCAL VARIABLES
+ */
+
+
+/*
+ * LOCAL FUNCTION PROTOTYPES
+ */
+static LONG  Find_PARAM_Line ( PSZ              pszHelpFile,
+                               PSZ              pszValue,
+                               PSZ              pszSearchName,
+                               XP_VALUE_REC     *pXP_Value );
+
+
+/*
+ * FUNCTION PROTOTYPES
+ */
+VOID s02encrypt ( PSZ, CRYPTNAME );
+
+/*
+ * ========================== GLOBAL FUNCTIONS ================================
+ */
+
+int _CDECL main ( INT argc, PSZ argv[] )
+  {
+  INT                     argn;
+  PSZ                     pszNameToSearch, pszNameToRename;
+  PSZ                     pszValue;
+  PSZ                     pszServerDB;
+
+  LONG                    rc     = NO_ERROR;
+  SQL_DBNAME              ServerDB;
+  PATHNAME                szHelpFile;
+  XP_KEY_TYPE             xp_key;
+  XP_VALUE_REC            xp_value;
+  INT4                    xp_fd;
+  INT1                    xp_ret;
+  C64                     Component;
+  BOOLEAN                 Ok;
+  CHAR                    ErrTextc[MAXERRORTEXT+1];
+  ERRORTEXT               ErrText;
+  PSZ                     pszDBRoot,
+                          pszProgName = (char *) strrchr ( argv[0], '/' ) ;
+  BOOLEAN                 fIsPutParam ;
+
+  if (pszProgName == NULL )
+    pszProgName = (char *) strrchr ( argv[0], '\\' ) ;
+
+  pszProgName = pszProgName != NULL ? ++pszProgName : argv[0] ;
+  fIsPutParam = strnicmp ( pszProgName, "putparam", 8 ) == 0 ;
+
+  argn = 1;
+  if ( ! ( argc - argn == ARGS ) )
+    {
+    fprintf ( stderr,
+              fIsPutParam ? PUTPARAM_USAGE : RENPARAM_USAGE , pszProgName );
+    return ( 1 );
+    }
+
+  pszServerDB = argv [ 1 ];
+  if ( fIsPutParam )
+    { pszNameToSearch  = argv [ 2 ];
+      pszValue         = argv [ 3 ];
+    }
+  else
+    { pszNameToSearch  = argv [ 3 ];
+      pszNameToRename  = argv [ 2 ];
+    }
+
+
+  // --- get DBROOT from Environment
+  if ( sql01c_get_dbroot (&pszDBRoot) == FALSE )
+    {
+    MSGCD((ERR_DBROOT_NOT_SET));
+    exit(1);
+    }
+
+  strncpy ( szHelpFile, pszDBRoot, sizeof(szHelpFile) - 1 );
+  szHelpFile[sizeof(szHelpFile)] = '\0';
+  strncat ( szHelpFile, "\\env\\xparam.pcf",
+            sizeof(szHelpFile) - 1 - strlen ( szHelpFile ));
+
+
+  rc = Find_PARAM_Line ( szHelpFile, pszValue, pszNameToSearch,
+                          fIsPutParam ? &xp_value : NULL );
+
+  if ( rc != NO_ERROR )
+    exit( rc );
+
+  sql47c_ctop ( ServerDB, pszServerDB, sizeof (SQL_DBNAME) );
+  sql47c_ctop ( Component, pszProgName, sizeof (C64 ) );
+
+  // --- display no error messages
+  sql60_disable_message_output ();
+
+  sql11c_OpenXParam ( pszDBRoot, ServerDB, &xp_fd, ErrText, XP_OPEN_REC, &Ok );
+
+  if ( Ok )
+    if ( fIsPutParam )
+      { sql47c_ctop ( xp_key,   pszNameToSearch ,    sizeof (XP_KEY_TYPE ) );
+        sql11c_PutXParam ( xp_fd, xp_key, &xp_value, ErrText, &xp_ret );
+      }
+    else
+      sql11c_RenameXParam ( xp_fd , pszNameToRename , pszNameToSearch ,
+                            ErrText, &xp_ret );
+  else
+    xp_ret = !XP_OK;
+
+  if ( xp_ret != XP_OK )
+    {
+    sql47c_ptoc ( ErrTextc, ErrText, MAXERRORTEXT );
+    fprintf ( stderr, PUTPARAM_ERR_TEXT, pszProgName,
+              fIsPutParam || xp_ret != XP_KEY_NOT_FOUND ?
+              pszNameToSearch : pszNameToRename , ErrTextc );
+    rc = 1;
+    }
+
+  sql11c_CloseXParam ( xp_fd, XP_FLUSH, ErrText, &Ok );
+
+  sql60_enable_message_output();
+  return ( rc );
+  }
+
+
+/*
+ * ========================== LOCAL FUNCTIONS =================================
+ */
+
+static LONG Find_PARAM_Line ( PSZ              pszHelpFile,
+                              PSZ              pszValue,
+                              PSZ              pszSearchName,
+                              XP_VALUE_REC     *pXP_Value )
+  {
+  FILE                    *hfp;
+  CHAR                    szLine [ 256 ];
+  PSZ                     pszName;
+  PSZ                     pszType;
+  PSZ                     pszEnd;
+  BOOL                    fFound = FALSE, fIsDynParam;
+  NAME                    szClearName;
+  char                    *DynPos ;
+
+  hfp = fopen ( pszHelpFile, "r" );
+
+  if ( ! hfp )
+    {
+    MSGCD (( ERR_PUTPARAM_OPEN_HELPFILE, pszHelpFile ));
+    return (1);
+    }
+
+  while ( fgets ( szLine, sizeof(szLine), hfp ) )
+    {
+    pszName = strchr ( szLine, '#' );
+
+    if (( ! pszName  ) || ( *pszName != '#' ))
+      continue;
+
+    pszType = strchr ( ++pszName, '#' );
+    if ( *pszType != '#' )
+      continue;
+
+    // --- Terminate the parameter name.
+    *pszType = '\0';
+    for ( pszEnd = pszType - 1; *pszEnd == ' '; pszEnd -- ) {;}
+
+    if ( *(pszEnd + 1) == ' ' )
+      {
+      pszEnd ++;
+      *pszEnd = '\0';
+      }
+
+    fIsDynParam = szLine[0] == '!' && szLine[1] == '!' &&
+                  ( DynPos = strchr ( pszName, '?' ) ) ;
+
+    if ( fIsDynParam )
+      fFound = ! memcmp( pszName, pszSearchName, (int ) (DynPos - pszName) ) ;
+    else
+      fFound = ! strcmp ( pszName, pszSearchName ) ;
+
+    if ( fFound )
+      {
+      // ---  Restore the original szLine.
+      if ( ! *pszEnd )
+        *pszEnd = ' ';
+
+      *pszType = '#';
+      break;
+      }
+    }
+
+  fclose ( hfp );
+
+  if ( ! fFound )
+    {
+    MSGCD (( ERR_PUTPARAM_WRONG_KEY, pszSearchName ));
+    return (1);
+    }
+
+  pszType ++;
+  pszEnd = strchr ( pszType, '#' );
+
+  if ( *pszEnd != '#' )
+    {
+    MSGCD (( ERR_PUTPARAM_INV_ENTRY, szLine ));
+    return (1);
+    }
+  *pszEnd = '\0';
+
+
+if ( pXP_Value ) // if NULL, rename param is active and need no check
+  {
+  if ( ! strcmp ( pszType, "int2" ) )
+    {
+    pXP_Value->xp_value_t      = XP_INT2_TYPE;
+    pXP_Value->xp_type.xp_int2 = (INT2) strtol ( pszValue, &pszEnd, 10 );
+
+    if ( ! *pszValue || *pszEnd )
+      {
+      MSGCD (( ERR_PUTPARAM_NUMERIC, pszValue ));
+      return (1);
+      }
+    }
+  else if ( ! strcmp ( pszType, "int4" ) )
+    {
+    pXP_Value->xp_value_t = XP_INT4_TYPE;
+    pXP_Value->xp_type.xp_int4 = strtol ( pszValue, &pszEnd, 10 );
+
+    if ( ! *pszValue || *pszEnd )
+      {
+      MSGCD (( ERR_PUTPARAM_NUMERIC, pszValue ));
+      return (1);
+      }
+    }
+  else if ( ! strcmp ( pszType, "crypt" ) )
+    {
+    pXP_Value->xp_value_t = XP_CRYPT_TYPE;
+
+    sql47c_ctop ( szClearName, pszValue, sizeof(szClearName) );
+    s02encrypt ( szClearName, pXP_Value->xp_type.xp_crypt );
+    }
+  else if ( ! strcmp ( pszType, "c8"   ) )
+    {
+    pXP_Value->xp_value_t = XP_C8_TYPE;
+    sql47c_ctop ( pXP_Value->xp_type.xp_c64, pszValue, 64 );
+    }
+  else if ( ! strcmp ( pszType, "c18"  ) )
+    {
+    pXP_Value->xp_value_t = XP_C18_TYPE;
+    sql47c_ctop ( pXP_Value->xp_type.xp_c64, pszValue, 64 );
+    }
+  else if ( ! strcmp ( pszType, "c24"  ) )
+    {
+    pXP_Value->xp_value_t = XP_C24_TYPE;
+    sql47c_ctop ( pXP_Value->xp_type.xp_c64, pszValue, 64 );
+    }
+  else if ( ! strcmp ( pszType, "c40"  ) )
+    {
+    pXP_Value->xp_value_t = XP_C40_TYPE;
+    sql47c_ctop ( pXP_Value->xp_type.xp_c64, pszValue, 64 );
+    }
+  else if ( ! strcmp ( pszType, "c64"  ) )
+    {
+    pXP_Value->xp_value_t = XP_C64_TYPE;
+    sql47c_ctop ( pXP_Value->xp_type.xp_c64, pszValue, 64 );
+    }
+  else
+    {
+    MSGCD (( ERR_PUTPARAM_UNSUPP_TYPE, pszType ));
+    return (1);
+    }
+  }
+  return (0);
+  }
+
+/*
+ * =============================== END ========================================
+ */
+
+.CM *-END-* code ----------------------------------------
+.SP 2
+***********************************************************
+*-PRETTY-*  statements    :         38
+*-PRETTY-*  lines of code :         38        PRETTY  1.07
+*-PRETTY-*  lines in file :        141         1989-01-20
+.PA

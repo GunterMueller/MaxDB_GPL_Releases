@@ -1,0 +1,276 @@
+/*!***************************************************************************
+
+  module:        unic2sqllong2.c
+
+  -------------------------------------------------------------------------
+
+  responsible:   D024584, TTK
+
+  special area:  Unicode conversion tests
+
+  description:   Tests for converting to LONG SQL_WCHAR:
+
+                 table with long columns (ASCII & UCS2) is filled with SQL_C_CHAR, SQL_C_WCHAR
+
+  -------------------------------------------------------------------------
+
+  copyright:    (c) 2002-2004 SAP AG
+
+\if EMIT_LICENCE
+
+    ========== licence begin  GPL
+    Copyright (c) 2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+\endif
+*****************************************************************************/
+
+#define _UNICODE
+#define _ODBC
+/*===========================================================================*
+ *  INCLUDES                                                                 *
+ *===========================================================================*/
+#include "uniutil.c"
+
+/*===========================================================================*
+ *  DEFINES                                                                  *
+ *===========================================================================*/
+#define TABNAME "C2SQLTAB3"
+#define COLDEF "COLLONG LONG VARCHAR UNICODE, COLLONG2 LONG VARCHAR ASCII"
+
+#define BUFSIZE  3000
+#define LONGSIZE 100000
+
+/*===========================================================================*
+ *  FUNCTIONS                                                                *
+ *===========================================================================*/
+int main(int argc, char **argv) {
+	HENV henv   = SQL_NULL_HENV;
+	HENV *phenv = &henv;
+	HDBC hdbc   = SQL_NULL_HDBC;
+	HDBC *phdbc = &hdbc;
+	HSTMT hstmt = SQL_NULL_HSTMT;
+	HSTMT *phstmt = &hstmt;
+	SQLLEN pcbValue;
+	RETCODE rc;
+        long count;          /* avoid endless loops for SQLGetData */
+
+        SQLLEN cb1, cb2, t1, t2, cc;
+	SQLCHAR insert[MAX_NAME_LEN+1];
+	SQLCHAR select[MAX_NAME_LEN+1];
+
+	SQLCHAR str1[] = "INSERT INTO ";
+	SQLCHAR str2[] = " VALUES(?, ?)";
+	SQLCHAR str3[] = "SELECT * FROM ";
+	SQLCHAR str4[] = "";
+
+	SQLCHAR buffer[O3UTIL_TEXT_BUFFER_LEN];
+        SQLCHAR longVal[100100];
+        SQLWCHAR longWVal[100100];
+
+	SQLCHAR col1[BUFSIZE];
+	SQLCHAR col2[BUFSIZE];
+	SQLCHAR col3[BUFSIZE];
+
+	SQLWCHAR ucol1[BUFSIZE];
+	SQLWCHAR ucol2[BUFSIZE];
+
+	UINT i;
+	BOOL	okflag;
+        UINT dummy1, dummy2;
+
+	SQLCHAR valChar[] = "Jackdaws love my big sphinkx of quartz. 1234567890";
+	SQLCHAR *valBinary;  /* = {'A', 0, 'B', 0, 'C', 0, 'D', 0, 'E', 0, 'F', 0}; */
+        SQLWCHAR valDummy[6];
+
+        StringToWString (valDummy, 12, &dummy1, FALSE, "ABCDEF", 6, &dummy2);
+        valBinary = malloc (100);
+
+        if (((long) valBinary) % 2 == 0)     /* force not aligned memory */
+          valBinary++;
+
+        memcpy (valBinary, valDummy, 12);
+
+	/* Connection to database and creation table rutine */
+	FullConnect(phenv, phdbc);
+        rc = SQLAllocStmt(hdbc, phstmt);
+        SPRINTF(buffer," SQLAllocStmt retcode: %d"CRLF, rc);
+        PRINTF(buffer);
+        ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	DropTestTable(hstmt, TABNAME);
+	CreateTestTable(hstmt, TABNAME, COLDEF);
+
+	/* Prepare for insert data in to the table */
+	STRCPY(insert, str1);
+	STRCAT(insert, TABNAME);
+	STRCAT(insert, str2);
+	SPRINTF(buffer,"Insert Stmt = '%s'"CRLF, insert);
+	PRINTF(buffer);
+	rc = SQLPrepare(hstmt, insert, SQL_NTS);
+	SPRINTF(buffer," SQLPrepare retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+        InitLongBuf (longVal, LONGSIZE+20);
+        StringToWString (longWVal, LONGSIZE, &dummy1, FALSE, longVal, LONGSIZE, &dummy2);
+
+
+
+	/* Insert C_CHAR data */
+	pcbValue = LONGSIZE;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR,
+							  SQL_WLONGVARCHAR, 0, 0, longVal, LONGSIZE, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_CHAR -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = LONGSIZE;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR,
+							  SQL_WLONGVARCHAR, 0, 0, longVal, LONGSIZE, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_CHAR -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = LONGSIZE;
+
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+
+	/* Insert C_WCHAR data */
+	pcbValue = LONGSIZE*2;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_WCHAR,
+							  SQL_WLONGVARCHAR, 0, 0, longWVal, 2*LONGSIZE, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_WCHAR -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = LONGSIZE*2;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR,
+							  SQL_WLONGVARCHAR, 0, 0, longWVal, 2*LONGSIZE, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_WCHAR -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = LONGSIZE*2;
+
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+	/* Insert C_BINARY data */
+        /*
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 1, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 2, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WVARCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	pcbValue = 12;
+	rc = SQLBindParameter(hstmt, 3, SQL_PARAM_INPUT, SQL_C_BINARY,
+							  SQL_WLONGVARCHAR, 128, 0, valBinary, 128, &pcbValue);
+	SPRINTF(buffer," SQLBindParameter (SQL_C_BINARY -> SQL_WLONGVARCHAR) retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+	rc = SQLExecute(hstmt);
+	SPRINTF(buffer," SQLExecute retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        */
+
+
+
+
+
+	/* Select date from the table */
+	STRCPY(select, str3);
+        STRCAT(select, TABNAME);
+	STRCAT(select, str4);
+	SPRINTF(buffer,"Select Stmt= '%s'"CRLF, select);
+	PRINTF(buffer);
+	rc = SQLExecDirect(hstmt, select, SQL_NTS);
+	SPRINTF(buffer," SQLExecDirect retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+        if (rc == SQL_ERROR)
+          exit (0);
+
+	okflag = TRUE;
+
+	rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+        count = 3000;
+        while ((rc = SQLGetData (hstmt, 1, SQL_C_CHAR, col1, BUFSIZE, &cb1) != SQL_NO_DATA)) {
+          if (count-- < 0)
+            break;
+          col1[30] = 0;
+          cc = cb1 < BUFSIZE ? cb1 : BUFSIZE;
+          SPRINTF(buffer,"Len: %ld >%s...%s<"CRLF, cb1, col1, col1+cc-30);
+          PRINTF(buffer);
+        }
+        while ((rc = SQLGetData (hstmt, 2, SQL_C_CHAR, col2, BUFSIZE, &cb2) != SQL_NO_DATA)) {
+          if (count-- < 0)
+            break;
+          col2[30] = 0;
+          cc = cb2 < BUFSIZE ? cb2 : BUFSIZE;
+          SPRINTF(buffer,"Len: %ld >%s...%s<"CRLF, cb2, col2, col2+cc-30);
+          PRINTF(buffer);
+        }
+
+        rc = SQLFetch(hstmt);
+	SPRINTF(buffer," SQLFetch retcode: %d\n\n"CRLF, rc);
+	PRINTF(buffer);
+	ErrorCheck(SQL_HANDLE_STMT, hstmt);
+
+        while ((rc = SQLGetData (hstmt, 1, SQL_C_WCHAR, ucol1, BUFSIZE, &cb1) != SQL_NO_DATA)) {
+          if (count-- < 0)
+            break;
+
+          cb1 /= sizeof (SQLWCHAR);      /* SQLGetData returns byte length after conversion */
+
+          WStringToString (col1, sizeof(col1), &dummy1, 1, ucol1, sizeof(ucol1), &dummy2);
+          col1[30] = 0;
+          cc = cb1 < BUFSIZE ? cb1 : BUFSIZE;
+          cc = dummy1;
+          SPRINTF(buffer,"Len: %ld >%s...%s<"CRLF, cb1, col1, col1+cc-30);
+          PRINTF(buffer);
+        }
+        while ((rc = SQLGetData (hstmt, 2, SQL_C_WCHAR, ucol2, BUFSIZE, &cb2) != SQL_NO_DATA)) {
+          if (count-- < 0)
+            break;
+
+          cb2 /= sizeof (SQLWCHAR);      /* SQLGetData returns byte length after conversion */
+
+          WStringToString (col2, sizeof(col2), &dummy2, 1, ucol2, sizeof(ucol2), &dummy2);
+          col2[30] = 0;
+          cc = cb2 < BUFSIZE ? cb2 : BUFSIZE;
+          cc = dummy2;
+          SPRINTF(buffer,"Len: %ld >%s...%s<"CRLF, cb2, col2, col2+cc-30);
+          PRINTF(buffer);
+        }
+
+	FullDisconnect(phenv, phdbc);
+
+	return 0;
+}

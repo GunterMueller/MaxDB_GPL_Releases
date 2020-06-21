@@ -1,0 +1,254 @@
+/*
+
+
+    ========== licence begin LGPL
+    Copyright (C) 2000 SAP AG
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    ========== licence end
+
+
+*/
+#include "o3util.c"
+
+#define PROGNAME "NULLINDICATOR"
+#define TABLE PROGNAME
+
+#ifndef DEFAULTS
+#define USERNAME "SUPERDBA"
+#define PASSWORD "ADMIN"
+#define DBNODE   "sqlprec:D"
+
+#define ODBCUSER  "ODBC"
+#define ODBCPASSW "ODBC"
+#endif
+
+#define ERROR_CHECK(hstmtx)      if (retcode != SQL_SUCCESS) {\
+			   SQLError(henv, hdbc, hstmtx,\
+			      sqlstate, &esq_sql_code, error_txt,\
+				    len_error_txt, &used_error_txt);\
+			   SPRINTF(buffer, " sqlstate: %s"CRLF, sqlstate);\
+			      PRINTF(buffer);\
+		  SPRINTF(buffer, " esq_sql_code: %ld"CRLF, esq_sql_code);\
+			      PRINTF(buffer);\
+		  SPRINTF(buffer, " error_txt: %s"CRLF, error_txt);\
+			      PRINTF(buffer);\
+                  switch (retcode) {\
+		  case(100) :\
+			  break;\
+                  case(SQL_ERROR) : \
+		     if (STRCMP(sqlstate,"22005"))\
+			if (STRCMP(sqlstate,"07006"))\
+			if (STRCMP(sqlstate,"22002"))\
+			{ exit(16); }\
+		     break;\
+                  case(SQL_SUCCESS_WITH_INFO) : \
+		       if (STRCMP(sqlstate,"01004"))\
+		          if (STRCMP(sqlstate,"22001"))\
+			{  }\
+		     break;\
+		  default   :\
+			  exit(16);\
+			  break; } }
+
+UCHAR sqlstate  [ 10 ];
+SDWORD esq_sql_code;
+UCHAR error_txt  [ 101 ] ;
+SWORD len_error_txt = 100;
+SWORD used_error_txt;
+HENV henv   = SQL_NULL_HENV;
+HENV FAR * phenv;
+HDBC hdbc   = SQL_NULL_HDBC;
+HDBC FAR * phdbc;
+HSTMT hstmt = SQL_NULL_HSTMT;
+HSTMT FAR * phstmt;
+
+UCHAR buffer [1024];
+
+typedef  struct mystruct {
+	char buffer[20];
+	SQLLEN len;
+	SQLLEN ind;
+} mystruct;
+
+
+int main(int argc, char **argv)
+{
+  UWORD ipar;
+  RETCODE retcode;
+  mystruct mm;
+  char cbuf[20], *p;
+  SQLLEN len, *lp, size;
+
+  SQLHDESC  hdesc;
+  SQLLEN indicator;
+  int testOK;
+
+  SPRINTF(buffer, PROGNAME" running."CRLF);
+  PRINTF(buffer);
+
+  phenv = (HENV FAR *) &henv;
+  phdbc = (HDBC FAR *) &hdbc;
+  phstmt = (HSTMT FAR *) &hstmt;
+
+
+    StartTest( PROGNAME );
+
+    retcode = FullConnect( &henv, &hdbc );
+    if (retcode != SQL_SUCCESS) {
+        return 0;
+    }; /* if */
+
+
+  retcode = SQLAllocStmt (hdbc, phstmt);
+  SPRINTF(buffer, " SQLAllocStmt retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+
+  retcode = SQLExecDirect (hstmt, "DROP TABLE "TABLE, SQL_NTS);
+  retcode = SQLExecDirect (hstmt, "CREATE TABLE "TABLE" (a char(10))", SQL_NTS);
+  SPRINTF(buffer, " SQLExecDirect(create) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  p = mm.buffer;
+
+  /* set basis address of structure as offset */
+  retcode = SQLSetStmtAttr (hstmt, SQL_ATTR_PARAM_BIND_OFFSET_PTR, &p, 0);
+  ERROR_CHECK(hstmt);
+
+  /* bind strLen_or_Indi as offset */
+  lp = (SQLLEN*)(((char*)&mm.len) - mm.buffer);
+  size = sizeof(cbuf);
+  retcode = SQLBindParameter (hstmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR,
+                              SQL_CHAR, 10, 0, 0, size, lp);
+   ERROR_CHECK(hstmt);
+
+  retcode = SQLPrepare (hstmt, "insert into "TABLE" values (?)", SQL_NTS);
+  SPRINTF(buffer, " SQLPrepare(insert) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLGetStmtAttr( hstmt, SQL_ATTR_APP_PARAM_DESC, &hdesc, 0, NULL );
+  SPRINTF(buffer, " SQLGetStmtAttr(insert) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  /* set indicator address as offset to &mm.ind */
+  lp++;
+  retcode = SQLSetDescField (hdesc, 1, SQL_DESC_INDICATOR_PTR, (SQLPOINTER) lp, 0);
+  SPRINTF(buffer, " SQLSetDescField(insert) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+   len = SQL_NTS;
+   strcpy (mm.buffer, "TTK");
+   mm.len = 0;
+   mm.ind = SQL_NULL_DATA;
+   retcode = SQLExecute (hstmt);
+  SPRINTF(buffer, " SQLExecute(insert) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+
+  retcode = SQLBindCol (hstmt, 1, SQL_C_CHAR, cbuf, sizeof(cbuf), &len);
+  ERROR_CHECK(hstmt);
+
+
+  retcode = SQLExecDirect (hstmt, "select * from "TABLE, SQL_NTS);
+  SPRINTF(buffer, " SQLExecDirect(select) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLFetch (hstmt);
+  SPRINTF(buffer, " SQLFetch retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  if (len == SQL_NULL_DATA) {
+    testOK = TRUE;
+    SPRINTF(buffer, "SQL_NULL_DATA\n", cbuf, len);
+  } else {
+    testOK = FALSE;
+    SPRINTF(buffer, "<%s>(%d)\n", cbuf, len);
+  }
+  PRINTF(buffer);
+
+  retcode = SQLFreeStmt (hstmt, SQL_CLOSE);
+  SPRINTF(buffer, " SQLFreeStmt retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLExecDirect (hstmt, "select * from "TABLE, SQL_NTS);
+  SPRINTF(buffer, " SQLExecDirect(select) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLFetch (hstmt);
+  SPRINTF(buffer, " SQLFetch retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  retcode = SQLGetData  (hstmt, 1, SQL_C_CHAR, cbuf, sizeof(cbuf), NULL);
+  SPRINTF(buffer, " SQLGetData (without indicator error) retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  len = 1;
+  retcode = SQLGetData  (hstmt, 1, SQL_C_CHAR, cbuf, sizeof(cbuf), &len);
+  SPRINTF(buffer, " SQLGetData retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(hstmt);
+
+  if (len == SQL_NULL_DATA) {
+    testOK |= TRUE;
+    SPRINTF(buffer, "SQL_NULL_DATA\n", cbuf, len);
+  } else {
+    testOK |= FALSE;
+    SPRINTF(buffer, "<%s>(%d)\n", cbuf, len);
+  }
+  PRINTF(buffer);
+
+  retcode = SQLDisconnect(hdbc);
+  SPRINTF(buffer, " SQLDisconnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeConnect(hdbc);
+  SPRINTF(buffer, " SQLFreeConnect retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  retcode = SQLFreeEnv(henv);
+  SPRINTF(buffer, " SQLFreeEnv retcode: %d"CRLF, retcode);
+  PRINTF(buffer);
+  ERROR_CHECK(NULL);
+
+  if (testOK)
+    SPRINTF(buffer, "Test ok\n");
+  else
+    SPRINTF(buffer,"Test failed!\n");
+  PRINTF(buffer);
+
+  SPRINTF(buffer, " %s ending"CRLF, PROGNAME);
+  PRINTF(buffer);
+
+  if (testOK)
+    return (0);
+  else
+    return (1);
+}
+

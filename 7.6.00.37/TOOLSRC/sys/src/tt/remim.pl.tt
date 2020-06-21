@@ -1,0 +1,401 @@
+#!/usr/bin/perl
+#
+# remim.pl Script for remim[fqs].pl
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use SDB::Remote::WebMake;
+
+
+sub usage0()
+{
+	print "usage: remim.pl tool type [<platform>] {<${imtool}_parameter>}\n";
+    print "Used to run commands on several platforms\n";
+	print "Normally used indirectly by other scripts like remimf,remimq,remims,remfree etc.\n";
+    print ("<platform>    32Bit:", $REMUSER_HOST{'32bit'}, "\n");
+    print "     or              H32_hostname to compile on a specific 32bit host\n";
+    print ("              64Bit:", $REMUSER_HOST{'64bit'}, "\n");
+    print "     or              H64_hostname to compile on a specific 64bit host\n";
+    print "     or              all   to compile on all platforms\n";
+	print "<${imtool}_parameter> are passed to '${imtool}'\n\n";
+	print "Example: remim.pl imf fast aix kernel\n";
+
+	exit 1;
+}
+
+if ( @ARGV < 2 )
+{
+	usage0();
+   exit 1;
+}
+
+$imtool   = $ARGV[0];
+shift;
+$imtype   = $ARGV[0];
+shift;
+$special_hosttype = undef;
+
+do "$ENV{'TOOL'}\\bin\\remuser_mach$ENV{'TOOLEXT'}";
+
+if ($imtype =~ /-[\?h]/)
+{
+	usage(1);
+}
+
+while ($_ = $ARGV[0], /^[-+]/)
+{	
+	shift;
+	if (/^-\?|-h$/)
+	{
+		usage(1);
+	}
+	
+	if (/^-l$/)
+	{
+		list_hosts(1);
+		exit 0;
+	}
+	
+	if (/^-(.*)$/)
+	{
+		my $option = $1;
+		if ($option =~ /^p/)
+		{
+			# make to productive make machine
+			$special_hosttype = "prod";
+		}
+		elsif ($option =~ /^w/)
+		{
+			$special_hosttype = "web";		
+		}
+		else
+		{
+			print "Error: unknown option $_\n";
+			usage();
+		}
+		next;
+	}
+}
+
+sub usage()
+{
+	my $list = shift;
+	if ( $imtype eq "free" )
+	{
+		if ($imtool =~ /cmd/)
+		{
+			print STDERR "usage: rem${imtool} <platform> <commandline>\n";
+		}
+		else
+		{
+			print STDERR "usage: rem${imtool} <platform>\n";
+		}
+	}
+	else
+	{
+		print STDERR "usage: rem${imtool} <platform> {<${imtool}_parameter>}\n";
+	}
+    print STDERR ("<platform>    32Bit:", $REMUSER_HOST{'32bit'}, "\n");
+    print STDERR "     or              H32_hostname to work on a specific 32bit host\n";
+    print STDERR ("              64Bit:", $REMUSER_HOST{'64bit'}, "\n");
+    print STDERR "     or              H64_hostname to work on a specific 64bit host\n";
+    print STDERR "     or              all   to work on all platforms\n";
+	if ( $imtype ne "free" )
+	{
+		print STDERR "<${imtool}_parameter> passed to '${imtool}'\n\n";
+
+		print STDERR "This is the remote version of ${imtool}.\n";
+
+		print STDERR "Example: rem${imtool} aix kernel    recompiles kernel ${imtype} on aix platform\n\n";
+
+		print STDERR "Environment: REMUSER_PLATFORM default for <platform>\n";
+		print STDERR "             Used only if first parameter given is no valid platform!\n";
+	}
+	list_hosts(0) if ($list);
+	die ;
+}
+
+
+sub list_hosts
+{
+	my $display_hosts= shift;
+	require Remote::SDBRemInfo;
+	import Remote::SDBRemInfo;
+	printHostKeyList(\%REMUSER_HOST, \%REMUSER_ALIAS, \%REMUSER_HOSTMODE, $display_hosts);
+}
+
+sub getAllRemuserHosts
+{
+	my %hostlist = ();
+	my $Release = undef;
+	if ( defined $ENV{IGME_VERSION} )
+	{	$Release = substr( $ENV{IGME_VERSION}, 0, 3 );	}
+	else
+	{
+		if ( defined($ENV{RELVER})
+		  && defined($ENV{CORRECTION_LEVEL}) )
+		{
+			$Release = "$ENV{RELVER}";
+			$Release =~ s/R(\d)(\d+)/$1.$2/;			
+		}
+	}
+	foreach my $pltfrmkey (sort keys %REMUSER_HOST)
+	{
+		if ($pltfrmkey =~ /^(.*)_$Release/)
+		{
+			my $pltfrm = $1;
+			if ($REMUSER_HOST{$pltfrmkey} =~ /no_.*supported/ )
+			{
+				delete $hostlist{$pltfrm};
+			}
+			else
+			{
+				$hostlist{$pltfrm} = $REMUSER_HOST{$pltfrmkey};	
+			}
+		}
+		elsif ($pltfrmkey =~ /web_(.*)$/)
+		{
+			next;
+			#$pltfrmkey
+		}
+		# other release
+		elsif ($pltfrmkey =~ /_\d\.\d/)
+		{
+			next;
+		}
+		else
+		{
+			unless ($hostlist{$pltfrmkey} ||  ($REMUSER_HOST{$pltfrmkey} =~ /no_.*supported/) )
+			{
+				$hostlist{$pltfrmkey} = $REMUSER_HOST{$pltfrmkey};	
+			}
+		}
+	}
+	return \%hostlist;
+}
+
+sub getRemuserhost {
+	my $Platform=$_;
+	my $Release;
+	my $Host=undef;
+	
+	if ( defined $ENV{IGME_VERSION} ) {
+		$Release = substr( $ENV{IGME_VERSION}, 0, 3 );
+		if ( defined $REMUSER_HOST{"${Platform}_${Release}"} ) {
+			$Host = $REMUSER_HOST{"${Platform}_${Release}"};
+		}
+	}
+	else {
+		if ( defined($ENV{RELVER})
+		  && defined($ENV{CORRECTION_LEVEL}) ) {
+			$Release = "$ENV{RELVER}";
+			$Release =~ s/R(\d)(\d+)/$1.$2/;
+			if ( defined $REMUSER_HOST{"${Platform}_${Release}"} ) {
+				$Host = $REMUSER_HOST{"${Platform}_${Release}"};
+			}
+		}
+
+	}
+	unless (defined $Host)
+	{
+		$Host = $REMUSER_HOST{${Platform}};
+	}
+	if (defined $Host)
+	{
+		print "Using ${Platform} : $Host".
+			(($REMUSER_HOSTMODE{$Host} =~ /web/i) ? " (webmake)" : "") . "\n";
+	}
+	return $Host;
+}
+
+if ( @ARGV < 1 )
+{
+	usage();
+}
+
+$platform = $ARGV[0];
+shift;
+
+if ( defined $REMUSER_ALIAS{$platform} )
+{
+	@platforms = split(/ /,$REMUSER_ALIAS{$platform});
+}
+else
+{
+	if ($platform =~ /,/)
+	{
+		my %platform_hash;
+		foreach (split(/,/,$platform))
+		{
+			if ( defined $REMUSER_ALIAS{$_} )
+			{
+				foreach (split(/ /,$REMUSER_ALIAS{$_}))
+				{
+					$platform_hash{$_} = 1;
+				}
+			}
+			else
+			{
+				$platform_hash{$_} = 1;
+			}
+		}
+		@platforms = keys %platform_hash;
+	}
+	else
+	{ @platforms= ( "$platform" ); }
+}
+
+@tmpargv=@ARGV;
+
+@commonargv=( "-$imtype" );
+push @commonargv, "-uselocaldev" if ( ! defined $IGNOREOWN );
+
+if ( $imtool eq "term" && $imtype eq "free" )
+{
+   $ENV{REM_PARALLEL} = "Start_Xterm";
+   $count = @platforms + 0;
+   if ( $count > 1 )
+   {
+       print "Starting $count xterms, please wait ...\n";
+   }
+   else
+   {
+       print "Starting xterm, please wait ...";
+   }
+}
+else
+{
+    if ( $ENV{"REM_FORCE_PARALLEL_MODE"} eq "ALWAYS" )
+    {
+        $ENV{REM_PARALLEL} = "Start_Parallel";
+    }
+    else
+    {
+        if ( $ENV{"REM_FORCE_PARALLEL_MODE"} eq "NEVER" )
+        {
+            undef $ENV{REM_PARALLEL};
+        }
+        else
+        {
+            if ( @platforms > 1 )
+            {
+                $ENV{REM_PARALLEL} = "Start_Parallel";
+            }
+            else
+            {
+                undef $ENV{REM_PARALLEL};
+            }
+        }
+    }
+}
+
+if ( $imtool =~ /free/)
+{
+	push @commonargv, "-action", "cleanup";
+}
+elsif ( $imtool =~ /term/)
+{
+	push @commonargv, "-action", "term";
+}
+elsif ( $imtool =~ /kill/)
+{
+	push @commonargv, "-action", "kill";
+}
+elsif ( $imtool =~ /dir/)
+{
+	push @commonargv, "-action", "dir";
+}
+elsif ( $imtool =~ /cmd/)
+{
+	push @commonargv, "-action", "cmd";
+}
+elsif ( $imtool =~ /ip[fqs]/)
+{
+	push @commonargv, "-action", "prot";
+}
+
+
+foreach (@platforms) {
+
+	my $platform = $_;
+	my $host = undef;
+	
+	if ($special_hosttype =~ /web/)
+	{
+		$host = getRemuserhost( "web_$_" );
+	}
+	
+	unless (defined $host)
+	{
+		$host = getRemuserhost( "$_");	
+	}
+	
+	if ( ! defined $host )
+	{
+		if ( /^H32_(.*)$/ )
+		{
+			$host = $1;
+			undef $REMUSER_BIT64MODE{$_};
+		}
+		else
+		{
+			if ( /^H64_(.*)$/ )
+			{
+				$host = $1;
+				$REMUSER_BIT64MODE{$_} = "BIT64";
+			}
+		}
+	}
+
+	if ( ! defined $host )
+	{
+		print "no host for platform $platform given\n";
+		usage();
+	}
+	
+	@ARGV=@commonargv;
+
+	if ( defined $REMUSER_BIT64MODE{$_} )
+	{
+		push @ARGV, "-bit64";
+	}
+	push @ARGV, "-platform", $platform;
+	push @ARGV, "-hosttype", $special_hosttype if (defined $special_hosttype);
+	push @ARGV, "-host", $host, "-e", @tmpargv;
+	
+
+	if ( defined $DEBUGREMIM )
+	{
+		print "$ENV{'TOOL'}\\bin\\rem_vmake$ENV{'TOOLEXT'}";
+	    foreach ( @ARGV ) { print " $_"; }
+		print "\n";
+	}
+	else
+	{
+		do "$ENV{'TOOL'}\\bin\\rem_vmake$ENV{'TOOLEXT'}";
+	}
+}
+
+if ($ENV{'REM_DEFAULT_BROWSER'} =~ /firefox/i)
+{
+	SDB::Remote::WebMake::show_all_adresses();
+}	

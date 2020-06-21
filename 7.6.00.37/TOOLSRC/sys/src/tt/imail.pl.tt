@@ -1,0 +1,119 @@
+# imail    h.b. 12.11.97  
+#
+# imail sends a file as mail
+#
+# -u specifies an user as recipient
+# -g specifies a group as recipient (see imember.tt)
+# -s specifies a subject line for the mail
+# -f specifies a sender  
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+
+use Env;
+use Getopt::Std;
+use ICopy;
+use DUser;
+
+
+if ( !getopts ('u:g:s:f:n:i') or 
+     ($opt_u and $opt_g) or  
+     ((@ARGV == 0) and !$opt_n and !$opt_i) ) {
+
+  print "Usage: imail [optional switches (see below)] <filename>\n";
+  print "       imail -i\n\n";
+  print "-u <duser> | -g <group> : recipient, default is group ALL (see imember.tt)\n";
+  print "-s \"<subject>\"          : subject line, default is \"imail from <duser>\"\n";
+  print "-f <duser>              : sender, default is USERNAME\n";
+
+  exit 1;
+}
+
+if ( $opt_i ) {
+  $cmd = "BLAT -install sapwdf.wdf.sap-ag.de $USERNAME";
+  print "$cmd\n";
+  system $cmd;
+  exit;
+}
+
+
+$UseNet  = $opt_n;
+$User    = uc $opt_u;
+$Grp     = uc $opt_g;
+$Sender  = $opt_f ? $opt_f : $USERNAME;
+@Duser   = DUser::userlookup($Sender);
+$Subject = $opt_s ? $opt_s : "imail from @Duser";
+$File    = $ARGV[0];
+
+unless ( $UseNet ) {
+ 
+  die "File $File does not exist" unless ( -f $File ); 
+}
+
+if ( $User ) {
+
+  push @Rlist, $User;
+
+} else {
+
+  $Grp = "ALL" unless ( $Grp );
+
+  open (INFILE,"<$TOOL/bin/imember") || die "Can't open $TOOL/bin/imember";
+  while (<INFILE>) {
+    unless ( /(^$)|(^#)/ ) {
+      if ( /^\s*$Grp\s*,/i ) {
+        s/^\s*$Grp\s*,//i;
+        do {
+          chop $_;
+          s/^\s*//;
+          if ( /.*;$/ ) {
+            s/;$//;
+            $Stop = 1;
+          }
+          @TmpList = split (/\s*,\s*/, $_);
+          push @Rlist, @TmpList;
+          last if $Stop;
+        } while (<INFILE>);
+        last;
+      }
+    }
+  }
+  close (INFILE);
+
+}
+
+if ( $UseNet ) {
+
+  foreach (@Rlist) {
+    $cmd = "NET send $_ $UseNet";
+    system $cmd;
+  }
+
+} else {
+
+  foreach (@Rlist) {
+    $cmd = "BLAT $File -f $Sender -s \"$Subject\" -t $_\@mlp.r3.sap-ag.de";
+    system $cmd;
+  }
+
+}
+
+

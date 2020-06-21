@@ -1,0 +1,205 @@
+#!/usr/bin/perl
+#
+# @(#) nachtRelease_ia64   19-10-2001   S. Paeck
+#
+# complete night run test script to run a single release
+# 
+#
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+use Env;
+
+use Win32;
+use Win32::IPC;
+use Win32::Process;
+
+$Release=shift;
+
+
+# Preserve only the 20 youngest nigth run protocols
+system("%TOOL%/Posix/find d:/SAPDevelop/Nachtlauf -mtime +20 -exec %TOOL%/Posix/rm -f {} ;");
+
+#------------------ Determing the name of the protocol, e.g. 06Nov2001_741.out --------------
+$day = (localtime)[3];
+if ($day < 10)
+{
+    $day = "0".$day;
+}
+
+$month = (Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec)[(localtime)[4]];
+$year = (localtime)[5] + 1900;
+
+$Prot = "d:/SAPDevelop/Nachtlauf/".$day.$month.$year."_".$Release.".out";
+#--------------------------------------------------------------------------------------------
+
+open (SAVEOUT, ">&STDOUT") or die "Can not redirect STDOUT";
+open (SAVERR, ">&STDERR") or die "Can not redirect STDERR";
+
+open (STDOUT, ">$Prot") or die "Can not redirect STDOUT";
+open (STDERR, ">&STDOUT") or die "Can not redirect STDERR";
+
+$|=1;
+if ( $WOCHENENDE eq "true" ) 
+{
+    $Mode="weekend";
+}
+else
+{
+    $Mode="normal";
+}
+
+
+#Lästige RSH-Protokolle auf C: entfernen
+unlink <C:/rsh*>;
+print "=====================================================================\n";
+print "Complete Itanium night run of Release $Release\n";
+print "=====================================================================\n";
+
+# ermitteln ob Wochenende ist
+$WOCHENENDE = ("true","false","false","false","false","true","true")[(localtime)[6]];
+print "Weekend: $WOCHENENDE \n";
+
+#---------------------------------- c l e a r --------------------------
+print "\n... clearing in $TMP :\n";
+system("$TOOL/Posix/find $TMP -mtime +4 -exec $TOOL/Posix/rm -rf {} ;");
+print;
+
+#print "\n... clearing in $WRK\n";
+#unlink <d:/SAPDevelop/$Release/sys/wrk/slow/tmp/*>;
+#unlink <d:/SAPDevelop/$Release/sys/wrk/quick/tmp/*>;
+#unlink <d:/SAPDevelop/$Release/sys/wrk/fast/tmp/*>;
+
+print "\n... clearing of protocols:\n";
+system("$TOOL/Posix/find d:/SAPDevelop/$Release/sys/wrk/slow/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+system("$TOOL/Posix/find d:/SAPDevelop/$Release/sys/wrk/quick/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+system("$TOOL/Posix/find d:/SAPDevelop/$Release/sys/wrk/fast/prot -mtime +4 -exec $TOOL/Posix/rm -f {} ;");
+print;
+
+#if ( $Mode "weekend" ) 
+#{
+#    print "\nWeekend, therefore d:/SAPDevelop/$Release/sys/wrk is deleted!\n";
+#    system("$TOOL/Posix/find d:/SAPDevelop/$Release/sys/wrk -exec $TOOL/Posix/rm -rf {} ;");
+#}
+print;
+
+if ($Release == "741")
+{
+
+    print "======================================================================\n";
+    print " Copy Tools to the Itanium test machine\n";
+    print "======================================================================\n";
+    print ("D:\\SAPDevelop\\robocopy.exe %TOOL%\\bin \\\\PINTEL64_03\\DevTool\\bin /XF *.f *.q *.s /XD wrk config  /e\n");
+    system ("D:\\SAPDevelop\\robocopy.exe %TOOL%\\bin \\\\PINTEL64_03\\DevTool\\bin /XF *.f *.q *.s /XD wrk config  /e");
+    print ("D:\\SAPDevelop\\robocopy.exe %TOOL%\\pgm \\\\PINTEL64_03\\DevTool\\pgm /XF *.f *.q *.s /XD wrk config  /e\n");
+    system ("D:\\SAPDevelop\\robocopy.exe %TOOL%\\pgm \\\\PINTEL64_03\\DevTool\\pgm /XF *.f *.q *.s /XD wrk config  /e");
+#    print ("copy /Y \\\\PINTEL64_03\\DevTool\\bin\\_sutsingle.pl \\\\PINTEL64_03\\DevTool\\bin\\sutsingle.pl\n");
+#    system ("copy /Y \\\\PINTEL64_03\\DevTool\\bin\\_sutsingle.pl \\\\PINTEL64_03\\DevTool\\bin\\sutsingle.pl");
+
+
+    #------------------------------    XCompilation for Itanium ------------------
+
+    Win32::Process::Create($XCompProc,
+                           "$SYSTEMROOT\\system32\\cmd.exe",
+                           "/c %TOOL%\\Perl\\bin\\perl.exe D:\\SAPDevelop\\nachtCompilation_ia64.pl $Mode $Release",
+                           1,
+                           CREATE_DEFAULT_ERROR_MODE,".") || die Win32::FormatMessage(Win32::GetLastError());
+    $XCompProc->SetPriorityClass(NORMAL_PRIORITY_CLASS);
+    #-----------------------------------------------------------------------------
+
+#    $ProtTmp = $Prot."tmp";
+
+#    close STDOUT;
+#    close STDERR;
+#    open STDOUT, ">&SAVEOUT";
+#    open STDERR, ">&SAVEERR";
+
+#    open (STDOUT, ">$ProtTmp") or die "Can not redirect STDOUT";
+#    open (STDERR, ">&STDOUT") or die "Can not redirect STDERR";
+
+#    print "=====================================================================\n";
+#    print " Compilation of the local 32 Bit Test enviroment\n";
+#    print "=====================================================================\n";
+
+    #The Tests are done on an Itanium remotely from this machine. Therefore first 
+    #of all we need a 32 Bit version of the requested tests
+#    Win32::Process::Create($TestCompProc,
+#                           "$SYSTEMROOT\\system32\\cmd.exe",
+#                           "/c %TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\devstudio.pl -c D:\\SAPDevelop_32Bit\\7.4.1 7.4.01&&set OWN=D:\\SAPDevelop_32Bit\\7.4.1&&D:\\SAPDevelop_32Bit\\7.4.1\\iprofile.bat&&%TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\imf.pl slowci sut\"",
+#                           1,
+#                           CREATE_DEFAULT_ERROR_MODE,
+#                           ".") || die Win32::FormatMessage(Win32::GetLastError());
+#    $TestCompProc->SetPriorityClass(NORMAL_PRIORITY_CLASS);
+
+
+    #------------------------------    Wait for the compilations to be terminated -----------
+#    Win32::IPC::WaitForMultipleObjects([ $XCompProc, $TestCompProc ], 1, INFINITE);
+    Win32::IPC::WaitForMultipleObjects([ $XCompProc ], 1, INFINITE);
+ 
+#    close STDOUT;
+#    close STDERR;
+    
+#    open STDOUT, ">&SAVEOUT";
+#    open STDERR, ">&SAVEERR";
+    
+    #------------------------------    Append 'ProtTmp' to 'Prot' --------------------------
+#    open (LESEN, "<$ProtTmp");
+#    open (APPEND, ">>$Prot");
+    
+#    while (<LESEN>) {print APPEND $_;}
+
+#    close (LESEN);
+#    close (APPEND);
+
+#    unlink "$ProtTmp";
+    #---------------------------------------------------------------------------------------
+
+
+#    open STDOUT, ">>$Prot";
+#    open STDERR, ">>&STDOUT";
+
+    
+    print "=====================================================================\n";
+    print " End of compilation jobs ", scalar localtime(),"\n";
+    print "=====================================================================\n";
+    print ("%TOOL%\\Posix\\touch \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\TestFlag\n");
+    system ("%TOOL%\\Posix\\touch \\\\PINTEL64_03\\SAPDevelop\\7.4.1\\TestFlag");
+
+#    print "=====================================================================\n";
+#    print " Testrun", scalar localtime(),"\n";
+#    print "=====================================================================\n";
+#    system ("$ENV{SYSTEMROOT}\\system32\\cmd.exe /c %TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\devstudio.pl -c D:\\SAPDevelop_32Bit\\7.4.1 7.4.01&&set OWN=D:\\SAPDevelop_32Bit\\7.4.1&&D:\\SAPDevelop_32Bit\\7.4.1\\iprofile.bat&&%TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\sutparam.pl -o remuser,Remuser -n PINTEL64_03 -R D:\\SAPDB_Tests\\741 -d SUT741");
+#    system ("$ENV{SYSTEMROOT}\\system32\\cmd.exe /c %TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\devstudio.pl -c D:\\SAPDevelop_32Bit\\7.4.1 7.4.01&&set OWN=D:\\SAPDevelop_32Bit\\7.4.1&&D:\\SAPDevelop_32Bit\\7.4.1\\iprofile.bat&&%TOOL%\\Perl\\bin\\perl.exe %TOOL%\\bin\\sutall.pl -n PINTEL64_03 -R D:\\SAPDB_Tests\\741 slow slowci SUT741");
+#    print "=====================================================================\n";
+#    print " end-of-job ", scalar localtime(),"\n";
+#    print "=====================================================================\n";
+}
+else
+{
+    @ARGV = ($Release);
+    do "D:\\SAPDevelop\\nachtCompilation_ia64.pl"; # || die "Can't execute 'nachtCompilation_ia64.pl'\n";
+}
+
+close STDOUT;
+close STDERR;
+
+open STDOUT, ">&SAVEOUT";
+open STDERR, ">&SAVEERR";
