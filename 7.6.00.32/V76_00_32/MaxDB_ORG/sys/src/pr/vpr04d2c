@@ -1,0 +1,479 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPR04D2C$
+.tt 2 $$$
+.tt 3 $$Parameter Conversions, DB2$2000-12-21$
+*****************************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+.CM *-END-* define --------------------------------------
+Use     :
+ 
+.CM *-END-* use -----------------------------------------
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : 
+.sp
+.cp 3
+Created : 1993-09-21
+.sp
+.cp 3
+Version : 1993-12-16
+.sp
+.cp 3
+Release :      Date : 2000-12-21
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.sp
+.CM -lll-
+Code    :
+/*PRETTY*/
+ 
+#include <stdio.h>
+#include <string.h>
+#include <memory.h>
+ 
+void s26new_part_init (tsp1_packet_ptr, tsp1_segment_ptr,
+	tsp1_part_ptr*);
+void s26finish_part (tsp1_packet_ptr, tsp1_part_ptr);
+
+void p04db2t (const struct sqlvar *var, char *name,
+	      short *vt, short *vl, short *vf, tsp00_Int4 *ival, char *err)
+{
+  short nl = var->sqlname.length;
+  char *dst = (char*) &var->sqllen;
+  short sint;
+ 
+  memcpy (name, var->sqlname.data, (nl < sizeof (sqllname)) ? nl :
+	  sizeof (sqllname));
+  if (nl < sizeof (sqllname))
+    memset (&name [nl], ' ', sizeof (sqllname) - nl);
+  *vl = var->sqllen;
+  *vf = 0;
+  *ival = 0;
+  if (var->sqltype % 2 != 0 && var->sqlind != 0) {
+    memcpy (&sint, var->sqlind, sizeof (sint));
+    *ival = sint;
+  }
+  switch (var->sqltype) {
+  case CPR_DB2_INT2: {}
+  case CPR_DB2_INT2N: {
+    *vt = CPR_VINT2;
+    break;
+  }
+  case CPR_DB2_INT4: {}
+  case CPR_DB2_INT4N: {
+    *vt = CPR_VINT4;
+    break;
+  }
+  case CPR_DB2_FLOAT: {}
+  case CPR_DB2_FLOATN: {
+    *vt = CPR_VREAL8;
+    *vf = -1;
+    break;
+  }
+  case CPR_DB2_DECIMAL: {}
+  case CPR_DB2_DECIMALN: {
+    *vt = CPR_VDECIMAL;
+    *vl = dst [0];
+    *vf = dst [1];
+    break;
+  }
+  case CPR_DB2_VARCHAR: {}
+  case CPR_DB2_VARCHARN: {}
+  case CPR_DB2_LVARCHAR: {}
+  case CPR_DB2_LVARCHARN: {}
+  case CPR_DB2_LVARGRAPHIC: {}
+  case CPR_DB2_LVARGRAPHICN: {
+    *vt = CPR_VSTRING;
+    break;
+  }
+  case CPR_DB2_CHARC: {}
+  case CPR_DB2_CHARCN: {
+    *vt = CPR_VCHARC;
+    break;
+  }
+  case CPR_DB2_CHAR: {}
+  case CPR_DB2_CHARN: {}
+  case CPR_DB2_DATE: {}
+  case CPR_DB2_DATEN: {}
+  case CPR_DB2_TIME: {}
+  case CPR_DB2_TIMEN: {}
+  case CPR_DB2_TIMESTAMP: {}
+  case CPR_DB2_TIMESTAMPN: {}
+  case CPR_DB2_GRAPHIC: {}
+  case CPR_DB2_GRAPHICN: {
+    *vt = CPR_VCHAR;
+    break;
+  }
+  default: {
+    *vt = -1;
+    if (*err == cpr_p_ok)
+      *err = cpr_unknown_datatype;
+    break;
+  }
+  }
+}
+ 
+void p04db2din (sqlcatype *sqlca, sqlxatype *sqlxa, sqlgaentry *gae, void *sqlda)
+{
+  tsp1_packet *pck = (tsp1_packet*) gae->gareqptr;
+  tsp1_segment *seg = (tsp1_segment *) sqlca->sqlrap->rasegptr;
+  struct SQLLD *ldp = sqlca->sqlrap->rasqlldp;
+  tsp00_Int2 *ldmaxi = &ldp->ldmaxi;
+  tsp00_Int2 *ldcolkind = &ldp->ldcolkind;
+  struct sqlda *da = (struct sqlda*) sqlda;
+  struct sqlvar *var = da->sqlvar;
+  struct sqlvar *varmx = var + da->sqld - 1;
+  sqlparsid parsid;
+  sqllname name;
+  short vt, vl, vf;
+  tsp00_Int4 ival;
+  char err;
+  int pno;
+  tsp1_part *pidpart;
+  tsp00_Uint1 *pid;
+  tsp1_part *datapart;
+  tsp00_Uint1 *data;
+  tsp1_part *cntpart;
+  tsp00_Uint1 *cnt;
+ 
+  if (sqlca->sqlcode != 0 || da->sqlrow.ireclen == 0)
+    return;
+ 
+  pr04LongInitLD (sqlca, sqlxa);	
+  p03find_part (sqlca->sqlrap, sp1pk_parsid, &pidpart);
+  pid = pidpart->sp1p_buf;
+  s26new_part_init (pck, seg, &cntpart);
+  cntpart->sp1p_part_header.sp1p_part_kind = sp1pk_resultcount;
+  cntpart->sp1p_part_header.sp1p_buf_len = MXPR_NUMB + 1;
+  sqlca->sqlrap->rasegmpartptr [sp1pk_resultcount] = cntpart;
+  cnt = cntpart->sp1p_buf;
+  *cnt = CPR_UNDEF_BYTE;
+  s26finish_part (pck, cntpart);
+  s26new_part_init (pck, seg, &datapart);
+  sqlca->sqlrap->rasegmpartptr [sp1pk_data] = datapart;
+  data = datapart->sp1p_buf;
+  memcpy (parsid, pid, sizeof (parsid));
+  p04mode (sqlca, gae);
+  for (pno = 1; var <= varmx; var++, pno++) {
+    err = cpr_p_ok;		
+    p04db2t (var, (char*)name, &vt, &vl, &vf, &ival, &err);
+    p04coltobuf (sqlca->sqlrap, (char*)data, &datapart->sp1p_part_header.sp1p_buf_len, &var->col, (char*)name, var->sqldata, vt, vl, vl, vf, ival, 0, pno, sqlca->sqlemp);
+    p03csqlemptosqlca (sqlca, sqlca->sqlemp);
+    if (*ldcolkind == cpr_is_true) {
+      struct SQLPCLD *ldpc = ldp->ldpc;
+      struct SQLPCLD *p = ldpc + *ldmaxi - 1;
+      p->ldindkaddr = var->sqlind;
+      p->ldcoladdr = &var->col;
+      p->ldindktype = CPR_VINT2;
+      p->ldindklen = 2;
+      p->ldindkfrac = 0;
+      p->ldrowno = 0;
+    }
+  }
+  pr04LongILvcOneRecord (sqlca, sqlxa, gae, &parsid, datapart, cntpart);  
+  p03csqlemptosqlca (sqlca, sqlca->sqlemp);
+  s26finish_part (pck, datapart);
+}
+ 
+void p04db2dout (sqlcatype *sqlca, sqlgaentry *gae, void *sqlda)
+{
+  tsp1_packet *pck = (tsp1_packet*) gae->gareqptr;
+  tsp1_segment *seg = (tsp1_segment *) sqlca->sqlrap->rasegptr;
+  struct SQLERROR *em = sqlca->sqlemp;
+  struct SQLLD *ldp = sqlca->sqlrap->rasqlldp;
+  tsp00_Int2 *ldmaxo = &ldp->ldmaxo;
+  tsp00_Int2 *ldcolkind = &ldp->ldcolkind;
+  struct sqlda *da = (struct sqlda*) sqlda;
+  struct sqlvar *var = da->sqlvar;
+  struct sqlvar *varmx = var + da->sqld - 1;
+  sqllname name;
+  short vt, vl, vf;
+  tsp00_Int4 ival;
+  char err;
+  int cntlen, pno;
+  tsp1_part *datapart;
+  tsp00_Uint1 *data;
+ 
+  if (sqlca->sqlcode != 0 || da->sqlrow.oreclen == 0)
+    return;
+ 
+  p03find_part (sqlca->sqlrap, sp1pk_data, &datapart);
+  data = datapart->sp1p_buf;
+  sqlca->sqlerrd[2] = p04rescount (seg, datapart->sp1p_part_header.sp1p_buf_len, &cntlen);
+  p04mode (sqlca, gae);
+  for (pno = 1; var <= varmx; var++, pno++) {
+    err = cpr_p_ok;
+    p04db2t (var, (char*)name, &vt, &vl, &vf, &ival, &err);
+    p04colfrombuf (sqlca->sqlrap, (char*)data,
+		   &datapart->sp1p_part_header.sp1p_buf_len, &var->col,
+		   (char*)name, var->sqldata, vt, vl, vl, vf, &ival, 0, pno,
+		   sqlca->sqlemp);
+    p03csqlemptosqlca (sqlca, sqlca->sqlemp);
+    if (*ldcolkind == cpr_is_true) {
+      struct SQLPCLD *ldpc = ldp->ldpc;
+      struct SQLPCLD *p = ldpc + *ldmaxo - 1;
+      p->ldindkaddr = var->sqlind;
+      p->ldcoladdr = &var->col;
+      p->ldindktype = CPR_VINT2;
+      p->ldindklen = 2;
+      p->ldindkfrac = 0;
+      p->ldrowno = 0;
+    }
+    if (var->sqlind != 0) {
+      short sint = (short) ival;
+      memcpy (var->sqlind, &sint, sizeof (sint));
+    }
+    else {
+      if (ival == -1)
+	p04err (sqlca->sqlrap, sqlca->sqlemp, cpr_out_null_not_allowed);
+    }
+    p03csqlemptosqlca (sqlca, sqlca->sqlemp);
+  }
+}
+ 
+void p04sftodb2 (sqlcatype *sqlca, sqlxatype *sqlxa,
+		 struct sqlvar *var, struct SQLROW *row,
+		 const tsp1_param_info *sfi, char init)
+{
+  M90TRACE(M90_TR_ENTRY, "p04sftodb2", 0);
+  p04decode (sfi, row, &var->col);
+  var->sqllen = (short) var->col.collen;
+  M90TRACE(M90_TR_SWORD, "switch col.coltype", &var->col.coltype);
+  switch (var->col.coltype) {
+  case dfixed: {
+    char *dst = (char*) &var->sqllen;
+    var->sqltype = CPR_DB2_DECIMAL;
+    dst [0] = (char) var->col.collen;
+    dst [1] = (char) var->col.colfrac;
+    if (var->col.colfrac == 0) {
+      if ( var->sqllen == (short) 5 ) {
+	var->sqllen = 2;
+	var->sqltype = CPR_DB2_INT2;
+      }
+      else {
+	if ( var->sqllen == (short) 10 ) {
+	  var->sqllen = 4;
+	  var->sqltype = CPR_DB2_INT4;
+	}
+      }
+    }
+    break;
+  }
+  case dsmallint: {
+    var->sqllen = 2;
+    var->sqltype = CPR_DB2_INT2;
+    break;
+  }
+  case dinteger: {
+    var->sqllen = 4;
+    var->sqltype = CPR_DB2_INT4;
+    break;
+  }
+  case dfloat: {}
+  case dvfloat: {
+    var->sqltype = CPR_DB2_FLOAT;
+    var->sqllen = CPR_DB2_FLOATLEN;
+    break;
+  }
+  case dcha: {}
+  case dche: {}
+  case dvarchara: {}
+  case dvarchare: {
+    var->sqltype = (sqlca->sqlrap->ralang == CPR_LA_C) ? 
+      (short) CPR_DB2_CHARC :
+      (var->sqllen > 254) ? (short) CPR_DB2_VARCHAR :
+      (short) CPR_DB2_CHAR;
+    break;
+  }
+  case dchb: {
+    var->sqltype = (var->sqllen > 254) ? (short) CPR_DB2_VARCHAR :
+      (short) CPR_DB2_CHAR;
+    break;
+  }
+  case dstra: {}
+  case dstre: {}
+  case dstrb: {
+    var->sqltype = CPR_DB2_LVARCHAR;
+    var->sqllen = 0;
+    break;
+  }
+  case dstrdb: {
+    var->sqltype = CPR_DB2_LVARGRAPHIC;
+    var->sqllen = 0;
+  }
+  case ddate: {
+    var->sqltype = CPR_DB2_DATE;
+    var->sqllen = CPR_DB2_DATELEN;
+    break;
+  }
+  case dtime: {
+    var->sqltype = CPR_DB2_TIME;
+    var->sqllen = CPR_DB2_TIMELEN;
+    break;
+  }
+  case dtimestamp: {
+    var->sqltype = CPR_DB2_TIMESTAMP;
+    var->sqllen = CPR_DB2_TIMESTAMPLEN;
+    break;
+  }
+  case dunicode: {}
+  case ddbyteebcdic: {
+    var->sqltype = (var->sqllen > (short) 254) ?
+      (short) CPR_DB2_VARGRAPHIC : (short) CPR_DB2_GRAPHIC;
+    break;
+  }
+  default: {
+    p08runtimeerror (sqlca, sqlxa, cpr_not_implemented);
+    break;
+  }
+  }
+  M90TRACE(M90_TR_SWORD, "var->sqllen ", &var->sqllen);
+  M90TRACE(M90_TR_SWORD, "var->sqltype", &var->sqltype);
+  if (var->col.colmode & 1 << CPR_INFO_OPTIONAL)
+    var->sqltype++;
+  if (init) {
+    var->sqlind = 0;
+    var->sqldata = 0;
+  }
+  M90TRACE(M90_TR_EXIT, "p04sftodb2", 0);
+}
+ 
+short p04db2dsfi (sqlcatype *sqlca, sqlxatype *sqlxa, sqlorentry *ore, void *sqlda, char fetchdesc, char again)
+{
+  tsp1_segment *seg = (tsp1_segment *) sqlca->sqlrap->rasegptr;
+  struct sqlda *da = (struct sqlda*) sqlda;
+  struct sqlvar *var = da->sqlvar;
+  tsp1_part *part;
+  tsp00_Uint1 *buf, *ebuf;
+  tsp1_param_info sfi;
+  int ln;
+ 
+  p03find_part (sqlca->sqlrap, sp1pk_shortinfo, &part);
+  if (!part) {
+    if (!ore || (ore->orcolcntacc == 0 && ore->orrescntacc == 0)) {
+      p08runtimeerror (sqlca, sqlxa, cpr_not_implemented);
+      return 0;
+    }
+  }
+  da->sqld = part->sp1p_part_header.sp1p_arg_count;
+  if (da->sqld > da->sqln) {
+    return 0;
+  }
+  buf = part->sp1p_buf;
+  ebuf = buf + part->sp1p_part_header.sp1p_buf_len;
+  p04init (&da->sqlrow);
+  while (buf < ebuf) {
+    memcpy (&sfi, buf, sizeof (tsp1_param_info));
+    buf += sizeof (tsp1_param_info);
+    p04sftodb2 (sqlca, sqlxa, var, &da->sqlrow, &sfi,
+		(char) !again);
+    var++;
+  }
+  var = da->sqlvar;
+  p03find_part (sqlca->sqlrap, sp1pk_columnnames, &part);
+  if (part) {
+    buf = part->sp1p_buf;
+    ebuf = buf + part->sp1p_part_header.sp1p_buf_len;
+    while (buf < ebuf) {
+      ln = *buf++;
+      var->sqlname.length = (short)
+	((ln > sizeof(var->sqlname.data))?
+	 sizeof (var->sqlname.data) : ln);
+      memcpy (var->sqlname.data, buf, var->sqlname.length);
+      if (var->sqlname.length < sizeof (var->sqlname.data))
+	memset (&var->sqlname.data[var->sqlname.length], ' ', sizeof (var->sqlname.data) - var->sqlname.length);
+      buf += ln;
+      var++;
+    }
+  }
+  else
+    if (!fetchdesc) {
+      static const char s[] = "COLUMN";
+      static const int ls = sizeof (s) - 1;
+      int i = 1;
+      struct sqlvar *evar = da->sqlvar + da->sqld;
+      while (var < evar) {
+	memcpy (var->sqlname.data, s, ls);
+	ln = ls + sprintf ((char*) &var->sqlname.data[ls],
+			   "%d", i++);
+	if (ln < sizeof (var->sqlname.data))
+	  memset (&var->sqlname.data [ln], ' ', sizeof (var->sqlname.data) - ln);
+	var->sqlname.length = (short) ln;
+	var++;
+      }
+    }
+  return da->sqlrow.oreclen;
+}
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :        339
+*-PRETTY-*  lines of code :        339        PRETTY  3.09 
+*-PRETTY-*  lines in file :        410         1992-11-23 
+.PA 

@@ -1,0 +1,124 @@
+#
+# =====================================================
+# @(#) UDE                     7.6        2003-06-13
+# =====================================================
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2003-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+_dbaRole = 'PUBLIC'   # while DBA role not implemented
+_sysude = "SYSUDE."
+
+def declareSystemProc (session, name, paramdef = ''):
+    stopIfSqlNotErr (session, -4016, "DROP DBPROC " + _sysude +  name)
+
+    if paramdef:
+        paramdef = '(' + paramdef + ')'
+    stopIfSqlNotOK (session, """CREATE DBPROC
+        %s %s
+        AS LANGUAGE SYSTEM NAME '%s'
+        """ % (name, paramdef, name))
+
+    stopIfSqlNotOK (session, "GRANT EXECUTE ON " + _sysude + name + " TO " + _dbaRole)
+
+def createTable (session, tablename, definition):
+    if not existsTable (session, tablename):
+        stopIfSqlNotOK (session, "CREATE TABLE %s (%s) INTERNAL" % (tablename, definition))
+
+    stopIfSqlNotOK (session, "GRANT SELECT, INSERT, DELETE, UPDATE ON %s TO %s" % (tablename, _dbaRole))
+
+
+def install (session,options):
+    """Installing support for UDE (User Defined Extensions)
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    #ADIS #1001953/1002033
+    requireSysdba (session)
+
+    commandLineDef = 'COMMANDLINE CHAR ( 255)'
+    commentDef = 'COMMENT     CHAR (3000)'
+    serverKindDef = 'SERVERKIND  CHAR (  32)'
+
+    if _sysude:
+        switchToSchema (session, 'SYSUDE')
+
+    createTable (session, "SERVER_CONFIG", """
+            %(serverKindDef)s,
+            INFOKIND    CHAR (   1),
+            %(commandLineDef)s,
+            EXTRAINFO   CHAR ( 255),
+            %(commentDef)s,
+            PRIMARY KEY (SERVERKIND)
+            """ % locals ())
+
+    declareSystemProc (session, 'DEFINE_SERVER', """IN %(serverKindDef)s,
+            IN %(commandLineDef)s,
+            IN %(commentDef)s""" % locals ())
+
+    declareSystemProc (session, 'DEFINE_DEBUGSERVER', """IN %(serverKindDef)s,
+            IN socketport FIXED (5, 0),
+            IN %(commentDef)s""" % locals ())
+
+    declareSystemProc (session, 'UNDEFINE_SERVER',
+        """IN %(serverKindDef)s""" % locals ())
+
+    createTable (session, "SERVER_PROPERTIES", """
+            %(serverKindDef)s,
+            NAME        CHAR ( 36),
+            STRINGVALUE CHAR (255),
+            INTVALUE    INTEGER,
+            PRIMARY KEY (SERVERKIND, NAME)
+            """ % locals ())
+
+    createTable (session, "SERVER_JARS", """
+            ID  CHAR ( 36),
+            STORETIME TIMESTAMP DEFAULT TIMESTAMP,
+            JAR LONG BYTE,
+            PRIMARY KEY (ID)
+            """)
+
+    #
+    # system views
+    #
+
+    declareSystemProc (session, 'SHOW_SERVER')
+
+    declareSystemProc (session, 'SHOW_SESSIONS')
+
+    #
+    # cleanup
+    #
+
+    loaderCmd (session, 'COMMIT')
+
+    switchToDefaultSchema (session, options)
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)

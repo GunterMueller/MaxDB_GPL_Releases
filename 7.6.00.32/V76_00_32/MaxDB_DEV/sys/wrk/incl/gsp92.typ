@@ -1,0 +1,244 @@
+
+ 
+      tsp92_RteRegionInfo = RECORD
+      (* RTE internals only begin *)
+            WaiterArray     : tsp00_Longint;
+            NumWaiter       : tsp00_Int4;
+            LastWaiterGiven : tsp00_Int4 ;
+            LastRegionGiven : tsp00_Int4 ;
+            (* RTE internals only end *)
+            RegionNo        : tsp00_Int4 ;
+            RegionName      : tsp00_Region ;
+            OwnerTaskIndex  : tsp00_Int4 ;
+            WaitTaskIndex   : tsp00_Int4 ;
+            GetCount        : tsp00_8ByteCounter ;
+            TasCount        : tsp00_8ByteCounter ;
+            WaitCount       : tsp00_8ByteCounter ;
+            CollisionCount  : tsp00_8ByteCounter ;
+            CollisionRate   : tsp00_Longreal ;
+            Exclusive       : tsp00_Int4
+      END;
+ 
+ 
+      tsp92_RteIOInfo = RECORD
+            NextDevNo       : tsp00_Int4 ;   (* RTE internal only *)
+            DevNo           : tsp00_Int4 ;
+            ReadCnt         : tsp00_8ByteCounter ;
+            ReadPageCnt     : tsp00_8ByteCounter ;
+            WriteCnt        : tsp00_8ByteCounter ;
+            WritePageCnt    : tsp00_8ByteCounter ;
+            DevspaceName    : tsp00_VFilename
+      END;
+ 
+ 
+      tsp92_RteBackupInfo = RECORD
+            NextDevNo       : tsp00_Int4 ;   (* RTE internal only *)
+            DevNo           : tsp00_Int4 ;
+            ReadCnt         : tsp00_8ByteCounter ;
+            WriteCnt        : tsp00_8ByteCounter ;
+            PageCnt         : tsp00_8ByteCounter ;
+            QueLen          : tsp00_Int4 ;
+            MaxQueLen       : tsp00_Int4 ;
+            DevspaceName    : tsp00_VFilename
+      END;
+ 
+ 
+      tsp92_RteStorageInfo = RECORD
+            StorageIdx      : tsp00_Int4 ;   (* RTE internal only *)
+            StorageValue    : tsp00_Int4 ;
+            StorageName     : tsp00_C64  ;
+            StorageUnit     : tsp00_C6
+      END;
+ 
+ 
+      tsp92_RteSpecThreadsInfo = RECORD
+            SpecThreadIdx   : tsp00_Int4 ;
+            SpecThreadId    : tsp00_Int4 ;
+            SpecThreadName  : tsp00_C16
+      END;
+ 
+ 
+      tsp92_RteUKTInfo = RECORD
+            ActUKT             : tsp00_Longint ; (* RTE internal only *)
+            LastUKT            : tsp00_Longint ; (* RTE internal only *)
+            UKTId              : tsp00_Int4 ;
+            UKTName            : tsp00_C16 ;
+            UKTState           : tsp00_C16 ;
+            UKTTaskCluster     : tsp00_C64 ;
+            UKTActiveTasks     : tsp00_Int4 ;
+            UKTTotalTasks      : tsp00_Int4 ;
+            UKTDispatcherCnt   : tsp00_8ByteCounter ;
+            UKTTaskSwitchCnt   : tsp00_8ByteCounter ;
+            UKTIdleCount	   : tsp00_8ByteCounter ;
+            UKTCommandCnt      : tsp00_8ByteCounter ;
+            UKTRunQueueLen	   : tsp00_Int4	
+      END;
+ 
+ 
+      tsp92_RteIODetailsInfo = RECORD
+            ActUKT          : tsp00_Longint ;(* RTE internal only *)
+            LastUKT         : tsp00_Longint ;(* RTE internal only *)
+            ActDEV          : tsp00_Longint ;(* RTE internal only *)
+            LastDEV         : tsp00_Longint ;(* RTE internal only *)
+            InternalDevno   : tsp00_Int4 ;   (* RTE internal only *)
+            DevNo           : tsp00_Int4 ;
+            ReadCnt         : tsp00_8ByteCounter ;
+            WriteCnt        : tsp00_8ByteCounter ;
+            QueLen          : tsp00_Int4 ;
+            MaxQueLen       : tsp00_Int4 ;
+            ThreadId        : tsp00_Int4 ;
+            ThreadName      : tsp00_C16 ;
+            DevspaceName    : tsp00_VFilename
+      END;
+ 
+      tsp92_RteTaskInfoStateToShow = (
+            sp92State_All,
+            sp92State_Active,
+            sp92State_Runnable );
+      tsp92_RteTaskInfoTypeToShow = (
+            sp92Type_All,
+            sp92Type_User,
+            sp92Type_Server,
+            sp92Type_DataWriter );
+ 
+      tsp92_RteTaskInfo = RECORD
+            ActTask         : tsp00_Longint ; (* RTE internal only *)
+            LastTask        : tsp00_Longint ; (* RTE internal only *)
+            TaskTypeToShow  : tsp00_Int4 ;    (* RTE internal only *)
+            TaskStateToShow : tsp00_Int4 ;    (* RTE internal only *)
+            UKTId           : tsp00_Int4 ;
+            TaskIndex       : tsp00_Int4 ;
+            ApplPid         : tsp00_Int4 ;
+            TaskName        : tsp00_C16 ;
+            TaskState       : tsp00_C16 ;
+            ExtendedTaskState : tsp00_C64 ;
+            TimeOut         : tsp00_Int4 ;
+            HoldingRegion   : tsp00_Int4 ;
+            WaitingForTask  : tsp00_Int4 ;
+            WaitingForRoot  : tsp00_Int4 ;
+            LockedPageNo    : tsp00_PageNo;
+            CancelFlag      : tsp00_C1 ;
+            OMSCallActive   : tsp00_C1 ;      (* PTS 1106969 *)
+            SpecialFlag     : tsp00_C1
+      END;
+ 
+ 
+      tsp92_RteTotalCntInfo = RECORD
+            DispatcherCnt      : tsp00_8ByteCounter;
+            CommandCnt         : tsp00_8ByteCounter;
+            VwaitCnt           : tsp00_8ByteCounter;
+            VsuspendCnt        : tsp00_8ByteCounter;
+            VsleepCnt          : tsp00_8ByteCounter;
+            PrioCnt            : tsp00_8ByteCounter;
+            UserTaskReadCnt    : tsp00_8ByteCounter;
+            UserTaskWriteCnt   : tsp00_8ByteCounter;
+            TaskIOCnt          : tsp00_8ByteCounter;
+            DevIOCnt           : tsp00_8ByteCounter;
+            RegionAccessCnt    : tsp00_8ByteCounter;
+            RegionCollCnt      : tsp00_8ByteCounter;
+            RegionWaitCnt      : tsp00_8ByteCounter;
+            VbegexclTasCollCnt : tsp00_8ByteCounter;
+            VendexclTasCollCnt : tsp00_8ByteCounter;
+            TaskSelfSuspCnt    : tsp00_8ByteCounter;
+            SymbolResolutionCnt: tsp00_8ByteCounter
+      END;
+ 
+ 
+      tsp92_RteTaskSelfIOInfo = RECORD
+            Cnt         : tsp00_8ByteCounter;
+            Pages       : tsp00_8ByteCounter;
+            AvgAbsTime  : tsp00_Longreal;
+            TotAbsTime  : tsp00_Longreal        (* PTS 1111217: total time in micro seconds *)
+      END;
+ 
+ 
+      tsp92_RteTaskDEVIOInfo = RECORD
+            Cnt         : tsp00_8ByteCounter;
+            Pages       : tsp00_8ByteCounter;
+            AvgRelTime  : tsp00_Longreal;       (* average time in seconds     *)
+            TotRelTime  : tsp00_Longreal;       (* PTS 1111217: total time in micro seconds *)
+            AvgAbsTime  : tsp00_Longreal;       (* average time in seconds     *)
+            TotAbsTime  : tsp00_Longreal        (* PTS 1111217: total time in micro seconds *)
+      END;
+ 
+ 
+      tsp92_RteTaskStateInfo = RECORD
+            Cnt         : tsp00_8ByteCounter;
+            AvgRelTime  : tsp00_Longreal;       (* average time in seconds     *)
+            TotRelTime  : tsp00_Longreal;       (* PTS 1111217: total time in micro seconds *)
+            AvgAbsTime  : tsp00_Longreal;       (* average time in seconds     *)
+            TotAbsTime  : tsp00_Longreal        (* PTS 1111217: total time in micro seconds *)
+      END;
+ 
+ 
+      tsp92_RteTaskDetailsInfo = RECORD
+            ActTask            : tsp00_Longint ; (* RTE internal only *)
+            LastTask           : tsp00_Longint ; (* RTE internal only *)
+            TaskIndex          : tsp00_Int4 ;
+            TaskName           : tsp00_C16;
+            TaskState          : tsp00_C16;
+            UKTId			   : tsp00_Int4;
+            RemoteApplNode     : tsp00_C64;
+            ApplPid            : tsp00_Int4;
+            DispatcherCnt      : tsp00_8ByteCounter;
+            CommandCnt         : tsp00_8ByteCounter;
+            PrioCnt            : tsp00_8ByteCounter;
+            TaskSelfSuspCnt    : tsp00_8ByteCounter;
+            RegionAccessCnt    : tsp00_8ByteCounter;
+            SelfIORead         : tsp92_RteTaskSelfIOInfo;
+            SelfIOWrite        : tsp92_RteTaskSelfIOInfo;
+            DEVIORead          : tsp92_RteTaskDEVIOInfo;
+            DEVIOWrite         : tsp92_RteTaskDEVIOInfo;
+            BackupRead         : tsp92_RteTaskDEVIOInfo;
+            BackupWrite        : tsp92_RteTaskDEVIOInfo;
+            Vsuspend           : tsp92_RteTaskStateInfo;
+            Vwait              : tsp92_RteTaskStateInfo;
+            Vsleep             : tsp92_RteTaskStateInfo;
+            ReplyReceive       : tsp92_RteTaskStateInfo;
+            ReceiveReply       : tsp92_RteTaskStateInfo;
+            COMProcedureName   : tsp00_KnlIdentifier;    (* PTS 1106969 *)
+            OMSCallbackCount   : tsp00_8ByteCounter;     (* PTS 1106969 *)
+            OMSMCallbackMethodName : tsp00_C32           (* PTS 1106969 *)
+      END;
+ 
+      tsp92_RteAllocatorInfo = RECORD
+            InfoArray          : tsp00_Addr;
+            LastIndex          : tsp00_Int4;
+            InfoIndex          : tsp00_Int4;
+            AllocatorName      : tsp00_C40;
+            UsedBytes          : tsp00_8ByteCounter;
+            MaxUsedBytes       : tsp00_8ByteCounter;     (* PTS 1120445 D.T. *)
+            AllocatedBytes     : tsp00_8ByteCounter;
+            CountAlloc         : tsp00_8ByteCounter;
+            CountDealloc       : tsp00_8ByteCounter;
+            BaseCountAlloc     : tsp00_8ByteCounter;
+            BaseCountDealloc   : tsp00_8ByteCounter;
+            ErrorCount         : tsp00_Int4;
+            AllocatorBaseName  : tsp00_C40;
+      END;
+
+      tsp92_RteSpinlockInfo = RECORD                     (* PTS 1109404 *)
+            InfoArray          : tsp00_Addr;
+            LastIndex          : tsp00_Int4;
+            InfoIndex          : tsp00_Int4;
+            SpinlockName       : tsp00_C40;
+            Locks              : tsp00_8ByteCounter;
+            Collisions         : tsp00_8ByteCounter;
+            TotalSpinLoops     : tsp00_Int4;
+            TotalYieldLoops    : tsp00_Int4;
+            MaxSpinLoops       : tsp00_Int4;
+            MaxYieldLoops      : tsp00_Int4;
+            CurrentLoops       : tsp00_Int4
+      END;
+
+      tsp92_RteConnectionInfo = RECORD                   (* PTS 1114549 *)
+            TaskIndex          : tsp00_Int4;
+            UKTId              : tsp00_Int4;
+            ApplPid            : tsp00_Int4;
+            PeerPid            : tsp00_Int4;
+            TaskName           : tsp00_C16;
+            ConnectState       : tsp00_C32;
+            ConnectTime        : tsp00_C32;
+            RemoteApplNode     : tsp00_C64
+      END;
+

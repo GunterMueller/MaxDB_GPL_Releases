@@ -1,0 +1,44 @@
+#ifndef RC_INVOKED
+#ifdef DEBUG
+#else
+#line 66 "vpa00vrc"
+#endif
+#endif
+
+/* B.D 14.8.95 */
+/* Note concatenated strings must seperated by spaces RC need this. */
+
+#define API_PROD_NAME		PROD_NAME_SP100
+#define API_COMPANY_NAME	COMPANY_NAME_SP100
+#define API_COPYRIGHT		COPYRIGHT_RC_SP100
+
+#define API_DRIVER_CL		"0.0"
+#define API_DRIVER_CL_NUM       0x0000
+#define API_VERSION		MAJOR_VERSION_NO_STR_SP100 "." MINOR_VERSION_NO_STR_SP100 "." CORRECTION_LEVEL_STR_SP100
+#define API_FILEVERSION		MAJOR_VERSION_NO_SP100, MINOR_VERSION_NO_SP100, CORRECTION_LEVEL_SP100, BUILD_PREFIX_SP100
+#define API_DRIVER_VER  	API_VERSION "." API_DRIVER_CL
+#define API_DRIVER_ODBC_VER 	"03.51"
+
+#ifdef WIN32
+#define API_DRIVER_NAME "sqlod32.dll"
+#define API_DRIVER_SETUP_NAME "sqlsp32.dll"
+#define API_MSG_PREFIX "["API_COMPANY_NAME"][SQLOD32 DLL]"
+#else
+#ifndef WIN
+#define API_DRIVER_NAME "libsqlod.so"
+#define API_MSG_PREFIX "["API_COMPANY_NAME"][LIBSQLOD SO]"
+#else
+#define API_DRIVER_NAME "sqlodbc.dll"
+#define API_DRIVER_SETUP_NAME "sqlodsp.dll"
+#define API_MSG_PREFIX "["API_COMPANY_NAME"][SQLODBC DLL]"
+#endif /* WIN */
+#endif /* WIN32 */
+
+#define API_DATABASE_NAME API_PROD_NAME " DATABASE"
+#define API_DBMS_NAME API_PROD_NAME
+#define API_DBMS_VER  API_VERSION ".0000 " API_PROD_NAME " " API_VERSION
+
+#define ODBCDR_TITLE		API_DBMS_NAME " ODBC Driver\0"
+#define ODBCSP_TITLE		API_DBMS_NAME " ODBC Setup\0"
+#define ODBCIN_TITLE		API_DBMS_NAME " ODBC Installer\0"
+

@@ -1,0 +1,4531 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-16
+*****************************************************
+modname : VAK58
+changed : 2000-11-16
+module  : AK_Delete
+ 
+Author  : ElkeZ
+Created : 1987-09-22
+*****************************************************
+ 
+Purpose : Processes syntax and semantics of delete commands.
+          Generates and processes a link buffer
+ 
+Define  :
+ 
+        PROCEDURE
+              a58atruncate_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a58_adelete_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a58_delete (
+                    VAR acv    : tak_all_command_glob;
+                    start_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a58delete_with_link (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tabid   : tgg00_Surrogate;
+                    linkindex   : integer;
+                    parsno      : integer;
+                    use_file_id : integer);
+ 
+        PROCEDURE
+              a58describe_long_columns (
+                    VAR acv     : tak_all_command_glob;
+                    VAR d_sparr : tak_syspointerarr);
+ 
+        PROCEDURE
+              a58update_with_link (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tabid   : tgg00_Surrogate;
+                    check_cnt   : integer;
+                    parsno      : integer);
+ 
+        PROCEDURE
+              a58_mass_update_delete (VAR dmli : tak_dml_info);
+ 
+        PROCEDURE
+              a58_current_of (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info;
+                    start_n  : integer);
+ 
+        PROCEDURE
+              a58_get_currentkey (
+                    VAR acv         : tak_all_command_glob;
+                    VAR currentnam  : tsp00_KnlIdentifier;
+                    VAR sourcetabid : tgg00_Surrogate;
+                    n_pos           : integer);
+ 
+        PROCEDURE
+              a58_b_delete_string (
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR dfa         : tak_dfarr;
+                    VAR isparr      : tak_syspointerarr;
+                    start_node      : tsp00_Int2;
+                    VAR sr_rec      : tak71_strat_rec;
+                    VAR all_done    : boolean;
+                    new_parsinfo    : boolean;
+                    VAR with_commit : boolean);
+ 
+        PROCEDURE
+              a58destroy_linkfile (
+                    VAR acv : tak_all_command_glob;
+                    file_id : integer);
+ 
+        PROCEDURE
+              a58exec_link_caused_dml (
+                    VAR acv       : tak_all_command_glob;
+                    mblock_ptr    : tak_sysbufferaddress;
+                    use_file_id   : tsp00_Int2;
+                    VAR cascade   : boolean;
+                    act_res_count : boolean);
+ 
+        PROCEDURE
+              a58execute_link_cmd (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a58link_fn_to_messbuf (
+                    VAR acv : tak_all_command_glob;
+                    file_id : integer);
+ 
+        PROCEDURE
+              a58mess_buf_to_linkparsinfo (
+                    VAR acv             : tak_all_command_glob;
+                    parse_id            : integer;
+                    VAR owner           : tsp00_KnlIdentifier;
+                    VAR tablen          : tsp00_KnlIdentifier;
+                    VAR constraint_name : tsp00_KnlIdentifier;
+                    VAR mblock_ptr      : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a58_put_link_inf_into_mess_buf (
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info;
+                    VAR colset : tak_columnset;
+                    file_id    : integer);
+ 
+        PROCEDURE
+              a58_indices (
+                    VAR acv      : tak_all_command_glob;
+                    VAR base_rec : tak_baserecord;
+                    VAR dfa      : tak_dfarr);
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01kw              : tak_keywordtab;
+              a01sysnullkey      : tgg00_SysInfoKey;
+              a01defaultkey      : tgg00_SysInfoKey;
+              a01_il_b_identifier : tsp00_KnlIdentifier;
+              a01_zero_res_name   : tsp00_KnlIdentifier;
+ 
+        PROCEDURE
+              a01_next_symbol (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a01_is_end_symbol (VAR a_scv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a01_call_put (
+                    VAR acv    : tak_all_command_glob;
+                    proc       : tak_procs;
+                    subproc    : tsp00_Int2;
+                    VAR curr_n : tsp00_Int2);
+ 
+        FUNCTION
+              a01_eqkey (
+                    VAR a      : tak_keyword;
+                    sqlmode    : tsp00_SqlMode;
+                    VAR b      : tsp00_MoveObj;
+                    VAR scv    : tak_scanner_glob) : boolean;
+ 
+        FUNCTION
+              a01mandatory_keyword (
+                    VAR acv          : tak_all_command_glob;
+                    required_keyword : integer) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_syntax_tools : VAK02;
+ 
+        PROCEDURE
+              a02_atablename (VAR acv : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a02_s_atable_spec (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_semantic_scanner_tools : VAK05;
+ 
+        PROCEDURE
+              a05identifier_get (
+                    VAR acv     : tak_all_command_glob;
+                    tree_index  : integer;
+                    obj_len     : integer;
+                    VAR moveobj : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06a_mblock_init (
+                    VAR acv      : tak_all_command_glob;
+                    mtype        : tgg00_MessType;
+                    m2type       : tgg00_MessType2;
+                    VAR tree     : tgg00_FileId);
+ 
+        PROCEDURE
+              a06cpy_mblock (
+                    VAR acv        : tak_all_command_glob;
+                    VAR src_mblock : tgg00_MessBlock;
+                    VAR dst_mblock : tgg00_MessBlock;
+                    withoutData    : boolean;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06extcolno (
+                    VAR baserec  : tak_baserecord;
+                    extcolno     : integer;
+                    VAR col_ptr  : tak00_colinfo_ptr);
+ 
+        PROCEDURE
+              a06inc_linkage (VAR linkage : tsp00_C2);
+ 
+        PROCEDURE
+              a06_systable_get (
+                    VAR acv      : tak_all_command_glob;
+                    dstate       : tak_directory_state;
+                    VAR tableid  : tgg00_Surrogate;
+                    VAR base_ptr : tak_sysbufferaddress;
+                    get_all      : boolean;
+                    VAR ok       : boolean);
+ 
+        PROCEDURE
+              a06rsend_mess_buf (
+                    VAR acv     : tak_all_command_glob;
+                    VAR mbuf    : tgg00_MessBlock;
+                    result_req  : boolean;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06retpart_move (
+                    VAR acv     : tak_all_command_glob;
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    move_len    : tsp00_Int4);
+ 
+        PROCEDURE
+              a06finish_curr_retpart (
+                    VAR acv   : tak_all_command_glob;
+                    part_kind : tsp1_part_kind;
+                    arg_count : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_error (
+                    VAR acv   : tak_all_command_glob;
+                    errorcode : tgg00_BasisError;
+                    VAR nod1  : tsp00_Int2;
+                    VAR nod2  : tsp00_Int2);
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err   : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07parm3_put_error (
+                    VAR acv     : tak_all_command_glob;
+                    b_err       : tgg00_BasisError;
+                    err_code    : tsp00_Int4;
+                    VAR param1  : tsp00_KnlIdentifier;
+                    VAR param2  : tsp00_KnlIdentifier;
+                    VAR param3  : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10del_sysinfo (
+                    VAR acv     : tak_all_command_glob;
+                    VAR syskey  : tgg00_SysInfoKey;
+                    VAR b_err   : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10rel_sysinfo (syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10_key_del  (
+                    VAR acv    : tak_all_command_glob;
+                    VAR syskey : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              a10_all_release (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a10repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10dispose (
+                    VAR acv : tak_all_command_glob;
+                    VAR p : tsp00_BufAddr);
+ 
+        PROCEDURE
+              a10invalidate_root (
+                    VAR acv    : tak_all_command_glob;
+                    VAR treeid : tgg00_FileId);
+ 
+        PROCEDURE
+              a10mblock_into_cache (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    VAR mblock   : tgg00_MessBlock;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10new (
+                    VAR acv  : tak_all_command_glob;
+                    obj_size : tsp00_Int4;
+                    VAR p    : tsp00_BufAddr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : vak101;
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_GetLogicalFilename(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        PROCEDURE
+              a101_SetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId;
+                    sublevel       : tsp00_Int4(*ptocConst*));
+ 
+        FUNCTION
+              a101_GetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tsp00_Int4;
+ 
+        PROCEDURE
+              a101_GetTempFileInstance(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              CatalogWrapper : VAK103;
+ 
+        FUNCTION
+              a103GetColumn (
+                    VAR BaseRec : tak_baserecord;
+                    ColIndex    : integer
+                    ) : tak00_colinfo_ptr;
+ 
+        PROCEDURE
+              a103GetSchemaName (
+                    VAR acv        : tak_all_command_glob;
+                    VAR schemaId   : tgg00_Surrogate (* ptocConst *);
+                    VAR schemaName : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Link : VAK25;
+ 
+        PROCEDURE
+              a25get_linkname (
+                    VAR acv        : tak_all_command_glob;
+                    linkbuf        : tak_sysbufferaddress;
+                    index          : integer;
+                    VAR link_name  : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Trigger : VAK262;
+ 
+        PROCEDURE
+              a262add_trigger_info (
+                    VAR acv           : tak_all_command_glob;
+                    VAR dmli          : tak_dml_info;
+                    ignoreUserTrigger : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_update_statistics : VAK28;
+ 
+        FUNCTION
+              a28TreeStoredInVar (VAR tree : tgg00_FileId) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_dispatcher : VAK501;
+ 
+        PROCEDURE
+              a501do_execute (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    output_during_execution : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK54;
+ 
+        PROCEDURE
+              a54set_complex_entry (
+                    VAR acv     : tak_all_command_glob;
+                    call_reason : tak_complex_call_reason);
+ 
+        PROCEDURE
+              a54_loc_temp_locks (
+                    VAR acv   : tak_all_command_glob;
+                    globstate : tgg00_HandlingSet;
+                    VAR sparr : tak_syspointerarr);
+ 
+        PROCEDURE
+              a54add_next_temp_lock (
+                    VAR acv           : tak_all_command_glob;
+                    VAR tabid         : tgg00_Surrogate;
+                    globstate         : tgg00_HandlingSet);
+ 
+        PROCEDURE
+              a54_dml_init (
+                    VAR acv   : tak_all_command_glob;
+                    VAR dmli  : tak_dml_info;
+                    in_union  : boolean);
+ 
+        PROCEDURE
+              a54_dml_finalize (
+                    VAR dmli         : tak_dml_info;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              a54_put_indices_in_mess_buf (
+                    VAR acv     : tak_all_command_glob;
+                    VAR basebuf : tak_baserecord;
+                    VAR dfa     : tak_dfarr;
+                    all_indices : boolean);
+ 
+        PROCEDURE
+              a54_get_pparsp_pinfop (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr;
+                    mtype     : tgg00_MessType);
+ 
+        PROCEDURE
+              a54_last_part (
+                    VAR acv        : tak_all_command_glob;
+                    VAR sparr      : tak_syspointerarr;
+                    last_pars_part : boolean);
+ 
+        PROCEDURE
+              a54_subquery (
+                    VAR acv          : tak_all_command_glob;
+                    VAR isparr       : tak_syspointerarr;
+                    start_node       : tsp00_Int2;
+                    mtype            : tgg00_MessType;
+                    VAR is_join_view : boolean);
+ 
+        PROCEDURE
+              a54_fixedpos (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              diagnose monitor : VAK545;
+ 
+        PROCEDURE
+              a545diag_parse_info (
+                    VAR acv        : tak_all_command_glob;
+                    VAR parsid     : tak_parsid;
+                    VAR sel_parsid : tak_parsid);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Parts : VAK55;
+ 
+        PROCEDURE
+              a55_asearch_clause (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a55_build_key (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info;
+                    VAR dfa  : tak_dfarr;
+                    keynode  : integer);
+ 
+        PROCEDURE
+              a55_nullvalue (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info;
+                    VAR dfa  : tak_dfarr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Insert : VAK56;
+ 
+        PROCEDURE
+              a56alloc_linkpos_info (
+                    VAR acv        : tak_all_command_glob;
+                    VAR p_arr      : tak_syspointerarr;
+                    mess_type      : tgg00_MessType;
+                    VAR linkposbuf : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a56one_default_value (
+                    VAR acv     : tak_all_command_glob;
+                    VAR dmli    : tak_dml_info;
+                    VAR colinfo : tak00_columninfo;
+                    with_length : tak_fp_kind_type);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Update : VAK57;
+ 
+        PROCEDURE
+              a57_upd_del_rest (
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR dfa         : tak_dfarr;
+                    VAR sr_rec      : tak71_strat_rec;
+                    VAR icurr_n     : integer;
+                    VAR upd_col_set : tak_columnset;
+                    new_parsinfo    : boolean);
+ 
+        PROCEDURE
+              a57WithCommitHandling (
+                    VAR acv    : tak_all_command_glob;
+                    VAR isparr : tak_syspointerarr;
+                    linkbuf    : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML-Join-View-Procedures : VAK59;
+ 
+        PROCEDURE
+              a59_join_view (
+                    VAR acv     : tak_all_command_glob;
+                    VAR dmli    : tak_dml_info;
+                    VAR viewdfa : tak_dfarr;
+                    start_node  : integer;
+                    mtype       : tgg00_MessType);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Syntax : VAK60;
+ 
+        PROCEDURE
+              a60rescount (
+                    VAR acv  : tak_all_command_glob;
+                    rescount : tsp00_Int4);
+ 
+        PROCEDURE
+              a60resnum (
+                    VAR acv     : tak_all_command_glob;
+                    VAR moveobj : tsp00_Buf;
+                    startpos    : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Execute_Select_Expression : VAK660;
+ 
+        PROCEDURE
+              a660_prefix_delete (
+                    VAR acv       : tak_all_command_glob;
+                    VAR parsk     : tak_parskey;
+                    VAR del_cnt   : integer;
+                    prefix_length : integer);
+ 
+        PROCEDURE
+              a660_search_one_table (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    table_node     : integer;
+                    all            : boolean;
+                    check_teresult : boolean;
+                    lock_spec      : tak_lockenum;
+                    wanted_priv    : tak00_PrivR);
+ 
+        PROCEDURE
+              a660_new_pparsp (
+                    VAR acv        : tak_all_command_glob;
+                    VAR sparr      : tak_syspointerarr;
+                    first_parsinfo : boolean;
+                    complicate     : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Resultname_handling : VAK663;
+ 
+        PROCEDURE
+              a663_resname (
+                    VAR acv          : tak_all_command_glob;
+                    VAR res_name     : tsp00_KnlIdentifier;
+                    VAR modul_name   : tsp00_KnlIdentifier;
+                    VAR resname_addr : tak_sysbufferaddress;
+                    dstate           : tak_directory_state;
+                    errorpos         : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy : VAK70;
+ 
+        PROCEDURE
+              a70_strategy_search (
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info;
+                    VAR rtree  : tgg00_FileId;
+                    VAR sr_rec : tak71_strat_rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Hint_Handling : VAK80;
+ 
+        PROCEDURE
+              a80_ahint_statement (
+                    VAR acv : tak_all_command_glob;
+                    subproc : tsp00_Int2;
+                    putnode : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+        PROCEDURE
+              b01empty_file (
+                    VAR t       : tgg00_TransContext;
+                    VAR current : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_2 : VBD07;
+ 
+        PROCEDURE
+              b07cnext_record (
+                    VAR t          : tgg00_TransContext;
+                    VAR curr       : tgg00_FileId;
+                    VAR rk         : tgg00_Lkey;
+                    VAR set_result : tgg00_BdSetResultRecord;
+                    VAR tree_pos   : tgg00_FilePos;
+                    VAR b          : tsp00_Buf);
+ 
+      ------------------------------ 
+ 
+        FROM
+              object_garbage_collection : VBD91;
+ 
+        PROCEDURE
+              bd91StartOMSGarbageCollection (
+                    VAR Trans                   : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01diag_moni_parse_on    : boolean;
+              g01ConsistentReadEnabled : boolean;
+ 
+        FUNCTION
+              g01packet_size : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04build_temp_tree_id (
+                    VAR curr : tgg00_FileId;
+                    VAR t : tgg00_TransContext);
+ 
+        PROCEDURE
+              g04index_tree_build (
+                    VAR file_id    : tgg00_FileId (*ptocConst*);
+                    VAR index_tree : tgg00_FileId;
+                    index_no       : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : char;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalUnicodeFill (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : tsp00_C2;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedUnicodeFill (
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : tsp00_C2 );
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedFill (
+                    size        : tsp00_Int4;
+                    m           : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4;
+                    len         : tsp00_Int4;
+                    fillchar    : char);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedOverlappingMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        PROCEDURE
+              s30cmp (
+                    VAR buf1     : tsp00_MoveObj;
+                    fieldpos1    : tsp00_Int4;
+                    fieldlength1 : tsp00_Int4;
+                    VAR buf2     : tsp00_MoveObj;
+                    fieldpos2    : tsp00_Int4;
+                    fieldlength2 : tsp00_Int4;
+                    VAR l_result : tsp00_LcompResult);
+ 
+        FUNCTION
+              s30lnr_defbyte (
+                    str       : tsp00_MoveObjPtr;
+                    defbyte   : char;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40g4int (
+                    VAR buf  : tsp00_ResNum;
+                    pos      : tsp00_Int4;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Number-Arithmetic : VSP51;
+ 
+        PROCEDURE
+              s51add (
+                    VAR left       : tsp00_ResNum;
+                    lpos           : tsp00_Int4;
+                    llen           : integer;
+                    VAR right      : tsp00_ResNum;
+                    rpos           : tsp00_Int4;
+                    rlen           : integer;
+                    VAR result     : tsp00_ResNum;
+                    respos         : tsp00_Int4;
+                    reslen         : integer;
+                    resfrac        : integer;
+                    VAR resbytelen : integer;
+                    VAR ret        : tsp00_NumError);
+&       IFDEF TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : vta01;
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR m         : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01qual (
+                    level     : tgg00_Debug;
+                    VAR q_buf : tgg00_QualBuf);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01treeid (
+                    layer      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    VAR treeid : tgg00_FileId);
+&       ENDIF
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+        PROCEDURE
+              a05identifier_get;
+ 
+              tsp00_MoveObj tsp00_KnlIdentifier
+ 
+        PROCEDURE
+              a60resnum;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              a10new;
+ 
+              tak_sysbufferaddress tsp00_BufAddr;
+ 
+        PROCEDURE
+              a10dispose;
+ 
+              tak_sysbufferaddress tsp00_BufAddr;
+ 
+        PROCEDURE
+              b07cnext_record;
+ 
+              tsp00_MoveObj tsp00_Buf;
+ 
+        PROCEDURE
+              s40g4int;
+ 
+              tsp00_MoveObj tsp00_ResNum
+ 
+        PROCEDURE
+              s51add;
+ 
+              tsp00_MoveObj tsp00_ResNum
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Description:
+ 
+A58DELETE_WITH_LINK
+-------------------------
+ 
+This procedure is always called when the deletion of records has taken
+place in a table that is a primary table of at least one link.
+When the recursive procedure
+AK58DEL_WITH_LINK is called, all necessary follow-up operations
+(update of the secondary table if link rule = default delete or
+nullify delete, select in the secondary table if link rule =
+restrict delete, delete in the secondary table if
+link rule = cascade delete) are determined and executed directly
+or first parsed.
+ 
+AK58DEL_WITH_LINK
+-------------------------
+ 
+This procedure determines the operations required in the secondary
+table(s) (update, delete, select) due to the deletion of records in
+a primary table.  This procedure is written recursively because,
+in the case of a cascade delete, the secondary table can itself take
+on the role of a primary table.
+ 
+The operations to be executed are built via
+AK58BUILD_LINK_DELETE_COMMAND in the mess buffer and either executed
+immediately (if the activating delete has already been executed) or
+the parse-information records of the operation are written to the
+parse file.  The parse-information records are concatenated in the
+form of a tree in order to make it possible to determine the next
+operation to be carried out at the time of execution (low run through
+the tree).  Therefore, each parse info of an operation to be carried out
+has the following layout:
+ 
+ 
++---------+----------+--+--+--+------------------------------+
+| parskey | slinkage |  |  |  | compressed mess buffer       |
++---------+----------+--+--+--+------------------------------+
+   46 B        2 B    2B 2B 2B  mess_header_length + part1_len +
+                      |  |  |   part2_len
+                      |  |  |
+                      |  |  |
+                      |  |  +- use_file_id
+                      |  +----- sa_level_parse_id
+                      +--------- lo_level_parse_id
+ 
+ 
+The use_file_id is an identifier of the temporary file from which
+the values for the qualification are taken at the time when the
+operation is executed.
+ 
+The sa_level_parse_id is the slinkage of the parse-information record
+that is the next to be executed after the parse infos specified by
+lo_level_parse_id have been processed.
+ 
+The lo_level_parse_id is the slinkage of the parse-information record
+that is to be executed next (if <> 0).
+ 
+ 
+Example:
+ 
+Given:  the table T1 .. T8 with the following links:
+ 
+ 
+                     T1
+                     |
+         +-------+-------+-------+
+         |       |       |       |
+         C       R       N       D
+         A       E       U       E
+         S       S       L       F
+         C       T       L       A
+         A       R       I       U
+         D       I       F       L
+         E       C       Y       T
+         |       T       |       |
+         |       |       |       |
+         T2      T3      T4      T5
+         |
+         +-------+-------+
+         |       |       |
+         C       R       N
+         A       E       U
+         S       S       L
+         C       T       L
+         A       R       I
+         D       I       F
+         E       C       Y
+         |       |       |
+         T6      T7      T8
+ 
+ 
+ 
+When a delete command is parsed in T1, the following parse-info tree
+is built:
+ 
+ 
+         +-------+-+-----------------+
+         |parskey|0| delete T1 ..... |
+         +-------+-+-----------------+
+                 |
+                |
+               |
++-------+-+----------------------+
+|parskey|1|5|2|0| delete T2 .... |
++-------+-+|-|-------------------+
+           | +-------+
+           |         |
+           |    +-------+-+----------------------+
+           |    |parskey|2|0|3|0| select T3 .... |
+           |    +-------+-+--|-------------------+
+           |                 |
+           |                 |
+           |            +-------+-+----------------------+
+           |            |parskey|3|0|4|0| update T4 .... |
+           |            +-------+-+--|-------------------+
+           |                         |
+           |                         |
+           |                    +-------+-+-+-+-+----------------+
+           |                    |parskey|4|0|0|0| update T5 .... |
+           |                    +-------+-+-+-+------------------+
+           |
+           |
+        +-------+-+-+-+-+----------------+
+        |parskey|5|0|6|1| delete T6 .... |
+        +-------+-+--|--+----------------+
+                     |
+                     |
+                +-------+-+-+-+-+----------------+
+                |parskey|6|0|7|1| select T7 .... |
+                +-------+-+--|--+----------------+
+                             |
+                             |
+                        +-------+-+-+-+-+----------------+
+                        |parskey|7|0|0|1| update T8 .... |
+                        +-------+-+-+-+-+----------------+
+ 
+ 
+The parse-information records are then processed at the time of
+execution in the following sequence:
+ 
+ 
+ 
+Delete T1 .....
+Delete T2 .....
+Delete T6 .....
+Select T7 .....
+Update T8 .....
+Select T3 .....
+Update T4 .....
+Update T5 .....
+ 
+ 
+AK58BUILD_LINK_DELETE_COMMAND
+-------------------------
+ 
+This procedure is used to build an operation in the mess buffer
+that became necessary due to a link between the tables
+T1 and T2.  Let the columns involved be T1_s1 .. T1_sn and
+T2_t1 .. T2_tn.  The following cases are then possible:
+ 
+ 
+i)   The link rule is cascade delete ==>
+----------------------------------------
+ 
+delete T2 where T2_t1 = value(T1_s1) and ... and T2_tn = value(T1_sn)
+ 
+ 
+ii)  The link rule is restrict delete ==>
+-----------------------------------------
+ 
+select T2 where T2_t1 = value(T1_s1) and ... and T2_tn = value(T1_sn)
+ 
+ 
+iii) The link rule is default delete ==>
+----------------------------------------
+ 
+update T2 set T2_t1 = default(T2_t1), .., T2_tn = default(T2_tn)
+          where T2_t1 = value(T1_s1) and ... and T2_tn = value(T1_sn)
+ 
+ 
+iv)  The link rule is nullify delete ==>
+----------------------------------------
+ 
+update T2 set T2_t1 = NULL, .., T2_tn = NULL
+          where T2_t1 = value(T1_s1) and ... and T2_tn = value(T1_sn)
+ 
+ 
+The terms value(T1_si) appearing in the qualification are not known
+until the time of execution and are written to part2 of the
+mess buffer until then.
+ 
+After the mess buffer has been built, either it is written to the
+parse file in a compressed form (i.e. only the relevant parts) or the
+command that has been built is immediately executed and the result
+analyzed via A58EXEC_LINK_CAUSED_DML.
+ 
+ 
+A58EXEC_LINK_CAUSED_DML
+-------------------------
+ 
+This procedure is called for all operations that are to be carried out
+based on links between tables.  Let T1 be the primary
+table and T2 the secondary table of a link.
+The following operations are then possible:
+ 
+i)   update T2 set T2.s1 = NULL, .. , T2.sn = NULL
+               where T2.s1 = value1 and .. and T2.sn = valuen
+ 
+ii)  update T2 set T2.S1 = default(T2.S1), .. T2.Sn = default(T2.Sn)
+               where T2.S1 = VALUE1 and .. and T2.Sn = VALUEn
+ 
+iii) delete T2 where T2.S1 = VALUE1 and .. and T2.Sn = VALUEn
+ 
+iv)  select * from T2
+               where T2.S1 = VALUE1 and .. and T2.Sn = VALUEn
+ 
+v)   get direct KEY (T2.S1, .. ,T2.Sn) in T1
+ 
+The mess buffer for such an operation is stored in compressed form
+in the cache under the address pparsp.  One of these operations has
+already been built in the acv.messbuf; the values
+VALUE1 .. VALUEn or KEY (T2.S1,..,T2.Sn) are not yet known but are
+located in the file specified by use_file_id (Use_File).
+ 
+Theoretically, the following process now takes place:
+A record is fetched from the file specified by use_file_id.  In the
+case of update, delete and select, the record-info part of the
+qualification value is written to part2 of the mess buffer; in the
+case of get direct, a key is built in part2 of the mess buffer
+for the search in T1 with the aid of the linkpos-information records.
+ 
+The request is sent to KB and the result that is returned is evaluated.
+A distinction is to be made between the following error situations:
+ 
+i)  The operation was a get direct and the key being search for does
+not exist in T1.  A violation of the link is pending.
+ 
+ii) The operation was select T2 and a result was found,
+i.e. a restrict delete link has been violated.
+ 
+If no error has occured, the same procedure is applied to the
+next record of the use_files, and so on.
+ 
+If the operation to be executed is a delete operation applied to T2
+and if T2 is a primary table of another link, the
+keys deleted must be written to a temporary file by T2 itself.
+The file name and the key of the first record under which the link
+columns of T2 are written to the file are located in part1 of the
+mess buffer at the time the procedure is called.
+Before the
+next delete command is sent to KB with new values from the use file, this
+value is written to part1 of the mess buffer as next key for the
+temporary file.  The var parameter cascade is set to TRUE in case
+the records in T2 have been deleted and T2 is the primary table of
+a link.
+ 
+If the strategy according to which the operation is to be processed is
+purely sequential (i.e. there are also no start keys or stop keys),
+the mess buffer is expanded in order to minimize the number of
+sequential runs through T2.  This means that the qualification is
+expanded as follows:
+ 
+     where (T2.s1 = value_11 and .. and T2.sn = value_n1) OR
+           (T2.s1 = value_12 and .. and T2.sn = value_n2) OR
+                            ............
+                            ............
+           (T2.s1 = value_1m and .. and T2.sn = value_nm)
+ 
+The qualification continues to be expanded until either the mess
+buffer is filled or the use_file has been processed.
+ 
+A58_PUT_LINK_INF_INTO_MESS_BUF
+-------------------------
+ 
+The stack entries of the key columns of the table specified by the
+system-information records in dmli.sparr are written to part1 of the
+mess buffer as link entries.  The file name of the temporary file to
+which KB is to transfer the link columns is transferred from the
+file_id passed to part1 of the mess buffer via
+A58LINK_FN_TO_MESSBUF.
+ 
+A58LINK_FN_TO_MESSBUF
+-------------------------
+ 
+An unambiguous file name is generated from the file_id
+passed via AK58BUILD_LINK_TREE and stored in part1 of the mess buffer.
+A 4-byte integer (1) is stored after the file name.  This integer
+indicates to KB the key of the temporary file with which the
+next entry is to occur.  In the first stack entry of the link
+columns, the position of the file name is stored in epos and the
+postion of the integer is stored in elen_var.
+ 
+AK58BUILD_LINK_TREE
+-------------------------
+ 
+If the file_Id = 0, acv.into_file is passed as a file name.  Otherwise,
+the file name is built from the file_id passed and the current session:
+ 
++----------+----------+-------+-+-------+---------------+
+|tfnTemp_egg00  |%LINKFILE%|Session|%|file_id|%              |
++----------+----------+-------+-+-------+---------------+
+  2 bytes    10 bytes  4 bytes   2 bytes
+ 
+ 
+A58NIL_GET_LINKPARSINFO
+-------------------------
+ 
+Space is requested in the cache for a parse-information record of a link
+operation.  The key of the information record is formed from
+acv.pars_last_key and pars_id as slinkage. The pointer pars_ptr points
+to the reserved space in the cache:
+ 
+              +---+-------------+--...--+-------+...
+pars_ptr -->  |255|pars_last_key|       |pars_id|
+              +---+-------------+--...--+-------+...
+               1 B    6 B                  2 B
+ 
+                        +----+----------------+-----------+........
+                        |    |sa_level_pars_id|use_file_id|
+                        +----+----------------+-----------+........
+                          2 B       2 B            2 B
+ 
+A58MESS_BUF_TO_LINKPARSINFO
+-------------------------
+ 
+The mess buffer is written in compressed form to the reserved space
+in the cache that is pointed to by the pars_ptr:
+ 
++-----------+...+----------------+----------------+....
+|tsysinfokey|   |lo_level_pars_id|sa_level_pars_id|
++-----------+...+----------------+----------------+....
+   48 B                 2 B              2 B
+ 
++-----------+-----------+--------------+--------------+
+|use_file_id|mess_header|mess_buf.part1|mess_buf.part2|
++-----------+-----------+--------------+--------------+
+    2 B         44 B       part1_len      part2_len
+ 
+Afterwards, the record is written to the parse file if the command
+was only parsed.
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_get_all          = true (* a06_systable_get *);
+      c_output_during_execution= true (* a501do_execute *);
+      c_in_union         = true (* a54_dml_init *);
+      c_last_pars_part   = true (* a54_last_part *);
+      c_all              = true (* a54_put_indices_in_mess_buf *);
+      (*                           a660_search_one_table *)
+      c_new_parsinfo     = true (* a58_b_delete_string *);
+      c_check_teresult   = true (* a660_search_one_table *);
+      c_complicate       = true (* a660_new_pparsp *);
+      c_first_parsinfo   = true (* a660_new_pparsp *);
+      c_without_data     = true (* a06cpy_mblock *);
+      c_ignore_trigger   = true;
+ 
+TYPE
+ 
+      tlink_parameter = RECORD
+            l_linkbuf    : tak_sysbufferaddress;
+            l_linkkey    : tgg00_SysInfoKey;
+            l_auxkey     : tgg00_SysInfoKey;
+            l_parsbuf    : tak_sysbufferaddress;
+            l_posbuf     : tak_sysbufferaddress;
+            l_linkindex  : tsp00_Int4;
+            l_upd_cnt    : tsp00_Int4;
+            l_lo_level   : tsp00_Int2;
+            l_index      : tsp00_Int2;
+            l_cascade    : boolean;
+            l_act_result : boolean;
+            l_first_call : boolean;
+            l_ex_kind    : tak_execution_kind;
+            l_glob_state : tgg00_HandlingSet;
+            l_upd        : boolean;
+            l_owner      : tsp00_KnlIdentifier;
+            l_tablen     : tsp00_KnlIdentifier;
+            l_linkname   : tsp00_KnlIdentifier;
+      END;
+ 
+ 
+      link_exec_record = RECORD
+            l_p2_pos      : integer;
+            l_loop_cnt    : integer;
+            l_m_type      : tgg00_MessType;
+            l_casc        : boolean;
+            l_curr_len    : tsp_int_map_c2;
+            l_curr_keylen : tsp_int_map_c2;
+            l_param_len   : integer;
+            l_owner       : tsp00_KnlIdentifier;
+            l_tablen      : tsp00_KnlIdentifier;
+            l_ref_name    : tsp00_KnlIdentifier;
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58analyze_result (
+            VAR acv           : tak_all_command_glob;
+            VAR link_exec_rec : link_exec_record;
+            act_res_count     : boolean;
+            VAR b_err         : tgg00_BasisError);
+ 
+VAR
+      ret     : tsp00_NumError;
+      dummy   : integer;
+&     ifdef trace
+      res_cnt : tsp00_Int4;
+&     endif
+ 
+BEGIN
+WITH acv, a_mblock, link_exec_rec DO
+    IF  b_err <> e_ok
+    THEN
+        BEGIN
+        IF  (l_m_type = m_get) AND (b_err = e_key_not_found)
+        THEN
+            (* searched key does not exist in        *)
+            (* primary table ==> integrity violation *)
+            a07parm3_put_error (acv,
+                  e_link_rule_violation, 1,
+                  l_ref_name, l_owner, l_tablen)
+        ELSE
+            BEGIN
+            IF  b_err <> e_key_not_found
+            THEN
+                a07_b_put_error (acv, b_err, 1)
+            ELSE
+                b_err := e_ok
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    ELSE (* b_err = e_ok *)
+        IF  l_m_type <> m_get
+        THEN
+            BEGIN
+&           ifdef trace
+            s40g4int (mb_qual^.mr_resnum, 2, res_cnt, ret);
+            t01int4 (ak_sem, 'res_cnt     ', res_cnt);
+&           endif
+            IF  mb_qual^.mr_resnum <> csp_rescnt_zero
+            THEN (* at least one result *)
+                BEGIN
+                IF  l_m_type = m_select
+                THEN
+                    (*=====================================*)
+                    (* In the case of restrict delete      *)
+                    (* there is at least one corresponding *)
+                    (* column in the secondary table       *)
+                    (*=====================================*)
+                    a07parm3_put_error (acv,
+                          e_link_rule_violation, 1,
+                          l_ref_name, l_owner, l_tablen)
+                ELSE
+                    BEGIN
+                    IF  (act_res_count) AND
+                        (a_return_segm^.sp1p_resnum[ 1 ] <> csp_undef_byte)
+                    THEN
+                        s51add (a_return_segm^.sp1p_resnum, 2, mxsp_resnum-1,
+                              mb_qual^.mr_resnum, 2, mxsp_resnum-1,
+                              a_return_segm^.sp1p_resnum, 2,
+                              csp_resnum_deflen, 0, dummy, ret);
+                    (*ENDIF*) 
+                    l_casc := true;
+                    END;
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58build_delete_string (
+            VAR acv         : tak_all_command_glob;
+            VAR isparr      : tak_syspointerarr;
+            start_node      : tsp00_Int2;
+            ora_truncate    : boolean;
+            VAR all_done    : boolean;
+            VAR with_commit : boolean);
+ 
+VAR
+      sr_rec : tak71_strat_rec;
+      dfa    : tak_dfarr;
+      dmli   : tak_dml_info;
+ 
+BEGIN
+sr_rec.sr_reverse_access := false;
+a54_dml_init (acv, dmli, NOT c_in_union);
+dmli.d_truncate         := ora_truncate;
+a58_b_delete_string (acv, dmli, dfa, isparr, start_node,
+      sr_rec, all_done, c_new_parsinfo, with_commit);
+a54_dml_finalize( dmli, acv.a_transinf.tri_trans );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58build_get_command (
+            VAR acv      : tak_all_command_glob;
+            VAR link_par : tlink_parameter);
+ 
+VAR
+      ok         : boolean;
+      base_ptr   : tak_sysbufferaddress;
+      index_tree : tgg00_FileId;
+ 
+BEGIN
+WITH acv, link_par,
+     l_linkbuf^, slink, linkdef[ l_linkindex ] DO
+    BEGIN
+    a06_systable_get (acv, d_release,
+          syskey.stableid, base_ptr, NOT c_get_all, ok);
+    IF  ok
+    THEN
+        BEGIN
+        a06a_mblock_init (acv, m_get, mm_key,
+              base_ptr^.sbase.btreeid); (* its allowed to use btreeid because base_ptr identifies a base table *)
+        WITH a_mblock.mb_qual^ DO
+            BEGIN
+            mtree.fileHandling_gg00 := mtree.fileHandling_gg00 -
+                  [ hsConsistentLock_egg00, hsIntentExcl_egg00, hsNoWait_egg00
+                  , hsTempLock_egg00, hsPermLock_egg00, hsOptimisticLock_egg00] +
+                  [ hsCollisionTest_egg00 ];
+            IF  lindexid [1] > chr(0)
+            THEN
+                BEGIN
+                g04index_tree_build (mtree, index_tree, ord(lindexid[1]));
+                mtree := index_tree;
+                END;
+            (*ENDIF*) 
+            WITH  base_ptr^.sbase,
+                 a_mblock.mb_qual^.mlc_info DO
+                BEGIN
+                mlp_sa_level   := 0;
+                mlp_lo_level   := 0;
+                mlp_use_fileid := -1;
+                END;
+            (*ENDWITH*) 
+            a58mess_buf_to_linkparsinfo (acv, link_par.l_lo_level,
+                  link_par.l_owner, link_par.l_tablen,
+                  link_par.l_linkname, link_par.l_parsbuf)
+            END
+        (*ENDWITH*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58build_link_delete_command (
+            VAR acv        : tak_all_command_glob;
+            curr_parsno    : integer;
+            parse_id       : integer;
+            sa_level       : integer;
+            VAR parsno     : integer;
+            use_file_id    : integer;
+            create_file_id : integer;
+            VAR link_par   : tlink_parameter);
+ 
+VAR
+      ok               : boolean;
+      self_ref         : boolean;
+      trigger          : boolean;
+      dummyErr         : tgg00_BasisError;
+      dstate           : tak_directory_state;
+      ex_kind          : tak_execution_kind;
+      i                : integer;
+      decr             : integer;
+      pos              : integer;
+      qual_offset      : integer;
+      old_data_len     : integer;
+      mess_type        : tgg00_MessType;
+      mess_type2       : tgg00_MessType2;
+      pbuf             : tak_sysbufferaddress;
+      col_ptr          : tak00_colinfo_ptr;
+      schema           : tsp00_KnlIdentifier;
+      tablen           : tsp00_KnlIdentifier;
+      colset           : tak_columnset;
+      treeid           : tgg00_FileId;
+      self_ref_info    : tak_selfref_link_info;
+      dmli             : tak_dml_info;
+      h_count_literals : tsp00_Int2;
+ 
+BEGIN
+WITH acv, dmli, link_par DO
+    BEGIN
+    a54_dml_init (acv, dmli, NOT c_in_union);
+    d_pos_result := 0;
+    d_globstate  := link_par.l_glob_state;
+    pbuf         := NIL;
+    WITH l_linkbuf^, slink, linkdef[ l_linkindex ] DO
+        self_ref     := (ltableid = syskey.stableid) AND
+              (laction = cak_x_cascade)              AND
+              NOT l_upd;
+    (*ENDWITH*) 
+    IF  NOT (self_ref)
+    THEN
+        l_act_result := false;
+    (*ENDIF*) 
+    ok := false;
+    trigger := false;
+    IF  self_ref
+    THEN
+        dstate := d_release
+    ELSE
+        dstate := d_fix;
+    (*ENDIF*) 
+    WITH l_linkbuf^.slink.linkdef[ l_linkindex ] DO
+        a06_systable_get (acv, dstate,
+              ltableid, d_sparr.pbasep, NOT(self_ref), ok);
+    (*ENDWITH*) 
+    IF  NOT ok
+    THEN
+        a07ak_system_error (acv, 58, 1)
+    ELSE
+        BEGIN
+        tablen := d_sparr.pbasep^.sbase.btablen^;
+        a103GetSchemaName (acv,
+              d_sparr.pbasep^.sbase.bauthid, schema);
+        IF  l_ex_kind <> only_executing
+        THEN
+            BEGIN
+            IF  a_isolation_info <> temp_lock_rec_get
+            THEN
+                dmli.d_globstate := dmli.d_globstate +
+                      [hsTempLock_egg00];
+            (*ENDIF*) 
+            a54add_next_temp_lock (acv,
+                  l_linkbuf^.slink.linkdef[ l_linkindex ].ltableid,
+                  dmli.d_globstate);
+            END;
+        (*ENDIF*) 
+        h_count_literals     := acv.a_count_literals;
+        acv.a_count_literals := 0;
+        IF  (self_ref) AND (l_ex_kind <> only_executing)
+        THEN
+            BEGIN
+            (* Store Information to be able to call  *)
+            (* a58delete_with_link at execution time *)
+            (* in case of self referencing link      *)
+            treeid       := b01niltree_id;
+            treeid.fileTabId_gg00 :=
+                  l_linkbuf^.slink.linkdef[ l_linkindex ].ltableid;
+            a06a_mblock_init (acv, m_verify, mm_nil, treeid);
+            WITH self_ref_info DO
+                BEGIN
+                sf_index  := l_index;
+                sf_parsno := parsno;
+                sf_use_id := use_file_id;
+                END;
+            (*ENDWITH*) 
+            SAPDB_PascalMove ('VAK58 ',   1,    
+                  sizeof(self_ref_info), a_mblock.mb_qual_size,
+                  @self_ref_info, 1, @a_mblock.mb_qual^.buf,
+                  FILE_ID_MXGG00 + 1, sizeof(self_ref_info),
+                  a_returncode);
+            WITH a_mblock.mb_qual^.mlc_info DO
+                BEGIN
+                mlp_use_fileid := use_file_id;
+                mlp_sa_level   := sa_level;
+                mlp_lo_level   := 0;
+                END;
+            (*ENDWITH*) 
+            a58mess_buf_to_linkparsinfo (acv, parse_id,
+                  schema, tablen, l_linkname, l_parsbuf)
+            END
+        ELSE
+            BEGIN
+            d_acttabindex := 1;
+            d_tabarr^[ 1 ].otreeid := d_sparr.pbasep^.sbase.btreeid;
+            (* just to avoid warnings: uninitialized mess_type(2) *)
+            mess_type  := m_insert_select;
+            mess_type2 := mm_nil;
+            WITH l_linkbuf^.slink.linkdef[ l_linkindex ] DO
+                IF  link_par.l_upd
+                THEN
+                    BEGIN
+                    mess_type  := m_insert_select;
+                    mess_type2 := mm_nil
+                    END
+                ELSE
+                    CASE laction OF
+                        cak_x_set_null, cak_x_set_default :
+                            BEGIN
+                            mess_type  := m_update;
+                            mess_type2 := mm_qual;
+                            END;
+                        cak_x_restrict :
+                            BEGIN
+                            mess_type  := m_select;
+                            mess_type2 := mm_nil;
+                            END;
+                        cak_x_cascade :
+                            BEGIN
+                            mess_type  := m_delete;
+                            mess_type2 := mm_qual;
+                            END;
+                        END;
+                    (*ENDCASE*) 
+                (*ENDIF*) 
+            (*ENDWITH*) 
+            a06a_mblock_init (acv, mess_type, mess_type2,
+                  d_sparr.pbasep^.sbase.btreeid);
+            WITH a_mblock.mb_qual^.mlc_info DO
+                BEGIN
+                mlp_use_fileid := use_file_id;
+                mlp_sa_level   := sa_level;
+                END;
+            (*ENDWITH*) 
+            qual_offset := 0;
+            IF  (mess_type = m_delete) AND
+                (is_primary_table in d_sparr.pbasep^.sbase.blinkexist) AND
+                NOT acv.a_isReplicationSession
+            THEN (* reserve space for link tree_id *)
+                BEGIN
+                i := (sizeof(tgg00_FileId) - 1 + sizeof(tgg00_StackEntry))
+                      DIV sizeof (tgg00_StackEntry) + 1;
+                a_mblock.mb_qual^.mfirst_free := i
+                END;
+            (*ENDIF*) 
+            IF  (mess_type <> m_select) AND
+                (mess_type <> m_insert_select)
+            THEN
+                ak58col_desc_to_messbuf (acv, dmli, link_par);
+            (*ENDIF*) 
+            IF  (a_returncode = 0) AND (mess_type = m_delete)
+            THEN
+                BEGIN (* on delete cascade *)
+                WITH a_mblock, mb_qual^, d_sparr DO
+                    BEGIN
+                    IF  (is_primary_table in pbasep^.sbase.blinkexist) AND
+                        NOT acv.a_isReplicationSession
+                    THEN
+                        l_cascade := true;
+                    (*ENDIF*) 
+                    trigger := (del_trigger in pbasep^.sbase.blinkexist) OR
+                          (internal_trigger in pbasep^.sbase.blinkexist)
+                    END;
+                (*ENDWITH*) 
+                END
+            ELSE
+                WITH a_mblock, mb_qual^ DO
+                    IF  mess_type = m_update
+                    THEN
+                        BEGIN (* on delete set NULL, DEFAULT *)
+                        mcol_pos    := mfirst_free;
+                        mcol_cnt    := l_linkbuf^.slink.
+                              linkdef[ l_linkindex ].lcolcount;
+                        mfirst_free := mfirst_free + mcol_cnt;
+                        trigger := (upd_trigger in
+                              d_sparr.pbasep^.sbase.blinkexist) OR
+                              (internal_trigger in d_sparr.pbasep^.sbase.blinkexist);
+                        IF  trigger
+                        THEN
+                            BEGIN
+                            d_upd_set := [  ];
+                            FOR i := 1 TO mcol_cnt DO
+                                d_upd_set := d_upd_set +
+                                      [l_linkbuf^.slink.
+                                      linkdef[l_linkindex].lseccolseq[i]]
+                            (*ENDFOR*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN (* on delete restrict *)
+                        mtree.fileHandling_gg00 := mtree.fileHandling_gg00 -
+                              [ hsConsistentLock_egg00, hsIntentExcl_egg00
+                              , hsNoWait_egg00, hsTempLock_egg00
+                              , hsPermLock_egg00, hsOptimisticLock_egg00] +
+                              [ hsCollisionTest_egg00 ];
+                        mqual_pos      := mfirst_free;
+                        mqual_cnt      := 1;
+                        WITH mb_st^ [mfirst_free] DO
+                            BEGIN
+                            etype       := st_jump_output;
+                            eop         := op_none;
+                            mfirst_free := mfirst_free + 1;
+                            epos        := mfirst_free;
+                            elen_var    := 0;
+                            ecol_pos    := 0;
+                            END;
+                        (*ENDWITH*) 
+                        END;
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            IF  l_cascade
+            THEN
+                BEGIN
+                WITH l_linkbuf^, slink.linkdef[ l_linkindex ] DO
+                    IF  ltableid = l_linkbuf^.syskey.stableid
+                    THEN
+                        l_lo_level := curr_parsno
+                    ELSE
+                        l_lo_level := parsno;
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                colset := [  ];
+                a58_put_link_inf_into_mess_buf (acv,
+                      dmli, colset, create_file_id)
+                END
+            ELSE
+                IF  l_upd
+                THEN
+                    l_lo_level := parsno + l_index - 1
+                ELSE
+                    l_lo_level := 0;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  mess_type = m_insert_select
+            THEN
+                WITH a_mblock, mb_qual^ DO
+                    BEGIN
+                    pos := cgg_rec_key_offset + 1;
+                    FOR i := 1 TO l_linkbuf^.slink.
+                          linkdef[ l_linkindex ].lcolcount DO
+                        BEGIN
+                        WITH l_linkbuf^.slink.linkdef[l_linkindex] DO
+                            a06extcolno (d_sparr.pbasep^.sbase,
+                                  lseccolseq[i], col_ptr);
+                        (*ENDWITH*) 
+                        mb_st^ [mfirst_free] := col_ptr^.ccolstack;
+                        mfirst_free := mfirst_free + 1;
+                        WITH mb_st^ [mfirst_free] DO
+                            BEGIN
+                            etype    := st_output;
+                            eop_out  := op_o_output_fixkey;
+                            epos     := pos;
+                            elen_var := mb_st^ [mfirst_free-1].elen_var;
+                            pos      := pos + elen_var;
+                            ecol_tab[ 1 ] := chr(0);
+                            ecol_tab[ 2 ] := chr(0)
+                            END;
+                        (*ENDWITH*) 
+                        mfirst_free          := mfirst_free + 1;
+                        mb_st^ [mqual_pos].epos := mfirst_free;
+                        mqual_cnt            := mqual_cnt + 2
+                        END;
+                    (*ENDFOR*) 
+                    qual_offset := mqual_cnt;
+                    mb_st^ [mfirst_free-1].eop_out := op_o_output_key;
+                    WITH mb_data^, mbp_info DO
+                        BEGIN
+                        rb_keylen            := 0;
+                        rb_ins_sel_info[ 1 ] := cgg04_ignore_dupl;
+                        rb_into_temp         := true;
+                        rb_tempkey           := cgg_zero_id;
+                        mb_data_len := cgg_rec_key_offset + 2 + SURROGATE_MXGG00
+                        END
+                    (*ENDWITH*) 
+                    END
+                (*ENDWITH*) 
+            ELSE
+                IF  mess_type <> m_select
+                THEN
+                    BEGIN
+                    a58describe_long_columns (acv, d_sparr);
+                    IF  (a_returncode = 0) AND trigger
+                    THEN
+                        BEGIN
+                        (* PTS 1111445 E.Z. *)
+                        ex_kind   := a_ex_kind;
+                        a_ex_kind := link_par.l_ex_kind;
+                        a262add_trigger_info (acv, dmli, NOT c_ignore_trigger);
+                        a_ex_kind := ex_kind
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  a_returncode = 0
+            THEN
+                BEGIN (* Qualification *)
+                WITH a_mblock, mb_qual^ DO
+                    BEGIN
+                    old_data_len := mb_data_len;
+                    IF  mqual_pos = 0
+                    THEN
+                        mqual_pos := mfirst_free;
+                    (*ENDIF*) 
+                    decr := 0;
+                    FOR i := 1 TO l_linkbuf^.slink.
+                          linkdef[ l_linkindex ].lcolcount DO
+                        BEGIN
+                        WITH l_linkbuf^.slink.linkdef[l_linkindex] DO
+                            a06extcolno (d_sparr.pbasep^.sbase,
+                                  lseccolseq[i], col_ptr);
+                        (*ENDWITH*) 
+                        mb_st^ [mfirst_free] := col_ptr^.ccolstack;
+                        IF  mess_type = m_update
+                        THEN
+                            mb_st^ [mcol_pos+i-1] := mb_st^ [mfirst_free];
+                        (*ENDIF*) 
+                        IF  ctmulti in col_ptr^.ccolpropset
+                        THEN
+                            mb_st^ [mfirst_free].ecol_tab[ 1 ] := chr(cak00_col_with_inv);
+                        (*ENDIF*) 
+                        mb_st^ [mfirst_free].ecol_tab[ 2 ] := chr(1);
+                        mfirst_free := mfirst_free + 1;
+                        mqual_cnt := mqual_cnt + 1;
+                        WITH mb_st^ [mfirst_free] DO
+                            BEGIN
+                            etype := st_value;
+                            eop   := op_eq;
+                            epos  := a_mblock.mb_data_len+1;
+                            elen_var := col_ptr^.cinoutlen;
+                            ecol_tab[ 1 ] := chr(0);
+                            ecol_tab[ 2 ] := chr(0);
+                            a_mblock.mb_data_len :=
+                                  a_mblock.mb_data_len + elen_var;
+                            END;
+                        (*ENDWITH*) 
+                        mfirst_free := mfirst_free + 1;
+                        mqual_cnt := mqual_cnt + 1;
+                        IF  i <> l_linkbuf^.slink.
+                            linkdef[ l_linkindex ].lcolcount
+                        THEN
+                            WITH mb_st^ [mfirst_free] DO
+                                BEGIN
+                                etype    := st_jump_false;
+                                eop      := op_none;
+                                epos     :=
+                                      (l_linkbuf^.slink.
+                                      linkdef[ l_linkindex ].lcolcount *
+                                      4) - 2 - mqual_cnt - decr +
+                                      qual_offset;
+                                elen_var := 0;
+                                ecol_pos := 0;
+                                decr  := succ(decr);
+                                IF  mess_type = m_select
+                                THEN
+                                    epos := epos + 1;
+                                (*ENDIF*) 
+                                mfirst_free := mfirst_free + 1;
+                                mqual_cnt   := mqual_cnt + 1;
+                                END;
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDFOR*) 
+                    FOR i := 1 TO l_linkbuf^.slink.
+                          linkdef[ l_linkindex ].lcolcount-1 DO
+                        WITH mb_st^ [mfirst_free] DO
+                            BEGIN
+                            etype    := st_op;
+                            eop      := op_and;
+                            epos     := 0;
+                            elen_var := 0;
+                            ecol_pos := 0;
+                            mfirst_free := mfirst_free + 1;
+                            mqual_cnt   := mqual_cnt + 1;
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDFOR*) 
+                    (* Force strategy search to use indexes in every case *)
+                    SAPDB_PascalFill ('VAK58 ',   2,    
+                          mb_data_size, @mb_data^.mbp_buf,
+                          old_data_len + 1, mb_data_len - old_data_len,
+                          chr(199), a_returncode);
+                    END;
+                (*ENDWITH*) 
+                ak58strategy_to_messbuf (acv, dmli);
+                WITH l_linkbuf^, slink.linkdef[ l_linkindex ],
+                     a_mblock, mb_qual^ DO
+                    IF  link_par.l_upd OR
+                        (ord (lindexid[1]) > 0)
+                    THEN
+                        WITH l_posbuf^.slinkposinfo DO
+                            BEGIN
+                            mview_pos := mfirst_free;
+                            FOR i := 1 TO lcolcount DO
+                                WITH lstack[ i ] DO
+                                    BEGIN
+&                                   IFDEF TRACE
+                                    t01int4 (ak_sem, 'extcolno    ',
+                                          lprimcolseq[i]);
+                                    t01int4 (ak_sem, 'lpos        ',
+                                          lpos_info[lprimcolseq[i]].lpos);
+&                                   ENDIF
+                                    mb_st^ [mfirst_free].epos :=
+                                          lpos_info[lprimcolseq[i]].lpos;
+                                    mb_st^ [mfirst_free].elen_var :=
+                                          lpos_info[lprimcolseq[i]].llen;
+                                    mfirst_free := mfirst_free + 1;
+                                    mview_cnt   := mview_cnt + 1
+                                    END;
+                                (*ENDWITH*) 
+                            (*ENDFOR*) 
+                            END;
+                        (*ENDWITH*) 
+&                   IFDEF TRACE
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                t01qual (ak_sem, a_mblock.mb_qual^);
+&               ENDIF
+                WITH  d_sparr.pbasep^.sbase,
+                     a_mblock.mb_qual^.mlc_info DO
+                    mlp_lo_level := l_lo_level;
+                (*ENDWITH*) 
+                a58mess_buf_to_linkparsinfo (acv, parse_id,
+                      schema, tablen, l_linkname, l_parsbuf);
+                (* PTS 1113190 E.Z. *)
+                IF  l_ex_kind = only_executing
+                THEN
+                    (* Call from VAK50 *)
+                    a58exec_link_caused_dml (acv,
+                          l_parsbuf, use_file_id, l_cascade, l_act_result);
+                (*ENDIF*) 
+                IF  l_parsbuf <> NIL
+                THEN
+                    BEGIN
+                    IF  self_ref
+                    THEN (* PTS 1105962 *)
+                        a10del_sysinfo (acv, l_parsbuf^.syskey, dummyErr)
+                    ELSE
+                        a10_key_del (acv, l_parsbuf^.syskey);
+                    (*ENDIF*) 
+&                   ifdef trace
+                    l_parsbuf := NIL
+&                         endif
+                    END;
+                (*ENDIF*) 
+                a10_all_release (acv);
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        acv.a_count_literals := h_count_literals;
+        END;
+    (*ENDIF*) 
+    a54_dml_finalize( dmli, acv.a_transinf.tri_trans );
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58build_link_treeid (
+            VAR acv       : tak_all_command_glob;
+            VAR link_tree : tgg00_FileId;
+            file_id       : integer);
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'file_id     ', file_id);
+&ENDIF
+IF  file_id = 0
+THEN
+    BEGIN
+    link_tree := acv.a_into_tree;
+    a101_GetLogicalFilename (acv.a_transinf.tri_trans, link_tree);
+    END
+ELSE
+    BEGIN
+    IF  file_id < 0
+    THEN
+        file_id := 0;
+    (*ENDIF*) 
+    g04build_temp_tree_id (link_tree, acv.a_transinf.tri_trans);
+    link_tree.fileTfnTemp_gg00 := ttfnLink_egg00;
+    a101_SetTempFileIndex (acv, link_tree, file_id);
+    END;
+(*ENDIF*) 
+link_tree.fileHandling_gg00 :=
+      link_tree.fileHandling_gg00 + [ hsCreateFile_egg00 ];
+&IFDEF TRACE
+;
+t01treeid (ak_sem, 'treeid      ', link_tree);
+&ENDIF
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58del_with_link (
+            VAR acv      : tak_all_command_glob;
+            tabid        : tgg00_Surrogate;
+            linkindex    : integer;
+            VAR parsno   : integer;
+            use_file_id  : tsp00_Int2;
+            VAR link_par : tlink_parameter);
+      (* parameter tabid must not be VAR-parameter !!! *)
+ 
+VAR
+      b_err           : tgg00_BasisError;
+      stop            : boolean;
+      unique_pk_tab   : boolean;
+      curr_parsno     : integer;
+      i               : integer;
+      j               : integer;
+      k               : integer;
+      index_id        : integer;
+      linkcnt         : integer;
+      sa_level_parsid : integer;
+      linkage         : tsp00_C2;
+ 
+BEGIN
+(* linkindex <> 0 ==> call from VAK50 exec_link in case of *)
+(* a self referencing link.                                *)
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    a06_systable_get (acv, d_release, tabid,
+          acv.a_p_arr3.pbasep, NOT c_get_all, stop);
+    unique_pk_tab := false;
+    IF  stop
+    THEN
+        BEGIN
+        a103GetSchemaName (acv,
+              acv.a_p_arr3.pbasep^.sbase.bschema,
+              link_par.l_owner);
+        link_par.l_tablen := acv.a_p_arr3.pbasep^.sbase.btablen^;
+        unique_pk_tab := unique_pk_table in
+              acv.a_p_arr3.pbasep^.sbase.blinkexist;
+        IF  link_par.l_first_call
+        THEN
+            BEGIN
+            IF  (link_par.l_ex_kind <> only_executing)
+                AND
+                ((hsTempLock_egg00 in acv.a_transinf.tri_global_state) OR
+                (hsPermLock_egg00 in acv.a_transinf.tri_global_state))
+            THEN
+                a54add_next_temp_lock (acv, tabid, link_par.l_glob_state);
+            (*ENDIF*) 
+            link_par.l_first_call := false
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    i           := 1;
+    j           := 1;
+    linkcnt     := 0;
+    stop        := false;
+    curr_parsno := parsno;
+    linkage     := cak_zero_linkage;
+    WHILE NOT (stop) AND (acv.a_returncode = 0) DO
+        BEGIN
+        IF  use_file_id = 0
+        THEN
+            link_par.l_act_result := true;
+        (*ENDIF*) 
+        IF  linkindex > 0
+        THEN
+            BEGIN
+            i := 1;
+            REPEAT
+                a06inc_linkage (linkage);
+                i := i + cak_maxlinkdef
+            UNTIL
+                i > linkindex;
+            (*ENDREPEAT*) 
+            i := linkindex
+            END
+        ELSE
+            IF  (i MOD cak_maxlinkdef) = 1
+            THEN
+                a06inc_linkage (linkage);
+            (*ENDIF*) 
+        (*ENDIF*) 
+        WITH link_par.l_linkkey DO
+            BEGIN
+            stableid       := tabid;
+            sentrytyp      := cak_eprimarykey;
+            slinkage       := linkage;
+            skeylen        := mxak_standard_sysk;
+            END;
+        (*ENDWITH*) 
+        a10get_sysinfo (acv, link_par.l_linkkey, d_fix,
+              link_par.l_linkbuf, b_err);
+        IF  b_err = e_ok
+        THEN
+            BEGIN
+            WITH link_par.l_linkbuf^.slink,
+                 linkdef[ (i - 1) MOD cak_maxlinkdef + 1 ] DO
+                BEGIN
+                a25get_linkname (acv, link_par.l_linkbuf,
+                      (i - 1) MOD cak_maxlinkdef + 1,
+                      link_par.l_linkname);
+                index_id := ord (lindexid[ 1 ]);
+                IF  (index_id > 0) OR link_par.l_upd
+                THEN
+                    BEGIN
+                    link_par.l_auxkey           := link_par.l_linkkey;
+                    link_par.l_auxkey.sentrytyp := cak_elinkpos;
+                    link_par.l_auxkey.slinkage  := cak_init_linkage;
+                    a10get_sysinfo (acv, link_par.l_auxkey,
+                          d_fix, link_par.l_posbuf, b_err);
+                    IF  b_err <> e_ok
+                    THEN
+                        a07_b_put_error (acv, b_err, 1)
+                    ELSE
+                        IF  link_par.l_upd
+                        THEN (* call in the course of an update *)
+                            WITH link_par.l_posbuf^.slinkposinfo DO
+                                BEGIN
+                                (* check, if current link contains *)
+                                (* any updated column              *)
+&                               IFDEF TRACE
+                                FOR k := 1 TO lcolcount DO
+                                    t01int4 (ak_sem, 'link_col    ',
+                                          lprimcolseq[k]);
+                                (*ENDFOR*) 
+                                FOR k := 1 TO MAX_COL_PER_TAB_GG00 DO
+                                    IF  k in lupd_col_info
+                                    THEN
+                                        t01int4 (ak_sem,
+                                              'upd_col     ', k);
+&                                   ENDIF
+                                    (*ENDIF*) 
+                                (*ENDFOR*) 
+                                k        := 1;
+                                index_id := 0;
+                                WHILE k <= lcolcount DO
+                                    IF  lprimcolseq[k] in lupd_col_info
+                                    THEN
+                                        BEGIN
+                                        (* updated column in link *)
+                                        (* ==> check link         *)
+                                        link_par.l_upd_cnt :=
+                                              link_par.l_upd_cnt - 1;
+                                        k        := csp_maxint2;
+                                        index_id := 1
+                                        END
+                                    ELSE
+                                        k := k + 1;
+                                    (*ENDIF*) 
+                                (*ENDWHILE*) 
+                                END;
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  i = 1
+                THEN
+                    BEGIN
+                    linkcnt := linkcount;
+                    parsno  := parsno + linkcount
+                    END;
+&               IFDEF TRACE
+                (*ENDIF*) 
+                t01int4 (ak_sem, 'l_upd_cnt   ', link_par.l_upd_cnt);
+                t01int4 (ak_sem, 'linkcnt     ', linkcnt);
+                t01int4 (ak_sem, 'linkindex   ', linkindex);
+&               ENDIF
+                IF  (i = linkcnt) OR (linkindex > 0) OR
+                    (link_par.l_upd AND (link_par.l_upd_cnt = 0))
+                THEN
+                    BEGIN
+                    stop            := true;
+                    sa_level_parsid := 0;
+                    END
+                ELSE
+                    sa_level_parsid := curr_parsno + j;
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+            IF  NOT (link_par.l_upd) OR (index_id > 0)
+            THEN
+                BEGIN
+                link_par.l_parsbuf := NIL;
+                link_par.l_cascade := false;
+                IF  acv.a_returncode = 0
+                THEN
+                    BEGIN
+                    link_par.l_linkindex :=
+                          (i - 1) MOD cak_maxlinkdef + 1;
+                    link_par.l_index     := i;
+                    ak58build_link_delete_command (acv, curr_parsno,
+                          curr_parsno + j - 1, sa_level_parsid,
+                          parsno, use_file_id,
+                          curr_parsno + j - 1, link_par);
+                    (* After the use_file has been accessed the first *)
+                    (* time, it resides at current serverdb           *)
+                    IF  link_par.l_upd
+                    THEN
+                        ak58build_get_command (acv, link_par)
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  (link_par.l_cascade) AND
+                    (acv.a_returncode = 0)
+                THEN
+                    WITH link_par.l_linkbuf^.slink.
+                         linkdef[ link_par.l_linkindex ] DO
+                        ak58del_with_link (acv, ltableid,
+                              0, parsno, curr_parsno + j - 1, link_par);
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                j := succ(j)
+                END;
+            (*ENDIF*) 
+            i := succ(i);
+            END
+        ELSE
+            a07_b_put_error (acv, b_err, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  unique_pk_tab OR link_par.l_upd
+    THEN
+        ak58del_pos_info (acv, tabid);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58del_pos_info (
+            VAR acv   : tak_all_command_glob;
+            VAR tabid : tgg00_Surrogate);
+ 
+VAR
+      b_err    : tgg00_BasisError;
+      sysk     : tgg00_SysInfoKey;
+ 
+BEGIN
+sysk           := a01defaultkey;
+sysk.stableid  := tabid;
+sysk.sentrytyp := cak_elinkpos;
+a10del_sysinfo (acv, sysk, b_err);
+IF  b_err <> e_ok
+THEN
+    a07_b_put_error (acv, b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58execute_link_cmd (VAR acv : tak_all_command_glob);
+ 
+VAR
+      del_cnt : integer;
+      parsk   : tak_parskey;
+      dmli    : tak_dml_info;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    a54_dml_init (acv, dmli, NOT c_in_union);
+    parsk           := acv.a_pars_last_key;
+    parsk.p_id[ 1 ] := acv.a_first_parskey;
+    parsk.p_kind    := m_complex;
+    parsk.p_no      := 0;
+    acv.a_ex_kind   := only_executing;
+    a501do_execute (acv, dmli, parsk, c_output_during_execution);
+    a660_prefix_delete (acv, parsk, del_cnt, cak_complete_prefix);
+    a54_dml_finalize( dmli, acv.a_transinf.tri_trans );
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58expand_messbuf (
+            VAR acv           : tak_all_command_glob;
+            VAR link_exec_rec : link_exec_record;
+            VAR b_err         : tgg00_BasisError);
+ 
+CONST
+      c_work_st_spare = 10;
+ 
+VAR
+      j : integer;
+ 
+BEGIN
+WITH acv, a_mblock, mb_qual^, link_exec_rec DO
+    BEGIN
+    WITH mb_st^ [mfirst_free] DO
+        BEGIN
+        etype       := st_jump_true;
+        eop         := op_none;
+        mfirst_free := succ(mfirst_free)
+        END;
+    (*ENDWITH*) 
+    j := mqual_pos;
+    IF  (l_m_type = m_select) OR (l_m_type = m_insert_select)
+    THEN
+        j := j + mb_st^ [j].epos - 1;
+    (*ENDIF*) 
+    WHILE j <  mqual_pos + mqual_cnt DO
+        BEGIN
+        mb_st^ [mfirst_free] := mb_st^ [j];
+        WITH mb_st^ [mfirst_free] DO
+            IF  etype = st_value
+            THEN
+                BEGIN
+                epos     := l_p2_pos + cgg_rec_key_offset;
+                l_p2_pos := l_p2_pos + elen_var
+                END;
+            (*ENDIF*) 
+        (*ENDWITH*) 
+        mfirst_free := succ(mfirst_free);
+        j           := succ(j)
+        END;
+    (*ENDWHILE*) 
+    IF  (mfirst_free+ mqual_cnt + 2 + l_loop_cnt > mb_st_max)
+        OR
+        (l_loop_cnt > mb_work_st_max - c_work_st_spare)
+        OR
+        (l_p2_pos + l_param_len > mxsp_buf)
+    THEN
+        b_err := e_buffer_limit
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58atruncate_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      last_n : tsp00_Int2;
+ 
+BEGIN
+WITH acv, a_scv DO
+    BEGIN
+    a_return_segm^.sp1r_function_code := csp1_delete_fc;
+    a01_next_symbol (acv);
+    IF  a01mandatory_keyword (acv, cak_i_table)
+    THEN
+        BEGIN
+        a_is_ddl := ddl_truncate;
+        a01_call_put (acv, a58, cak_i_truncate, put_node);
+        a01_call_put (acv, a66, cak_x_table_spec, last_n);
+        a_ap_tree^[put_node].n_lo_level := last_n;
+        a02_atablename  (acv,
+              a_ap_tree^[ last_n ].n_lo_level, last_n);
+        IF  sc_symb <> s_eof
+        THEN
+            IF  a01_eqkey (a01kw[cak_i_drop], a_sqlmode,
+                acv.a_cmd_part^.sp1p_buf, a_scv) OR
+                a01_eqkey (a01kw[cak_i_reuse], a_sqlmode,
+                acv.a_cmd_part^.sp1p_buf, a_scv)
+            THEN
+                BEGIN
+                a01_next_symbol (acv);
+                IF  a01_eqkey (a01kw[cak_i_storage], a_sqlmode,
+                    acv.a_cmd_part^.sp1p_buf, a_scv)
+                THEN
+                    a01_next_symbol (acv)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        a01_is_end_symbol (acv);
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(* PTS 1111576 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_adelete_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      curr_n          : tsp00_Int2;
+      last_n          : tsp00_Int2;
+      procs           : tak_procs;
+ 
+BEGIN
+WITH acv, a_scv DO
+    IF  a_returncode = 0
+    THEN
+        BEGIN
+        a_scv.sc_states := a_scv.sc_states + [ scs_hint_allowed ];
+        a01_next_symbol (acv);
+        a_return_segm^.sp1r_function_code := csp1_delete_fc;
+        procs := a58;
+        IF  NOT a_cmd_segment_header.sp1c_mass_cmd
+        THEN
+            a01_call_put (acv, procs, cak_i_delete, put_node)
+        ELSE
+            BEGIN
+            acv.a_return_segm^.sp1r_function_code :=
+                  acv.a_return_segm^.sp1r_function_code + csp1_masscmd_fc_offset;
+            a_precomp_info_byte := csp1_p_mass_command;
+            a01_call_put (acv, procs, cak_x_mdelete, put_node)
+            END;
+        (*ENDIF*) 
+        a_ap_tree^[put_node].n_length := 0;
+        curr_n := put_node;
+        a_select_node := put_node;
+        IF  a01_eqkey (a01kw[ cak_i_object ], a_sqlmode,
+            a_cmd_part^.sp1p_buf, a_scv) AND
+            (NOT a_cmd_segment_header.sp1c_mass_cmd) AND
+            (a_sqlmode = sqlm_internal)
+        THEN
+            ak58delete_object_space (acv, put_node)
+        ELSE
+            BEGIN
+            IF  a_scv.sc_symb = s_hint
+            THEN
+                a80_ahint_statement(acv, cak_x_delete_hint, put_node);
+            (*ENDIF*) 
+            a_scv.sc_states := a_scv.sc_states - [ scs_hint_allowed ];
+            (* CR 1000134 E.Z: *)
+            IF  a01_eqkey (a01kw[ cak_i_from ], a_sqlmode,
+                a_cmd_part^.sp1p_buf, a_scv)
+            THEN
+                a01_next_symbol (acv)
+            ELSE
+                (* PTS 1110877 E.Z. *)
+                IF  (a_sqlmode <> sqlm_internal) AND
+                    (a_sqlmode <> sqlm_oracle)
+                THEN
+                    a07_error (acv, e_wanted_keyword, put_node, last_n);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            a02_s_atable_spec (acv, a_ap_tree^[ curr_n ].n_lo_level, last_n);
+            IF  ((a01_eqkey (a01kw[ cak_i_where ], a_sqlmode,
+                a_cmd_part^.sp1p_buf, a_scv))
+                OR (a01_eqkey (a01kw[ cak_i_key ], a_sqlmode,
+                a_cmd_part^.sp1p_buf, a_scv)))
+            THEN
+                BEGIN
+                a55_asearch_clause (acv, a_ap_tree^[ last_n ].n_sa_level,
+                      curr_n);
+                last_n := a_ap_tree^[ last_n ].n_sa_level
+                END
+            ELSE
+                WITH a_transinf.tri_trans DO
+                    trWarning_gg00 := trWarning_gg00 + [ warn0_exist,
+                          warn4_nullwhere ];
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            IF  (a_returncode = 0) AND
+                (sc_symb <> s_eof)
+            THEN
+                IF  a01_eqkey (a01kw[ cak_i_nowait ], a_sqlmode,
+                    a_cmd_part^.sp1p_buf, a_scv)
+                THEN
+                    BEGIN
+                    a01_call_put (acv, a52, cak_x_nowait, a_ap_tree^[ last_n ].n_sa_level);
+                    last_n := a_ap_tree^[ last_n ].n_sa_level;
+                    a01_next_symbol (acv);
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  (a_returncode = 0)                   AND
+            (sc_symb <> s_eof) (* PTS 1106990 *)
+            AND
+            (
+            (a_proc_compile in [pct_insert_trigger,
+            pct_update_trigger,
+            pct_delete_trigger,
+            pct_multi_trigger])   OR
+            (a_trigger_level > 0) OR
+            (a_comp_type = at_kernel)
+            )
+        THEN
+            IF  a01_eqkey (a01kw[ cak_i_ignore ], a_sqlmode,
+                a_cmd_part^.sp1p_buf, a_scv)
+            THEN
+                BEGIN
+                a01_next_symbol (acv);
+                IF  a01mandatory_keyword (acv, cak_i_trigger)
+                THEN
+                    BEGIN
+                    acv.a_ap_tree^[ put_node ].n_length := cak_i_ignore;
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  (a_returncode = 0)                   AND
+            (sc_symb <> s_eof)                   AND
+            ((a_sqlmode = sqlm_internal) OR (a_sqlmode = sqlm_oracle))
+        THEN
+            IF  a01mandatory_keyword (acv, cak_i_with)
+            THEN
+                IF  a01mandatory_keyword (acv, cak_i_commit)
+                THEN
+                    BEGIN
+                    a01_call_put (acv, a52, cak_x_commit, a_ap_tree^[ last_n ].n_sa_level);
+                    last_n := a_ap_tree^[ last_n ].n_sa_level;
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        a01_is_end_symbol (acv);
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(* CR 1000134 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58delete_object_space (
+            VAR acv  : tak_all_command_glob;
+            put_node : tsp00_Int2);
+ 
+BEGIN
+a01_next_symbol(acv);
+IF  a01mandatory_keyword (acv, cak_i_storage)
+THEN
+    acv.a_ap_tree^[ put_node ].n_subproc := cak_i_object;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_b_delete_string (
+            VAR acv         : tak_all_command_glob;
+            VAR dmli        : tak_dml_info;
+            VAR dfa         : tak_dfarr;
+            VAR isparr      : tak_syspointerarr;
+            start_node      : tsp00_Int2;
+            VAR sr_rec      : tak71_strat_rec;
+            VAR all_done    : boolean;
+            new_parsinfo    : boolean;
+            VAR with_commit : boolean);
+ 
+VAR
+      key_found   : boolean;
+      is_prim_tab : boolean;
+      nowait      : boolean;
+      b_err       : tgg00_BasisError;
+      act_node    : integer;
+      i           : integer;
+      icurr_n     : integer;
+      tab_node    : integer;
+      dummy_set   : tak_columnset;
+      parsk       : tak_parskey;
+      sysk        : tgg00_SysInfoKey;
+ 
+BEGIN
+act_node := acv.a_ap_tree^[ start_node ].n_lo_level;
+WHILE (acv.a_ap_tree^[ act_node ].n_sa_level > 0) AND
+      (acv.a_ap_tree^[ act_node ].n_proc <> a52) DO
+    act_node := acv.a_ap_tree^[ act_node ].n_sa_level;
+(*ENDWHILE*) 
+nowait := false;
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    IF  (acv.a_ap_tree^[ act_node ].n_proc = a52) AND
+        (acv.a_ap_tree^[ act_node ].n_subproc = cak_x_nowait)
+    THEN
+        nowait := true;
+    (*ENDIF*) 
+    IF  (acv.a_ap_tree^[ act_node ].n_proc = a52) AND
+        (acv.a_ap_tree^[ act_node ].n_subproc = cak_x_commit)
+    THEN
+        BEGIN
+        with_commit := true;
+        IF  start_node <> acv.a_ap_tree^[ 0 ].n_lo_level
+        THEN
+            a07_b_put_error (acv, e_not_implemented, 1)
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+act_node     := acv.a_ap_tree^[ start_node ].n_lo_level;
+dmli.d_acttabindex   := 1;
+dmli.d_cntfromtab   := 1;
+tab_node := acv.a_ap_tree^[ act_node ].n_lo_level;
+a660_search_one_table (acv, dmli, tab_node, c_all,
+      c_check_teresult, no_lock, r_del);
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    WITH acv, dmli DO
+        IF  d_sparr.pbasep^.sbase.btablekind = tview
+        THEN
+            IF  nowait OR with_commit
+            THEN
+                a07_b_put_error (acv, e_not_implemented, 1)
+            ELSE
+                BEGIN
+                all_done := true;
+                a59_join_view (acv, dmli, dfa, start_node, m_delete);
+                isparr := d_sparr
+                END
+            (*ENDIF*) 
+        ELSE
+            (* PTS 1122050 E.Z. *)
+            IF  ftsArchive_egg00 in d_sparr.pbasep^.sbase.btreeid.fileType_gg00
+            THEN
+                a07_b_put_error (acv, e_invalid_tabletype,
+                      acv.a_ap_tree^[tab_node].n_pos)
+            ELSE
+                BEGIN
+                is_prim_tab :=
+                      (is_primary_table in d_sparr.pbasep^.sbase.blinkexist) AND
+                      NOT acv.a_isReplicationSession;
+                IF  is_prim_tab AND d_truncate
+                THEN
+                    a07_b_put_error (acv, e_missing_privilege, 1);
+                (*ENDIF*) 
+                key_found := false;
+                icurr_n := 0;
+                IF  a_ap_tree^[ act_node ].n_sa_level <> 0
+                THEN
+                    BEGIN
+                    act_node := a_ap_tree^[ act_node ].n_sa_level;
+                    icurr_n := a_ap_tree^[ act_node ].n_lo_level;
+                    WITH a_ap_tree^[ icurr_n ] DO
+                        IF  ((n_proc = a55) AND (n_subproc = cak_x_keyspec_list))
+                        THEN
+                            key_found := true;
+                        (*ENDIF*) 
+                    (*ENDWITH*) 
+                    END;
+                (*ENDIF*) 
+                IF  (is_prim_tab
+                    OR
+                    ((d_sparr.pbasep^.sbase.bsegmentid =
+                    cak00_public_segment_id) AND
+                    NOT key_found)
+                    )
+                    AND
+                    (a_isolation_info <> temp_lock_rec_get)
+                THEN
+                    BEGIN
+                    a_ex_kind        := only_parsing;
+                    a_isolation_info := temp_lock_rec_needed;
+                    IF  acv.a_command_kind = single_command
+                    THEN
+                        acv.a_command_kind := link_command
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                a06a_mblock_init (acv, m_delete, mm_qual,
+                      dmli.d_tabarr^[ dmli.d_acttabindex ].otreeid);
+                (* PTS 1113190 E.Z. *)
+                IF  nowait
+                THEN
+                    acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 :=
+                          acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 + [ hsNoWait_egg00 ];
+                (*ENDIF*) 
+                IF  is_prim_tab
+                THEN
+                    BEGIN
+                    (* reserve space for link file treeid *)
+                    i := (sizeof(tgg00_FileId) - 1 + sizeof(tgg00_StackEntry))
+                          DIV sizeof (tgg00_StackEntry) + 1;
+                    a_mblock.mb_qual^.mfirst_free := i
+                    END;
+                (*ENDIF*) 
+                IF  ((a_ex_kind = only_parsing) AND new_parsinfo)
+                THEN
+                    BEGIN
+                    IF  start_node <> a_ap_tree^[ 0 ].n_lo_level
+                    THEN
+                        BEGIN
+                        a_pars_last_key.p_kind := m_delete;
+                        a660_new_pparsp (acv, dmli.d_sparr,
+                              NOT c_first_parsinfo, c_complicate);
+                        IF  acv.a_returncode = 0
+                        THEN
+                            BEGIN
+                            a54set_complex_entry (acv, c_set_last_pars);
+                            sysk := a01sysnullkey;
+                            WITH sysk, parsk DO
+                                BEGIN
+                                sauthid[ 1 ] := cak_tempinfo_byte;
+                                p_count   := acv.a_pars_last_key.p_count;
+                                p_id[ 1 ] := acv.a_first_parsid;
+                                p_kind    := m_fetch;
+                                p_no      := 0;
+                                sentrytyp := cak_eshortinfo;
+                                SAPDB_PascalForcedMove (sizeof(parsk), sizeof(sauthid),
+                                      @parsk, 1, @sauthid, 2, mxak_parskey);
+                                END;
+                            (*ENDWITH*) 
+                            a10get_sysinfo (acv, sysk, d_fix,
+                                  d_sparr.pinfop, b_err);
+                            IF  b_err <> e_ok
+                            THEN
+                                a07_b_put_error (acv, b_err, 1);
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        a54_get_pparsp_pinfop (acv, d_sparr, m_delete);
+                        IF  acv.a_command_kind = link_command
+                        THEN
+                            a54set_complex_entry (acv, c_set_last_pars);
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  ((d_sparr.pbasep^.sbase.bsegmentid = cak00_public_segment_id) AND
+                        (NOT a101_IsExtendedTempFile (acv,
+                        d_sparr.pbasep^.sbase.btreeid)) AND
+                        NOT key_found)
+                    THEN
+                        a54add_next_temp_lock (acv,
+                              d_sparr.pbasep^.sbase.btreeid.fileTabId_gg00,
+                              [ hsTempLock_egg00 ])
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                d_like := false;
+                d_movebefore := cgg_rec_key_offset;
+                d_maxlen := 0;
+                d_pargeslen := 0;
+                IF  a_returncode = 0
+                THEN
+                    BEGIN
+                    IF  a_ex_kind = only_parsing
+                    THEN
+                        d_sparr.pparsp^.sparsinfo.p_tabid :=
+                              d_sparr.pbasep^.syskey.stableid;
+                    (*ENDIF*) 
+                    IF  icurr_n <> 0
+                    THEN
+                        BEGIN
+                        WITH a_ap_tree^[ icurr_n ] DO
+                            IF  key_found
+                            THEN
+                                BEGIN
+                                d_pars_kind := fp_val_varcol_with_len;
+                                a55_build_key (acv, dmli, dfa, icurr_n);
+                                icurr_n := n_sa_level;
+                                WITH a_mblock.mb_data^ DO
+                                    mbp_keylen := a_mblock.mb_data_len-cgg_rec_key_offset;
+                                (*ENDWITH*) 
+                                IF  acv.a_check_lock
+                                THEN
+                                    a_mblock.mb_type2 := mm_test
+                                ELSE
+                                    a_mblock.mb_type2 := mm_nil
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                IF  ((n_proc = a55) AND
+                                    ((n_subproc = cak_x_current_of) OR
+                                    ( n_subproc = cak_x_pos_of)))
+                                THEN
+                                    BEGIN
+                                    a58_current_of (acv, dmli, icurr_n);
+                                    IF  acv.a_check_lock
+                                    THEN
+                                        a_mblock.mb_type2 := mm_test
+                                    ELSE
+                                        a_mblock.mb_type2 := mm_nil;
+                                    (*ENDIF*) 
+                                    icurr_n := n_sa_level;
+                                    END;
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                        (*ENDWITH*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                WITH a_mblock.mb_qual^ DO
+                    mcol_pos := mfirst_free;
+                (*ENDWITH*) 
+                a58_indices (acv, d_sparr.pbasep^.sbase, dfa);
+                d_joins.jrc_cnt := 0;
+                dummy_set       := [  ];
+                IF  a_returncode = 0
+                THEN
+                    a57_upd_del_rest (acv, dmli, dfa, sr_rec, icurr_n,
+                          dummy_set, new_parsinfo);
+                (*ENDIF*) 
+                a58describe_long_columns (acv, d_sparr);
+                IF  (a_returncode = 0) AND is_prim_tab
+                THEN
+                    BEGIN
+                    a58_put_link_inf_into_mess_buf (acv, dmli, dummy_set, 0)
+                    END;
+                (*ENDIF*) 
+                IF  (a_returncode = 0) AND
+                    NOT d_truncate
+                THEN
+                    a262add_trigger_info (acv, dmli,
+                          acv.a_ap_tree^[start_node].n_length = cak_i_ignore);
+                (*ENDIF*) 
+                WITH a_mblock, mb_qual^ DO
+                    IF  (mb_type2 = mm_qual)                       AND
+                        (mqual_cnt    = 0  )                       AND
+                        (mlink_cnt    = 0  )                       AND
+                        ((mtrigger_cnt = 0) OR d_truncate)         AND
+                        NOT (a101_IsExtendedTempFile (acv, mtree)) AND
+                        NOT g01ConsistentReadEnabled               AND
+                        (* PTS 1111576 E.Z. *)
+                        (* PTS 1115978 E.Z. *)
+                        NOT (a28TreeStoredInVar (mtree))
+                    THEN
+                        (* PTS 1124490 E.Z. *)
+                        IF  d_truncate
+                        THEN
+                            a_mblock.mb_type2 := mm_trunc
+                        ELSE
+                            a_mblock.mb_type2 := mm_empty;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                isparr := d_sparr
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_current_of (
+            VAR acv  : tak_all_command_glob;
+            VAR dmli : tak_dml_info;
+            start_n  : integer);
+ 
+VAR
+      idm_index   : integer;
+      curr_n      : integer;
+      currentnam  : tsp00_KnlIdentifier;
+      sourcetabid : tgg00_Surrogate;
+      current_of  : boolean;
+ 
+BEGIN
+WITH acv, a_mblock, mb_data^ DO
+    BEGIN
+    (* because of join-views with start_n = -1 *)
+    IF  start_n = -1
+    THEN
+        BEGIN
+        curr_n := start_n;
+        current_of := true
+        END
+    ELSE
+        IF  (a_ap_tree^[ start_n ].n_proc = a55) AND
+            (a_ap_tree^[ start_n ].n_subproc = cak_x_current_of)
+        THEN
+            BEGIN
+            curr_n := a_ap_tree^[ start_n ].n_lo_level;
+            current_of := true
+            END
+        ELSE
+            BEGIN
+            curr_n := 0;
+            current_of := false;
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  current_of
+    THEN
+        BEGIN
+        IF  a_mblock.mb_type = m_lock
+        THEN
+            sourcetabid := cgg_zero_id
+        ELSE
+            sourcetabid := dmli.d_tabarr^[ 1 ].ofromtableid;
+        (*ENDIF*) 
+        IF  (dmli.d_maxlen + mb_data_len) MOD ALIGNMENT_GG00 <> 0
+        THEN
+            BEGIN
+            mb_data_len := mb_data_len -
+                  ((dmli.d_maxlen + mb_data_len) MOD ALIGNMENT_GG00) +
+                  ALIGNMENT_GG00;
+            IF  acv.a_ex_kind = only_parsing
+            THEN
+                a54_fixedpos (acv, dmli);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  curr_n > 0
+        THEN
+            BEGIN
+            a05identifier_get (acv, curr_n,
+                  sizeof (currentnam), currentnam);
+            a58_get_currentkey (acv, currentnam, sourcetabid,
+                  a_ap_tree^[ curr_n ].n_pos);
+            END
+        ELSE
+            (* updateable Join-Views *)
+            currentnam := a01_il_b_identifier;
+        (*ENDIF*) 
+        IF  a_ex_kind = only_parsing
+        THEN
+            BEGIN
+            IF  a_returncode = 0
+            THEN
+                BEGIN
+                SAPDB_PascalMove ('VAK58 ',   3,    
+                      sizeof(currentnam), mb_data_size,
+                      @currentnam, 1, @mbp_buf, mb_data_len+1,
+                      sizeof (currentnam),
+                      a_returncode);
+                WITH dmli.d_sparr.pparsp^.sparsinfo,
+                     p_pars_infos[ p_cnt_infos+1 ] DO
+                    BEGIN
+                    fp_kind         := fp_current_of_key;
+                    fp_etype        := st_dummy;
+                    fp_datatyp      := dunknown;
+                    fp_colset       := [  ];
+                    fp_curr_keylen  := sizeof (currentnam);
+                    fp_movebefore_v5:= dmli.d_movebefore;
+                    dmli.d_movebefore := 0;
+                    fp_startpos     := 1;
+                    fp_fill_51      := csp_maxint2;
+                    fp_pos_no       := 0;
+                    p_cnt_infos := succ(p_cnt_infos)
+                    END;
+                (*ENDWITH*) 
+                mb_data_len := mb_data_len + sizeof (currentnam);
+                IF  NOT (a_mblock.mb_type in [ m_lock, m_commit, m_rollback ])
+                THEN
+                    WITH dmli, d_tabarr^[ d_acttabindex ] DO
+                        IF  a_ex_kind = only_parsing
+                        THEN
+                            BEGIN
+                            idm_index := d_sparr.pbasep^.sbase.blastkeyind;
+                            WITH a103GetColumn (d_sparr.pbasep^.sbase, idm_index )^ DO
+                                IF  ccolstack.epos + cinoutlen - 1 >
+                                    sizeof (currentnam)
+                                THEN (* execute_key had no place *)
+                                    (* where res_name is now (18Bytes)*)
+                                    BEGIN
+                                    mb_data_len := mb_data_len -
+                                          sizeof (currentnam) +
+                                          ccolstack.epos+cinoutlen-1;
+                                    WITH dmli.d_sparr.pparsp^.sparsinfo,
+                                         p_pars_infos[ p_cnt_infos ] DO
+                                        fp_curr_keylen := ccolstack.epos+
+                                              cinoutlen-1
+                                    (*ENDWITH*) 
+                                    END
+                                (*ENDIF*) 
+                            (*ENDWITH*) 
+                            END;
+                        (*ENDIF*) 
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_delete (
+            VAR acv    : tak_all_command_glob;
+            start_node : tsp00_Int2);
+ 
+VAR
+      b_del_string : boolean;
+      all_done     : boolean;
+      massdelete   : boolean;
+      ora_truncate : boolean;
+      with_commit  : boolean;
+      del_cnt      : integer;
+      glob_state   : tgg00_HandlingSet;
+      isparr       : tak_syspointerarr;
+      parsid       : tak_parsid;
+      dummy_parsid : tak_parsid;
+ 
+BEGIN
+b_del_string := false;
+ora_truncate := false;
+WITH acv.a_ap_tree^[ start_node ] DO
+    BEGIN
+    (* CR 1000134 E.Z. *)
+    IF  n_subproc = cak_i_object
+    THEN
+        WITH acv DO
+            BEGIN
+            IF  a_ex_kind = only_parsing
+            THEN
+                BEGIN
+                a_pars_last_key.p_kind := m_destroy_temp;
+                parsid.pid_session :=
+                      a_transinf.tri_trans.trSessionId_gg00;
+                parsid.pid_parsk   := a_pars_last_key;
+                parsid.pid_appl_info[1]  :=
+                      chr(a_precomp_info_byte);
+                parsid.pid_dtime_info[1] := chr(ord(dtf_none));
+                IF  g01diag_moni_parse_on
+                THEN
+                    BEGIN
+                    dummy_parsid.pid_session.ci4_gg00 := cgg_nil_session;
+                    a545diag_parse_info (acv,
+                          parsid, dummy_parsid);
+                    END;
+                (* Building of first return part  with parsid. *)
+                (*ENDIF*) 
+                a06retpart_move (acv, @parsid, sizeof (parsid));
+                a06finish_curr_retpart (acv, sp1pk_parsid, 1);
+                END
+            ELSE
+                bd91StartOMSGarbageCollection (a_transinf.tri_trans);
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+    ELSE
+        BEGIN
+        ora_truncate := n_subproc = cak_i_truncate;
+        IF  n_sa_level <> 0
+        THEN
+            a54_subquery (acv, isparr, start_node,
+                  m_delete, b_del_string)
+        ELSE
+            b_del_string := true;
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  b_del_string
+THEN
+    BEGIN
+    all_done    := false;
+    with_commit := false;
+    ak58build_delete_string (acv, isparr, start_node,
+          ora_truncate, all_done, with_commit);
+    WITH acv, a_mblock, mb_data^ DO
+        IF  a_returncode = 0
+        THEN
+            BEGIN
+            IF  NOT all_done
+            THEN
+                BEGIN
+                massdelete := (mb_type = m_delete) AND
+                      ((mb_type2 = mm_qual) OR
+                      (mb_type2 = mm_trunc) OR
+                      (mb_type2 = mm_empty));
+                IF  massdelete AND (mb_type2 IN [ mm_empty, mm_trunc ])
+                THEN
+                    a10invalidate_root (acv, mb_qual^.mtree);
+                (*ENDIF*) 
+                IF  with_commit
+                THEN
+                    BEGIN
+                    IF  (is_primary_table in isparr.pbasep^.sbase.blinkexist) OR
+                        (del_trigger      in isparr.pbasep^.sbase.blinkexist) OR
+                        (internal_trigger in isparr.pbasep^.sbase.blinkexist)
+                    THEN
+                        a07_b_put_error (acv, e_invalid_tabletype, 1)
+                    ELSE
+                        a57WithCommitHandling (acv, isparr, NIL)
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    a54_last_part (acv, isparr, c_last_pars_part)
+                (*ENDIF*) 
+                END
+            ELSE
+                massdelete := false;
+            (*ENDIF*) 
+            IF  ((a_returncode = 0) AND
+                (a_ex_kind <> only_parsing)           AND
+                (a_qualified_jv_upd = no_jv_upd))
+            THEN
+                IF  massdelete
+                THEN
+                    IF  (mb_qual^.mr_resnum = csp_rescnt_zero) AND NOT ora_truncate
+                    THEN
+                        BEGIN
+                        a07_b_put_error (acv, e_row_not_found, 1)
+                        END
+                    ELSE
+                        a60resnum (acv, mb_qual^.buf, MB_PART1_HEAD_MXGG00+1)
+                    (*ENDIF*) 
+                ELSE
+                    a60rescount (acv, 1);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  (is_primary_table in
+                isparr.pbasep^.sbase.blinkexist)  AND
+                NOT all_done                      AND
+                NOT acv.a_isReplicationSession    AND
+                (a_returncode = 0)
+            THEN
+                a58delete_with_link (acv,
+                      isparr.pbasep^.syskey.stableid, 0, 1, 0);
+            (*ENDIF*) 
+            IF  (a_isolation_info = temp_lock_rec_get) AND
+                NOT all_done                           AND
+                (a_returncode = 0)
+            THEN
+                BEGIN
+                glob_state := acv.a_transinf.tri_global_state;
+                IF  NOT (hsTempLock_egg00 in glob_state) AND
+                    NOT (hsPermLock_egg00 in glob_state)
+                THEN
+                    glob_state := glob_state + [ hsTempLock_egg00 ];
+                (*ENDIF*) 
+                a54_loc_temp_locks (acv, glob_state, acv.a_p_arr2);
+                END;
+            (* PTS 1106167 E.Z. *)
+            (*ENDIF*) 
+            IF  (acv.a_init_ex_kind <> acv.a_ex_kind) AND
+                NOT all_done
+            THEN
+                IF  a_returncode = 0
+                THEN
+                    BEGIN
+                    acv.a_ex_kind := acv.a_init_ex_kind;
+                    IF  acv.a_init_ex_kind <> only_parsing
+                    THEN
+                        a58execute_link_cmd (acv)
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    a660_prefix_delete (acv, acv.a_pars_last_key,
+                          del_cnt, cak_complete_prefix);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_get_currentkey (
+            VAR acv         : tak_all_command_glob;
+            VAR currentnam  : tsp00_KnlIdentifier;
+            VAR sourcetabid : tgg00_Surrogate;
+            n_pos           : integer);
+ 
+VAR
+      e                : tgg00_BasisError;
+      aux_resname_addr : tak_sysbufferaddress;
+      qbufp            : tak_sysbufferaddress;
+      ke               : tgg00_SysInfoKey;
+ 
+BEGIN
+a663_resname (acv, currentnam, acv.a_modul_name,
+      aux_resname_addr, d_release, n_pos);
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    ke := a01sysnullkey;
+    WITH ke, aux_resname_addr^.sresname DO
+        BEGIN
+        IF  (NOT resexecuted) AND
+            (reseparsk.p_kind <> m_show)
+        THEN
+            BEGIN
+            sauthid[ 1 ] := cak_tempinfo_byte;
+            SAPDB_PascalForcedMove (sizeof(reseparsk), sizeof(sauthid),
+                  @reseparsk, 1, @sauthid, 2, mxak_parskey);
+            sauthid[ mxak_parskey+1 ] := chr(0);
+            END
+        ELSE
+            stempid   := a101_GetTempFileIndex (acv, restreeid);
+        (*ENDIF*) 
+        sentrytyp := cak_ereskey;
+        END;
+    (*ENDWITH*) 
+    a10get_sysinfo (acv, ke, d_release, qbufp, e);
+    IF  e <> e_ok
+    THEN
+        a07_b_put_error (acv, e, 1)
+    ELSE
+        WITH qbufp^.sreskey DO
+            IF  NOT res_for_update
+            THEN
+                a07_b_put_error (acv, e_update_not_allowed, 1)
+            ELSE
+                IF  ((res_updtabid = sourcetabid) OR
+                    (acv.a_mblock.mb_type = m_lock))
+                THEN
+                    BEGIN
+                    IF  acv.a_ex_kind <> only_parsing
+                    THEN
+                        IF  res_useupdk = 0
+                        THEN
+                            a07_b_put_error (acv, e_current_of_needs_fetch, 1)
+                        ELSE
+                            WITH acv.a_mblock, mb_data^ DO
+                                BEGIN
+                                mbp_keylen := s30lnr_defbyte (@res_keysbuf,
+                                      res_updchar[ 1 ],
+                                      res_updkey.ks_pos, res_updkey.ks_len);
+                                IF  mbp_keylen < res_minkeylen
+                                THEN
+                                    mbp_keylen := res_minkeylen;
+                                (*ENDIF*) 
+                                SAPDB_PascalMove ('VAK58 ',   4,    
+                                      sizeof(res_keysbuf), mb_data_size,
+                                      @res_keysbuf, res_updkey.ks_pos,
+                                      @mbp_buf, mb_data_len + 1,
+                                      mbp_keylen,
+                                      acv.a_returncode);
+                                mb_data_len := mb_data_len + mbp_keylen;
+                                IF  ((acv.a_mblock.mb_type = m_delete) AND
+                                    (currentnam <> a01_zero_res_name))
+                                THEN
+                                    BEGIN
+                                    res_useupdk := res_useupdk - 1;
+                                    a10repl_sysinfo (acv, qbufp, e);
+                                    IF  e <> e_ok
+                                    THEN
+                                        a07_b_put_error (acv, e, 1)
+                                    (*ENDIF*) 
+                                    END
+                                (*ENDIF*) 
+                                END
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  acv.a_ex_kind = only_executing
+                    THEN
+                        a07_b_put_error (acv, e_old_fileversion, 1)
+                    ELSE
+                        a07_b_put_error (acv, e_update_not_allowed, 1)
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_indices (
+            VAR acv      : tak_all_command_glob;
+            VAR base_rec : tak_baserecord;
+            VAR dfa      : tak_dfarr);
+ 
+BEGIN
+WITH acv, base_rec DO
+    BEGIN
+    IF  a_returncode = 0
+    THEN
+        IF  bindexexist
+        THEN
+            a54_put_indices_in_mess_buf (acv, base_rec, dfa, c_all);
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_mass_update_delete (VAR dmli : tak_dml_info);
+ 
+BEGIN
+WITH dmli DO
+    BEGIN
+    d_vppos := 1;
+    d_keylen := RESCNT_MXGG04;
+    d_single := false;
+    (*
+          IF  d_longdesc_found
+          THEN
+          d_rowno := cgg04_one_record_at_most_internal
+          ELSE
+          *)
+    d_rowno := cgg04_no_rowno_predicate;
+    d_inoutpos := cgg_rec_key_offset + RESCNT_MXGG04 + 1;
+    d_change.cr_colcount := 0;
+    d_group := false;
+    d_having := false;
+    d_view := false;
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58_put_link_inf_into_mess_buf (
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info;
+            VAR colset : tak_columnset;
+            file_id    : integer);
+ 
+VAR
+      isKey              : boolean;
+      phase_look_for_key : boolean;
+      b_err              : tgg00_BasisError;
+      scan_cnt           : integer;
+      i                  : integer;
+      link_cnt           : integer;
+      link_index         : integer;
+      max                : integer;
+      pos                : integer;
+      extno              : integer;
+      linkbuf            : tak_sysbufferaddress;
+      linkposbuf         : tak_sysbufferaddress;
+      linkkey            : tgg00_SysInfoKey;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'atpos       ', dmli.d_acttabindex);
+&ENDIF
+WITH acv.a_mblock, mb_qual^, dmli.d_tabarr^[ dmli.d_acttabindex ] DO
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        linkposbuf := NIL;
+        linkkey    := a01defaultkey;
+        WITH linkkey DO
+            BEGIN
+            stableid      := otreeid.fileTabId_gg00;
+            sentrytyp     := cak_eprimarykey
+            END;
+        (*ENDWITH*) 
+        IF  unique_pk_table in dmli.d_sparr.pbasep^.sbase.blinkexist
+        THEN
+            BEGIN
+            a56alloc_linkpos_info (acv,
+                  dmli.d_sparr, m_delete, linkposbuf);
+            IF  acv.a_returncode = 0
+            THEN
+                FOR i := 1 TO dmli.d_sparr.pbasep^.sbase.bmaxcol DO
+                    linkposbuf^.slinkposinfo.lpos_info[ i ].lpos := 0;
+                (*ENDFOR*) 
+            (*ENDIF*) 
+            scan_cnt := 2
+            END
+        ELSE
+            scan_cnt := 1;
+        (*ENDIF*) 
+        colset    := [  ];
+        mlink_pos := mfirst_free;
+        link_cnt  := 0;
+        pos       := cgg_rec_key_offset + 1;
+        REPEAT
+            REPEAT
+                a10get_sysinfo (acv,
+                      linkkey, d_release, linkbuf, b_err);
+                IF  b_err = e_ok
+                THEN
+                    BEGIN
+                    IF  linkkey.slinkage = cak_init_linkage
+                    THEN
+                        link_cnt := linkbuf^.slink.linkcount;
+                    (*ENDIF*) 
+                    IF  NOT (unique_pk_table in
+                        dmli.d_sparr.pbasep^.sbase.blinkexist)
+                    THEN
+                        BEGIN
+                        link_cnt           := 1;
+                        max                := 1;
+                        phase_look_for_key := false
+                        END
+                    ELSE
+                        BEGIN
+                        IF  link_cnt > cak_maxlinkdef
+                        THEN
+                            max := cak_maxlinkdef
+                        ELSE
+                            max := link_cnt;
+                        (*ENDIF*) 
+                        phase_look_for_key := scan_cnt = 2
+                        END;
+                    (*ENDIF*) 
+                    link_index := 1;
+                    WHILE link_index <= max DO
+                        WITH linkbuf^.slink.linkdef[ link_index ] DO
+                            BEGIN
+                            i     := 1;
+                            isKey := lindexid [1] = chr(0);
+                            WHILE i <= lcolcount DO
+                                BEGIN
+                                extno := lprimcolseq[i];
+                                IF  NOT (extno in colset) AND
+                                    (NOT phase_look_for_key OR isKey)
+                                THEN
+                                    IF  mfirst_free > mb_st_max
+                                    THEN
+                                        a07_b_put_error (acv,
+                                              e_buffer_limit, 1)
+                                    ELSE
+                                        BEGIN
+                                        colset := colset + [ extno ];
+                                        mlink_cnt         := mlink_cnt + 1;
+                                        mb_st^ [mfirst_free] := lstack[ i ];
+                                        mfirst_free       := mfirst_free + 1;
+                                        IF  linkposbuf <> NIL
+                                        THEN
+                                            WITH linkposbuf^.slinkposinfo DO
+                                                BEGIN
+&                                               IFDEF TRACE
+                                                t01int4 (ak_sem, 'extno       ', extno);
+                                                t01int4 (ak_sem, 'pos         ', pos);
+&                                               ENDIF
+                                                lpos_info[ extno ].lpos := pos;
+                                                lpos_info[ extno ].llen :=
+                                                      lstack[ i ].elen_var;
+                                                pos := pos +
+                                                      lstack[ i ].elen_var;
+                                                END;
+                                            (*ENDWITH*) 
+                                        (*ENDIF*) 
+                                        END;
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                                IF  isKey AND phase_look_for_key
+                                THEN
+                                    BEGIN
+                                    phase_look_for_key := false;
+                                    i                  := lcolcount + 1;
+                                    link_index         := max;
+                                    link_cnt           := 0;
+                                    END
+                                ELSE
+                                    i := i + 1;
+                                (*ENDIF*) 
+                                END;
+                            (*ENDWHILE*) 
+                            link_index := link_index + 1
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDWHILE*) 
+                    link_cnt := link_cnt - max
+                    END
+                ELSE
+                    IF  b_err <> e_sysinfo_not_found
+                    THEN
+                        a07_b_put_error (acv, b_err, 1);
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                a06inc_linkage (linkkey.slinkage)
+            UNTIL
+                (link_cnt <= 0) OR (acv.a_returncode <> 0);
+            (*ENDREPEAT*) 
+            scan_cnt := scan_cnt - 1;
+            IF  scan_cnt > 0
+            THEN
+                BEGIN
+                linkkey.slinkage := cak_init_linkage
+                END;
+            (*ENDIF*) 
+        UNTIL
+            (scan_cnt = 0)  OR (acv.a_returncode <> 0);
+        (*ENDREPEAT*) 
+        IF  linkposbuf <> NIL
+        THEN
+            a10add_sysinfo (acv, linkposbuf, b_err);
+        (*ENDIF*) 
+        a58link_fn_to_messbuf (acv, file_id);
+        END;
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58strategy_to_messbuf (
+            VAR acv      : tak_all_command_glob;
+            VAR dmli     : tak_dml_info);
+ 
+VAR
+      sr_rec   : tak71_strat_rec;
+      res_tree : tgg00_FileId;
+ 
+BEGIN
+WITH acv, a_mblock, mb_qual^ DO
+    BEGIN
+    g04build_temp_tree_id (res_tree, a_transinf.tri_trans );
+    res_tree.fileTfnTemp_gg00 := ttfnLink_egg00;
+    WITH sr_rec DO
+        BEGIN
+        sr_must_result    := (mb_type <> m_select);
+        sr_use_rowno      := false;
+        sr_distinct_bytes := true;
+        sr_invkeylen      := csp_maxint2;
+        sr_reverse_access := false;
+        END;
+    (*ENDWITH*) 
+    dmli.d_distinct := no_distinct;
+    dmli.d_use_order := false;
+    dmli.d_order_or_group_cols := @dmli.d_order_cols;
+    dmli.d_order_cols.ocntord  := 0;
+    a58_mass_update_delete (dmli);
+    a70_strategy_search (acv, dmli, res_tree, sr_rec);
+&   IFDEF TRACE
+    t01messblock (ak_sem, '58strat-->mb', a_mblock);
+&   ENDIF
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak58col_desc_to_messbuf (
+            VAR acv      : tak_all_command_glob;
+            VAR dmli     : tak_dml_info;
+            VAR link_par : tlink_parameter);
+ 
+VAR
+      init_ex_kind : tak_execution_kind;
+      i            : integer;
+      j            : integer;
+      dfa          : tak_dfarr;
+ 
+BEGIN
+WITH acv, link_par DO
+    BEGIN
+    SAPDB_PascalForcedFill (sizeof(dfa), @dfa, 1, sizeof(dfa), chr(0)); (* purify *)
+    IF  a_mblock.mb_type = m_update
+    THEN
+        BEGIN (* update cols ==> message_buffer *)
+        dmli.d_foundset := [  ];
+        (* PTS 1112200 E.Z. *)
+        FOR i := 1 TO l_linkbuf^.slink.linkdef[ l_linkindex ].lcolcount DO
+            WITH l_linkbuf^.slink, linkdef[ l_linkindex ],
+                 dfa[ lseccolseq[ i ] ] DO
+                BEGIN
+                dmli.d_fieldno := lseccolseq[i];
+                a06extcolno (dmli.d_sparr.pbasep^.sbase,
+                      dmli.d_fieldno, dml_col_ptr);
+                dml_colno_in_subquery := 0;
+                dml_node              := 1;
+                j                     := 0;
+                init_ex_kind := a_ex_kind;
+                a_ex_kind    := parsing_executing;
+                IF  laction = cak_x_set_default
+                THEN
+                    a56one_default_value (acv, dmli, dml_col_ptr^,
+                          fp_val_all_with_len)
+                ELSE
+                    BEGIN
+                    IF  dml_col_ptr^.ccolstack.etype = st_fixcol
+                    THEN
+                        WITH a_mblock DO
+                            BEGIN
+                            mb_data_len := mb_data_len + 1;
+                            j := mb_data_len;
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    a55_nullvalue (acv, dmli, dfa);
+                    IF  dml_col_ptr^.ccolstack.etype = st_fixcol
+                    THEN
+                        WITH a_mblock, mb_data^ DO
+                            mbp_buf [j] := chr (mb_data_len - j);
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                a_ex_kind := init_ex_kind;
+                dmli.d_foundset := dmli.d_foundset + [ lseccolseq[ i ] ];
+                END;
+            (*ENDWITH*) 
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+    IF  dmli.d_sparr.pbasep^.sbase.bindexexist
+    THEN
+        a54_put_indices_in_mess_buf (acv,
+              dmli.d_sparr.pbasep^.sbase, dfa,
+              a_mblock.mb_type <> m_update);
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58delete_with_link (
+            VAR acv     : tak_all_command_glob;
+            VAR tabid   : tgg00_Surrogate;
+            linkindex   : integer;
+            parsno      : integer;
+            use_file_id : integer);
+ 
+VAR
+      link_parameter : tlink_parameter;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'linkindex   ', linkindex);
+t01int4 (ak_sem, 'parsno      ', parsno);
+t01int4 (ak_sem, 'use_file_id ', use_file_id);
+&ENDIF
+link_parameter.l_ex_kind    := acv.a_ex_kind;
+link_parameter.l_glob_state := acv.a_transinf.tri_global_state;
+IF  NOT (hsTempLock_egg00 in acv.a_transinf.tri_global_state) AND
+    NOT (hsPermLock_egg00 in acv.a_transinf.tri_global_state)
+THEN
+    link_parameter.l_glob_state := link_parameter.l_glob_state +
+          [ hsTempLock_egg00 ];
+(*ENDIF*) 
+acv.a_ex_kind               := only_parsing;
+link_parameter.l_first_call := true;
+link_parameter.l_act_result := false;
+link_parameter.l_upd        := false;
+ak58del_with_link (acv,
+      tabid, linkindex, parsno, use_file_id, link_parameter);
+acv.a_ex_kind := link_parameter.l_ex_kind
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58describe_long_columns (
+            VAR acv     : tak_all_command_glob;
+            VAR d_sparr : tak_syspointerarr);
+ 
+VAR
+      long_count : integer;
+      ind        : integer;
+ 
+BEGIN
+WITH acv DO
+    IF  (a_returncode = 0)
+    THEN
+        BEGIN
+        long_count := d_sparr.pbasep^.sbase.bstringcount;
+        IF  long_count > 0
+        THEN
+            WITH a_mblock, mb_qual^ DO
+                BEGIN
+                mstring_pos := mfirst_free;
+                ind         := d_sparr.pbasep^.sbase.blastkeyind;
+                (* PTS 1000873 E.Z. *)
+                WHILE (long_count > 0) AND (ind <> 0) DO
+                    WITH a103GetColumn (d_sparr.pbasep^.sbase, ind)^ DO
+                        BEGIN
+                        IF  (cdatatyp in [dstra, dstrb, dstruni,
+                            dlonga, dlongb, dlonguni]) AND
+                            NOT (ctinvisible in ccolpropset)
+                        THEN
+                            IF  mfirst_free > mb_st_max
+                            THEN
+                                BEGIN
+                                long_count := 0;
+                                a07_b_put_error (acv,
+                                      e_too_many_mb_stackentries, -mb_st_max)
+                                END
+                            ELSE
+                                BEGIN
+                                mstring_cnt := succ(mstring_cnt);
+                                mb_st^ [mfirst_free] := ccolstack;
+                                mfirst_free := succ(mfirst_free);
+                                long_count  := pred(long_count);
+                                END;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                        ind := cnextind;
+                        END
+                    (*ENDWITH*) 
+                (*ENDWHILE*) 
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58update_with_link (
+            VAR acv     : tak_all_command_glob;
+            VAR tabid   : tgg00_Surrogate;
+            check_cnt   : integer;
+            parsno      : integer);
+ 
+VAR
+      link_parameter : tlink_parameter;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'check_cnt   ', check_cnt);
+t01int4 (ak_sem, 'parsno      ', parsno);
+&ENDIF
+link_parameter.l_ex_kind    := acv.a_ex_kind;
+link_parameter.l_glob_state := acv.a_transinf.tri_global_state;
+IF  NOT (hsTempLock_egg00 in acv.a_transinf.tri_global_state) AND
+    NOT (hsPermLock_egg00 in acv.a_transinf.tri_global_state)
+THEN
+    link_parameter.l_glob_state := link_parameter.l_glob_state +
+          [ hsTempLock_egg00 ];
+(*ENDIF*) 
+acv.a_ex_kind               := only_parsing;
+link_parameter.l_first_call := true;
+link_parameter.l_act_result := false;
+link_parameter.l_upd        := true;
+link_parameter.l_upd_cnt    := check_cnt;
+link_parameter.l_posbuf     := NIL;
+ak58del_with_link (acv,
+      tabid, 0, parsno, 0, link_parameter);
+acv.a_ex_kind := link_parameter.l_ex_kind
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58destroy_linkfile (
+            VAR acv : tak_all_command_glob;
+            file_id : integer);
+ 
+VAR
+      link_tree : tgg00_FileId;
+ 
+BEGIN
+&IFDEF TRACE
+t01int4 (ak_sem, 'destroy_file', file_id);
+&ENDIF
+IF  file_id = 0
+THEN
+    BEGIN
+    a101_GetTempFileInstance (acv.a_transinf.tri_trans, acv.a_into_tree);
+    b01empty_file (acv.a_transinf.tri_trans, acv.a_into_tree);
+    END
+ELSE
+    BEGIN
+    ak58build_link_treeid (acv, link_tree, file_id);
+    a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, link_tree);
+    END;
+(*ENDIF*) 
+WITH acv.a_transinf.tri_trans DO
+    IF  (trError_gg00 <> e_ok) AND (trError_gg00 <> e_file_not_found)
+    THEN
+        a07_b_put_error (acv, trError_gg00, 1)
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58exec_link_caused_dml (
+            VAR acv       : tak_all_command_glob;
+            mblock_ptr    : tak_sysbufferaddress;
+            use_file_id   : tsp00_Int2;
+            VAR cascade   : boolean;
+            act_res_count : boolean);
+ 
+TYPE
+ 
+      a58_strat = RECORD
+            CASE boolean OF
+                true :
+                    (enum : tgg07_StratEnum);
+                false :
+                    (c    : tsp00_C2);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+VAR
+      more_records    : boolean;
+      rec_found       : boolean;
+      strat_seq       : boolean;
+      last_rec_buffer : boolean;
+      first_kb_call   : boolean;
+      resetViewCnt    : boolean;
+      trunc_char      : char;
+      res             : tsp00_LcompResult;
+      strat           : a58_strat;
+      b_err           : tgg00_BasisError;
+      init_first_free : integer;
+      default_len     : integer;
+      default_pos     : integer;
+      i               : integer;
+      j               : integer;
+      link_cnt        : integer;
+      max_trunc       : integer;
+      rec_len         : integer;
+      rec_pos         : integer;
+      pos_cnt         : integer;
+      no_of_entries   : integer;
+      strat_entry     : tgg00_StackEntry;
+      set_result      : tgg00_BdSetResultRecord;
+      tree_pos        : tgg00_FilePos;
+      zerokey         : tgg00_Lkey;
+      link_treeid     : tgg00_FileId;
+      res_treeid      : tgg00_FileId;
+      use_treeid      : tgg00_FileId;
+      buf_ptr         : tsp00_BufAddr;
+      gg_strat_ptr    : ^tgg07_StrategyInfo;
+ 
+      pos_info        : ARRAY[ 1..MAX_COL_SEQUENCE_GG00 ] OF RECORD
+            pi_pos : tsp00_Int2;
+            pi_len : tsp00_Int2;
+      END;
+ 
+      link_exec_rec   : link_exec_record;
+ 
+BEGIN
+WITH acv, a_mblock, mb_qual^, mb_data^, link_exec_rec DO
+    BEGIN
+    strat_entry.esurrogate := bsp_c8; (* to silence var-not-init warning *)
+    link_treeid  := b01niltree_id;    (* to silence var-not-init warning *)
+    res_treeid   := b01niltree_id;    (* to silence var-not-init warning *)
+    resetViewCnt := false;
+    more_records := false;
+    buf_ptr      := NIL;
+    l_p2_pos     := 0;
+    l_param_len  := 0;
+    IF  a_returncode = 0
+    THEN
+        BEGIN
+        a_mblock.mb_data_len := 0;
+        a06cpy_mblock (acv, mblock_ptr^.smessblock.mbr_mess_block,
+              a_mblock, NOT c_without_data, b_err);
+        IF  a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree)
+        THEN
+            a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+                  acv.a_mblock.mb_qual^.mtree);
+        (*ENDIF*) 
+        IF  b_err <> e_ok
+        THEN
+            a07_b_put_error (acv, b_err, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    pos_cnt      := 0;
+    strat_seq    := false;
+    default_len  := 0;
+    default_pos  := 0;
+    init_first_free := 0;
+    trunc_char      := csp_ascii_blank;
+    IF  a_returncode = 0
+    THEN
+        BEGIN
+        l_owner       := a_mblock.mb_qual^.mlc_info.mlp_owner;
+        l_tablen      := a_mblock.mb_qual^.mlc_info.mlp_tablen;
+        l_ref_name    := a_mblock.mb_qual^.mlc_info.mlp_ref_name;
+        l_m_type      := mb_type;
+        link_cnt      := mb_qual^.mlink_cnt;
+&       IFDEF TRACE
+        t01int4    (ak_sem, 'use_file_id ', use_file_id);
+        t01messblock (ak_sem, '58 link dml ', a_mblock);
+&       ENDIF
+        ak58build_link_treeid (acv, use_treeid, use_file_id);
+        a101_GetTempFileInstance (acv.a_transinf.tri_trans, use_treeid);
+        zerokey.len  := 0;
+        cascade      := false;
+        IF  l_m_type <> m_get
+        THEN (* test, if secondary table has to be processed by *)
+            (* sequential strategy and no start- and stopkey    *)
+            (* exists ==> expand mess-buffer                    *)
+            BEGIN
+            gg_strat_ptr := @acv.a_mblock.
+                  mb_strat^[ acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos ];
+            res_treeid   := gg_strat_ptr^.str_result_id;
+            res_treeid.fileHandling_gg00 :=
+                  res_treeid.fileHandling_gg00 - [ hsCreateFile_egg00 ];
+            strat.enum   := gg_strat_ptr^.str_strategy;
+            IF  (strat.enum = strat_key_range) OR
+                (strat.enum = strat_key_range_fetch)
+            THEN
+                BEGIN
+                (* if a startkey exists strategy    *)
+                (* is considered as not sequential  *)
+                IF  ( gg_strat_ptr^.str_key_in_range.skir_keystart[ 0 ] = 0 )
+                THEN
+                    strat_seq := true;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  mview_cnt > 0
+            THEN
+                BEGIN
+                resetViewCnt := true;
+                FOR i := mview_pos TO mview_pos + mview_cnt - 1 DO
+                    BEGIN
+                    pos_cnt := pos_cnt + 1;
+                    WITH pos_info[ pos_cnt ] DO
+                        BEGIN
+                        pi_pos := mb_st^ [i].epos;
+                        pi_len := mb_st^ [i].elen_var
+&                             IFDEF TRACE
+                              ;
+                        t01int4 (ak_sem, 'pi_pos      ', pi_pos);
+                        t01int4 (ak_sem, 'pi_len      ', pi_len);
+&                       ENDIF
+                        END;
+                    (*ENDWITH*) 
+                    END;
+                (*ENDFOR*) 
+                mfirst_free := mview_pos;
+                mview_pos   := 0;
+                mview_cnt   := 0
+                END;
+            (*ENDIF*) 
+            END
+        ELSE (* verify foreign key in the course of an insert *)
+            IF  mb_data_len  > 0
+            THEN
+                BEGIN (* default foreign key is stored in part2 *)
+                default_len := mbp_keylen;
+                default_pos := cgg_rec_key_offset + 1
+                END
+            ELSE
+                default_pos := 0;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        (* allocate storage in cache, where the values of the temp *)
+        (* file are to be stored in (save space of 1 buffer)       *)
+        a10new (acv, MAX_RECLEN_GG00, buf_ptr);
+        ;
+        IF  buf_ptr = NIL
+        THEN
+            a07_b_put_error (acv, e_no_more_memory, 1)
+        ELSE
+            BEGIN
+            IF  (l_m_type = m_delete) AND (link_cnt > 0)
+            THEN
+                BEGIN
+                cascade     := true;
+                link_treeid := a_mblock.mb_qual^.mlinktree;
+                a_mblock.mb_trns^.trTempCount_gg00 :=
+                      acv.a_transinf.tri_trans.trTempCount_gg00;
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        l_casc       := false;
+        more_records := true;
+        END;
+    (*ENDIF*) 
+    WITH set_result DO
+        BEGIN
+        bd_key_check_len := 0;
+        bd_max_rec_cnt   := csp_maxint2;
+        bd_max_fill_len  := mxak_parsbuf;
+        bd_next          := false;
+        END;
+    (*ENDWITH*) 
+    no_of_entries := mqual_pos;
+    IF  (l_m_type = m_select) OR (l_m_type = m_insert_select)
+    THEN
+        no_of_entries := no_of_entries + mb_st^ [mqual_pos].epos - 1;
+    (*ENDIF*) 
+    no_of_entries := mqual_pos + mqual_cnt - no_of_entries;
+    rec_pos         := 1;
+    rec_len         := 0;
+    tree_pos.tpsPno_gg00  := NIL_PAGE_NO_GG00;
+    last_rec_buffer := false;
+    first_kb_call   := true;
+    WHILE (more_records) AND (a_returncode = 0) DO
+        BEGIN
+        rec_found  := false;
+        l_loop_cnt := 0;
+        IF  l_m_type <> m_get
+        THEN
+            BEGIN
+            (* determine the position in part2, where the    *)
+            (* values needed by the qualification will start *)
+            i := 0;
+            REPEAT
+                i := i + 1;
+            UNTIL
+                mb_st^[ mqual_pos + i ].etype = st_value;
+            (*ENDREPEAT*) 
+            l_p2_pos    := mb_st^[ mqual_pos + i ].epos - cgg_rec_key_offset;
+            strat_entry := mb_st^[ mstrat_pos ];
+            init_first_free := a_mblock.mb_qual^.mfirst_free;
+            a_mblock.mb_qual^.mfirst_free :=
+                  a_mblock.mb_qual^.mstrat_pos;
+            END;
+        (*ENDIF*) 
+        REPEAT
+            (* Execute all records of the use-file *)
+            b_err := e_ok;
+            IF  rec_pos >= rec_len
+            THEN
+                BEGIN
+                b07cnext_record (a_transinf.tri_trans,
+                      use_treeid, zerokey, set_result,
+                      tree_pos, buf_ptr^);
+                b_err := a_transinf.tri_trans.trError_gg00;
+                IF  (b_err = e_ok) OR (b_err = e_key_not_found) OR
+                    (b_err = e_buffer_limit)
+                THEN
+                    BEGIN
+                    IF  b_err <> e_buffer_limit
+                    THEN
+                        last_rec_buffer := true;
+                    (*ENDIF*) 
+                    rec_len := set_result.bd_fill_len;
+                    rec_pos := 0;
+                    b_err   := e_ok
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  b_err = e_ok
+            THEN
+                BEGIN
+                l_curr_len.map_c2[ 1 ]    := buf_ptr^[ rec_pos+1 ];
+                l_curr_len.map_c2[ 2 ]    := buf_ptr^[ rec_pos+2 ];
+                l_curr_keylen.map_c2[ 1 ] := buf_ptr^[ rec_pos+3 ];
+                l_curr_keylen.map_c2[ 2 ] := buf_ptr^[ rec_pos+4 ];
+                rec_found := true;
+                b_err     := e_ok;
+                IF  l_m_type <> m_get
+                THEN (* fill values of qualification into part2 *)
+                    IF  pos_cnt = 0
+                    THEN
+                        BEGIN
+                        l_param_len := l_curr_len.map_int -
+                              cgg_rec_key_offset - l_curr_keylen.map_int;
+                        SAPDB_PascalMove ('VAK58 ',   5,    
+                              sizeof(buf_ptr^), mb_data_size,
+                              @buf_ptr^, rec_pos + cgg_rec_key_offset+
+                              l_curr_keylen.map_int + 1,
+                              @mbp_buf, l_p2_pos + cgg_rec_key_offset,
+                              l_param_len, b_err);
+                        END
+                    ELSE
+                        BEGIN
+                        l_param_len := 0;
+                        FOR j := 1 TO pos_cnt DO
+                            BEGIN
+                            IF  (l_m_type = m_insert_select) AND
+                                (buf_ptr^[rec_pos +
+                                l_curr_keylen.map_int +
+                                pos_info[ j ].pi_pos ] = csp_undef_byte)
+                            THEN
+                                rec_found := false
+                            ELSE
+                                BEGIN
+                                SAPDB_PascalMove ('VAK58 ',   6,    
+                                      sizeof(buf_ptr^), mb_data_size,
+                                      @buf_ptr^,
+                                      rec_pos + l_curr_keylen.map_int +
+                                      pos_info[ j ].pi_pos,
+                                      @mbp_buf, l_p2_pos + l_param_len +
+                                      cgg_rec_key_offset,
+                                      pos_info[ j ].pi_len, b_err);
+                                l_param_len := l_param_len +
+                                      pos_info[ j ].pi_len
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDFOR*) 
+                        END
+                    (*ENDIF*) 
+                ELSE
+                    (* keytest in the primary table :       *)
+                    (* the key has to be constructed by the *)
+                    (* record of the temporary file.        *)
+                    (* Information about positions can be   *)
+                    (* found in the link stackentries.      *)
+                    BEGIN
+                    l_p2_pos        := 0;
+                    init_first_free := 1;
+                    IF  mb_type2 = mm_key
+                    THEN
+                        BEGIN
+                        mb_type2 := mm_direct;
+                        mb_qual^.mcol_cnt   := 0;
+                        mb_data^.mbp_keylen := l_curr_keylen.map_int;
+                        SAPDB_PascalMove ('VAK58 ',   7,    
+                              sizeof(buf_ptr^), mb_data_size,
+                              @buf_ptr^, rec_pos+cgg_rec_key_offset+1,
+                              @mbp_buf, cgg_rec_key_offset + 1,
+                              l_curr_keylen.map_int, b_err);
+                        mb_data_len := cgg_rec_key_offset+
+                              l_curr_keylen.map_int;
+                        strat_seq  := false;
+                        rec_found  := true
+                        END
+                    ELSE
+                        BEGIN
+                        FOR j := mcol_pos TO mcol_pos + mcol_cnt - 1 DO
+                            BEGIN
+                            IF  buf_ptr^[ mb_st^ [j].epos +
+                                l_curr_keylen.map_int+rec_pos ] =
+                                csp_undef_byte
+                            THEN
+                                (* At least one undef-column value *)
+                                (* ==> no test in primary table    *)
+                                rec_found := false
+                            ELSE
+                                BEGIN
+                                (* columnvalue into part2 *)
+                                SAPDB_PascalMove ('VAK58 ',   8,    
+                                      sizeof(buf_ptr^), mb_data_size,
+                                      @buf_ptr^, mb_st^ [j].epos +
+                                      l_curr_keylen.map_int + rec_pos,
+                                      @mbp_buf, l_p2_pos + cgg_rec_key_offset+1,
+                                      mb_st^ [j].elen_var, b_err);
+                                trunc_char := mbp_buf [l_p2_pos+
+                                      cgg_rec_key_offset+1];
+                                l_p2_pos   := l_p2_pos +
+                                      mb_st^ [j].elen_var;
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDFOR*) 
+                        IF  rec_found
+                        THEN
+                            BEGIN (* Truncate key *)
+                            max_trunc  :=
+                                  l_p2_pos-mb_st^ [mcol_cnt].elen_var+1;
+                            j := mcol_pos + mcol_cnt - 1;
+                            IF  trunc_char = csp_unicode_def_byte
+                            THEN
+                                l_p2_pos := max_trunc + s30lnr_defbyte (@mbp_buf,
+                                      trunc_char, cgg_rec_key_offset+max_trunc+1,
+                                      mb_st^ [mcol_cnt].elen_var-1)
+                            ELSE
+                                WHILE (mbp_buf [l_p2_pos + cgg_rec_key_offset] =
+                                      trunc_char)
+                                      AND
+                                      (l_p2_pos > max_trunc) DO
+                                    l_p2_pos := l_p2_pos - 1;
+                                (*ENDWHILE*) 
+                            (*ENDIF*) 
+                            mbp_keylen := l_p2_pos;
+                            mb_data_len := cgg_rec_key_offset+l_p2_pos;
+                            (* Compare Key with default foreign key, *)
+                            (* if equal no check in primary table    *)
+                            IF  default_pos > 0
+                            THEN
+                                BEGIN
+                                s30cmp (mb_data^.mbp_buf,
+                                      cgg_rec_key_offset+1,
+                                      mb_data^.mbp_keylen,
+                                      mblock_ptr^.smessblock.mbr_mess_block.
+                                      mb_data^.mbp_buf,
+                                      default_pos, default_len, res);
+                                rec_found := res <> l_equal;
+                                END;
+                            (*ENDIF*) 
+                            mb_qual^.mstrat_cnt := 0;
+                            mb_qual^.mlink_cnt  := 0;
+                            mb_qual^.mcol_cnt   := 0;
+                            strat_seq           := false
+                            END;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  rec_pos + l_curr_len.map_int >= rec_len
+                THEN
+                    IF  last_rec_buffer
+                    THEN
+                        BEGIN
+                        more_records := false;
+                        b_err        := e_no_next_record
+                        END
+                    ELSE
+                        rec_pos := rec_pos + l_curr_len.map_int
+                    (*ENDIF*) 
+                ELSE
+                    rec_pos := rec_pos + l_curr_len.map_int;
+                (*ENDIF*) 
+                IF  l_loop_cnt = 0
+                THEN
+                    l_p2_pos := a_mblock.mb_data_len -cgg_rec_key_offset + 1
+                ELSE
+                    ak58expand_messbuf (acv, link_exec_rec, b_err);
+                (*ENDIF*) 
+&               IFDEF TRACE
+                t01int4 (ak_sem, 'strat_seq   ', ord(strat_seq));
+&               ENDIF
+                IF  strat_seq
+                THEN
+                    BEGIN
+                    (* Fill in more qualifications and        *)
+                    (* values, if there are more in temp file *)
+                    l_loop_cnt := succ(l_loop_cnt);
+                    END
+                ELSE (* send buffer to KB, see below *)
+                    b_err := e_buffer_limit;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                (* temp file is processed *)
+                IF  b_err <> e_no_next_record
+                THEN
+                    a07_b_put_error (acv, b_err, 1);
+                (*ENDIF*) 
+                more_records := false;
+                END;
+            (*ENDIF*) 
+        UNTIL
+            (b_err <> e_ok);
+        (*ENDREPEAT*) 
+        IF  ((b_err = e_no_next_record) OR
+            (b_err = e_buffer_limit)) AND (rec_found)
+        THEN
+            BEGIN
+            IF  l_loop_cnt > 1
+            THEN
+                BEGIN
+                FOR i := 1 TO l_loop_cnt - 1 DO
+                    WITH mb_st^ [mfirst_free] DO
+                        BEGIN
+                        etype       := st_op;
+                        eop         := op_or;
+                        epos        := 0;
+                        elen_var    := 0;
+                        ecol_pos    := 0;
+                        mfirst_free := mfirst_free + 1;
+                        mqual_cnt   := mfirst_free - mqual_pos;
+                        END;
+                    (*ENDWITH*) 
+                (*ENDFOR*) 
+                mstrat_pos := mfirst_free;
+                mb_st^[ mstrat_pos ] := strat_entry;
+                j := 0;
+                FOR i := mqual_pos TO mfirst_free - 1 DO
+                    IF  mb_st^ [i].etype = st_jump_true
+                    THEN
+                        BEGIN
+                        mb_st^ [i].epos := mfirst_free - i - j;
+                        j := succ(j)
+                        END;
+                    (*ENDIF*) 
+                (*ENDFOR*) 
+                mfirst_free := mstrat_pos + 1;
+                mb_data_len := cgg_rec_key_offset+l_p2_pos - 1
+                END
+            ELSE
+                mfirst_free := init_first_free;
+            (*ENDIF*) 
+            IF  first_kb_call
+            THEN
+                first_kb_call := false
+            ELSE
+                WITH a_mblock.mb_qual^ DO
+                    IF  mlink_cnt > 0
+                    THEN
+                        mlinktree.fileHandling_gg00 :=
+                              mlinktree.fileHandling_gg00 -
+                              [ hsCreateFile_egg00 ];
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            IF  l_m_type = m_insert_select
+            THEN
+                cascade := true;
+            (*ENDIF*) 
+            a06rsend_mess_buf  (acv, a_mblock, cak_return_req, b_err);
+            ak58analyze_result (acv,
+                  link_exec_rec, act_res_count, b_err);
+            IF  b_err <> e_ok
+            THEN
+                a07_b_put_error (acv, b_err, 1)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  more_records AND
+            (a_returncode = 0)
+        THEN
+            BEGIN
+            a_mblock.mb_data_len := 0;
+            a06cpy_mblock (acv, mblock_ptr^.smessblock.mbr_mess_block,
+                  a_mblock, NOT c_without_data, b_err);
+            IF  a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree)
+            THEN
+                a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+                      acv.a_mblock.mb_qual^.mtree);
+            (*ENDIF*) 
+            IF  b_err <> e_ok
+            THEN
+                a07_b_put_error (acv, b_err, 1)
+            ELSE
+                WITH a_mblock, mb_qual^ DO
+                    BEGIN
+                    IF  resetViewCnt (* PTS 1117764 *)
+                    THEN
+                        BEGIN
+                        mfirst_free := mview_pos;
+                        mview_pos   := 0;
+                        mview_cnt   := 0
+                        END;
+                    (*ENDIF*) 
+                    IF  mlink_cnt > 0
+                    THEN
+                        mb_qual^.mlinktree := link_treeid;
+                    (*ENDIF*) 
+                    IF  l_m_type = m_insert_select
+                    THEN
+                        BEGIN
+                        gg_strat_ptr := @acv.a_mblock.mb_strat^
+                              [ acv.a_mblock.mb_st^[
+                              acv.a_mblock.mb_qual^.mstrat_pos ].epos ];
+                        gg_strat_ptr^.str_result_id := res_treeid;
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            END
+        ELSE
+            a10rel_sysinfo (mblock_ptr);
+        (*ENDIF*) 
+        IF  (l_m_type = m_select)
+        THEN
+            BEGIN
+            a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, res_treeid);
+            b_err := acv.a_transinf.tri_trans.trError_gg00;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  buf_ptr <> NIL
+    THEN
+        a10dispose (acv, buf_ptr)
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  cascade
+THEN
+    BEGIN
+    cascade := link_exec_rec.l_casc;
+    IF  (NOT cascade) OR (acv.a_returncode <> 0)
+    THEN
+        BEGIN
+        IF  link_exec_rec.l_m_type = m_insert_select
+        THEN
+            ak58build_link_treeid (acv, link_treeid, -1);
+        (*ENDIF*) 
+        a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, link_treeid);
+        IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+        THEN
+            a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58link_fn_to_messbuf (
+            VAR acv : tak_all_command_glob;
+            file_id : integer);
+ 
+BEGIN
+ak58build_link_treeid (acv,
+      acv.a_mblock.mb_qual^.mlinktree, file_id);
+WITH acv.a_mblock DO
+    mb_qual_len  := mb_qual_len  + FILE_ID_MXGG00;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a58mess_buf_to_linkparsinfo (
+            VAR acv             : tak_all_command_glob;
+            parse_id            : integer;
+            VAR owner           : tsp00_KnlIdentifier;
+            VAR tablen          : tsp00_KnlIdentifier;
+            VAR constraint_name : tsp00_KnlIdentifier;
+            VAR mblock_ptr      : tak_sysbufferaddress);
+ 
+VAR
+      b_err        : tgg00_BasisError;
+      linkparskey  : tgg00_SysInfoKey;
+ 
+BEGIN
+WITH acv DO
+    IF  a_returncode = 0
+    THEN
+        BEGIN
+        linkparskey            := a01sysnullkey;
+        linkparskey.sauthid[1] := cak_tempinfo_byte;
+        SAPDB_PascalForcedMove (sizeof(a_pars_last_key), sizeof(linkparskey.sauthid),
+              @a_pars_last_key, 1, @linkparskey.sauthid, 2, mxak_parskey);
+        linkparskey.sentrytyp                   := cak_emessblock;
+        linkparskey.sintlinkage                 := parse_id;
+        a_mblock.mb_qual^.mlc_info.mlp_owner    := owner;
+        a_mblock.mb_qual^.mlc_info.mlp_tablen   := tablen;
+        a_mblock.mb_qual^.mlc_info.mlp_ref_name := constraint_name;
+        IF  a_mblock.mb_qual_len < sizeof (tgg00_LinkChainInfo)
+        THEN
+            a_mblock.mb_qual_len := sizeof (tgg00_LinkChainInfo);
+        (*ENDIF*) 
+        a10mblock_into_cache (acv, linkparskey, a_mblock,
+              d_fix, mblock_ptr, b_err);
+        IF  (a_ex_kind = only_parsing) AND (b_err = e_ok)
+        THEN
+            a10add_sysinfo (acv, mblock_ptr, b_err);
+        (*ENDIF*) 
+        IF  b_err <> e_ok
+        THEN
+            a07_b_put_error (acv, b_err, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

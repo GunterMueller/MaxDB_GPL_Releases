@@ -1,0 +1,117 @@
+#!/usr/bin/perl
+#
+# @(#)g10translator     1998-03-26
+#
+# G. Großmann, SAP AG
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package g10translator;
+use File::Basename;
+use File::Copy;
+use FileHandle;
+use ICopy;
+#use strict;
+
+#use vars qw( $srcfile $outfile $path $name $suffix);
+
+die "usage \"g10translator filenmame\"\n" if !@ARGV;
+
+$srcfile = ICopy::GetFilePath(@ARGV[0], 0, 1, 1);
+
+die "Source doesn't exist!\n" if !$srcfile;
+if ( $srcfile =~ /^vgg10/ )
+{
+    caller() ? return(0) : exit(0) ;
+}
+local $ticks;
+($name,$path,$suffix) = fileparse($srcfile, '\..+');
+if (( $suffix=~ /\.(cpp|h)/i ) or ( $name =~ /^(v|g|h|i)[a-z]{2,}[0-9]{2,}[a-z]*[c|x]$/i ))
+{ $ticks = "\"" } else { $ticks = "'" }
+
+local $Modulname = uc($name) . " "x(6-length($name));
+$Modulname = substr($Modulname, 0, 6 ) if (length($Modulname) > 6 ) ;
+$outfile = "$path"."tmp_$name.$suffix";
+
+($file_out = new FileHandle $outfile, "w") or die "Can't open $outfile (output): $!\n";
+($file_in  = new FileHandle $srcfile, "r") or die "Can't open $srcfile (input): $!\n";
+
+# check for Module Frame
+$/ = ".CM";
+$_ = <$file_in>;
+if ( !eof($file_in) )
+{
+    # module frame found, track down code section
+    $file_out->print($_);
+    $/ = "Code";
+    $_ = <$file_in>;
+    do { $file_in->close; die "No CODE section found\n" } if eof($file_in);
+    $file_out->print($_);
+}
+else
+{
+    $file_in->seek(0, 0);
+}
+$/ = "(";
+
+local ($FunctionParms, $counter);
+$counter = 0;
+while(<$file_in>)
+{
+    if ( /(g10fil|g10mv|g10mvaux)[^(]+\(/i )
+    {
+        $counter++;
+        $file_out->print($_);
+        $FunctionParms = GetFuncParameters();
+        $file_out->print($FunctionParms);
+    }
+    else
+    {
+        $file_out->print($_);
+    }
+}
+
+$file_in->close;
+$file_out->close;
+
+unlink "$srcfile.bak";
+rename($srcfile, "$srcfile.bak") or warn "Can't backup $srcfile: $!\n";
+rename($outfile, $srcfile) or warn "Can't rename $outfile to $srcfile: $!\n";
+
+###############################################################################
+
+sub GetFuncParameters {
+
+    my ($BracketDepth, $inpchar, $parameters);
+    $BracketDepth = 1;
+
+    do
+    {
+        $inpchar = $file_in->getc;
+        $parameters .= $inpchar;
+        $BracketDepth++ if $inpchar eq "(";
+        $BracketDepth-- if $inpchar eq ")";
+    }
+    until ( $BracketDepth == 0 );
+    $parameters =~ s/(.*?),(.*?),/$ticks$Modulname$ticks, $counter,/s;
+
+    return $parameters;
+}

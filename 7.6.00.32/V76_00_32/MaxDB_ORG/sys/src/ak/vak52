@@ -1,0 +1,3640 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-08-25
+*****************************************************
+modname : VAK52
+changed : 2000-08-25
+module  : AK_Lock_Commit_Rollback
+ 
+Author  : ElkeZ
+Created : 1985-02-01
+*****************************************************
+ 
+Purpose : Syntax analysis and processing of the commands:
+          LOCK, UNLOCK, COMMIT, ROLLBACK, BEGIN SUBTRANS, END SUBTRANS
+ 
+Define  :
+ 
+        PROCEDURE
+              a52_alock_statement (
+                    VAR acv          : tak_all_command_glob;
+                    VAR put_node     : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_aunlock_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_acommit_rollback_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2;
+                    commit       : boolean);
+ 
+        PROCEDURE
+              a52_aforce_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_asavepoint (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_arelease_savepoint (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52asubtrans_statement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_call_semantik (
+                    VAR acv : tak_all_command_glob;
+                    subproc : tsp00_Int2);
+ 
+        PROCEDURE
+              a52InnerTransactionStatement (
+                    VAR acv      : tak_all_command_glob;
+                    VAR put_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52_lock_statement (
+                    VAR acv    : tak_all_command_glob;
+                    start_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a52commit_rollback (
+                    VAR acv        : tak_all_command_glob;
+                    m_type         : tgg00_MessType;
+                    n_rel          : boolean;
+                    normal_release : boolean);
+ 
+        PROCEDURE
+              a52_ex_commit_rollback (
+                    VAR acv        : tak_all_command_glob;
+                    m_type         : tgg00_MessType;
+                    n_rel          : boolean;
+                    normal_release : boolean);
+ 
+        PROCEDURE
+              a52_rest_lock_statement (
+                    VAR acv       : tak_all_command_glob;
+                    VAR isparr    : tak_syspointerarr;
+                    VAR back_lock : tak_ak_all_locks;
+                    return_result : boolean;
+                    complicate    : boolean);
+ 
+        PROCEDURE
+              a52free_caches (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a52new_subtrans (
+                    VAR acv           : tak_all_command_glob;
+                    VAR subtrans_name : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a52InnerTransaction (
+                    VAR acv : tak_all_command_glob;
+                    subproc : integer);
+ 
+        PROCEDURE
+              a52internal_subtrans (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a52end_rollback_subtrans (
+                    VAR acv           : tak_all_command_glob;
+                    VAR subtrans_name : tsp00_KnlIdentifier;
+                    m_type : tgg00_MessType);
+ 
+        PROCEDURE
+              a52release_session (
+                    VAR acv        : tak_all_command_glob;
+                    normal_release : boolean);
+ 
+        PROCEDURE
+              a52init_subtrans_of_new_trans (VAR acv : tak_all_command_glob);
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01kw                : tak_keywordtab;
+              a01sysnullkey        : tgg00_SysInfoKey;
+              a01defaultkey        : tgg00_SysInfoKey;
+              a01_il_b_identifier   : tsp00_KnlIdentifier;
+ 
+        PROCEDURE
+              a01_next_symbol (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a01_is_end_symbol (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a01_call_put (
+                    VAR acv    : tak_all_command_glob;
+                    proc       : tak_procs;
+                    subproc    : tsp00_Int2;
+                    VAR curr_n : tsp00_Int2);
+ 
+        FUNCTION
+              a01_eqkey (
+                    VAR a      : tak_keyword;
+                    sqlmode    : tsp00_SqlMode;
+                    VAR b      : tsp00_MoveObj;
+                    VAR scv    : tak_scanner_glob) : boolean;
+ 
+        PROCEDURE
+              a01_get_keyword (
+                    VAR acv      : tak_all_command_glob;
+                    VAR index    : integer;
+                    VAR reserved : boolean);
+ 
+        FUNCTION
+              a01mandatory_keyword (
+                    VAR acv          : tak_all_command_glob;
+                    required_keyword : integer) : boolean;
+ 
+        PROCEDURE
+              a01_force_symbol (
+                    VAR acv         : tak_all_command_glob;
+                    expected_symbol : tak_sc_symbol;
+                    VAR node1       : tsp00_Int2;
+                    VAR node2       : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_syntax_tools : VAK02;
+ 
+        PROCEDURE
+              a02_put_identifier (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a02_atablename (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a02_l_atablename_list (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_semantic_scanner_tools : VAK05;
+ 
+        PROCEDURE
+              a05identifier_get (
+                    VAR acv     : tak_all_command_glob;
+                    tree_index  : integer;
+                    obj_len     : integer;
+                    VAR moveobj : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06_systable_get (
+                    VAR acv      : tak_all_command_glob;
+                    dstate       : tak_directory_state;
+                    VAR tableid  : tgg00_Surrogate;
+                    VAR base_ptr : tak_sysbufferaddress;
+                    get_all      : boolean;
+                    VAR ok       : boolean);
+ 
+        PROCEDURE
+              a06a_mblock_init (
+                    VAR acv      : tak_all_command_glob;
+                    mtype        : tgg00_MessType;
+                    m2type       : tgg00_MessType2;
+                    VAR tree     : tgg00_FileId);
+ 
+        PROCEDURE
+              a06lsend_mess_buf (
+                    VAR acv         : tak_all_command_glob;
+                    VAR mbuf        : tgg00_MessBlock;
+                    call_from_rsend : boolean;
+                    VAR b_err       : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06remove_locked_state (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a06rsend_mess_buf (
+                    VAR acv       : tak_all_command_glob;
+                    VAR mbuf      : tgg00_MessBlock;
+                    result_req    : boolean;
+                    VAR b_err     : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06init_curr_retpart (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a06retpart_move (
+                    VAR acv     : tak_all_command_glob;
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    move_len    : tsp00_Int4);
+ 
+        PROCEDURE
+              a06finish_curr_retpart (
+                    VAR acv   : tak_all_command_glob;
+                    part_kind : tsp1_part_kind;
+                    arg_count : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+        PROCEDURE
+              a07_error (
+                    VAR acv  : tak_all_command_glob;
+                    err      : tgg00_BasisError;
+                    VAR nod1 : tsp00_Int2;
+                    VAR nod2 : tsp00_Int2);
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07_const_b_put_error (
+                    VAR acv    : tak_all_command_glob;
+                    b_err      : tgg00_BasisError;
+                    err_code   : tsp00_Int4;
+                    param_addr : tsp00_MoveObjPtr;
+                    const_len  : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK071;
+ 
+        FUNCTION
+              a071_return_code (
+                    b_err   : tgg00_BasisError;
+                    sqlmode : tsp00_SqlMode) : tsp00_Int2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10rel_sysinfo (syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10del_sysinfo (
+                    VAR acv     : tak_all_command_glob;
+                    VAR syskey  : tgg00_SysInfoKey;
+                    VAR b_err   : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_key_del  (
+                    VAR acv    : tak_all_command_glob;
+                    VAR syskey : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              a10_add_repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    add_sysinfo  : boolean;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_fix_len_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    required_len : integer;
+                    plus         : integer;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10free_cache (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_cache_delete  (
+                    VAR acv     : tak_all_command_glob;
+                    is_rollback : boolean);
+ 
+        PROCEDURE
+              a10cmd_rollback  (VAR acv : tak_all_command_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              CatalogWrapper : VAK103;
+ 
+        PROCEDURE
+              a103CatalogSchemaId (
+                    VAR catalogSchemaId : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Link : VAK25;
+ 
+        FUNCTION
+              a25lnk_pending (VAR acv : tak_all_command_glob) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_dialog_tools : VAK260;
+ 
+        PROCEDURE
+              a260end_session (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a260session_frame_release (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a260TransEnd (
+                    VAR acv  : tak_all_command_glob;
+                    messType : tgg00_MessType;
+                    release  : boolean;
+                    VAR e    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_Sink_1 : VAK341;
+ 
+        PROCEDURE
+              ak341EndConsistentTrans (VAR Trans : tgg00_TransContext);
+ 
+        PROCEDURE
+              ak341StartConsistentTrans (VAR Trans : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Statement_Syntax : VAK351;
+ 
+        FUNCTION
+              a351admin_state (VAR acv : tak_all_command_glob) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Connect : VAK51;
+ 
+        PROCEDURE
+              a51release_cache_size_info (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a51_internal_trans (VAR acv : tak_all_command_glob;
+                    VAR old_trans : tgg00_UnivTrans);
+ 
+        PROCEDURE
+              a51close_internal_trans (VAR acv : tak_all_command_glob;
+                    VAR old_trans : tgg00_UnivTrans;
+                    m_type        : tgg00_MessType);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK54;
+ 
+        PROCEDURE
+              a54_dml_init (
+                    VAR acv   : tak_all_command_glob;
+                    VAR dmli  : tak_dml_info;
+                    in_union  : boolean);
+ 
+        PROCEDURE
+              a54_dml_finalize (
+                    VAR dmli         : tak_dml_info;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              a54_get_pparsp_pinfop (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr;
+                    mtype     : tgg00_MessType);
+ 
+        PROCEDURE
+              a54_shortinfo_to_varpart (
+                    VAR acv   : tak_all_command_glob;
+                    store_cmd : boolean;
+                    VAR infop : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a54_store_parsinfo (
+                    VAR acv   : tak_all_command_glob;
+                    VAR sparr : tak_syspointerarr);
+ 
+        PROCEDURE
+              a54set_complex_entry (
+                    VAR acv     : tak_all_command_glob;
+                    call_reason : tak_complex_call_reason);
+ 
+        PROCEDURE
+              a54_fixedpos (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              diagnose monitor : VAK545;
+ 
+        PROCEDURE
+              a545diag_parse_info (
+                    VAR acv        : tak_all_command_glob;
+                    VAR parsid     : tak_parsid;
+                    VAR sel_parsid : tak_parsid);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Parts : VAK55;
+ 
+        PROCEDURE
+              a55_akey_spec_list (
+                    VAR acv       : tak_all_command_glob;
+                    VAR put_node  : tsp00_Int2;
+                    VAR last_node : tsp00_Int2);
+ 
+        PROCEDURE
+              a55_build_key (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info;
+                    VAR dfa  : tak_dfarr;
+                    keynode  : integer);
+ 
+        PROCEDURE
+              a55_current_or_pos_of_resname (
+                    VAR acv                    : tak_all_command_glob;
+                    VAR current_or_pos_allowed : tak_allow_type;
+                    VAR put_node               : tsp00_Int2;
+                    VAR last_node              : tsp00_Int2);
+ 
+        PROCEDURE
+              a55realloc_parsinfo (
+                    VAR acv          : tak_all_command_glob;
+                    VAR parsinfo_ptr : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Delete : VAK58;
+ 
+        PROCEDURE
+              a58_current_of (
+                    VAR acv  : tak_all_command_glob;
+                    VAR dmli : tak_dml_info;
+                    curr_n   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Execute_Select_Expression : VAK660;
+ 
+        PROCEDURE
+              a660_search_one_table (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    table_node     : integer;
+                    all            : boolean;
+                    check_teresult : boolean;
+                    lockspec       : tak_lockenum;
+                    wanted_priv    : tak00_PrivR);
+ 
+        PROCEDURE
+              a660_new_pparsp (
+                    VAR acv        : tak_all_command_glob;
+                    VAR sparr      : tak_syspointerarr;
+                    first_parsinfo : boolean;
+                    complicate     : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Resultname_handling : VAK663;
+ 
+        PROCEDURE
+              a663commit_rollback
+                    (VAR acv : tak_all_command_glob;
+                    m_type   : tgg00_MessType;
+                    release  : boolean;
+                    subtrans : tgg00_SubtransNo);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+        PROCEDURE
+              b01trelease_temp_cache (VAR t : tgg00_TransContext);
+ 
+        PROCEDURE
+              b01shutdown_filesystem (VAR t : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              object_garbage_collection : VBD91;
+ 
+        PROCEDURE
+              bd91FreeCaches (VAR Trans : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_locklist : VKB51;
+ 
+        FUNCTION
+              k51is_locklist_generated (taskid : tsp00_TaskId) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_Logging : VKB560;
+ 
+        PROCEDURE
+              kb560DeleteLogTransaction (VAR Trans : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb560BeginSubtransLogTransaction (VAR Trans : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb560EndSubtransLogTransaction (VAR Trans : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb560RollbackLogTransAction (VAR Trans : tgg00_TransContext;
+                    RollbackKind : tgg00_MessType2;
+                    SubTransNo   : tgg00_SubtransNo);
+ 
+        PROCEDURE
+              kb560StartSavepointAndWait (VAR Trans : tgg00_TransContext;
+                    MessType2 : tgg00_MessType2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01diag_moni_parse_on    : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Regions_and_Longwaits : VGG08;
+ 
+        VAR
+              g08diagcache : tsp00_RegionId;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KernelAdministration_Interface : VGG999;
+ 
+        FUNCTION
+              gg999KernelStateIsAdmin : boolean;
+              (* temporary change ff 2004-FEB-06 *)
+ 
+        FUNCTION
+              gg999KernelStateIsOnline : boolean;
+ 
+        FUNCTION
+              gg999KernelStateIsRedoLogProcessing : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        FUNCTION
+              vconnectedusertasks : tsp00_Int4;
+ 
+        FUNCTION
+              visutilitytaskconnected : boolean;
+ 
+        PROCEDURE
+              vbegexcl (pid : tsp00_TaskId;
+                    region  : tsp00_RegionId);
+ 
+        PROCEDURE
+              vendexcl (pid : tsp00_TaskId;
+                    region  : tsp00_RegionId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        PROCEDURE
+              a101_DestroyContextMembers(
+                    VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a101_RemoveFromSessionList(
+                    VAR acv       : tak_all_command_glob);
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        PROCEDURE
+              a101_DestroyAllGroupedTempFiles(
+                    VAR trans      : tgg00_TransContext;
+                    VAR fileName   : tgg00_Filename);
+&       IFDEF TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01lock (
+                    layer : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    VAR l : tgg00_Lock);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR m         : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01lidentifier (
+                    debug      : tgg00_Debug;
+                    identifier : tsp00_KnlIdentifier);
+&       ENDIF
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+        PROCEDURE
+              a05identifier_get;
+ 
+              tsp00_MoveObj tsp00_KnlIdentifier
+ 
+        PROCEDURE
+              vmfree;
+ 
+              tsp00_ObjAddr tsp1_packet_ptr
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Description:
+ 
+.sp 2;A52_ALOCK_STATEMENT
+.sp
+The syntax for the LOCK command is analyzed.
+The syntax analysis of the actual lock specifications is performed in
+AK52LOCK_SPEC.
+.br;ALOCK is called in order to determine the lock mode for the specified
+tables or rows (EXCLUSIVE or SHARE).
+.br;If SHARE has been specified, a part with EXCLUSIVE specifications for
+tables and rows may still follow.
+.sp 2;A52_AUNLOCK_STATEMENT
+.sp
+The syntax of the UNLOCK command is analyzed with the aid of AKLOCK_SPEC.
+.sp 2;AK52ALOCK
+.sp
+When this procedure is called, the specifications on parts that are to be
+locked have already been syntactically analyzed. 'IN EXCLUSIVE MODE' or 'IN
+SHARE MODE' must follow. In the case of SHARE, a branch is made to AK52SHARE_PART,
+since the SHARE specifications may still be followed by specifications on
+EXCLUSIVE parts that are to be locked.
+.sp 2;AK52SHARE_PART
+.sp
+A search is made for 'SHARE MODE' and then, with the aid of AK52LOCK_SPEC, the list
+of parts to be locked is again analyzed. 'IN EXCLUSIVE MODE' must come at the
+end; the repeated specification of 'IN SHARE MODE' is illegal.
+.sp 2;AK52LOCK_SPEC
+.sp
+If entire tables are to be locked, the keyword TABLE need appear only once in
+front of a list of table names. If rows are to be locked, the keyword ROW must
+be specified for each row. The procedure AK52ROW_SPEC is called each time a row is
+specified.
+.br;The table locks must come before the row locks.
+.sp 2;AK52ROW_SPEC
+.sp
+This procedure syntactically analyzes the specification of a row that is to be
+locked. The specification of the key by 'KEY ...' or by 'CURRENT OF ...' is
+possible.
+.sp 2;A52_LOCK_STATEMENT
+.sp
+This procedure forms the main part of the processing of the LOCK and UNLOCK
+commands. It makes entries only in the message types for the Mess_Buffer and
+calls AK52BUILD_LOCK_STRING and REST_LOCK_STATEMENT.
+.sp 2;REST_LOCK_STATEMENT
+.sp
+The created Mess_Buffer of the LOCK, UNLOCK, COMMIT or ROLLBACK command is
+either sent directly to KB or is entered as parse info in the parse file. If
+only parsing is to be performed, the parse id and the parameter descriptions
+are given to the user in the SQL_PACKET.
+.sp 2;AK52BUILD_LOCK_STRING
+.sp
+The Mess_Buffer is initialized with the transferred message types. Preliminary
+entries are made in some variables in DMLI that are necessary for data input
+(fetched from the command or specified only as parameters).
+.br;Two buffers are taken from the Cache
+(A54_GET_PPARSP_PINFOP), in which, in the case of
+parsing, the parameter descriptions are stored for the user and for internal
+use.
+.br;AK52LOCKALL is called for one lock mode,to process all parts that are
+to be locked.
+.br;If both SHARE and also EXCLUSIVE locks have been requested, AK52LOCKALL is
+called a second time (the second time relates in all cases to EXCLUSIVE locks).
+.sp 2;AK52LOCKALL
+.sp
+If entire tables are to be locked, AK52LOCK_TABLES is called; if rows are also
+being locked, AK52LOCK_KEYS is used.
+.sp
+40 lock entries each of 92 bytes are available.
+.sp 2;AK52LOCK_TABLES
+.sp
+In a loop via the table list, the table description is fetched with the aid of
+AK52GET_TABLE, the privileges are checked etc. If everything is O.K., the next lock
+entry (entries) is (are) filled in the Mess_Buffer. In the case of Join-Views,
+this is done by AK52JOINVIEW_TABLELOCK. In all other cases it is done directly.
+The key length of the entry to be locked is set to 0; the mode is
+set to table-read/-write lock.
+.sp 2;AK52JOINVIEW_TABLELOCK
+.sp
+In the case of a Join-View, each base table must be locked. For this purpose,
+the system information is fetched in which the names of the base tables have
+been recorded for this view. A separate lock entry is filled for each of these
+base tables.
+.sp 2;AK52LOCK_KEYS
+.sp
+In a loop via the row entries, the table description is fetched with the aid of
+AK52GET_TABLE, the privileges are checked etc. If everything is O.K., the next lock
+entry (entries) is (are) filled in the Mess_Buffer.
+.br;In the case of Join-Views, this is done by A59_JOIN_VIEW. Afterwards the
+lock mode must be set.
+.br;For other tables, the trunc_key is pre-initialized with chr(0) and is then,
+by means of A55_BUILD_KEY (Specification 'KEY ...') or A58_CURRENT_OF
+(Specification 'CURRENT OF ...'), entirely or partially overwritten or left
+unchanged if, in the case of parsing, the parameter values are not yet known.
+.br;L_KLENGTH
+contains the length of the entire key. The key itself is truncated after the
+30th byte (trunc_keysize). This means that all records that are identical up to
+the 30th byte and that have the same length are locked with one lock entry
+although this is perhaps not what the user wanted.
+.br;It is recorded in the internal parameter information that the parameters up
+to this point form one key, i.e. an entry must now be made in k_length, and
+that the further parameters belong to the next key.
+.sp 2;AK52GET_TABLE
+.sp
+The user id and the table name are fetched from the SQL_PACKET; a search
+is made for the associated system information (A06_TABLE_EXIST). Privilege
+checks are performed, with the following applying: for read locks, only
+the Select privilege is necessary, but for write locks, the Insert,
+Update or Delete privilege is necessary.
+.br;DM_PRIVCHECK specifies whether privilege checks must still be made for
+individual fields. DM_ALLPRIVS contains as a set all the fields for which at
+least one privilege exists,
+i.e. that are known to the user. DM_ACT_SET contains
+as a set all the fields that have the desired privilege.
+.br;If necessary, an entry is made in the Sysusage table.
+.sp 2;A52_ACOMMIT_ROLLBACK_STATEMENT
+.sp
+The syntax of COMMIT and ROLLBACK is analyzed.
+.sp 2;A52_CALL_SEMANTIC
+.sp
+This is the distributor for the processing of all VAK52 commands.
+.sp 2;AK52COMMIT_ROLLBACK
+.sp
+Everything can be done by A52_EX_COMMIT_ROLLBACK.
+.br;If only parsing was requested, only the parse id is formed, in which p_no =
+maxint1 specifies that 'RELEASE' has been requested.
+.br;No parse information is stored for the commands COMMIT and ROLLBACK.
+The parse id is put into the SQL_PACKET.
+.sp 2;A52_EX_COMMIT_ROLLBACK
+.sp
+.br;For ROLLBACK, the cache is deleted, so that modified system information
+cannot be used in the next transaction by DDL commands.
+.br;A Mess_Buffer is sent to KB with this leading to a Log entry and releasing
+the locks that are still held.
+.br;If RELEASE has been specified, the string file, the result files, the file
+for the parse information and the system information for result sets, the file
+for the unnamed result set, the file in which results can, if necessary, be
+stored intermediately for SELECT ... INTO, and the Schema Unloading and
+Reloading file are deleted (see
+VAK51).
+.br;An entry is made in the Return_Code in order to inform VAK9x that a release
+has been performed (there, the Return_Code is then reset to 0).
+.br;The user is removed from the list of currently connected users;
+current_auth_id is reset to blank in order to show that no user is connected.
+.br;In all cases, the transaction number is increased by one.
+.sp 2;.fo
+A52_COL_FILE_NOLOG
+.sp
+If necessary, the file for string fields is deleted.
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_return_result   = true (* a52_rest_lock_statement *);
+      c_complicate      = true (* a52_rest_lock_statement *);
+      (*                          a660_new_pparsp *)
+      c_normal_release  = true (* a52_ex_commit_rollback  *);
+      (*                          a52release_session *)
+      c_all             = true (* ak52get_table *);
+      c_check_one_to_one= true (* ak52joinview_tablelock *);
+      c_release         = true (* ak52return_parsid *);
+      (*                          a663commit_rollback *)
+      c_call_from_rsend = true (* a06lsend_mess_buf *);
+      c_add_sysinfo     = true (* a10_add_repl_sysinfo *);
+      c_in_union        = true (* a54_dml_init *);
+      c_check_teresult  = true (* a660_search_one_table *);
+      c_first_parsinfo  = true (* a660_new_pparsp *);
+      c_is_rollback     = true;
+ 
+TYPE
+      (* pop_stack_type = (pop, delete_top, read_top); *)
+ 
+      tak52trans_end_info = RECORD
+            tei_m_type         : tgg00_MessType;
+            tei_m2_type        : tgg00_MessType2;
+            tei_release        : boolean;
+            tei_normal_release : boolean;
+            tei_drda_access    : boolean;
+            tei_two_phase      : boolean;
+            tei_rolled_back    : boolean;
+            tei_b_err          : tgg00_BasisError;
+      END;
+ 
+      (* PTS 1115978 E.Z. *)
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52end_rollback_subtrans (
+            VAR acv : tak_all_command_glob;
+            m_type : tgg00_MessType);
+ 
+VAR
+      _subtrans_name : tsp00_KnlIdentifier;
+ 
+BEGIN
+IF  acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_sa_level <> 0
+THEN
+    a05identifier_get (acv,
+          acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_sa_level,
+          sizeof(_subtrans_name), _subtrans_name)
+ELSE
+    _subtrans_name := a01_il_b_identifier;
+(*ENDIF*) 
+a52end_rollback_subtrans (acv, _subtrans_name, m_type);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52force_savepoint (VAR acv : tak_all_command_glob);
+ 
+VAR
+      _b_err        : tgg00_BasisError;
+      _sparr        : tak_syspointerarr;
+      _parsid       : tak_parsid;
+      _dummy_parsid : tak_parsid;
+ 
+BEGIN
+IF  acv.a_ex_kind = only_parsing
+THEN
+    BEGIN
+    a54_get_pparsp_pinfop (acv, _sparr, m_flush);
+    acv.a_return_segm^.sp1r_function_code := csp1_set_fc;
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        IF  _sparr.pinfop <> NIL
+        THEN
+            BEGIN
+            a10_key_del (acv, _sparr.pinfop^.syskey);
+&           ifdef trace
+            _sparr.pinfop := NIL;
+&           endif
+            acv.a_shortinfo_key := cgg_zero_id;
+            END;
+        (*ENDIF*) 
+        WITH _sparr.pparsp^.sparsinfo DO
+            BEGIN
+            p_mtyp     := m_flush;
+            p_mtyp2    := mm_with_functions; (* force savepoint*)
+            p_select   := false;
+            p_prepare  := false;
+            END;
+        (*ENDWITH*) 
+        _sparr.pparsp^.b_sl := mxak_pars_header + cak_sysbufferoffset;
+        _sparr.pparsp^.sparsinfo.p_fullen := _sparr.pparsp^.b_sl;
+        _sparr.pparsp^.b_kl := mxak_standard_sysk;
+        a10add_sysinfo (acv, _sparr.pparsp, _b_err);
+        IF  _b_err <> e_ok
+        THEN
+            a07_b_put_error (acv, _b_err, 1)
+        ELSE
+            BEGIN
+            WITH acv.a_pars_last_key DO
+                BEGIN
+                p_id[ 1 ] := chr (ord (p_id[ 1 ]) + 1);
+                p_kind    := m_flush;
+                END;
+            (*ENDWITH*) 
+            _parsid.pid_session       := acv.a_transinf.tri_trans.trSessionId_gg00;
+            _parsid.pid_parsk         := acv.a_pars_last_key;
+            _parsid.pid_appl_info[1]  := chr (acv.a_precomp_info_byte);
+            _parsid.pid_dtime_info[1] := chr (ord(dtf_none));
+            IF  g01diag_moni_parse_on
+            THEN
+                BEGIN
+                _dummy_parsid.pid_session.ci4_gg00 := cgg_nil_session;
+                a545diag_parse_info (acv, _parsid, _dummy_parsid)
+                END;
+            (* Now put the parsid into the result part. *)
+            (* Building of second return part with parsid. *)
+            (*ENDIF*) 
+            a06retpart_move (acv, @_parsid, sizeof (_parsid));
+            a06finish_curr_retpart (acv, sp1pk_parsid, 1);
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    kb560StartSavepointAndWait (acv.a_transinf.tri_trans, mm_user);
+    IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+    THEN
+        a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1);
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52InnerTransaction (
+            VAR acv : tak_all_command_glob;
+            subproc : integer);
+ 
+VAR
+      _e     : tgg00_BasisError;
+      _mType : tgg00_MessType;
+      _msg   : tsp00_C40;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_sem, 'subproc     ', subproc);
+&endif
+acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+_e                                    := e_ok;
+IF  acv.a_ex_kind = only_parsing
+THEN
+    BEGIN
+    CASE subproc OF
+        cak_x_inner_trans_begin :
+            BEGIN
+            _mType := m_innerTransBegin;
+            acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+            END;
+        cak_x_inner_trans_commit :
+            BEGIN
+            _mType := m_innerTransCommit;
+            acv.a_return_segm^.sp1r_function_code := csp1_commit_fc;
+            END;
+        OTHERWISE
+            BEGIN
+            _mType := m_innerTransRollback;
+            acv.a_return_segm^.sp1r_function_code := csp1_rollback_fc;
+            END;
+        END;
+    (*ENDCASE*) 
+    ak52return_parsid (acv, a01_il_b_identifier, _mType, NOT c_release);
+    END
+ELSE
+    IF  subproc = cak_x_inner_trans_begin
+    THEN
+        BEGIN
+        acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+        IF  acv.a_in_inner_trans
+        THEN
+            BEGIN
+            _e   := e_not_implemented;
+            _msg := 'inner transaction in inner transaction  ';
+            END
+        ELSE
+            BEGIN
+            a51_internal_trans (acv, acv.a_outer_trans);
+            IF  acv.a_transinf.tri_trans.trError_gg00 = e_ok
+            THEN
+                acv.a_in_inner_trans := true
+            ELSE
+                a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        IF  acv.a_in_inner_trans
+        THEN
+            BEGIN
+            IF  subproc = cak_x_inner_trans_commit
+            THEN
+                BEGIN
+                acv.a_return_segm^.sp1r_function_code := csp1_commit_fc;
+                _mType := m_commit
+                END
+            ELSE
+                BEGIN
+                _mType := m_rollback;
+                acv.a_return_segm^.sp1r_function_code := csp1_rollback_fc;
+                END;
+            (*ENDIF*) 
+            a51close_internal_trans (acv, acv.a_outer_trans, _mType);
+            acv.a_in_inner_trans := false;
+            END
+        ELSE
+            a07_b_put_error (acv, e_no_open_subtrans, 1);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  _e = e_not_implemented
+THEN
+    a07_const_b_put_error (acv, _e, 1, @_msg, sizeof(_msg));
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52free_caches (VAR acv : tak_all_command_glob);
+ 
+BEGIN
+IF  acv.a_sysdir.ci_cache_p <> NIL
+THEN
+    BEGIN
+    WITH acv.a_transinf DO
+        BEGIN
+        IF  tri_trans.trSessionId_gg00.ci4_gg00 <> cgg_nil_session
+        THEN
+            a51release_cache_size_info (acv);
+        (*ENDIF*) 
+        IF  tri_trans.trBdTcachePtr_gg00 <> NIL
+        THEN
+            BEGIN
+            b01trelease_temp_cache (tri_trans);
+            tri_trans.trBdTcachePtr_gg00 := NIL
+            END;
+        (*ENDIF*) 
+        IF  ( tri_trans.trFreePagesForIns_gg00 <> NIL ) OR
+            ( tri_trans.trSchemaShrLockHash_gg00 <> NIL )
+        THEN
+            bd91FreeCaches(tri_trans);
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+    a260session_frame_release  (acv);
+    a10free_cache (acv);
+    a101_DestroyContextMembers (acv);
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52alock (
+            VAR acv        : tak_all_command_glob;
+            may_optimistic : boolean;
+            VAR put_node   : tsp00_Int2);
+ 
+VAR
+      _curr_n : tsp00_Int2;
+      _last_n : tsp00_Int2;
+ 
+BEGIN
+_last_n := put_node;
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  NOT a01_eqkey (a01kw[ cak_i_in], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        IF  ((acv.a_sqlmode = sqlm_internal) AND
+            may_optimistic AND
+            a01_eqkey (a01kw[ cak_i_optimistic], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv))
+        THEN
+            BEGIN
+            a01_call_put (acv, a52, cak_x_optimistic, _curr_n);
+            acv.a_ap_tree^[ _last_n ].n_sa_level := _curr_n;
+            _last_n := _curr_n;
+            a01_next_symbol (acv);
+            END
+        ELSE
+            a07_error (acv, e_wanted_keyword, put_node, put_node)
+        (*ENDIF*) 
+    ELSE
+        BEGIN
+        a01_next_symbol (acv);
+        IF  a01_eqkey (a01kw[ cak_i_exclusive], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            BEGIN
+            a01_next_symbol (acv);
+            IF  a01mandatory_keyword (acv, cak_i_mode)
+            THEN
+                BEGIN
+                a01_call_put (acv, a52, cak_x_exclusive, _curr_n);
+                acv.a_ap_tree^[ _last_n ].n_sa_level := _curr_n;
+                _last_n := _curr_n;
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            ak52share_part (acv, acv.a_ap_tree^[ _last_n ].n_sa_level, _curr_n);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52build_lock_string (
+            VAR acv       : tak_all_command_glob;
+            VAR isparr    : tak_syspointerarr;
+            VAR back_lock : tak_ak_all_locks;
+            start_node    : tsp00_Int2;
+            start_n       : integer;
+            mtype         : tgg00_MessType;
+            m2type        : tgg00_MessType2);
+ 
+VAR
+      _b_err    : tgg00_BasisError;
+      _curr_n   : integer;
+      _next_n   : integer;
+      _lockspec : tak_lockenum;
+      _parsk    : tak_parskey;
+      _sysk     : tgg00_SysInfoKey;
+      _dmli     : tak_dml_info;
+ 
+BEGIN
+a54_dml_init (acv, _dmli, NOT c_in_union);
+_curr_n := start_n;
+a06a_mblock_init (acv, mtype, m2type, b01niltree_id);
+acv.a_mblock.mb_qual^.mlock_cnt := 0;
+back_lock.all_lock_count      := 0;
+_dmli.d_pars_kind  := fp_lock_val;
+_dmli.d_like       := false;
+_dmli.d_movebefore := 0;
+_dmli.d_nullkey    := true;
+_dmli.d_pargeslen  := 0;
+_dmli.d_maxlen     := 0;
+IF  acv.a_ex_kind = only_parsing
+THEN
+    IF  start_node <> acv.a_ap_tree^[ 0 ].n_lo_level
+    THEN
+        BEGIN
+        acv.a_pars_last_key.p_kind := mtype;
+        a660_new_pparsp (acv, _dmli.d_sparr,
+              NOT c_first_parsinfo, c_complicate);
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            a54set_complex_entry (acv, c_set_last_pars);
+            _sysk := a01sysnullkey;
+            WITH _sysk, _parsk DO
+                BEGIN
+                sauthid[ 1 ] := cak_tempinfo_byte;
+                p_count   := acv.a_pars_last_key.p_count;
+                p_id[ 1 ] := acv.a_first_parsid;
+                p_kind    := m_fetch;
+                p_no      := 0;
+                sentrytyp := cak_eshortinfo;
+                SAPDB_PascalForcedMove (sizeof(_parsk), sizeof(sauthid),
+                      @_parsk, 1, @sauthid, 2, mxak_parskey);
+                END;
+            (*ENDWITH*) 
+            a10get_sysinfo (acv, _sysk, d_fix, _dmli.d_sparr.pinfop, _b_err);
+            IF  _b_err <> e_ok
+            THEN
+                a07_b_put_error (acv, _b_err, 1);
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    ELSE
+        a54_get_pparsp_pinfop (acv, _dmli.d_sparr, mtype);
+    (*ENDIF*) 
+(*ENDIF*) 
+_next_n := acv.a_ap_tree^[ _curr_n ].n_sa_level;
+WITH acv.a_ap_tree^[ _next_n ] DO
+    IF  n_subproc = cak_x_rows
+    THEN
+        _next_n := n_sa_level;
+    (*ENDIF*) 
+(*ENDWITH*) 
+IF  acv.a_ap_tree^[ _next_n ].n_subproc = cak_x_share
+THEN
+    _lockspec := read_lock
+ELSE
+    IF  acv.a_ap_tree^[ _next_n ].n_subproc = cak_x_optimistic
+    THEN
+        _lockspec := optimistic_lock
+    ELSE
+        _lockspec := write_lock;
+    (*ENDIF*) 
+(*ENDIF*) 
+ak52lockall (acv, _dmli, _curr_n, back_lock, _lockspec);
+IF  ((_lockspec = read_lock) AND
+    (acv.a_returncode = 0))
+THEN
+    BEGIN
+    WITH acv.a_ap_tree^[ _curr_n ] DO
+        IF  n_sa_level <> 0
+        THEN
+            BEGIN
+            _curr_n := n_sa_level;
+            ak52lockall (acv, _dmli, _curr_n, back_lock, write_lock)
+            END
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    END;
+(*ENDIF*) 
+isparr := _dmli.d_sparr;
+a54_dml_finalize( _dmli, acv.a_transinf.tri_trans );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52check_pending_fks (
+            VAR acv            : tak_all_command_glob;
+            VAR trans_end_info : tak52trans_end_info);
+ 
+BEGIN
+acv.a_link_pending := false;
+IF  a25lnk_pending (acv) AND (trans_end_info.tei_m_type = m_commit)
+THEN
+    BEGIN
+    trans_end_info.tei_m_type      := m_rollback;
+    trans_end_info.tei_rolled_back := true;
+    IF  trans_end_info.tei_normal_release
+    THEN
+        BEGIN
+        trans_end_info.tei_normal_release := false;
+        trans_end_info.tei_release        := false
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52commit_messbuf (
+            VAR acv  : tak_all_command_glob;
+            m2type   : tgg00_MessType2);
+ 
+BEGIN
+a06a_mblock_init (acv, m_commit, m2type, b01niltree_id);
+SAPDB_PascalMove ('VAK52 ',   1,    
+      sizeof(acv.a_acc_user_id), acv.a_mblock.mb_qual_size,
+      @acv.a_acc_user_id, SURROGATE_MXGG00 - USERID_MXGG04 + 1,
+      @acv.a_mblock.mb_qual^.buf, 1, USERID_MXGG04,
+      acv.a_returncode);
+acv.a_mblock.mb_qual_len  := USERID_MXGG04;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52commit_rollback (
+            VAR acv : tak_all_command_glob;
+            m_type : tgg00_MessType);
+ 
+VAR
+      _n_rel              : boolean;
+      _curr_n             : integer;
+      _subtrans_name      : tsp00_KnlIdentifier;
+ 
+BEGIN
+_curr_n       := acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_lo_level;
+_n_rel        := false;
+IF  _curr_n <> 0
+THEN
+    IF  acv.a_ap_tree^[ _curr_n ].n_subproc = cak_x_release
+    THEN
+        _n_rel := true;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  acv.a_ex_kind <> only_parsing
+THEN
+    a52commit_rollback (acv, m_type, _n_rel, c_normal_release)
+ELSE
+    BEGIN
+    _subtrans_name := a01_il_b_identifier;
+    ak52return_parsid (acv, _subtrans_name, m_type, _n_rel)
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52get_table (
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info;
+            VAR lock_n : integer;
+            all        : boolean;
+            lockspec   : tak_lockenum);
+ 
+BEGIN
+dmli.d_acttabindex := 1;
+dmli.d_cntfromtab  := 1;
+dmli.d_view        := false;
+IF  lockspec = read_lock
+THEN
+    a660_search_one_table (acv, dmli, lock_n,
+          all, NOT c_check_teresult, lockspec, r_sel)
+ELSE
+    a660_search_one_table (acv, dmli, lock_n,
+          all, NOT c_check_teresult, lockspec, r_upd);
+(*ENDIF*) 
+IF  acv.a_ap_tree^[ lock_n ].n_symb = s_authid
+THEN
+    lock_n := acv.a_ap_tree^[ lock_n ].n_sa_level;
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    IF  a101_IsExtendedTempFile (acv, dmli.d_sparr.pbasep^.sbase.btreeid)
+    THEN
+        a07_b_put_error (acv, e_temp_table_not_allowed,
+              acv.a_ap_tree^[ lock_n ].n_pos)
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52complicated_view_lock (
+            VAR acv       : tak_all_command_glob;
+            VAR dmli      : tak_dml_info;
+            VAR dfa       : tak_dfarr;
+            tablelockn    : integer;
+            VAR back_lock : tak_ak_all_locks);
+ 
+VAR
+      ok                : boolean;
+      b_err             : tgg00_BasisError;
+      dummy_node        : integer;
+      tabcnt            : integer;
+      tabno             : integer;
+      viewtextkey       : tgg00_SysInfoKey;
+ 
+BEGIN
+viewtextkey           := dmli.d_sparr.pbasep^.syskey;
+viewtextkey.sentrytyp := cak_eviewtext;
+tabno                 := cak_is_undefined;
+dummy_node := 0;
+tabcnt     := 0;
+REPEAT
+    a10get_sysinfo (acv, viewtextkey, d_release,
+          dmli.d_viewtextbuf, b_err);
+    IF  b_err = e_ok
+    THEN
+        WITH dmli.d_viewtextbuf^.sviewtext DO
+            BEGIN
+            IF  tabno = cak_is_undefined
+            THEN
+                IF  va_correlation in dmli.d_sparr.pbasep^.sbase.bview_attributes
+                THEN
+                    BEGIN
+                    tabno  := 1;
+                    tabcnt := vtfromtabcnt
+                    END
+                ELSE
+                    BEGIN
+                    tabno  := vttabcount - vtfromtabcnt + 1;
+                    tabcnt := vttabcount
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            WITH vttab[ tabno ] DO
+                a06_systable_get (acv, d_release, vtttableid,
+                      dmli.d_sparr.pbasep, NOT c_all, ok);
+            (*ENDWITH*) 
+            IF  ok
+            THEN
+                CASE dmli.d_sparr.pbasep^.sbase.btablekind OF
+                    tcomplexview :
+                        ak52complicated_view_lock (acv, dmli,
+                              dfa, tablelockn, back_lock);
+                    tonebase :
+                        ak52lock_one_table (acv,
+                              dmli.d_sparr.pbasep^.sbase.btreeid,
+                              back_lock, read_lock);
+                    tview :
+                        ak52joinview_tablelock (acv, dmli,
+                              dfa, tablelockn, back_lock,
+                              read_lock,  dummy_node,
+                              NOT c_check_one_to_one);
+                    OTHERWISE
+                        ak52lock_one_table (acv,
+                              dmli.d_sparr.pbasep^.sbase.btreeid,
+                              back_lock, read_lock);
+                    END
+                (*ENDCASE*) 
+            ELSE
+                a07ak_system_error (acv, 52, 1);
+            (*ENDIF*) 
+            tabno := succ(tabno);
+            END
+        (*ENDWITH*) 
+    ELSE
+        a07_b_put_error (acv, b_err, 1);
+    (*ENDIF*) 
+UNTIL
+    (tabno > tabcnt) OR (acv.a_returncode <> 0);
+(*ENDREPEAT*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52joinview_tablelock (
+            VAR acv          : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR dfa          : tak_dfarr;
+            tablelockn       : integer;
+            VAR back_lock    : tak_ak_all_locks;
+            lockspec         : tak_lockenum;
+            curr_n           : integer;
+            check_one_to_one : boolean);
+ 
+VAR
+      _e       : tgg00_BasisError;
+      _i       : integer;
+      _iblcnt  : integer;
+      _viewp   : tak_sysbufferaddress;
+      _ke      : tgg00_SysInfoKey;
+ 
+BEGIN
+IF  lockspec = optimistic_lock
+THEN
+    a07_b_put_error (acv, e_lock_row_not_allowed, 1)
+ELSE
+    BEGIN
+    _ke           := dmli.d_sparr.pbasep^.syskey;
+    _ke.sentrytyp := cak_eviewqual_basis;
+    a10get_sysinfo (acv, _ke, d_fix, _viewp, _e);
+    IF  _e <> e_ok
+    THEN
+        a07_b_put_error (acv, _e, 1);
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        WITH back_lock DO
+            BEGIN
+            _iblcnt := all_lock_count + 1;
+            _i      := 1;
+            WHILE ((_i <= _viewp^.sviewqual_basis.vbasetabcnt) AND
+                  (acv.a_returncode = 0)) DO
+                BEGIN
+                WITH _viewp^.sviewqual_basis.vtable[ _i ] DO
+                    IF  NOT check_one_to_one OR vtone_to_one
+                    THEN
+                        IF  all_lock_count = MAX_QUALBUF_LOCKS_GG00
+                        THEN
+                            a07_b_put_error (acv, e_too_many_lockunits_specified,
+                                  acv.a_ap_tree^[ tablelockn ].n_pos)
+                        ELSE
+                            BEGIN
+                            all_lock_count := succ(all_lock_count);
+                            WITH all_locks[ all_lock_count ] DO
+                                BEGIN
+                                lockTabId_gg00  := vttableid;
+                                lockState_gg00 := [  ];
+                                IF  check_one_to_one
+                                THEN
+                                    BEGIN
+                                    IF  _i > 1
+                                    THEN
+                                        BEGIN
+                                        lockKeyPos_gg00 :=
+                                              acv.a_mblock.mb_data_len -
+                                              cgg_rec_key_offset + 1;
+                                        lockKeyLen_gg00 := back_lock.all_locks
+                                              [ _iblcnt ].lockKeyLen_gg00;
+                                        IF  (acv.a_ap_tree^[ curr_n ].n_proc = a55) AND
+                                            (acv.a_ap_tree^[ curr_n ].n_subproc =
+                                            cak_x_keyspec_list)
+                                        THEN
+                                            a55_build_key (acv,
+                                                  dmli, dfa, curr_n)
+                                        ELSE
+                                            (* PTS 1107541 E.Z. *)
+                                            BEGIN
+                                            IF  (dmli.d_maxlen + acv.a_mblock.mb_data_len) MOD ALIGNMENT_GG00 <> 0
+                                            THEN
+                                                BEGIN
+                                                acv.a_mblock.mb_data_len := acv.a_mblock.mb_data_len -
+                                                      ((dmli.d_maxlen + acv.a_mblock.mb_data_len) MOD ALIGNMENT_GG00) +
+                                                      ALIGNMENT_GG00;
+                                                IF  acv.a_ex_kind = only_parsing
+                                                THEN
+                                                    a54_fixedpos (acv, dmli);
+                                                (*ENDIF*) 
+                                                END;
+                                            (*ENDIF*) 
+                                            lockKeyPos_gg00 :=
+                                                  acv.a_mblock.mb_data_len -
+                                                  cgg_rec_key_offset + 1;
+                                            a58_current_of (acv,
+                                                  dmli, curr_n);
+                                            END;
+                                        (*ENDIF*) 
+                                        IF  acv.a_ex_kind = only_parsing
+                                        THEN
+                                            BEGIN
+                                            WITH dmli.d_sparr.pparsp^.sparsinfo DO
+                                                IF  p_cnt_infos >=
+                                                    p_max_infos
+                                                THEN
+                                                    a55realloc_parsinfo (acv,
+                                                       dmli.d_sparr.pparsp);
+                                                (*ENDIF*) 
+                                            (*ENDWITH*) 
+                                            IF  acv.a_returncode = 0
+                                            THEN
+                                                WITH dmli.d_sparr.pparsp^.sparsinfo,
+                                                     p_pars_infos[ p_cnt_infos+1 ] DO
+                                                    BEGIN
+                                                    fp_kind := fp_last_lock;
+                                                    fp_movebefore_v4 := dmli.d_movebefore;
+                                                    dmli.d_movebefore := 0;
+                                                    p_cnt_infos :=
+                                                       succ(p_cnt_infos)
+                                                    END;
+                                                (*ENDWITH*) 
+                                            (*ENDIF*) 
+                                            END;
+                                        (*ENDIF*) 
+                                        END;
+                                    (*ENDIF*) 
+                                    IF  lockspec = read_lock
+                                    THEN
+                                        lockMode_gg00 := lckRowShare_egg00
+                                    ELSE
+                                        BEGIN
+                                        lockMode_gg00 := lckRowExcl_egg00;
+                                        (*lockState_gg00 := lockState_gg00 +
+                                              [ lrs_intent_excl ]*)
+                                        END
+                                    (*ENDIF*) 
+                                    END
+                                ELSE
+                                    BEGIN
+                                    lockKeyPos_gg00 := 0;
+                                    lockKeyLen_gg00 := 0;
+                                    IF  lockspec = read_lock
+                                    THEN
+                                        lockMode_gg00 := lckTabShare_egg00
+                                    ELSE
+                                        BEGIN
+                                        lockMode_gg00 := lckTabExcl_egg00;
+                                        (*lockState_gg00 := lockState_gg00 +
+                                              [ lrs_intent_excl ]*)
+                                        END
+                                    (*ENDIF*) 
+                                    END;
+                                (*ENDIF*) 
+&                               IFDEF TRACE
+                                t01int4 (ak_sem, 'lock_cnt    ', all_lock_count);
+                                t01lock (ak_sem, '============',
+                                      all_locks[ all_lock_count ])
+&                                     ENDIF
+                                END;
+                            (*ENDWITH*) 
+                            END;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                _i := succ(_i)
+                END;
+            (*ENDWHILE*) 
+            END;
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    a10rel_sysinfo( _viewp );
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52lock_keys (
+            VAR acv       : tak_all_command_glob;
+            VAR dmli      : tak_dml_info;
+            first_n       : integer;
+            VAR back_lock : tak_ak_all_locks;
+            lockspec      : tak_lockenum);
+ 
+VAR
+      _curr_n     : integer;
+      _lock_n     : integer;
+      _tablelockn : integer;
+      _dfa        : tak_dfarr;
+ 
+BEGIN
+WITH back_lock DO
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        _lock_n := first_n;
+        REPEAT
+            _tablelockn := acv.a_ap_tree^[ _lock_n ].n_lo_level;
+            ak52get_table (acv, dmli, _tablelockn, c_all, lockspec);
+            IF  acv.a_returncode = 0
+            THEN
+                WITH dmli.d_sparr.pbasep^.sbase DO
+                    IF  (btablekind = tview)        OR
+                        (btablekind = tcomplexview) OR
+                        (btablekind = tdb2view)
+                    THEN
+                        IF  ((NOT bv_checkopt) OR
+                            (lockspec = optimistic_lock) OR
+                            (btablekind = tdb2view))
+                        THEN
+                            a07_b_put_error (acv, e_lock_row_not_allowed,
+                                  acv.a_ap_tree^[ _tablelockn ].n_pos);
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                _curr_n := acv.a_ap_tree^[ _tablelockn ].n_sa_level;
+                IF  all_lock_count = MAX_QUALBUF_LOCKS_GG00
+                THEN
+                    a07_b_put_error (acv, e_too_many_lockunits_specified,
+                          acv.a_ap_tree^[ _tablelockn ].n_pos)
+                ELSE
+                    BEGIN
+                    all_locks[ all_lock_count+1 ].lockKeyPos_gg00 :=
+                          acv.a_mblock.mb_data_len - cgg_rec_key_offset + 1;
+                    IF  (acv.a_ap_tree^[ _curr_n ].n_proc = a55) AND
+                        (acv.a_ap_tree^[ _curr_n ].n_subproc = cak_x_keyspec_list)
+                    THEN
+                        a55_build_key (acv, dmli, _dfa, _curr_n)
+                    ELSE
+                        a58_current_of (acv, dmli, _curr_n);
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+&               IFDEF TRACE
+                t01messblock (ak_sem, 'lock_keys ab', acv.a_mblock);
+&               ENDIF
+                IF  acv.a_returncode = 0
+                THEN
+                    BEGIN
+                    WITH all_locks[ all_lock_count+1 ] DO
+                        lockKeyLen_gg00 := acv.a_mblock.mb_data_len -
+                              cgg_rec_key_offset - lockKeyPos_gg00 + 1;
+                    (*ENDWITH*) 
+                    IF  acv.a_ex_kind = only_parsing
+                    THEN
+                        BEGIN
+                        WITH dmli.d_sparr.pparsp^.sparsinfo DO
+                            IF  p_cnt_infos >= p_max_infos
+                            THEN
+                                a55realloc_parsinfo (acv, dmli.d_sparr.pparsp);
+                            (*ENDIF*) 
+                        (*ENDWITH*) 
+                        IF  acv.a_returncode = 0
+                        THEN
+                            WITH dmli.d_sparr.pparsp^.sparsinfo,
+                                 p_pars_infos[ p_cnt_infos+1 ] DO
+                                BEGIN
+                                fp_kind          := fp_last_lock;
+                                fp_movebefore_v4 := dmli.d_movebefore;
+                                dmli.d_movebefore     := 0;
+                                p_cnt_infos      := p_cnt_infos + 1
+                                END;
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  dmli.d_sparr.pbasep^.sbase.btablekind <> tview
+                    THEN
+                        BEGIN
+                        all_lock_count := succ(all_lock_count);
+                        WITH dmli.d_sparr, all_locks[ all_lock_count ] DO
+                            BEGIN
+                            lockSite_gg00  := cgg_zero_c2;
+                            lockTabId_gg00 := pbasep^.sbase.btreeid.fileTabId_gg00;
+                            lockState_gg00 := [  ];
+                            IF  lockspec = read_lock
+                            THEN
+                                lockMode_gg00 := lckRowShare_egg00
+                            ELSE
+                                IF  lockspec = optimistic_lock
+                                THEN
+                                    lockMode_gg00 := lckRowOptimistic_egg00
+                                ELSE
+                                    BEGIN
+                                    lockMode_gg00 := lckRowExcl_egg00;
+                                    (*lockState_gg00 := lockState_gg00 + [ lrs_intent_excl ]*)
+                                    END;
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                            END;
+                        (*ENDWITH*) 
+                        END
+                    ELSE
+                        ak52joinview_tablelock (acv, dmli, _dfa,
+                              _tablelockn, back_lock, lockspec,
+                              _curr_n, c_check_one_to_one);
+                    (*ENDIF*) 
+                    _lock_n := acv.a_ap_tree^[ _lock_n ].n_sa_level
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        UNTIL
+            ((_lock_n = 0) OR (acv.a_returncode <> 0))
+        (*ENDREPEAT*) 
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52lock_spec (
+            VAR acv            : tak_all_command_glob;
+            VAR may_optimistic : boolean;
+            VAR put_node       : tsp00_Int2;
+            VAR last_node      : tsp00_Int2);
+ 
+VAR
+      _curr_n : tsp00_Int2;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    put_node := 0;
+    IF  (a01_eqkey (a01kw[ cak_i_table], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv))
+        OR
+        (* PTS 1107262 E.Z. *)
+        (a01_eqkey (a01kw[ cak_i_row], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv))
+    THEN
+        BEGIN
+        IF  a01_eqkey (a01kw[ cak_i_table], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            BEGIN
+            may_optimistic := false;
+            a01_call_put (acv, a52, cak_x_table, _curr_n);
+            put_node  := _curr_n;
+            last_node := _curr_n;
+            a01_next_symbol (acv);
+            IF  acv.a_sqlmode = sqlm_internal
+            THEN
+                a02_l_atablename_list (acv,
+                      acv.a_ap_tree^[ _curr_n ].n_lo_level,
+                      _curr_n)
+            ELSE
+                a02_atablename (acv,
+                      acv.a_ap_tree^[ _curr_n ].n_lo_level, _curr_n);
+            (*ENDIF*) 
+            END;
+        (* PTS 1107262 E.Z. *)
+        (*ENDIF*) 
+        IF  a01_eqkey (a01kw[ cak_i_row], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            BEGIN
+            a01_call_put (acv, a52, cak_x_rows, _curr_n);
+            IF  put_node = 0
+            THEN
+                BEGIN
+                put_node  := _curr_n;
+                last_node := _curr_n
+                END
+            ELSE
+                BEGIN
+                acv.a_ap_tree^[ last_node ].n_sa_level := _curr_n;
+                last_node := _curr_n
+                END;
+            (*ENDIF*) 
+            ak52row_spec (acv, acv.a_ap_tree^[ last_node ].n_lo_level, _curr_n);
+            WHILE a01_eqkey (a01kw[ cak_i_row], acv.a_sqlmode,
+                  acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+                  AND (acv.a_returncode = 0) DO
+                ak52row_spec (acv, acv.a_ap_tree^[ _curr_n ].n_sa_level, _curr_n)
+            (*ENDWHILE*) 
+            END
+        (*ENDIF*) 
+        END
+    ELSE
+        a07_error (acv, e_wanted_keyword, put_node, last_node)
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_lock_statement (
+            VAR acv    : tak_all_command_glob;
+            start_node : tsp00_Int2);
+ 
+VAR
+      _start_n   : integer;
+      _mtype     : tgg00_MessType;
+      _m2type    : tgg00_MessType2;
+      _isparr    : tak_syspointerarr;
+      _back_lock : tak_ak_all_locks;
+ 
+BEGIN
+_start_n := acv.a_ap_tree^[ start_node ].n_lo_level;
+IF  acv.a_ap_tree^[ start_node ].n_subproc = cak_x_unlock
+THEN
+    BEGIN
+    _mtype  := m_unlock;
+    _m2type := mm_nil
+    END
+ELSE
+    BEGIN
+    _mtype := m_lock;
+    WITH acv.a_ap_tree^[ _start_n ] DO
+        IF  n_subproc = cak_x_nowait
+        THEN
+            BEGIN
+            _m2type  := mm_test;
+            _start_n := n_sa_level
+            END
+        ELSE
+            _m2type := mm_nil;
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    END;
+(*ENDIF*) 
+ak52build_lock_string (acv, _isparr, _back_lock,
+      start_node, _start_n, _mtype, _m2type);
+a52_rest_lock_statement (acv, _isparr, _back_lock,
+      c_return_result, NOT c_complicate);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52lock_tables (
+            VAR acv       : tak_all_command_glob;
+            VAR dmli      : tak_dml_info;
+            first_n       : integer;
+            VAR back_lock : tak_ak_all_locks;
+            lockspec      : tak_lockenum);
+ 
+VAR
+      _tablelockn : integer;
+      _dummy_node : integer;
+      _dummy_dfa  : tak_dfarr;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    _dummy_node := 0;
+    _tablelockn := first_n;
+    REPEAT
+        ak52get_table (acv, dmli, _tablelockn, NOT c_all, lockspec);
+        IF  acv.a_returncode = 0
+        THEN
+            WITH dmli.d_sparr.pbasep^.sbase DO
+                BEGIN
+                CASE btablekind OF
+                    tcomplexview :
+                        ak52complicated_view_lock (acv, dmli,
+                              _dummy_dfa, _tablelockn, back_lock);
+                    tonebase :
+                        ak52lock_one_table (acv, btreeid,
+                              back_lock, lockspec);
+                    tview :
+                        ak52joinview_tablelock (acv, dmli,
+                              _dummy_dfa, _tablelockn, back_lock,
+                              lockspec,  _dummy_node,
+                              NOT c_check_one_to_one);
+                    OTHERWISE
+                        ak52lock_one_table (acv, btreeid,
+                              back_lock, lockspec);
+                    END;
+                (*ENDCASE*) 
+                _tablelockn := acv.a_ap_tree^[ _tablelockn ].n_sa_level
+                END
+            (*ENDWITH*) 
+        (*ENDIF*) 
+    UNTIL
+        ((_tablelockn = 0) OR (acv.a_returncode <> 0))
+    (*ENDREPEAT*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52lock_one_table (
+            VAR acv       : tak_all_command_glob;
+            VAR tree      : tgg00_FileId;
+            VAR back_lock : tak_ak_all_locks;
+            lockspec      : tak_lockenum);
+ 
+VAR
+      _ok              : boolean;
+      _duplicate       : boolean;
+      _i               : integer;
+      _pBase           : tak_sysbufferaddress;
+      _catalogSchemaId : tgg00_Surrogate;
+ 
+BEGIN
+WITH back_lock DO
+    BEGIN
+    _duplicate := false;
+    _i         := 1;
+    WHILE (_i <= all_lock_count) AND NOT _duplicate DO
+        WITH all_locks[ _i ] DO
+            BEGIN
+            IF  lockTabId_gg00 = tree.fileTabId_gg00
+            THEN
+                BEGIN
+                IF  lockMode_gg00 = lckTabShare_egg00
+                THEN
+                    BEGIN
+                    _duplicate := true;
+                    IF  lockspec <> read_lock
+                    THEN
+                        lockMode_gg00 := lckTabExcl_egg00
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  lockMode_gg00 = lckTabExcl_egg00
+                    THEN
+                        _duplicate := true
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            _i := _i + 1
+            END;
+        (*ENDWITH*) 
+    (*ENDWHILE*) 
+    IF  NOT _duplicate
+    THEN
+        BEGIN
+        (* check if table belongs to catalog schema ==> no explicit locks allowed *)
+        a103CatalogSchemaId (_catalogSchemaId);
+        a06_systable_get (acv, d_release, tree.fileTabId_gg00,
+              _pBase, NOT c_all, _ok);
+        IF  _ok
+        THEN
+            IF  _pBase^.sbase.bschema = _catalogSchemaId
+            THEN
+                _duplicate := true;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  NOT _duplicate
+    THEN
+        IF  all_lock_count = MAX_QUALBUF_LOCKS_GG00
+        THEN
+            a07_b_put_error (acv, e_too_many_lockunits_specified, 1)
+        ELSE
+            BEGIN
+            all_lock_count := succ(all_lock_count);
+            WITH all_locks[ all_lock_count ] DO
+                BEGIN
+                lockKeyPos_gg00 := 0;
+                lockTabId_gg00  := tree.fileTabId_gg00;
+                lockKeyLen_gg00 := 0;
+                lockState_gg00  := [  ];
+                IF  lockspec = read_lock
+                THEN
+                    lockMode_gg00 := lckTabShare_egg00
+                ELSE
+                    BEGIN
+                    lockMode_gg00 := lckTabExcl_egg00;
+                    (*lockState_gg00 := lockState_gg00 + [ lrs_intent_excl ]*)
+                    END;
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52lockall (
+            VAR acv       : tak_all_command_glob;
+            VAR dmli      : tak_dml_info;
+            VAR curr_n    : integer;
+            VAR back_lock : tak_ak_all_locks;
+            lockspec      : tak_lockenum);
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    WITH acv.a_ap_tree^[ curr_n ] DO
+        IF  n_subproc = cak_x_table
+        THEN
+            BEGIN
+            ak52lock_tables (acv, dmli, n_lo_level, back_lock, lockspec);
+            curr_n := n_sa_level
+            END;
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    WITH acv.a_ap_tree^[ curr_n ] DO
+        IF  n_subproc = cak_x_rows
+        THEN
+            BEGIN
+            ak52lock_keys (acv, dmli, n_lo_level, back_lock, lockspec);
+            curr_n := n_sa_level
+            END
+        (*ENDIF*) 
+    (*ENDWITH*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52row_spec (
+            VAR acv       : tak_all_command_glob;
+            VAR put_node  : tsp00_Int2;
+            VAR last_node : tsp00_Int2);
+ 
+VAR
+      _curr_n                 : tsp00_Int2;
+      _current_or_pos_allowed : tak_allow_type;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    a01_call_put (acv, a52, cak_x_row, _curr_n);
+    put_node  := _curr_n;
+    last_node := _curr_n;
+    a01_next_symbol (acv);
+    a02_atablename (acv,
+          acv.a_ap_tree^[_curr_n].n_lo_level, _curr_n);
+    IF  NOT a01_eqkey (a01kw[ cak_i_key], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        BEGIN
+        _current_or_pos_allowed := at_has_to_be_there;
+        a55_current_or_pos_of_resname (acv,
+              _current_or_pos_allowed,
+              acv.a_ap_tree^[ _curr_n ].n_sa_level, _curr_n);
+        END
+    ELSE
+        a55_akey_spec_list (acv, acv.a_ap_tree^[ _curr_n ].n_sa_level, _curr_n)
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52share_part (
+            VAR acv       : tak_all_command_glob;
+            VAR put_node  : tsp00_Int2;
+            VAR last_node : tsp00_Int2);
+ 
+VAR
+      _may_optimistic : boolean;
+      _curr_n         : tsp00_Int2;
+      _last_n         : tsp00_Int2;
+      _subproc        : tsp00_Int2;
+ 
+BEGIN
+_subproc := cak_x_share;
+IF  a01_eqkey (a01kw[ cak_i_share], acv.a_sqlmode,
+    acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+THEN
+    BEGIN
+    a01_next_symbol (acv);
+    IF  acv.a_sqlmode = sqlm_oracle
+    THEN
+        BEGIN
+        IF  a01_eqkey (a01kw[ cak_i_update], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            a01_next_symbol (acv)
+        ELSE
+            IF  a01_eqkey (a01kw[ cak_i_row], acv.a_sqlmode,
+                acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+            THEN
+                BEGIN
+                a01_next_symbol (acv);
+                IF  a01mandatory_keyword (acv, cak_i_exclusive)
+                THEN
+                    _subproc := cak_x_exclusive
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+ELSE
+    IF  acv.a_sqlmode <> sqlm_oracle
+    THEN
+        a07_error (acv, e_wanted_keyword, put_node, _last_n)
+    ELSE
+        IF  a01mandatory_keyword (acv, cak_i_row)
+        THEN
+            BEGIN
+            IF  a01_eqkey (a01kw[ cak_i_share], acv.a_sqlmode,
+                acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+            THEN
+                BEGIN
+                a01_next_symbol (acv);
+                _subproc := cak_x_share
+                END
+            ELSE
+                IF  a01_eqkey (a01kw[ cak_i_exclusive], acv.a_sqlmode,
+                    acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+                THEN
+                    BEGIN
+                    a01_next_symbol (acv);
+                    _subproc := cak_x_exclusive
+                    END
+                ELSE
+                    a07_error (acv, e_wanted_keyword, put_node,
+                          _last_n);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  a01mandatory_keyword (acv, cak_i_mode)
+    THEN
+        BEGIN
+        a01_call_put (acv, a52, _subproc, _curr_n);
+        put_node := _curr_n;
+        _last_n := _curr_n;
+        IF  ((a01_eqkey (a01kw[ cak_i_table], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)) OR
+            (a01_eqkey (a01kw[ cak_i_row], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)))
+            AND (acv.a_sqlmode = sqlm_internal)
+        THEN
+            BEGIN
+            _may_optimistic := false;
+            ak52lock_spec (acv, _may_optimistic,
+                  acv.a_ap_tree^[ _last_n ].n_sa_level, _curr_n);
+            _last_n := _curr_n;
+            IF  a01mandatory_keyword (acv, cak_i_in)
+            THEN
+                BEGIN
+                IF  a01mandatory_keyword (acv, cak_i_exclusive)
+                THEN
+                    BEGIN
+                    IF  a01mandatory_keyword (acv, cak_i_mode)
+                    THEN
+                        BEGIN
+                        a01_call_put (acv, a52, cak_x_exclusive, _curr_n);
+                        acv.a_ap_tree^[ _last_n ].n_sa_level := _curr_n;
+                        _last_n := _curr_n;
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        last_node := _last_n;
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52new_subtrans (VAR acv : tak_all_command_glob);
+ 
+VAR
+      _subtrans_name : tsp00_KnlIdentifier;
+ 
+BEGIN
+IF  acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_lo_level <> 0
+THEN
+    a05identifier_get (acv,
+          acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_lo_level,
+          sizeof(_subtrans_name), _subtrans_name)
+ELSE
+    _subtrans_name := a01_il_b_identifier;
+(*ENDIF*) 
+a52new_subtrans (acv, _subtrans_name);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52trans_end (
+            VAR acv            : tak_all_command_glob;
+            VAR trans_end_info : tak52trans_end_info);
+ 
+VAR
+      _b_err : tgg00_BasisError;
+ 
+BEGIN
+IF  (trans_end_info.tei_m_type = m_commit) AND (acv.a_dbproc_level = 0) (* 1106919 *)
+THEN
+    a260TransEnd (acv, trans_end_info.tei_m_type,
+          trans_end_info.tei_release, trans_end_info.tei_b_err);
+(*ENDIF*) 
+IF  (trans_end_info.tei_b_err <> e_ok) AND (trans_end_info.tei_m_type = m_commit)
+THEN
+    BEGIN
+    trans_end_info.tei_rolled_back  := true;
+    (* PTS 1109783 E.Z. *)
+    END;
+(*ENDIF*) 
+IF  (trans_end_info.tei_m_type = m_commit) AND NOT trans_end_info.tei_rolled_back
+THEN
+    ak52commit_messbuf (acv, trans_end_info.tei_m2_type)
+ELSE
+    BEGIN
+    a06a_mblock_init (acv, m_rollback, trans_end_info.tei_m2_type, b01niltree_id);
+    IF  trans_end_info.tei_m2_type = mm_destroy_temp
+    THEN
+        acv.a_mblock.mb_reply := false;
+    (*ENDIF*) 
+    acv.a_mblock.mb_qual_len  := 0;
+    END;
+(*ENDIF*) 
+a06lsend_mess_buf (acv, acv.a_mblock,
+      NOT c_call_from_rsend, trans_end_info.tei_b_err);
+(* PTS 1109783 E.Z. *)
+IF  (trans_end_info.tei_m_type = m_rollback) AND (acv.a_dbproc_level = 0) (* PTS 1106919 *)
+THEN
+    BEGIN
+    _b_err := e_ok;
+    a260TransEnd (acv, trans_end_info.tei_m_type, trans_end_info.tei_release, _b_err);
+    IF  (trans_end_info.tei_b_err = e_ok) AND (_b_err <> e_ok)
+    THEN
+        trans_end_info.tei_b_err := _b_err;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (acv.a_dbproc_level = 0)
+THEN
+    BEGIN
+    _b_err := e_ok;
+    (* PTS 1110315, unlock OmsLockObjects *)
+    (* PTS 1131350, call user-exit omsInvalidate *)
+    IF  (trans_end_info.tei_m_type = m_rollback) OR (trans_end_info.tei_rolled_back = true)
+    THEN
+        a260TransEnd (acv, m_afterRollback, trans_end_info.tei_release, _b_err)
+    ELSE
+        a260TransEnd (acv, m_afterCommit, trans_end_info.tei_release, _b_err);
+    (*ENDIF*) 
+    IF  (trans_end_info.tei_b_err = e_ok)
+    THEN
+        trans_end_info.tei_b_err := _b_err;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+acv.a_createSharedSQL     := true;
+acv.a_localCacheUsageOnly := false;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_acommit_rollback_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2;
+            commit       : boolean);
+ 
+VAR
+      _curr_n : tsp00_Int2;
+      _last_n : tsp00_Int2;
+ 
+BEGIN
+a01_next_symbol (acv);
+IF  commit
+THEN
+    a01_call_put (acv, a52, cak_x_commit, _curr_n)
+ELSE
+    a01_call_put (acv, a52, cak_x_rollback, _curr_n);
+(*ENDIF*) 
+put_node := _curr_n;
+_last_n   := _curr_n;
+IF  a01_eqkey (a01kw[ cak_i_work], acv.a_sqlmode,
+    acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+THEN
+    a01_next_symbol (acv)
+ELSE
+    IF  acv.a_sqlmode = sqlm_ansi
+    THEN
+        a07_error (acv, e_wanted_keyword, _last_n, _last_n);
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  a01_eqkey (a01kw[ cak_i_release], acv.a_sqlmode,
+    acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+THEN
+    BEGIN
+    acv.a_precomp_info_byte := csp1_p_release_found;
+    a01_call_put (acv, a52, cak_x_release, _curr_n);
+    acv.a_ap_tree^[ _last_n ].n_lo_level := _curr_n;
+    a01_next_symbol (acv)
+    END
+ELSE
+    (* PTS 1120205 E.Z. *)
+    IF  NOT (commit) AND
+        a01_eqkey (a01kw[ cak_i_to], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv) AND
+        (acv.a_sqlmode in [sqlm_oracle, sqlm_internal])
+    THEN
+        BEGIN
+        IF  acv.a_statement_kind = irollbacks
+        THEN
+            acv.a_statement_kind := irollback_subtrans;
+        (*ENDIF*) 
+        a01_next_symbol (acv);
+        IF  a01_eqkey (a01kw[ cak_i_savepoint], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            a01_next_symbol (acv);
+        (*ENDIF*) 
+        acv.a_ap_tree^[ put_node ].n_subproc :=
+              cak_x_rollback_subtrans;
+        a02_put_identifier (acv,
+              acv.a_ap_tree^[ _last_n ].n_sa_level, _last_n)
+        END;
+    (* PTS 1102895 E.Z. *)
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  commit
+THEN
+    IF  acv.a_precomp_info_byte = csp1_p_release_found
+    THEN
+        acv.a_return_segm^.sp1r_function_code := csp1_commit_release_fc
+    ELSE
+        acv.a_return_segm^.sp1r_function_code := csp1_commit_fc
+    (*ENDIF*) 
+ELSE
+    IF  acv.a_precomp_info_byte = csp1_p_release_found
+    THEN
+        acv.a_return_segm^.sp1r_function_code := csp1_rollback_release_fc
+    ELSE
+        acv.a_return_segm^.sp1r_function_code := csp1_rollback_fc;
+    (*ENDIF*) 
+(*ENDIF*) 
+a01_is_end_symbol (acv);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_aforce_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+BEGIN
+a01_next_symbol (acv);
+(* PTS 1110053 E.Z. *)
+(*
+      IF  ((acv.a_ex_kind = parsing_executing) AND
+      (acv.a_comp_type in [at_load, at_control, at_db_manager]))
+      OR
+      ((acv.a_ex_kind = only_parsing) AND (acv.a_comp_type = at_cpc))
+      OR
+      (acv.a_initial_segment_header.sp1c_mess_type = sp1m_execute)
+      THEN
+      *)
+BEGIN
+IF  NOT a01mandatory_keyword (acv, cak_i_savepoint)
+THEN
+    put_node := 0
+ELSE
+    BEGIN
+    IF  a01_eqkey (a01kw[ cak_i_no], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        BEGIN
+        a01_next_symbol (acv);
+        IF  NOT a01mandatory_keyword (acv, cak_i_open)
+        THEN
+            put_node := 0
+        ELSE
+            IF  NOT a01mandatory_keyword (acv, cak_i_transaction)
+            THEN
+                put_node := 0
+            ELSE
+                a01_call_put (acv, a52, cak_x_force_checkpoint, put_node);
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        a01_call_put (acv, a52, cak_x_force_savepoint, put_node);
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END
+(*
+      ELSE
+      a07_b_put_error (acv, e_invalid_command, 1)
+      *)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_alock_statement (
+            VAR acv          : tak_all_command_glob;
+            VAR put_node     : tsp00_Int2);
+ 
+VAR
+      _may_optimistic : boolean;
+      _testfound      : boolean;
+      _curr_n         : tsp00_Int2;
+      _last_n         : tsp00_Int2;
+ 
+BEGIN
+acv.a_return_segm^.sp1r_function_code := csp1_lock_table_fc;
+a01_call_put (acv, a52, cak_x_lock, _curr_n);
+put_node := _curr_n;
+_last_n   := _curr_n;
+a01_next_symbol (acv);
+_testfound      := false;
+_may_optimistic := (acv.a_sqlmode = sqlm_internal);
+(* PTS 1107262 E.Z. *)
+(* PTS 1120205 E.Z. *)
+IF  acv.a_scv.sc_symb = s_leftpar
+THEN
+    BEGIN
+    a01_next_symbol (acv);
+    IF  a01_eqkey (a01kw[ cak_i_nowait], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        BEGIN
+        a01_call_put (acv, a52, cak_x_nowait, _curr_n);
+        acv.a_ap_tree^[ _last_n ].n_lo_level := _curr_n;
+        a01_next_symbol (acv);
+        _testfound := true;
+        _last_n := _curr_n
+        END
+    ELSE
+        IF  a01_eqkey (a01kw[ cak_i_wait], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            a01_next_symbol (acv)
+        ELSE
+            a07_error (acv, e_wanted_keyword, put_node, _last_n);
+        (*ENDIF*) 
+    (*ENDIF*) 
+    a01_force_symbol (acv, s_rightpar, put_node, _last_n)
+    END;
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    IF  _testfound
+    THEN
+        ak52lock_spec (acv, _may_optimistic,
+              acv.a_ap_tree^[ _last_n ].n_sa_level, _curr_n)
+    ELSE
+        ak52lock_spec (acv, _may_optimistic,
+              acv.a_ap_tree^[ _last_n ].n_lo_level, _curr_n);
+    (*ENDIF*) 
+(*ENDIF*) 
+ak52alock (acv, _may_optimistic, _curr_n);
+IF  acv.a_sqlmode = sqlm_oracle
+THEN
+    IF  a01_eqkey (a01kw[ cak_i_nowait], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        BEGIN
+        a01_call_put (acv, a52, cak_x_nowait, _curr_n);
+        acv.a_ap_tree^[ _curr_n ].n_sa_level :=
+              acv.a_ap_tree^[ _last_n ].n_lo_level;
+        acv.a_ap_tree^[ _last_n ].n_lo_level := _curr_n;
+        a01_next_symbol (acv);
+        _last_n := _curr_n
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+a01_is_end_symbol (acv);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_arelease_savepoint (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      _last_n : tsp00_Int2;
+ 
+BEGIN
+a01_next_symbol (acv);
+IF  a01mandatory_keyword (acv, cak_i_savepoint)
+THEN
+    BEGIN
+    acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+    a01_call_put (acv, a52, cak_x_end_subtrans, put_node);
+    a02_put_identifier (acv, acv.a_ap_tree^[ put_node ].n_sa_level, _last_n);
+    a01_is_end_symbol (acv);
+    IF  (acv.a_returncode = 0)
+    THEN
+        acv.a_statement_kind := iend_subtrans;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_asavepoint (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      _last_n : tsp00_Int2;
+ 
+BEGIN
+acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+a01_call_put (acv, a52, cak_x_begin_subtrans, put_node);
+a01_next_symbol (acv);
+a02_put_identifier (acv, acv.a_ap_tree^[ put_node ].n_lo_level, _last_n);
+a01_is_end_symbol (acv)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_aunlock_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      _may_optimistic : boolean;
+      _curr_n         : tsp00_Int2;
+      _last_n         : tsp00_Int2;
+ 
+BEGIN
+WITH acv, a_scv DO
+    BEGIN
+    a_return_segm^.sp1r_function_code := csp1_unlock_fc;
+    a01_call_put (acv, a52, cak_x_unlock, _curr_n);
+    put_node       := _curr_n;
+    _last_n         := _curr_n;
+    _may_optimistic := true;
+    ak52lock_spec (acv, _may_optimistic,
+          a_ap_tree^[ _last_n ].n_lo_level, _curr_n);
+    ak52alock (acv, _may_optimistic, _curr_n);
+    a01_is_end_symbol (acv);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52admin_commit_release (VAR acv : tak_all_command_glob);
+ 
+VAR
+      task_cnt : integer;
+ 
+BEGIN
+IF  a101_IsExtendedTempFile (acv,  acv.a_pars_curr)
+    AND (a101_GetExtendedTempFileType (acv, acv.a_pars_curr) = ttfnPars_egg00)
+THEN
+    BEGIN
+    a101_DestroyAllGroupedTempFiles (acv.a_transinf.tri_trans,
+          acv.a_pars_curr.fileName_gg00);
+    IF  acv.a_transinf.tri_trans.trError_gg00 = e_file_not_found
+    THEN
+        acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    (*ENDIF*) 
+    IF  acv.a_transinf.tri_trans.trBdTcachePtr_gg00 <> NIL
+    THEN
+        b01trelease_temp_cache (acv.a_transinf.tri_trans);
+    (*ENDIF*) 
+    IF  acv.a_transinf.tri_trans.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  visutilitytaskconnected
+        THEN
+            task_cnt := 1
+        ELSE
+            task_cnt := 0;
+        (*ENDIF*) 
+        IF  task_cnt + vconnectedusertasks = 1
+        THEN
+            b01shutdown_filesystem (acv.a_transinf.tri_trans);
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  acv.a_transinf.tri_trans.trError_gg00 = e_ok
+THEN
+    acv.a_returncode := cak_e_released
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_call_semantik (
+            VAR acv : tak_all_command_glob;
+            subproc : tsp00_Int2);
+ 
+BEGIN
+CASE subproc OF
+    cak_x_commit :
+        ak52commit_rollback (acv, m_commit);
+    cak_x_rollback :
+        ak52commit_rollback (acv, m_rollback);
+    cak_x_begin_subtrans :
+        ak52new_subtrans (acv);
+    cak_x_end_subtrans :
+        ak52end_rollback_subtrans (acv, m_end);
+    cak_x_rollback_subtrans :
+        ak52end_rollback_subtrans (acv, m_rollback);
+    cak_x_force_savepoint,
+    cak_x_force_checkpoint :
+        (* PTS 1110053 E.Z. *)
+        ak52force_savepoint (acv);
+    cak_x_inner_trans_begin,
+    cak_x_inner_trans_commit,
+    cak_x_inner_trans_rollback :
+        a52InnerTransaction (acv, subproc);
+    OTHERWISE
+        a52_lock_statement (acv, acv.a_ap_tree^[ 0 ].n_lo_level);
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52commit_rollback (
+            VAR acv        : tak_all_command_glob;
+            m_type         : tgg00_MessType;
+            n_rel          : boolean;
+            normal_release : boolean);
+ 
+BEGIN
+(* PTS 1132993 UH 2004-12-15 changed condition *)
+IF  gg999KernelStateIsOnline
+    OR
+    (gg999KernelStateIsAdmin
+    AND
+    gg999KernelStateIsRedoLogProcessing
+    AND
+    k51is_locklist_generated (acv.a_transinf.tri_trans.trTaskId_gg00))
+THEN
+    a52_ex_commit_rollback (acv, m_type, n_rel, normal_release)
+ELSE
+    BEGIN
+    IF  (m_type = m_commit) AND n_rel
+    THEN
+        ak52admin_commit_release (acv)
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_ex_commit_rollback (
+            VAR acv        : tak_all_command_glob;
+            m_type         : tgg00_MessType;
+            n_rel          : boolean;
+            normal_release : boolean);
+ 
+VAR
+      _dummy_err        : tgg00_BasisError;
+      _sysk             : tgg00_SysInfoKey;
+      _trans_end_info   : tak52trans_end_info;
+ 
+BEGIN
+(* PTS 1113190 E.Z. *)
+_trans_end_info.tei_m_type         := m_type;
+_trans_end_info.tei_release        := n_rel AND acv.a_is_connected;
+_trans_end_info.tei_normal_release := normal_release;
+_trans_end_info.tei_drda_access    := false;
+_trans_end_info.tei_rolled_back    := false;
+(* required exceptions must not survive transaction end, PTS 1112358 *)
+acv.a_allocatorInfo.ai_badAllocCountDown := -1;
+IF  (acv.a_is_connected AND NOT gg999KernelStateIsAdmin)
+THEN
+    BEGIN
+    IF  acv.a_link_pending
+    THEN
+        ak52check_pending_fks (acv, _trans_end_info);
+    (*ENDIF*) 
+    IF  _trans_end_info.tei_release OR
+        ((acv.a_sqlmode <> sqlm_oracle)
+        AND
+        NOT ((acv.a_sqlmode = sqlm_internal) AND (m_type = m_commit)))
+    THEN
+        a663commit_rollback (acv,
+              _trans_end_info.tei_m_type, _trans_end_info.tei_release, cgg_zero_subtrans);
+    (*ENDIF*) 
+    IF  acv.a_named_subtrans
+    THEN
+        BEGIN
+        _sysk           := a01defaultkey;
+        _sysk.sentrytyp := cak_esubtrans;
+        a10del_sysinfo (acv, _sysk, _dummy_err);
+        acv.a_named_subtrans := false
+        END;
+    (*ENDIF*) 
+    IF  acv.a_in_inner_trans
+    THEN
+        BEGIN
+        acv.a_in_inner_trans := false;
+        a51close_internal_trans (acv, acv.a_outer_trans, m_type);
+        END;
+    (*ENDIF*) 
+    IF  _trans_end_info.tei_m_type = m_rollback
+    THEN
+        a10_cache_delete(acv, c_is_rollback);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  _trans_end_info.tei_release AND acv.a_is_connected
+THEN
+    _trans_end_info.tei_m2_type := mm_destroy_temp
+ELSE
+    _trans_end_info.tei_m2_type := mm_nil;
+(*ENDIF*) 
+_trans_end_info.tei_b_err     := e_ok;
+_trans_end_info.tei_two_phase := false;
+ak52trans_end (acv, _trans_end_info);
+(* PTS 1113190 E.Z. *)
+IF  _trans_end_info.tei_release
+THEN
+    BEGIN
+    (* PTS 1115978 E.Z. *)
+    (* PTS 1103938 E.Z. *)
+    a52release_session (acv, _trans_end_info.tei_normal_release);
+    IF  _trans_end_info.tei_b_err = e_ok
+    THEN
+        acv.a_returncode := cak_e_released
+    ELSE
+        acv.a_returncode := 0;
+    (*ENDIF*) 
+    END
+ELSE
+    IF  _trans_end_info.tei_b_err = e_ok
+    THEN
+        BEGIN
+        a52init_subtrans_of_new_trans (acv);
+        a06remove_locked_state (acv);
+        IF  acv.a_iso_level = cak_iso_level_trans_consistent
+        THEN
+            BEGIN
+            ak341StartConsistentTrans (acv.a_transinf.tri_trans);
+            IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+            THEN
+                a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  _trans_end_info.tei_rolled_back
+THEN
+    _trans_end_info.tei_b_err := e_work_rolled_back;
+(*ENDIF*) 
+IF  _trans_end_info.tei_b_err <> e_ok
+THEN
+    a07_b_put_error (acv, _trans_end_info.tei_b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52_rest_lock_statement (
+            VAR acv       : tak_all_command_glob;
+            VAR isparr    : tak_syspointerarr;
+            VAR back_lock : tak_ak_all_locks;
+            return_result : boolean;
+            complicate    : boolean);
+ 
+VAR
+      _b_err           : tgg00_BasisError;
+      _i               : integer;
+ 
+BEGIN
+WITH acv.a_mblock, mb_qual^, back_lock DO
+    BEGIN
+&   IFDEF TRACE
+    t01int4 (ak_sem, 'return_resul', ord(return_result));
+&   ENDIF
+    IF  acv.a_returncode = 0
+    THEN
+        IF  acv.a_ex_kind <> only_parsing
+        THEN
+            BEGIN
+            mlock_cnt    := 0;
+            FOR _i := 1 TO all_lock_count DO
+                WITH all_locks[ _i ] DO
+                    BEGIN
+                    mlock_cnt           := succ (mlock_cnt);
+                    mlock [ mlock_cnt ] := all_locks[ _i ];
+                    END;
+                (*ENDWITH*) 
+            (*ENDFOR*) 
+            mb_qual_len    := MB_PART1_LOCKHEAD_MXGG04 + mlock_cnt * LOCK_MXGG04;
+            IF  (mlock_cnt > 0) AND
+                (acv.a_returncode = 0)
+            THEN
+                BEGIN
+                a06rsend_mess_buf (acv, acv.a_mblock,
+                      NOT cak_return_req, _b_err);
+                IF  _b_err <> e_ok
+                THEN
+                    BEGIN
+                    acv.a_part_rollback := true;
+                    a07_b_put_error (acv, _b_err,
+                          acv.a_cmd_part^.sp1p_buf_len)
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            isparr.pparsp^.sparsinfo.p_select   := false;
+            mlock_cnt := all_lock_count;
+            FOR _i := 1 TO all_lock_count DO
+                mlock[ _i ] := all_locks[ _i ];
+            (*ENDFOR*) 
+            mb_qual_len  :=
+                  MB_PART1_LOCKHEAD_MXGG04 + mlock_cnt * LOCK_MXGG04;
+            a54_store_parsinfo (acv, isparr);
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( acv.a_ex_kind = only_parsing ) AND
+        ( acv.a_returncode = 0 )
+        AND (NOT complicate)
+    THEN
+        a54_shortinfo_to_varpart (acv, acv.a_initial_segment_header.sp1c_prepare, isparr.pinfop);
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(* PTS 1115978 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52asubtrans_statement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      _id : integer;
+ 
+BEGIN
+_id := cak_x_commit;
+a01_next_symbol (acv);
+IF  a01_eqkey (a01kw[ cak_i_begin], acv.a_sqlmode,
+    acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+THEN
+    BEGIN
+    acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+    _id := cak_x_begin_subtrans
+    END
+ELSE
+    IF  a01_eqkey (a01kw[ cak_i_end], acv.a_sqlmode,
+        acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+    THEN
+        BEGIN
+        acv.a_return_segm^.sp1r_function_code := csp1_commit_fc;
+        _id := cak_x_end_subtrans
+        END
+    ELSE
+        IF  a01_eqkey (a01kw[ cak_i_rollback], acv.a_sqlmode,
+            acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+        THEN
+            BEGIN
+            acv.a_return_segm^.sp1r_function_code := csp1_rollback_fc;
+            _id := cak_x_rollback_subtrans
+            END
+        ELSE
+            a07_error (acv, e_wanted_keyword, put_node, put_node);
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  acv.a_statement_kind = isql_commands
+    THEN
+        CASE _id OF
+            cak_x_begin_subtrans :
+                acv.a_statement_kind := ibegin_subtrans;
+            cak_x_end_subtrans :
+                acv.a_statement_kind := iend_subtrans;
+            cak_x_rollback_subtrans :
+                acv.a_statement_kind := irollback_subtrans;
+            END;
+        (*ENDCASE*) 
+    (*ENDIF*) 
+    a01_next_symbol (acv);
+    a01_call_put (acv, a52, _id, put_node);
+    a01_is_end_symbol (acv)
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52InnerTransactionStatement (
+            VAR acv      : tak_all_command_glob;
+            VAR put_node : tsp00_Int2);
+ 
+VAR
+      _reserved : boolean;
+      _id       : integer;
+      _kw       : integer;
+ 
+BEGIN
+a01_next_symbol (acv);
+_id := cak_x_commit; (* or any other dummy-value *)
+IF  a01mandatory_keyword (acv, cak_i_transaction)
+THEN
+    BEGIN
+    a01_get_keyword (acv, _kw, _reserved);
+    CASE _kw OF
+        cak_i_begin :
+            _id := cak_x_inner_trans_begin;
+        cak_i_commit :
+            _id := cak_x_inner_trans_commit;
+        cak_i_rollback :
+            _id := cak_x_inner_trans_rollback;
+        OTHERWISE
+            a07_error (acv, e_wanted_keyword, put_node, put_node);
+        END;
+    (*ENDCASE*) 
+    a01_next_symbol (acv);
+    END;
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    a01_call_put (acv, a52, _id, put_node);
+    a01_is_end_symbol (acv);
+    END
+(*ENDIF*) 
+END;
+ 
+(* PTS 1102303 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52end_rollback_subtrans (
+            VAR acv           : tak_all_command_glob;
+            VAR subtrans_name : tsp00_KnlIdentifier;
+            m_type            : tgg00_MessType);
+ 
+VAR
+      _cmd_rollback   : boolean;
+      _b_err          : tgg00_BasisError;
+      _subtrans_id    : tgg00_SubtransNo;
+      _i              : integer;
+      _sysk           : tgg00_SysInfoKey;
+ 
+BEGIN
+IF  ((acv.a_ex_kind <> only_parsing) AND NOT (acv.a_in_internal_subtr))
+    OR
+    (
+    acv.a_in_internal_subtr AND
+    ((acv.a_internal_sql = no_internal_sql) OR acv.a_in_ddl_trigger) AND
+    (* PTS 1111044 E.Z. *)
+    ((acv.a_long_desc_pos = 0) OR (acv.a_ex_kind = only_parsing))
+    )
+THEN
+    BEGIN
+    acv.a_ptr1               := NIL;
+    _b_err                := e_ok;
+    _subtrans_id := acv.a_transinf.tri_trans.trSubtransId_gg00;
+    IF  subtrans_name <> a01_il_b_identifier
+    THEN
+        BEGIN (* rollback of named subtrans *)
+        _sysk           := a01defaultkey;
+        _sysk.sentrytyp := cak_esubtrans;
+        a10get_sysinfo (acv, _sysk,
+              d_release, acv.a_ptr1, _b_err);
+        IF  _b_err = e_ok
+        THEN
+            WITH acv.a_ptr1^.ssubtrans DO
+                BEGIN
+                _subtrans_id := cgg_zero_subtrans;
+                _i := str_count;
+                WHILE _i > 0 DO
+                    WITH str_subtrans[ _i ] DO
+                        BEGIN
+                        IF  str_name = subtrans_name
+                        THEN
+                            BEGIN
+                            _subtrans_id := str_no;
+                            IF  ( m_type = m_rollback )
+                            THEN
+                                str_count    := _i
+                            ELSE
+                                str_count    := pred(_i);
+                            (*ENDIF*) 
+                            _i           := 0;
+                            END
+                        ELSE
+                            _i := _i - 1;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDWITH*) 
+                (*ENDWHILE*) 
+                IF  _subtrans_id = cgg_zero_subtrans
+                THEN
+                    a07_b_put_error (acv, e_no_open_subtrans, 1);
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+        ELSE
+            IF  _b_err = e_sysinfo_not_found
+            THEN
+                a07_b_put_error (acv, e_no_open_subtrans, 1)
+            ELSE
+                a07_b_put_error (acv, _b_err, 1)
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (* PTS 1123746 E.Z. *)
+    (*ENDIF*) 
+    IF  (_b_err = e_ok) AND
+        (acv.a_returncode <> a071_return_code (e_no_open_subtrans, acv.a_sqlmode))
+    THEN
+        BEGIN
+        _cmd_rollback    := acv.a_part_rollback AND acv.a_in_internal_subtr;
+        IF  NOT acv.a_in_internal_subtr
+        THEN
+            IF  m_type = m_rollback
+            THEN
+                acv.a_return_segm^.sp1r_function_code := csp1_rollback_fc
+            ELSE
+                acv.a_return_segm^.sp1r_function_code := csp1_commit_fc;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        acv.a_part_rollback := false;
+        IF  _cmd_rollback
+        THEN
+            m_type := m_rollback;
+        (*ENDIF*) 
+        IF  m_type = m_rollback
+        THEN
+            BEGIN
+            acv.a_transinf.tri_trans.trSubtransId_gg00 := _subtrans_id;
+            acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+            kb560RollbackLogTransAction (acv.a_transinf.tri_trans, mm_subtrans, _subtrans_id);
+            _b_err := acv.a_transinf.tri_trans.trError_gg00;
+            IF  _b_err <> e_ok
+            THEN
+                BEGIN
+                IF  (_b_err = e_work_rolled_back) OR
+                    (_b_err = e_rollb_log_full  )
+                THEN
+                    (* returncode may be <> 0 in case this procedure   *)
+                    (* is called by vak93 in case of an error          *)
+                    (* those errors seem to be stronger than any other *)
+                    acv.a_returncode := 0;
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+            kb560EndSubtransLogTransaction (acv.a_transinf.tri_trans);
+            _b_err := acv.a_transinf.tri_trans.trError_gg00;
+            END;
+        (*ENDIF*) 
+        IF  (_b_err <> e_ok)
+        THEN
+            a07_b_put_error (acv, _b_err, 1)
+        ELSE
+            BEGIN
+            IF  acv.a_in_internal_subtr
+            THEN
+                acv.a_in_internal_subtr := false
+            ELSE
+                BEGIN
+                IF  (acv.a_ptr1 <> NIL) AND (acv.a_returncode = 0)
+                THEN
+                    WITH acv.a_ptr1^.ssubtrans DO
+                        BEGIN
+                        acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+                        IF  ( m_type = m_rollback )
+                        THEN
+                            BEGIN
+                            kb560BeginSubtransLogTransaction (acv.a_transinf.tri_trans);
+                            str_subtrans[ str_count ].str_no :=
+                                  acv.a_transinf.tri_trans.trSubtransId_gg00;
+                            END;
+                        (*ENDIF*) 
+                        acv.a_ptr1^.b_sl := cak_sysbufferoffset +
+                              4 + sizeof (tak_named_subtrans_info) * str_count;
+                        a10_add_repl_sysinfo (acv,
+                              acv.a_ptr1, NOT c_add_sysinfo, _b_err);
+                        IF  _b_err <> e_ok
+                        THEN
+                            a07_b_put_error (acv, _b_err, 1)
+                        (*ENDIF*) 
+                        END;
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  m_type = m_rollback
+            THEN
+                IF  _cmd_rollback
+                THEN
+                    BEGIN
+                    a10cmd_rollback (acv);
+                    IF  acv.a_isolation_info = temp_lock_rec_get
+                    THEN
+                        acv.a_isolation_info := temp_lock_rec_needed
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    IF  acv.a_sqlmode = sqlm_internal
+                    THEN
+                        a663commit_rollback (acv, m_partial_rollback,
+                              NOT c_release, _subtrans_id);
+                    (*ENDIF*) 
+                    a10_cache_delete(acv, c_is_rollback)
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+ELSE
+    IF  NOT acv.a_in_internal_subtr
+    THEN
+        BEGIN
+        IF  m_type = m_rollback
+        THEN
+            m_type := m_partial_rollback;
+        (*ENDIF*) 
+        ak52return_parsid (acv, subtrans_name, m_type,
+              NOT c_release)
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52internal_subtrans (VAR acv : tak_all_command_glob);
+ 
+BEGIN
+IF  NOT acv.a_in_internal_subtr
+THEN
+    BEGIN
+    acv.a_in_internal_subtr := true;
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    kb560BeginSubtransLogTransaction (acv.a_transinf.tri_trans);
+    IF  (acv.a_returncode = 0) AND NOT acv.a_in_ddl_trigger
+    THEN
+        BEGIN
+        WITH acv.a_transinf.tri_trans DO
+            trState_gg00 := trState_gg00 - [ tsSubUpdated_egg00 ]
+        (*ENDWITH*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52new_subtrans (
+            VAR acv           : tak_all_command_glob;
+            VAR subtrans_name : tsp00_KnlIdentifier);
+ 
+VAR
+      _b_err      : tgg00_BasisError;
+      _i          : integer;
+      _j          : integer;
+      _sysk       : tgg00_SysInfoKey;
+ 
+BEGIN
+IF  acv.a_ex_kind <> only_parsing
+THEN
+    BEGIN
+    acv.a_return_segm^.sp1r_function_code := csp1_savepoint_fc;
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    kb560BeginSubtransLogTransaction (acv.a_transinf.tri_trans);
+    IF  (acv.a_returncode = 0) AND
+        (subtrans_name <> a01_il_b_identifier)
+    THEN
+        BEGIN (* savepoint <savepoint name> *)
+        _sysk           := a01defaultkey;
+        _sysk.sentrytyp := cak_esubtrans;
+        a10_fix_len_get_sysinfo (acv, _sysk, d_release,
+              cak_sysbufferoffset + 4 + sizeof (tak_named_subtrans_info),
+              sizeof (tak_named_subtrans_info), acv.a_ptr1, _b_err);
+        IF  acv.a_returncode = 0
+        THEN
+            WITH acv.a_ptr1^.ssubtrans DO
+                BEGIN
+                acv.a_named_subtrans := true;
+                IF  _b_err = e_sysinfo_not_found
+                THEN
+                    BEGIN
+                    acv.a_ptr1^.b_sl := cak_sysbufferoffset + 4;
+                    str_count    := 0
+                    END;
+                (*ENDIF*) 
+                _i := 1;
+                WHILE _i <= str_count DO
+                    IF  str_subtrans[ _i ].str_name = subtrans_name
+                    THEN
+                        BEGIN (* redefinition of subtrans name *)
+                        FOR _j := _i + 1 TO str_count DO
+                            str_subtrans[ _j-1 ] := str_subtrans[ _j ];
+                        (*ENDFOR*) 
+                        WITH str_subtrans[ str_count ] DO
+                            BEGIN
+                            str_name := subtrans_name;
+                            str_no   := acv.a_transinf.tri_trans.trSubtransId_gg00
+                            END;
+                        (*ENDWITH*) 
+                        _i := csp_maxint2
+                        END
+                    ELSE
+                        _i := _i + 1;
+                    (*ENDIF*) 
+                (*ENDWHILE*) 
+                IF  _i < csp_maxint2
+                THEN
+                    BEGIN (* new savepoint name *)
+                    IF  str_count >= cak_max_named_subtrans
+                    THEN
+                        a07_b_put_error (acv, e_too_many_named_subtrans, 1)
+                    ELSE
+                        BEGIN
+                        str_count := str_count + 1;
+                        WITH str_subtrans[ str_count ] DO
+                            BEGIN
+                            str_name := subtrans_name;
+                            str_no   := acv.a_transinf.tri_trans.trSubtransId_gg00
+                            END;
+                        (*ENDWITH*) 
+                        acv.a_ptr1^.b_sl := acv.a_ptr1^.b_sl +
+                              sizeof (tak_named_subtrans_info)
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                a10_add_repl_sysinfo (acv,
+                      acv.a_ptr1, _b_err = e_sysinfo_not_found, _b_err);
+                IF  _b_err <> e_ok
+                THEN
+                    a07_b_put_error (acv, _b_err, 1)
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    ak52return_parsid (acv, subtrans_name, m_begin, NOT c_release)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52release_session (
+            VAR acv        : tak_all_command_glob;
+            normal_release : boolean);
+ 
+VAR
+      _b_err       : tgg00_BasisError;
+      _s           : tgg00_ServerdbNo;
+ 
+BEGIN
+a101_RemoveFromSessionList (acv); (* PTS 1135218 M.Ki. *)
+IF  acv.a_iso_level = cak_iso_level_trans_consistent
+THEN
+    ak341EndConsistentTrans (acv.a_transinf.tri_trans);
+(*ENDIF*) 
+a260end_session (acv);
+acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+(* PTS 1103938 E.Z. *)
+IF  normal_release
+THEN
+    a06a_mblock_init (acv, m_release, mm_nil, b01niltree_id)
+ELSE
+    a06a_mblock_init (acv, m_release, mm_ignore, b01niltree_id);
+(*ENDIF*) 
+_s := cgg04_nil_site;
+acv.a_mblock.mb_qual^.buf[ 1 ] := _s[ 1 ];
+acv.a_mblock.mb_qual^.buf[ 2 ] := _s[ 2 ];
+SAPDB_PascalMove ('VAK52 ',   2,    
+      sizeof(acv.a_init_user_id), acv.a_mblock.mb_qual_size,
+      @acv.a_init_user_id, SURROGATE_MXGG00 - USERID_MXGG04 + 1,
+      @acv.a_mblock.mb_qual^.buf, 3, USERID_MXGG04,
+      acv.a_returncode);
+acv.a_mblock.mb_qual_len  := 2 + USERID_MXGG04;
+a06lsend_mess_buf (acv, acv.a_mblock,
+      NOT c_call_from_rsend, _b_err);
+acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+kb560DeleteLogTransaction (acv.a_transinf.tri_trans); (* Logging74 UH *)
+acv.a_curr_user_name    := a01_il_b_identifier;
+acv.a_is_connected      := false;
+acv.a_in_internal_subtr := false;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak52return_parsid (
+            VAR acv           : tak_all_command_glob;
+            VAR subtrans_name : tsp00_KnlIdentifier;
+            m_type            : tgg00_MessType;
+            release           : boolean);
+ 
+VAR
+      _b_err        : tgg00_BasisError;
+      _parsid       : tak_parsid;
+      _dummy_parsid : tak_parsid;
+ 
+BEGIN
+IF  (subtrans_name <> a01_il_b_identifier)
+THEN
+    BEGIN
+    a54_get_pparsp_pinfop (acv, acv.a_p_arr1, m_type);
+    IF  (acv.a_returncode = 0)
+    THEN
+        WITH acv.a_p_arr1.pparsp^, sparsinfo DO
+            BEGIN
+            p_resn             := subtrans_name;
+            p_statement_kind   := acv.a_statement_kind;
+            p_filler1          := false;
+            p_function_code    := acv.a_return_segm^.sp1r_function_code;
+            p_sqlmode          := acv.a_sqlmode;
+            p_own_trans        := false;
+            b_sl := cak_sysbufferoffset + mxak_pars_header;
+            p_fullen           := b_sl;
+            a10_add_repl_sysinfo (acv,
+                  acv.a_p_arr1.pparsp, c_add_sysinfo, _b_err)
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    WITH acv.a_pars_last_key DO
+        BEGIN
+        p_id[ 1 ] := chr (ord (p_id[ 1 ]) + 1);
+        p_kind    := m_type;
+        IF  release
+        THEN
+            p_no := csp_maxint1
+        ELSE
+            IF  acv.a_sqlmode <> acv.a_session_sqlmode
+            THEN
+                BEGIN
+                a54_get_pparsp_pinfop (acv, acv.a_p_arr1, m_type);
+                IF  (acv.a_returncode = 0)
+                THEN
+                    WITH acv.a_p_arr1.pparsp^, sparsinfo DO
+                        BEGIN
+                        p_resn             := subtrans_name;
+                        p_statement_kind   := acv.a_statement_kind;
+                        p_filler1          := false;
+                        p_function_code    := acv.a_return_segm^.sp1r_function_code;
+                        p_sqlmode          := acv.a_sqlmode;
+                        p_own_trans        := false;
+                        b_sl := cak_sysbufferoffset + mxak_pars_header;
+                        p_fullen           := b_sl;
+                        a10_add_repl_sysinfo (acv,
+                              acv.a_p_arr1.pparsp, c_add_sysinfo, _b_err);
+                        END;
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                p_no := csp_maxint1 - 2;
+                END
+            ELSE
+                p_no := csp_maxint1 - 1;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+    END;
+(*ENDIF*) 
+_parsid.pid_session       := acv.a_transinf.tri_trans.trSessionId_gg00;
+_parsid.pid_parsk         := acv.a_pars_last_key;
+_parsid.pid_appl_info[1]  := chr (acv.a_precomp_info_byte);
+_parsid.pid_dtime_info[1] := chr (ord(dtf_none));
+IF  g01diag_moni_parse_on
+THEN
+    BEGIN
+    _dummy_parsid.pid_session.ci4_gg00 := cgg_nil_session;
+    a545diag_parse_info (acv, _parsid, _dummy_parsid)
+    END;
+(* Now put the parsid into the result part. *)
+(*ENDIF*) 
+a06retpart_move (acv, @_parsid,  sizeof (_parsid));
+a06finish_curr_retpart (acv, sp1pk_parsid, 1);
+a06init_curr_retpart (acv);
+a06finish_curr_retpart (acv, sp1pk_shortinfo, 0);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a52init_subtrans_of_new_trans (VAR acv : tak_all_command_glob);
+ 
+BEGIN
+(* setting of real subtrans is done in KB *)
+acv.a_in_internal_subtr := false;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

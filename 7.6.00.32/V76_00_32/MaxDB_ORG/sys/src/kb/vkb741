@@ -1,0 +1,463 @@
+.nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2004-04-16
+*****************************************************
+modname : VKB741
+changed : 2004-04-16
+module  : KB_Join_Select
+ 
+Author  : GertG
+Created : 2004-04-16
+*****************************************************
+ 
+Purpose : Processing the join between two tables
+ 
+Define  :
+ 
+        PROCEDURE
+              k741_create_lkey(
+                    trans               : tgg00_TransContextPtr;
+                    VAR right_rec       : tgg00_Rec;
+                    VAR getrec          : tgg07_get_param;
+                    VAR left_key        : tgg00_Lkey;
+                    VAR result_possible : boolean );
+ 
+        PROCEDURE
+              k741_create_rkey(
+                    trans               : tgg00_TransContextPtr;
+                    VAR left_rec        : tgg00_Rec;
+                    VAR getrec          : tgg07_get_param;
+                    VAR right_key       : tgg00_Lkey;
+                    VAR result_possible : boolean );
+ 
+.CM *-END-* define --------------------------------------
+Use     :
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+&       ifdef trace
+        PROCEDURE
+              g01abort (
+                    msg_no     : tsp00_Int4;
+                    msg_label  : tsp00_C8;
+                    msg_text   : tsp00_C24;
+                    bad_value  : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04smallest_greater_key_ex(
+                    VAR key     : tgg00_Lkey;
+                    max_length  : tsp00_Int2 );
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    size1          : tsp00_Int4;
+                    size2          : tsp00_Int4;
+                    val1           : tsp00_MoveObjPtr;
+                    p1             : tsp00_Int4;
+                    val2           : tsp00_MoveObjPtr;
+                    p2             : tsp00_Int4;
+                    cnt            : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : char;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedFill (
+                    size        : tsp00_Int4;
+                    m           : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4;
+                    len         : tsp00_Int4;
+                    fillchar    : char);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        FUNCTION
+              s30lnr_defbyte (
+                    str       : tsp00_MoveObjPtr;
+                    defbyte   : char;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01char (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    c     : char);
+ 
+        PROCEDURE
+              t01sname (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01key (
+                    debug   : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    VAR k   : tgg00_Lkey);
+ 
+        PROCEDURE
+              t01int4 (
+                    layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+ 
+        PROCEDURE
+              t01buf (
+                    debug    : tgg00_Debug;
+                    VAR buf  : tgg00_Rec;
+                    startpos : integer;
+                    endpos   : integer);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+Synonym :
+ 
+        PROCEDURE
+              t01buf;
+ 
+              tsp00_Buf tgg00_Rec;
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+Specification:
+ 
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+Description:
+ 
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k741_create_lkey(
+            trans               : tgg00_TransContextPtr;
+            VAR right_rec       : tgg00_Rec;
+            VAR getrec          : tgg07_get_param;
+            VAR left_key        : tgg00_Lkey;
+            VAR result_possible : boolean );
+ 
+VAR
+      _i        : tsp00_Int2;
+      _rcol_len : tsp00_Int4;
+ 
+LABEL
+      999;
+ 
+BEGIN
+(* temporary result ist ordered ascending *)
+&ifdef trace
+SAPDB_PascalForcedFill( sizeof( left_key.k ),
+      @left_key.k, 1, sizeof( left_key.k ), '8' );
+&endif
+result_possible := true;
+left_key.len := 0;
+IF  (( getrec.gi_linkrec.kbjr_jointrans_cnt > 0 ) AND
+    NOT ( getrec.gi_linkrec.kbjr_jarr[ getrec.gi_linkrec.kbjr_jpath ].
+    kbji_parts[1].kboj_op in [ op_le, op_lt, op_ne,
+    op_like, op_not_like, op_sounds, op_not_sounds ] ))
+THEN
+    BEGIN
+    left_key.len := 0;
+&   ifdef trace
+    t01int4( kb, 'kbjr_jpath  ', getrec.gi_linkrec.kbjr_jpath );
+&   endif
+    FOR _i := 1 TO  getrec.gi_linkrec.kbjr_jpath DO
+        BEGIN
+        (* BOOLEAN FALSE '00 00', with s30lnr_defbyte() = 0 with startpos *)
+        (* same as defined byte pos, therefore 1 + s30lnr_defbyte(pos+1)  *)
+        _rcol_len := 1 + s30lnr_defbyte( @right_rec,
+              right_rec.recBuf_gg00[ getrec.gi_linkrec.
+              kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_recpos ],
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_recpos + 1,
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len - 1 );
+&       ifdef trace
+        IF  ( _i < getrec.gi_linkrec.kbjr_jpath ) AND
+            ( getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[1].kboj_op <> op_eq )
+        THEN
+            g01abort (csp3_structure_check, csp3_n_join,
+                  'WRONG KBOJ_OP           ',
+                  ord(getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[1].kboj_op));
+        (*ENDIF*) 
+        t01int4( kb, 'left deflen ',
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len );
+        t01int4( kb, 'right deflen',
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len );
+        t01int4( kb, 'right len   ', _rcol_len );
+        t01sname( kb, 'right col   ' );
+        t01buf( kb,
+              right_rec,
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_recpos,
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_recpos +
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len - 1 );
+&       endif
+        ;
+        IF  ( getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len
+            < _rcol_len )
+        THEN
+            BEGIN
+            (* right column content longer than left column *)
+            result_possible := false;
+            goto 999;
+            END
+        ELSE
+            BEGIN
+            (* copy key value, right col val to left key *)
+            SAPDB_PascalMove ('VKB741',   1,    
+                  sizeof(right_rec), sizeof(left_key.k),
+                  @right_rec,
+                  getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_recpos,
+                  @left_key.k, left_key.len + 1,
+                  _rcol_len,
+                  trans^.trError_gg00);
+            IF  ( _i < getrec.gi_linkrec.kbjr_jpath )
+            THEN
+                BEGIN
+                IF  ( getrec.gi_linkrec.kbjr_jarr[ _i ].
+                    kbji_parts[ 1 ].kboj_len > _rcol_len )
+                THEN
+                    (* left > right, fill with define byte *)
+                    BEGIN
+                    SAPDB_PascalFill('VKB741',   2,    
+                          sizeof( left_key.k ),
+                          @left_key.k, left_key.len + _rcol_len + 1,
+                          getrec.gi_linkrec.kbjr_jarr[ _i ].
+                          kbji_parts[ 1 ].kboj_len - _rcol_len,
+                          left_key.k[ left_key.len + 1 ],
+                          trans^.trError_gg00 );
+                    END;
+                (*ENDIF*) 
+                left_key.len := left_key.len +
+                      getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len
+                END
+            ELSE
+                BEGIN
+                left_key.len := left_key.len + _rcol_len;
+                IF  ( getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[1].kboj_op = op_gt )
+                THEN
+                    BEGIN
+                    IF  ( getrec.gi_linkrec.kbjr_jarr[ _i ].
+                        kbji_parts[ 1 ].kboj_len > _rcol_len )
+                    THEN
+                        BEGIN
+                        IF  ( left_key.k[ left_key.len - _rcol_len + 1 ]
+                            <> csp_defined_byte )
+                        THEN
+                            BEGIN
+                            (* string type *)
+                            g04smallest_greater_key_ex( left_key, KEY_MXSP00 );
+                            END
+                        ELSE
+                            BEGIN
+                            g04smallest_greater_key_ex( left_key, left_key.len );
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        (* left len <= right len *)
+                        BEGIN
+                        g04smallest_greater_key_ex( left_key, left_key.len );
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    (*ENDFOR*) 
+    END;
+(*ENDIF*) 
+;
+&ifdef trace
+t01key( kb, 'left_key    ', left_key );
+&endif
+999: ;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k741_create_rkey(
+            trans               : tgg00_TransContextPtr;
+            VAR left_rec        : tgg00_Rec;
+            VAR getrec          : tgg07_get_param;
+            VAR right_key       : tgg00_Lkey;
+            VAR result_possible : boolean );
+ 
+VAR
+      _i        : tsp00_Int2;
+      _lcol_len : tsp00_Int4;
+ 
+LABEL
+      999;
+ 
+BEGIN
+&ifdef trace
+SAPDB_PascalForcedFill( sizeof( right_key.k ),
+      @right_key.k, 1, sizeof( right_key.k ), '8' );
+&endif
+result_possible := true;
+right_key.len := 0;
+;
+FOR _i := 1 TO  getrec.gi_linkrec.kbjr_jpath DO
+    BEGIN
+    _lcol_len := 1 + s30lnr_defbyte( @left_rec,
+          left_rec.recBuf_gg00[ getrec.gi_linkrec.
+          kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_recpos ],
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_recpos + 1,
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len - 1 );
+&   ifdef trace
+    IF  ( _i < getrec.gi_linkrec.kbjr_jpath ) AND
+        ( getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[1].kboj_op <> op_eq )
+    THEN
+        g01abort (csp3_structure_check, csp3_n_join,
+              'WRONG KBOJ_OP           ',
+              ord(getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[1].kboj_op));
+    (*ENDIF*) 
+    t01int4( kb, 'left deflen ',
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len );
+    t01int4( kb, 'right deflen',
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len );
+    t01int4( kb, 'left len    ', _lcol_len );
+    t01sname( kb, 'left col    ' );
+    t01buf( kb,
+          left_rec,
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_recpos,
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_recpos +
+          getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_len - 1 );
+&   endif
+    IF  ( _lcol_len >
+        getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len )
+    THEN
+        BEGIN
+        (* left column content longer than right column *)
+        result_possible := false;
+        goto 999;
+        END
+    ELSE
+        BEGIN
+        (* copy key value, left col val to right key *)
+        SAPDB_PascalMove ('VKB741',   3,    
+              sizeof(left_rec), sizeof(right_key.k),
+              @left_rec,
+              getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 1 ].kboj_recpos,
+              @right_key.k, right_key.len + 1,
+              _lcol_len,
+              trans^.trError_gg00);
+        IF  ( _i < getrec.gi_linkrec.kbjr_jpath )
+        THEN
+            BEGIN
+            IF  ( _lcol_len < getrec.gi_linkrec.kbjr_jarr[ _i ].
+                kbji_parts[ 2 ].kboj_len )
+            THEN
+                (* left < right, fill with define byte *)
+                BEGIN
+                SAPDB_PascalFill('VKB741',   4,    
+                      sizeof( right_key.k ),
+                      @right_key.k, right_key.len + _lcol_len + 1,
+                      getrec.gi_linkrec.kbjr_jarr[ _i ].
+                      kbji_parts[ 2 ].kboj_len - _lcol_len,
+                      right_key.k[ right_key.len + 1 ],
+                      trans^.trError_gg00 );
+                END;
+            (*ENDIF*) 
+            right_key.len := right_key.len +
+                  getrec.gi_linkrec.kbjr_jarr[ _i ].kbji_parts[ 2 ].kboj_len
+            END
+        ELSE
+            BEGIN
+            right_key.len := right_key.len + _lcol_len;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDFOR*) 
+;
+&ifdef trace
+t01key( kb, 'right_key   ', right_key );
+&endif
+999: ;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

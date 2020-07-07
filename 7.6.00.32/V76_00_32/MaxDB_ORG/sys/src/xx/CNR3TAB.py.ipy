@@ -1,0 +1,242 @@
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+def install (session,options):
+    """Installing system tables for R3 backup information
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+
+    requireSysdba (session)
+
+    switchToSchema (session, 'SYSDBM')
+
+    #== TABLE CNMEDIA ============================================
+
+    if not existsTable (session, "SYSDBM.CNMEDIA"):
+        stopIfSqlNotOK (session, """CREATE TABLE CNMEDIA (
+            MEDIA_ID        CHAR(128) ASCII CONSTRAINT CNMEDIA_PK PRIMARY KEY,
+            TYPE            CHAR(1)   ASCII,
+            OVERWRITE       CHAR(1)   ASCII,
+            MAXSIZE         CHAR(18)  ASCII,
+            USED            CHAR(8)   ASCII,
+            NEXT_ID         CHAR(8)   ASCII,
+            BLKSIZE         CHAR(2)   ASCII,
+            DEVPATH1        CHAR(128) ASCII,
+            DEVPATH2        CHAR(128) ASCII,
+            DESC            CHAR(80)  ASCII,
+            OS_CMD          CHAR(255) ASCII,
+            PARALLEL        CHAR(1)   ASCII
+            )
+            INTERNAL""")
+
+        stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON CNMEDIA TO PUBLIC")
+
+        if existsTable (session, "SYSDBA.CNMEDIA"):
+
+            stopIfSqlNotErr (session, 100, """INSERT CNMEDIA SELECT * FROM SYSDBA.CNMEDIA""")
+            stopIfSqlNotOK (session, """DROP TABLE SYSDBA.CNMEDIA""")
+    else:
+        stopIfSqlNotErr (session, -4004, 'DROP VIEW SYSDBA.CNMEDIA')
+
+
+    sqlOK (session, "DROP VIEW SYSBU$MEDIA")
+
+    stopIfSqlNotOK (session, "CREATE VIEW SYSBU$MEDIA AS SELECT * FROM CNMEDIA INTERNAL")
+    stopIfSqlNotOK (session, "GRANT SELECT ON SYSBU$MEDIA TO PUBLIC")
+
+    #== TABLE CNMEDDEF =============================================
+
+    if not sqlOK (session, "EXISTS TABLE CNMEDDEF"):
+        stopIfSqlNotOK (session, """CREATE TABLE CNMEDDEF (
+            CMD_ID           CHAR(12)  ASCII,
+            LABEL            CHAR(9)   ASCII,
+            VERSION62873     CHAR(1),
+            DEVICE           CHAR(255) ASCII
+            )
+            INTERNAL""")
+
+        stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON CNMEDDEF TO PUBLIC")
+
+        if existsTable (session, "SYSDBA.CNMEDDEF"):
+
+            stopIfSqlNotErr (session, 100, """INSERT CNMEDDEF SELECT * FROM SYSDBA.CNMEDDEF""")
+
+            stopIfSqlNotOK (session, """DROP TABLE SYSDBA.CNMEDDEF""")
+
+    else:
+        stopIfSqlNotErr (session, -4004, 'DROP VIEW SYSDBA.CNMEDDEF')
+
+    #== TABLE CNHIST ===============================================
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSDBA.CNHIST')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW SYSDBA.CNHIST')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSDBM.CNHIST')
+    
+    stopIfSqlNotOK (session, """
+             CREATE TABLE CNHIST (
+             CMD_ID           CHAR(12) ASCII,
+             LABEL            CHAR(13) ASCII,
+             ACTION           CHAR(10) ASCII,
+             START_LPNO_DATE  CHAR(10) ASCII,
+             START_LPNO_TIME  CHAR(8)  ASCII,
+             STOP_LPNO_DATE   CHAR(10) ASCII,
+             STOP_LPNO_TIME   CHAR(8)  ASCII,
+             BEGIN_DATE       CHAR(10) ASCII,
+             BEGIN_TIME       CHAR(8)  ASCII,
+             END_DATE         CHAR(10) ASCII,
+             END_TIME         CHAR(8)  ASCII,
+             START_LPNO       FIXED(10),
+             STOP_LPNO        FIXED(10),
+             LOGREQUESTED     CHAR(3)  ASCII,
+             MEDIANAME        CHAR(8)  ASCII,
+             PAGECOUNT        FIXED(10),
+             VOLUMES          FIXED(10),
+             RETCODE          FIXED(10),
+             VERSION6288      CHAR(1),
+             RETTEXT          CHAR(40) ASCII,
+             CONSTRAINT CNHIST_PK PRIMARY KEY (CMD_ID,LABEL)
+             )
+             INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON CNHIST TO PUBLIC")
+
+    sqlOK (session, "DROP TABLE SYSBU$HISTORY")
+    sqlOK (session, "DROP VIEW  SYSBU$HISTORY")
+
+    stopIfSqlNotOK (session, """
+        CREATE VIEW SYSBU$HISTORY (
+            SAVID, SAVTYP, CREATOR, CREDAT, CRETIM, BEGDAT, BEGTIM,
+            ENDDAT, ENDTIM, MEDIA, DEVICE, DBSTA, SAVSTA, PROCID, LABEL, RETCOD )
+            AS SELECT
+            ' ', ACTION, ' ', START_LPNO_DATE, START_LPNO_TIME, BEGIN_DATE, BEGIN_TIME,
+            END_DATE, END_TIME, MEDIANAME, ' ', ' ', ' ', ' ', LABEL, RETCODE
+            FROM CNHIST INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON SYSBU$HISTORY TO PUBLIC")
+
+    #== TABLE CNREPRT ============================================
+
+    if not sqlOK (session, "EXISTS TABLE CNREPRT"):
+        stopIfSqlNotOK (session, """
+            CREATE TABLE CNREPRT (
+                CMDTYP          CHAR(10) ASCII,
+                CMD_ID          CHAR(12) ASCII,
+                LINENO          CHAR(4)  ASCII,
+                REP_DATE        CHAR(10)  ASCII,
+                REP_TIME        CHAR(8)  ASCII,
+                LINE            CHAR(255) ASCII,
+                CONSTRAINT CNREPRT_PK PRIMARY KEY (CMD_ID, LINENO)
+                )
+                INTERNAL""")
+        stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON CNREPRT TO PUBLIC")
+
+        if existsTable (session, "SYSDBA.CNREPRT"):
+
+            stopIfSqlNotErr (session, 100, """INSERT CNREPRT SELECT 
+                CMDTYP, CMD_ID, LINENO, REP_DATE, REP_TIME, LINE FROM SYSDBA.CNREPRT""")
+
+            stopIfSqlNotOK (session, """DROP TABLE SYSDBA.CNREPRT""")
+
+    else:
+        stopIfSqlNotErr (session, -4004, 'DROP VIEW SYSDBA.CNREPRT')
+
+
+    sqlOK (session, "DROP TABLE SYSBU$REPORT")
+    sqlOK (session, "DROP VIEW  SYSBU$REPORT")
+
+    stopIfSqlNotOK (session, """
+        CREATE VIEW SYSBU$REPORT (SAVID, SAVTYP, POS, LINE)
+          AS SELECT substr(cmd_id,9,6), cmdtyp, 0, LINE
+          FROM CNREPRT INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON SYSBU$REPORT TO PUBLIC")
+
+    sqlOK (session, "DROP VIEW CNDETAIL")
+
+    stopIfSqlNotOK (session, """
+        CREATE VIEW CNDETAIL (
+          cmd_id, lineno, action_date,action_time,action_txt)
+          AS SELECT  cnhist.cmd_id, lineno, rep_date, rep_time, line
+          FROM cnhist, cnreprt
+          WHERE cnhist.cmd_id = cnreprt.cmd_id
+          INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON CNDETAIL TO PUBLIC")
+
+
+    #== TABLE CNSTATE ============================================
+
+    if not sqlOK (session, "EXISTS TABLE CNSTATE"):
+        stopIfSqlNotOK (session, """
+             CREATE TABLE CNSTATE (
+                LABEL    CHAR(18),
+                VAL      CHAR(8) )
+                INTERNAL""")
+
+        stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON CNSTATE TO PUBLIC")
+
+
+    #== VIEW SYSBU$STATE =========================================
+
+    sqlOK (session, "DROP VIEW SYSBU$STATE")
+
+    stopIfSqlNotOK (session, """
+        CREATE VIEW SYSBU$STATE
+            AS SELECT *
+            FROM CNSTATE
+            INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT ON SYSBU$STATE TO PUBLIC")
+
+
+    #== VIEW DBPARAMSINFO =========================================
+
+    sqlOK (session, "DROP TABLE DBPARAMSINFO")
+
+    stopIfSqlNotOK (session, """
+        CREATE TABLE DBPARAMSINFO (
+            PARAMID     VARCHAR(32)   NOT NULL,
+            TYPE        VARCHAR(6)    ASCII DEFAULT ' ',
+            GROUPSPEC   VARCHAR(8)    ASCII DEFAULT ' ',
+            HELP        VARCHAR(128)  ASCII DEFAULT ' ',
+            DEFVALUE    VARCHAR(256)  ASCII DEFAULT ' ',
+
+            PRIMARY KEY (PARAMID) ) INTERNAL""")
+
+    stopIfSqlNotOK (session, "GRANT SELECT,UPDATE,DELETE,INSERT ON DBPARAMSINFO TO PUBLIC")
+
+    switchToDefaultSchema (session, options)
+
+    loaderCmd (session, 'COMMIT')
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

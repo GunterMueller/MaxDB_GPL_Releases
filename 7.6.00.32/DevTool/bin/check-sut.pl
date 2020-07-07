@@ -1,0 +1,321 @@
+#!/usr/bin/perl
+# sutcheck.pl
+# changes 98/07/13 &gar:
+#     - new options -r & -d
+#     - separate reference file for different unix-plattforms
+#       ( generate from the user with check-sut.pl )
+#  Zum Ueberpruefen und festschreiben der Protokolle der
+# Singleusertests.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Env;
+use Cwd;
+use Getopt::Std;
+use File::Copy;
+require "$TOOL/bin/sutvars$TOOLEXT";
+
+if (!getopts('hprs') || $opt_h) {
+    print <DATA>;
+    exit 1;
+}
+
+$ProtDir = cwd();
+@Files=();
+
+if ($#ARGV != -1){
+   $VERSION = shift;
+   # not the version -> protocol file
+   if ( $VERSION !~ /^(fast|quick|slow)/i){
+	push @Files, $VERSION;
+        @path=split(/\//,$ProtDir);
+        $VERSION=pop(@path);
+        die "the reference modus is not possible in this directory\n".
+           "(fast|quick|slow required)" if (($VERSION !~ /^(fast|quick|slow)/i) && ($opt_r));
+   }
+   else {
+        $ProtDir="$SUT/$VERSION";
+   }
+}
+
+$PortModus = $opt_p;
+$RefModus = $opt_r;
+chdir($ProtDir) || die "Can't change directory: $!\n";
+
+
+if  (( $#ARGV == -1 ) && ( $#Files ==-1 )) {
+  opendir(DIR_IN, $ProtDir);
+  @Files = grep /^[A-Z].*\.pdiff/i, readdir(DIR_IN);
+  closedir DIR_IN;
+}
+
+unless ( $opt_p ) {
+  print "... there are followed differences:\n\n";
+
+  $i = 1;
+  foreach (@Files) {
+    print "$_\n";
+    $i++;
+    if ( $i == 20) {
+	print "\nmore ...\n";
+	$ANSW = <STDIN>;
+        $i = 1;
+    }
+  }
+  if ($i>1) {
+     print "\n... end\n";
+     $ANSW = <STDIN>;
+  }
+  print "\n\n";
+}
+
+map { s/\.pdiff//i; tr/[a-z]/[A-Z]/} @Files;
+
+foreach $FN (@Files) {
+  if ( -f "$ProtDir/$FN.pdiff" ) {
+
+     @ARGV = ("-e","$EDITOR", "-r", "-s") unless ( $opt_s );
+     # &gar -> compare the modifcation time with old standard reference protocol
+     if ( $RefModus ) {
+        if ($VERSION =~ /^(fast|quick)/i){
+           if (-f "$SUT/$FN.tpunx") {
+              @statinfo_org=stat "$SUT/$FN.tpunx";
+              $RefFile="$FN.tpunx";
+           }
+           elsif (-f "$SUT/$FN.punix"){
+              @statinfo_org=stat "$SUT/$FN.punix";
+              $RefFile="$FN.punix";
+           }
+           else{
+              print "\n$FN.punix or $FN.tpunx in $SUT not found";
+              $ANSW = <STDIN>;
+              next;
+           }
+        }
+        # slow version
+        else{
+           if (-f "$SUT/$FN.punix") {
+              @statinfo_org=stat "$SUT/$FN.punix";
+              $RefFile="$FN.punix";
+           }
+           else{
+              print "\n$SUT/$FN.punix not found";
+              $ANSW = <STDIN>;
+              next;
+           }
+        }
+
+        if (-f "$ProtDir/$FN.pmach"){
+           @statinfo_mach=stat "$ProtDir/$FN.pmach";
+           # comp modification time
+		   $ANSW="x";
+           if ($statinfo_org[9]>$statinfo_mach[9]){
+              until ($ANSW =~ /^(y|n)/i) {
+                 print "\n$FN.pmach is older than $RefFile => delete $FN.pmach (y/n) ?";
+                 $ANSW = <STDIN>;
+                 chop($ANSW);
+              }
+			  if ($ANSW =~ /^y/i) {
+                 unlink "$ProtDir/$FN.old_pmach" if ( -f "$ProtDir/$FN.old_pmach");
+                 copy ("$ProtDir/$FN.pmach", "$ProtDir/$FN.old_pmach");
+                 unlink "$ProtDir/$FN.pmach";
+                 push @ARGV, "$ProtDir/$FN.pdiff";
+              }
+           }
+           if ($ANSW !~ /^y/i) {
+              system("$DIFF $ProtDir/$FN.pmach $ProtDir/$FN.pdiff > $ProtDir/$FN.mdiff");
+              if (-s "$ProtDir/$FN.mdiff"){
+                 print "\n!!! there are differences between $FN.pdiff and $FN.pmach !!!\n";
+                 print "create file $FN.mdiff (diffs betw. $FN.pdiff and $FN.pmach)";
+                 $ANSW = <STDIN>;
+                 push @ARGV, "$ProtDir/$FN.mdiff", "$ProtDir/$FN.pdiff";
+              }
+              else{
+                 unlink "$ProtDir/$FN.mdiff";
+                 unlink "$ProtDir/$FN.pdiff";
+                 unlink "$ProtDir/$FN.prot";
+                 print "\nno differences between $FN.pdiff and $FN.pmach";
+                 $ANSW = <STDIN>;
+                 next;
+              }
+           }
+        }
+        else{
+	   push @ARGV, "$ProtDir/$FN.pdiff";
+        }
+     }
+     else{
+        push @ARGV, "$ProtDir/$FN.pdiff";
+     }
+
+     if ( ! $PortModus ) {
+         push @ARGV, "$ProtDir/$FN.prot";
+     }
+
+     if ( $opt_s) {
+         @ARGV = "$ProtDir/$FN";
+    	 do "$TOOL/bin/diffview$TOOLEXT";
+	 if ( $@ ) { die "Error while executing diffview$TOOLEXT: $@" }
+     } else {
+	 do "$TOOL/bin/opendoc$TOOLEXT";
+	 if ( $@ ) { die "Error while executing opendoc$TOOLEXT: $@" }
+     }
+
+     if ( -f "$FN.punix" ) {
+	@statinfo = stat "$FN.punix";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+              scalar localtime(@statinfo[$$r_mtime]),
+              " $FN.punix\n";
+     }
+
+     if ( -f "$FN.tpunx" ) {
+	@statinfo = stat "$FN.tpunx";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+              scalar localtime(@statinfo[$$r_mtime]),
+              " $FN.tpunx\n";
+     }
+
+     if ( -f "$ProtDir/$FN.mach" ) {
+	@statinfo = stat "$ProtDir/$FN.mach";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+              scalar localtime(@statinfo[$$r_mtime]),
+              " $FN.mach\n";
+     }
+
+     if ( -f "$ProtDir/$FN.prot" ) {
+	@statinfo = stat "$ProtDir/$FN.prot";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+              scalar localtime(@statinfo[$$r_mtime]),
+              " $FN.prot\n";
+     }
+
+     if ( -f "$ProtDir/$FN.pdiff" ) {
+	@statinfo = stat "$ProtDir/$FN.pdiff";
+	( $r_size, $r_mtime ) = (\7, \9);
+	print "@statinfo[$$r_size] ",
+              scalar localtime(@statinfo[$$r_mtime]),
+              " $FN.pdiff\n";
+     }
+
+
+   open(FILE_IN, "<$AllSut");
+   while(<FILE_IN>) { do { print $_; last; } if /\b$FN\b/}
+   close(FILE_IN);
+
+    $ANSW="x";
+    if ( $RefModus ){
+       until ( ($ANSW =~ /^(q|d|s|n)/i) || $ANSW eq "" ) {
+          print "\n==> Quit / Delete / New Reference / Save all files with reference / Nothing";
+          print "\n==> Command : (Q/D/N/S/<CR>)";
+          $ANSW = <STDIN>;
+          chop($ANSW);
+       }
+    }
+    else{
+       until (($ANSW =~ /^(q|d)/i) || $ANSW eq "" ) {
+          print "\n==> Quit / Delete / Nothing";
+          print "\n==> Command : (Q/D/<CR>)";
+          $ANSW = <STDIN>;
+          chop($ANSW);
+       }
+    }
+
+    CASE: {
+
+	if ( $ANSW =~ /d/i ) {
+          unlink ("$ProtDir/$FN.pdiff", "$ProtDir/$FN.prot");
+          print "$FN.pdiff and $FN.prot removed\n";
+          if ( -f "$ProtDir/$FN.pmach")
+          {
+             unlink ("$ProtDir/$FN.pmach") if ( -f "$ProtDir/$FN.pmach");
+             print "$FN.pmach removed\n";
+          }
+          last CASE;
+	}
+
+        if ( $ANSW =~ /q/i ) {
+
+          print "QUIT check-sut.\n";
+          exit;
+          last CASE;
+        }
+	# &gar ->
+        if ( $ANSW =~ /n/i && $RefModus) {
+           if ( -f "$ProtDir/$FN.pmach"){
+              unlink "$ProtDir/$FN.old_pmach" if ( -f "$ProtDir/$FN.old_pmach");
+              copy ("$ProtDir/$FN.pmach", "$ProtDir/$FN.old_pmach");
+              unlink "$ProtDir/$FN.pmach";
+              print "old ref-file copied to $FN.old_pmach\n"
+           }
+           unlink "$ProtDir/$FN.pmach" if ( -f "$ProtDir/$FN.pmach");
+           copy ("$ProtDir/$FN.pdiff", "$ProtDir/$FN.pmach");
+           unlink "$ProtDir/$FN.pdiff";
+           unlink ("$ProtDir/$FN.prot");
+           print "$ProtDir/$FN.pdiff is the new ref-file\n";
+        }
+        # <- &gar
+
+		# &gar ->
+        if ( $ANSW =~ /s/i && $RefModus) {
+           if ( -f "$ProtDir/$FN.pmach"){
+              unlink "$ProtDir/$FN.old_pmach" if ( -f "$ProtDir/$FN.old_pmach");
+              copy ("$ProtDir/$FN.pmach", "$ProtDir/$FN.old_pmach");
+              unlink "$ProtDir/$FN.pmach";
+              print "old ref-file copied to $FN.old_pmach\n"
+           }
+           copy ("$ProtDir/$FN.pdiff", "$ProtDir/$FN.pmach");
+           print "$ProtDir/$FN.pdiff is the new ref-file / $FN.prot und $FN.pdiff not removed \n";
+        }
+        # <- &gar
+
+        if ( $ANSW eq "" ) {
+          print "$FN.prot und $FN.pdiff not removed\n";
+          last CASE;
+	}
+    }
+
+     unless ( $opt_s ) {
+	 do "$TOOL/bin/closedoc$TOOLEXT";
+	 if ( $@ ) { die "Error while executing closedoc$TOOLEXT: $@" }
+     }
+  }
+}
+print "\n";
+
+
+
+__DATA__
+
+
+  USAGE:  check-sut  [-prhs] [<version>] [<protname> ...]
+
+        tool to check the SUT result
+
+  OPTIONS:
+    <version>    :  fast|quick|slow
+    -h           :  this help screen
+    -p           :  port modus (only pdiff files)
+    -r           :  reference modus (comparison with other ref-files)
+    -s           :  use diffview as frontend

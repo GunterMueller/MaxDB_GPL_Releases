@@ -1,0 +1,76 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package iview;
+use Env;
+use Getopt::Std;
+use ICopy;
+
+$Usage = "usage: iview -h -l<level>[x] [-e{editor|0}] file [ file ... ]\n";
+
+die "TMP not set\n" if (! defined $ENV{'TMP'});
+
+die "directory TMP='$TMP' does not exist or permission denied\n"
+        if ((! -d $TMP) || (! -x $TMP) || (! -r $TMP) || (! -w $TMP));
+
+die "" if !getopts('hl:e:');
+if (  @ARGV == 0 && !defined($opt_h))  {
+	die $Usage;
+}
+
+if ( $opt_h ) {
+	print <DATA>;
+	exit 0;
+}
+
+if ( !defined($opt_e) ) {
+	die "environment %EDITOR% not used!\n" unless defined($EDITOR);
+	$editor = $EDITOR;
+} else { $editor = $opt_e }
+
+if ( defined($opt_l) ) {
+	die $Usage unless $opt_l =~ /^(\d+)x?$/i;
+	$level = $1; $exclusive = 1 if $opt_l =~ /x$/i;
+}
+$level = 0 unless defined($level);
+$exclusive = 0 unless defined($exclusive);
+if ( ICopy::_GetPathList($VMAKE_PATH) < $level+1 ) {
+	die "The level value dont match! Use a lower level.\n";
+}
+
+
+$rc = !ICopy::iview(\@ARGV, $level, $exclusive, $editor, 0);
+warn "iview.pl: Source not found!\n" if $rc;
+exit $rc;
+
+__DATA__
+
+usage: iview [-h] [-l level[x]] [-e editor] file [ file ... ]
+
+options:
+
+ -l<level>  : search the file from the specified level down to the
+              final level
+
+ -l<level>x : search the file only in the specified level (exclusive)
+
+ -e editor  : use the editor to view the file
+

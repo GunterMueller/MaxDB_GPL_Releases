@@ -1,0 +1,2902 @@
+.CM  SCRIPT , Version - 1.1 , last edited by barbara
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.TT 1 $SQL$Project Distributed Database System$VIN11$
+.tt 2 $$$
+.TT 3 $$dialog_editor_functions$1995-11-01$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+MODULE  : dialog_editor_functions
+=========
+.sp
+Purpose : Execution of edit functions
+          (prefix commands and function keys), fetch of
+          messagetext from database
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              i11message (
+                    msg_id       : tin_edit_msg;
+                    VAR text     : tin_screenline;
+                    VAR err_flag : boolean);
+ 
+        PROCEDURE
+              i11content_message (
+                    msg_id          : tin_edit_msg;
+                    msg_length      : tin_natural;
+                    VAR msg_content : tsp00_C10;
+                    VAR text        : tin_screenline;
+                    VAR err_flag    : boolean);
+ 
+        PROCEDURE
+              i11exeditcmds(VAR eform : tin_eform_buffer;
+                    VAR evars   : tin_eform_vars;
+                    VAR display : tin_display_parms;
+                    VAR edit   : tin_edit_work_area);
+ 
+        PROCEDURE
+              i11exrelkeycmd(
+                    VAR eform : tin_eform_buffer;
+                    VAR evars   : tin_eform_vars;
+                    VAR display : tin_display_parms;
+                    VAR edit    : tin_edit_work_area;
+                    VAR cmd     : tin_cmd_type;
+                    VAR relkey  : tin_ls_releasemode;
+                    VAR block   : tin_ed_winmark_type);
+ 
+        PROCEDURE
+              i11sortprefix(VAR prefix   : tin_prefix_type);
+ 
+        FUNCTION
+              i11isdark_ln (
+                    VAR prefix    : tin_prefix_type;
+                    this_eline_no : tin_natural;
+                    VAR this_lno  : tin_natural ) : boolean;
+ 
+        PROCEDURE
+              i11getdark_eline_count (
+                    VAR prefix     : tin_prefix_type;
+                    start_this     : tin_natural;
+                    this           : integer;
+                    VAR dark_count : tin_natural );
+ 
+        FUNCTION
+              i11lixbln_in_x_block (
+                    VAR prefix    : tin_prefix_type;
+                    this          : tin_natural;
+                    VAR this_lno  : tin_natural;
+                    VAR firstdark : tin_natural ) : boolean;
+ 
+        PROCEDURE
+              i11ekedit_key (
+                    VAR relkey      : tin_ls_releasemode;
+                    VAR ed_key      : tin_edit_key;
+                    VAR error       : boolean );
+ 
+        FUNCTION
+              i11keychange : boolean;
+ 
+        FUNCTION
+              in1130 : tsp00_Int4;
+ 
+        PROCEDURE
+              i11update_prefix_line(
+                    VAR prefix  : tin_prefix_type;
+                    first, last : tin_natural;
+                    count       : tsp00_Int2);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+        PROCEDURE
+              s10mv (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+&       ifdef WINDOWS
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        FUNCTION
+              s30klen (
+                    VAR str : tin_screenline;
+                    val     : char;
+                    cnt     : integer) : integer;
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-60 : VSP60;
+ 
+        FUNCTION
+              s60maximal (
+                    i1,i2 : tsp00_Int4) : tsp00_Int4;
+ 
+        FUNCTION
+              s60minimal (
+                    i1,i2 : tsp00_Int4) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              global_variable : VIN01;
+ 
+        VAR
+              i01g : tin_global_in_vars;
+ 
+      ------------------------------ 
+ 
+        FROM
+              messages : VIN03;
+ 
+        PROCEDURE
+              i03msg (
+                    msg_nr    : integer;
+                    VAR parms : tin_msg_parms;
+                    VAR msg   : tin_screenline;
+                    VAR msgt  : tin_msg_type);
+ 
+      ------------------------------ 
+ 
+        FROM
+              dialog_editor_li_functions : VIN13;
+ 
+        PROCEDURE
+              i13etfeform_to_file (
+                    VAR eform      : tin_eform_buffer;
+                    VAR evars      : tin_eform_vars;
+                    VAR display    : tin_display_parms;
+                    VAR edit       : tin_edit_work_area;
+                    VAR line_no    :  integer;
+                    VAR line_count :  integer;
+                    VAR fname      :  tsp00_VFilename;
+                    VAR direction  :  tsp00_VFileOpCodes );
+ 
+        PROCEDURE
+              i13rfread_file (
+                    VAR eform      :  tin_eform_buffer;
+                    VAR evars      :  tin_eform_vars;
+                    VAR display    :  tin_display_parms;
+                    VAR edit       :  tin_edit_work_area;
+                    VAR fname      :  tsp00_VFilename;
+                    VAR line_no    :  integer;
+                    VAR line_count :  integer;
+                    VAR ignore_crs :  boolean );
+ 
+        PROCEDURE
+              i13printeform(VAR eform : tin_eform_buffer;
+                    VAR evars        : tin_eform_vars;
+                    VAR display : tin_display_parms;
+                    VAR relkey : tin_ls_releasemode;
+                    VAR edit : tin_edit_work_area;
+                    close  : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              dialog_editor_rand_functions : VIN12;
+ 
+        PROCEDURE
+              i12exrandkeys(VAR eform : tin_eform_buffer;
+                    VAR evars         : tin_eform_vars;
+                    VAR display       : tin_display_parms;
+                    VAR edit          : tin_edit_work_area;
+                    VAR cmd           : tin_cmd_type;
+                    VAR relkey        : tin_ls_releasemode;
+                    VAR block         : tin_ed_winmark_type );
+ 
+      ------------------------------ 
+ 
+        FROM
+              standard_editor_functions : VIN14;
+ 
+        FUNCTION
+              i14linelength (
+                    VAR eform   : tin_eform_buffer;
+                    VAR evars   : tin_eform_vars;
+                    line_nr     : tin_natural) : tin_natural;
+ 
+        PROCEDURE
+              i14shifteline (
+                    VAR eform   : tin_eform_buffer;
+                    VAR evars   : tin_eform_vars;
+                    line_nr     : tin_natural;
+                    line_count  : tin_natural;
+                    shift_count : tin_natural;
+                    right       : boolean;
+                    max_cols    : tin_natural;
+                    VAR error   : boolean);
+ 
+        PROCEDURE
+              i14inserteline (VAR eform  : tin_eform_buffer;
+                    VAR evars        : tin_eform_vars;
+                    line_nr          : tin_natural;
+                    line_count       : tin_natural;
+                    VAR error        : boolean);
+ 
+        PROCEDURE
+              i14deleteeline (VAR eform  : tin_eform_buffer;
+                    VAR evars        : tin_eform_vars;
+                    line_nr          : tin_natural;
+                    line_count       : tin_natural);
+ 
+        PROCEDURE
+              i14copyeline (VAR eform  : tin_eform_buffer;
+                    VAR evars      : tin_eform_vars;
+                    source_nr      : tin_natural;
+                    line_count     : tin_natural;
+                    dest_nr        : tin_natural;
+                    VAR error      : boolean);
+ 
+        PROCEDURE
+              i14moveeline (VAR eform  : tin_eform_buffer;
+                    VAR evars      : tin_eform_vars;
+                    source_nr      : tin_natural;
+                    dest_nr        : tin_natural;
+                    line_count     : tin_natural;
+                    VAR error      : boolean);
+ 
+        PROCEDURE
+              i14duplicateeline (VAR eform  : tin_eform_buffer;
+                    VAR evars      : tin_eform_vars;
+                    source_nr      : tin_natural;
+                    line_count     : tin_natural;
+                    is_block       : boolean;
+                    VAR error      : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              logical_screen_layout : VIN51;
+ 
+        PROCEDURE
+              i51size(screen_part : tin_ls_part;
+                    VAR length : tin_natural;
+                    VAR width : tin_natural);
+&       ifdef WINDOWS
+ 
+      ------------------------------ 
+ 
+        FROM
+              vp_output: VIN61;
+ 
+        FUNCTION
+              i61questionprint (
+                    msgtext     : tin_screenline;
+                    msglen      : tin_natural;
+                    VAR errtext : tsp00_ErrText;
+                    VAR ok      : boolean) : boolean;
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+&       ifdef WINDOWS
+        PROCEDURE
+              s30klen;
+ 
+              tsp00_MoveObj  tin_screenline
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  :
+.sp
+.cp 3
+Created :  1.08.84
+.sp
+.cp 3
+.sp
+.cp 3
+Release :  6.1.2     Date : 1995-11-01
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+.nf
+        PROCEDURE
+              i11message (msg_id : tin_edit_msg;
+                          VAR text : tin_screenline);
+.sp;.fo
+The text belonging to a specific msg_id is fetched from the
+database (see i03msg).
+.sp 2;.nf
+        PROCEDURE
+              i11exeditcmds(VAR eform : eform_type;
+                          VAR display : tin_display_parms;
+                          VAR edit   : tin_edit_work_area);
+.sp2 .fo
+Beginning with eform.top, the editor form (eform) is searched for
+entries in the prefix.  If a correct command is found, it is
+executed; invalid commands are displayed on the screen in high intensity
+and an appropriate message is output.
+.sp 2;.nf
+        PROCEDURE
+              i11exrelkeycmd(VAR eform : eform_type;
+                          VAR display  : tin_display_parms;
+                          VAR edit     : tin_edit_work_area;
+                          VAR cmd      : tin_cmd_type;
+                          VAR relkey   : tin_ls_releasemode;
+                          VAR mark     : tsp00_VtRectangle);
+.sp2 .fo
+ 
+The function assigned to the release key that is pressed is
+executed:
+.sp
+ENTER :  places cursor on the command line or in the input area
+PF04  :  prints editor form
+PF07  :  scrolls back one page
+PF08  :  scrolls forward one page
+PF10  :  displays left margin
+PF11  :  displays right margin
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+PROCEDURE
+      i11_forward_scroll(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area);
+PROCEDURE
+      i11_backward_scroll(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area);
+.sp;.fo
+Scrolling in the editor form:  The pointer to the first line to be
+displayed is updated (display.upper_margin).
+.sp 2;.nf
+PROCEDURE
+      i11_ex_this_cmd(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  this : eline_id);
+.sp;.fo
+Depending on the type of the prefix command found, calls the following
+procedures:
+.sp 2;.nf
+PROCEDURE
+      i11_ex_ins(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  behind : eline_id);
+.sp;.fo
+Insertion of lines.
+'behind' is the line after which lines are to be inserted.
+The number of lines is contained in edit.cmd [behind] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_del(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit    : tin_edit_work_area;
+                  first_del   : eline_id);
+.sp;.fo
+Deletion of lines.
+first_del is the first line to be deleted; the number of lines is
+contained in edit.cmd [first_del] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_copy(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit    : tin_edit_work_area;
+                  first_copy  : eline_id);
+.sp;.fo
+Copying of lines.
+first_copy is the first line to be copied; the number of lines is
+contained in edit.cmd [first_copy] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_move(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  first_move : eline_id);
+.sp;.fo
+Moving of lines.
+first_move is the first line to be moved; the number of lines is
+contained in edit.cmd [first_move] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_ftarget(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  this : eline_id);
+.sp;.fo
+An F command that was detected is entered in edit.target_line.
+If an F command was already found, an appropriate message is
+output.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_ptarget(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  this : eline_id);
+.sp;.fo
+A P command that was detected is entered in edit.target_line.
+If a P command was already found, an appropriate message is
+output.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_dupl(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit    : tin_edit_work_area;
+                  first_dupl  : eline_id);
+.sp;.fo
+Duplicating of lines.
+first_dupl is the first line to be duplicated; the number of lines is
+contained in edit.cmd [first_dupl] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_shift(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit    : tin_edit_work_area;
+                  first_shift : eline_id);
+.sp;.fo
+Shifts lines marked with < or > to the right or to the left.
+first_shift is the first line to be shifted; the number of lines is
+contained in edit.cmd [first_shift] .arg.
+.sp 2;.nf
+PROCEDURE
+      i11_ex_center(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  VAR edit : tin_edit_work_area;
+                  this : eline_id);
+.sp;.fo
+Centering of the line specified in 'this'.
+.sp 2;.nf
+PROCEDURE
+      i11_rshift_line(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  this        : eline_id;
+                  amount      : ecol_count);
+.sp;.fo
+Shifting of lines to the right.
+'this' is the first line to be shifted right; the number of lines is
+contained in 'amount'.
+.sp 2;.nf
+PROCEDURE
+      i11_lshift_line(VAR eform : eform_type;
+                  VAR display : tin_display_parms;
+                  this        : eline_id;
+                  amount      : ecol_count);
+.sp;.fo
+Shifting of lines to the left.
+'this' is the first line to be shifted left; the number of lines is
+contained in 'amount'.
+.sp 2;.nf
+PROCEDURE
+      i11_scan_forward(VAR eform : eform_type;
+                  here      : eline_id;
+                  count     : eline_count;
+                  VAR there : eline_id;
+                  VAR dist  : eline_count);
+.sp;.fo
+Sets a pointer to a line of the editor form (here)
+forward by 'count' lines but no further than eform.bottom.
+.sp;.nf
+Input parameters:
+here   :   pointer to a line
+count  :   number of lines
+Output parameters:
+there  :   pointer to the target line
+count  :   number of steps run through
+.sp 2;.nf
+PROCEDURE
+      i11_scan_backward(VAR eform : eform_type;
+                  here      : eline_id;
+                  count     : eline_count;
+                  VAR there : eline_id;
+                  VAR dist  : eline_count);
+.sp;.fo
+Sets a pointer to a line of the editor form (here)
+back by 'count' lines but no further than eform.top.
+.sp;.nf
+Input parameters:
+here   :   pointer to a line
+count  :   number of lines
+Output parameters:
+there  :   pointer to the target line
+count  :   number of steps run through
+PROCEDURE
+      i11_chain_out(VAR eform : eform_type;
+                  first_out : eline_id;
+                  last_out  : eline_id);
+.sp;.fo
+Removes the lines from first_out to last_out from the editor-form
+string.  The lines must be reinserted at another location.
+.sp 2;.nf
+PROCEDURE
+      i11_chain_in(VAR eform : eform_type;
+                  first_in : eline_id;
+                  last_in  : eline_id;
+                  behind   : eline_id);
+.sp;.fo
+Inserts the lines from first_in to last_in in the eform string after
+the line 'behind'.  The lines must first have been removed via
+chain_out.
+.sp 2;.nf
+PROCEDURE
+      i11_clear_chain(VAR eform : eform_type;
+                  VAR edit  : tin_edit_work_area;
+                  first     : eline_id;
+                  last      : eline_id);
+.sp;.fo
+Initializes the editor lines from 'first' to 'last' with blank lines and
+resets the prefix area.
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      in1130 : tsp00_Int4;
+ 
+BEGIN
+(* linkcheck function *)
+in1130 := 219020519;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11message (
+            msg_id       : tin_edit_msg;
+            VAR text     : tin_screenline;
+            VAR err_flag : boolean );
+ 
+VAR
+      i           : integer;
+      pos         : integer;
+      msg_content : tsp00_C10;
+      helptext    : tin_screenline;
+ 
+BEGIN
+msg_content :=  bsp_c10;
+CASE msg_id OF
+    ok_msg :
+        i11_get_msg_11(0,msg_content,17200,text, err_flag);
+    unknown_ecmd :
+        i11_get_msg_11(0,msg_content,17001,text, err_flag);
+    unknown_relkey :
+        i11_get_msg_11(0,msg_content,17201,text, err_flag);
+    copy_pending :
+        BEGIN
+        msg_content  [1]  :=  'C';
+        i11_get_msg_11(1,msg_content,17002,text, err_flag);
+        END;
+    move_pending :
+        BEGIN
+        msg_content  [1]  :=  'M';
+        i11_get_msg_11(2,msg_content,17002,text, err_flag);
+        END;
+    del_pending :
+        BEGIN
+        msg_content  [1]  :=  'D';
+        i11_get_msg_11(1,msg_content,17002,text, err_flag);
+        END;
+    dupl_pending :
+        BEGIN
+        msg_content  [1]  :=  '"';
+        i11_get_msg_11(1,msg_content,17002,text, err_flag);
+        END;
+    dark_pending :
+        BEGIN
+        msg_content  [1]  :=  'X';
+        i11_get_msg_11(1,msg_content,17002,text, err_flag);
+        END;
+    shift_pending :
+        BEGIN
+        msg_content  [1]  :=  '>';
+        i11_get_msg_11(1,msg_content,17002,text, err_flag);
+        END;
+    target_pending :
+        BEGIN
+        msg_content  [1]  :=  'P';
+        msg_content  [2]  :=  '/';
+        msg_content  [3]  :=  'F';
+        i11_get_msg_11(3,msg_content,17002,text, err_flag);
+        END;
+    ambiguous_targets :
+        i11_get_msg_11(0,msg_content,17003,text, err_flag);
+    eform_overflow :
+        i11_get_msg_11(0,msg_content,17004,text, err_flag);
+    eform_underflow :
+        i11_get_msg_11(0,msg_content,17202,text, err_flag);
+    right_truncated :
+        i11_get_msg_11(0,msg_content,17203,text, err_flag);
+    left_truncated :
+        i11_get_msg_11(0,msg_content,17204,text, err_flag);
+    top_reached :
+        i11_get_msg_11(0,msg_content,17205,text, err_flag);
+    bottom_reached :
+        i11_get_msg_11(0,msg_content,17206,text, err_flag);
+    printer_not_ok :
+        i11_get_msg_11(0,msg_content,17005,text, err_flag);
+    ok_change :
+        i11_get_msg_11(0,msg_content,17207,text, err_flag);
+    option_error :
+        i11_get_msg_11(0,msg_content,17006,text, err_flag);
+    slash_missing :
+        i11_get_msg_11(0,msg_content,17007,text, err_flag);
+    file_error :
+        i11_get_msg_11(0,msg_content,17008,text, err_flag);
+    no_copy :
+        i11_get_msg_11(0,msg_content,17009,text, err_flag);
+    not_implemented :
+        i11_get_msg_11(0,msg_content,17208,text, err_flag);
+    no_pick :
+        i11_get_msg_11(0,msg_content,17010,text, err_flag);
+    buf_empty :
+        i11_get_msg_11(0,msg_content,17011,text, err_flag);
+    pick_done :
+        i11_get_msg_11(0,msg_content,17209,text, err_flag);
+    no_target :
+        i11_get_msg_11(0,msg_content,17210,text, err_flag);
+    ok_copy   :
+        i11_get_msg_11(0,msg_content,17211,text, err_flag);
+    no_change :
+        i11_get_msg_11(0,msg_content,17012,text, err_flag);
+    li_trunc :
+        i11_get_msg_11(0,msg_content,17013,text, err_flag);
+    print_enqueued :
+        i11_get_msg_11(0,msg_content,17213,text, err_flag);
+    print_out :
+        i11_get_msg_11(0,msg_content,17214,text, err_flag);
+    no_print :
+        i11_get_msg_11(0,msg_content,17215,text, err_flag);
+    eform_empty :
+        i11_get_msg_11(0,msg_content,17014,text, err_flag);
+    default_pf :
+        BEGIN
+        pos := 1;
+        FOR i := 17232 TO 17240 DO
+            BEGIN
+            i11_get_msg_11 (0, msg_content, i, helptext, err_flag);
+            s10mv (mxin_screenline,mxin_screenline,
+                  @helptext,1,
+                  @text,pos,csp_lslabel);
+            pos := pos + csp_lslabel;
+            END;
+        (*ENDFOR*) 
+        END;
+    prefix_overflow :
+        i11_get_msg_11(0,msg_content,17015,text, err_flag);
+    wrap_on         :
+        i11_get_msg_11(0,msg_content,17217,text, err_flag);
+    wrap_off        :
+        i11_get_msg_11(0,msg_content,17218,text, err_flag);
+    wrap_overflow   :
+        i11_get_msg_11(0,msg_content,17016,text, err_flag);
+    red_cmd         :
+        i11_get_msg_11(0,msg_content,17017,text, err_flag);
+    pr_prot      :
+        i11_get_msg_11(0,msg_content,17219,text, err_flag);
+    wrong_csrpos    :
+        i11_get_msg_11(0,msg_content,17019,text, err_flag);
+    OTHERWISE:
+        i11_get_msg_11(0,msg_content,17208,text, err_flag);
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11content_message (
+            msg_id          : tin_edit_msg;
+            msg_length      : tin_natural;
+            VAR msg_content : tsp00_C10;
+            VAR text        : tin_screenline;
+            VAR err_flag    : boolean );
+ 
+BEGIN
+CASE msg_id OF
+    line_overflow :
+        i11_get_msg_11( msg_length, msg_content, 17018, text, err_flag);
+    OTHERWISE:
+        i11_get_msg_11 ( 0, msg_content, 17208, text, err_flag );
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_get_msg_11(
+            msg_length      : tin_natural;
+            VAR msg_content : tsp00_C10;
+            msg_no          : integer;
+            VAR text        : tin_screenline;
+            VAR err_flag    : boolean );
+ 
+VAR
+      parms : tin_msg_parms;
+      msgt  : tin_msg_type;
+      i     : tin_natural;
+ 
+BEGIN
+parms.buffer [1] :=chr(msg_length);
+s10mv (10,mxin_parms_buffer,
+      @msg_content,1,
+      @parms.buffer,2,msg_length);
+IF  msg_length=0
+THEN
+    parms.length:=0
+ELSE
+    parms.length:=1+msg_length;
+(*ENDIF*) 
+i03msg ( msg_no, parms, text, msgt );
+IF  msgt in [ short_msg,crash_msg ]
+THEN
+    IF  (msg_no >= 17230) AND (msg_no <= 17240)
+    THEN
+        FOR i := 1 TO mxin_screenline DO
+            text [i]  := ' ';
+        (*ENDFOR*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  (msg_no > 17000) AND (msg_no < 17200)
+THEN
+    err_flag := true
+ELSE
+    err_flag := false;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11exeditcmds(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area);
+ 
+VAR
+      next_start     : tin_natural;
+      new_start      : boolean;
+      bottom_reached : boolean;
+      this           : tin_natural;
+      cmd_found      : boolean;
+ 
+BEGIN
+IF  NOT edit.error_found AND (edit.prefix.length > 0)
+THEN
+    BEGIN
+    next_start := 1;
+    new_start  := true;
+    REPEAT
+        (* ========================================= *)
+        (* search next prefix command and execute it *)
+        (* ========================================= *)
+        this := next_start;
+        cmd_found := false;
+        REPEAT
+            (* ================================ *)
+            (* search from next_start to bottom *)
+            (* ================================ *)
+            cmd_found := (edit.prefix.line [this] .op <> e_no_cmd);
+            bottom_reached := (this = edit.prefix.length);
+            IF  NOT ( cmd_found OR bottom_reached )
+            THEN
+                this := this + 1
+            (*ENDIF*) 
+        UNTIL
+            ( cmd_found OR bottom_reached );
+        (*ENDREPEAT*) 
+        IF  cmd_found
+        THEN
+            BEGIN
+            new_start := edit.prefix.line [this] .op IN
+                  [ e_del,e_move] ;
+            (* ================================= *)
+            (* execute last found prefix command *)
+            (* ================================= *)
+            i11_ex_this_cmd(eform,evars,display,edit,this);
+            IF  new_start
+            THEN
+                next_start := 1
+            ELSE
+                next_start := this + 1;
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+    UNTIL
+        (bottom_reached OR edit.error_found);
+    (*ENDREPEAT*) 
+    IF  cmd_found
+    THEN
+        BEGIN
+        edit.mark1 := false;
+        edit.mark1_line := 0;
+        edit.mark2_line := 0;
+        edit.mark1_scol := 0;
+        edit.mark2_scol := 0;
+        END;
+    (*ENDIF*) 
+    IF  edit.error_found
+    THEN
+        BEGIN
+        WITH display, edit DO
+            i11message(edit.msg_id,frame [current_eform] .sys_msg,
+                  frame [current_eform] .is_error);
+        (*ENDWITH*) 
+        edit.error_line := edit.prefix.line [this] .eline_nr;
+        edit.error_type := cmd_error;
+        i11_reset_cmd( edit.prefix.line [this ] )
+        END
+    ELSE
+        IF  (* still *)
+            edit.target_found
+        THEN
+            WITH display DO
+                i11message(target_pending,
+                      frame [edit.current_eform] .sys_msg,
+                      frame [edit.current_eform] .is_error);
+            (*ENDWITH*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    i11sortprefix(edit.prefix);
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11exrelkeycmd (
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            VAR cmd     : tin_cmd_type;
+            VAR relkey  : tin_ls_releasemode;
+            VAR block   : tin_ed_winmark_type );
+ 
+CONST
+      cin11_win_print  = 15714;
+ 
+VAR
+      csr_in_workarea : boolean;
+      error, ok       : boolean;
+      eform_line      : tin_natural;
+      eform_scol      : tin_natural;
+      dark_count      : tin_natural;
+      ed_key          : tin_edit_key;
+      len             : tin_natural;
+&     ifdef WINDOWS
+      dummy_errtext   : tsp00_ErrText;
+      dummy_ok        : boolean;
+      msg_content     : tsp00_C10;
+      helpmsg         : tin_screenline;
+&     endif
+ 
+BEGIN
+WITH display, csr_pos, edit  DO
+    BEGIN
+    i11ekedit_key ( relkey, ed_key, error );
+    dark_count := 0;
+    IF  ed_key <> edk_print
+    THEN
+        BEGIN
+        edit.print_now := false;
+        edit.print_prot := false;
+        END;
+    (*ENDIF*) 
+    edit.print_prot := true;
+    IF  NOT edit.error_found
+    THEN
+        BEGIN
+        csr_in_workarea := false;
+        IF  (screen_part = cin_ls_workarea) AND
+            (scol >= first_edit_scol) AND
+            (scol < ecols_on_screen + first_edit_scol)
+        THEN
+            BEGIN
+            csr_in_workarea := true;
+            i11_getdark_scrnline_count ( edit,
+                  frame [active_screen] .upper_margin,
+                  csr_pos.sline, dark_count );
+            eform_line := frame [active_screen] .upper_margin +
+                  csr_pos.sline - 1 + dark_count;
+            eform_scol := csr_pos.scol +
+                  frame [active_screen] .left_margin - first_edit_scol;
+            END;
+        (*ENDIF*) 
+        CASE ed_key OF
+            edk_enter :
+                BEGIN
+                IF  relkey = f_cmd
+                THEN
+                    insert_mode := false;
+                (*ENDIF*) 
+                csr_switch :=
+                      ((screen_part <> cin_ls_inputarea) OR
+                      (relkey = f_cmd)) AND (csr_switch);
+                IF  csr_in_workarea AND (insert_mode = false)
+                THEN
+                    IF  NOT mark1
+                    THEN
+                        BEGIN
+                        mark1_line := eform_line;
+                        mark1_scol := eform_scol;
+                        mark2_line := eform_line;
+                        mark2_scol := eform_scol;
+                        END
+                    ELSE
+                        BEGIN
+                        mark2_line := eform_line;
+                        mark2_scol := eform_scol;
+                        END;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            edk_mark:
+                BEGIN
+                IF  csr_in_workarea
+                THEN
+                    BEGIN
+                    mark1 := true;
+                    mark1_line := eform_line;
+                    mark1_scol := eform_scol;
+                    mark2_line := eform_line;
+                    mark2_scol := eform_scol;
+                    csr_set_by_user := false;
+                    csr_switch := false;
+                    END
+                ELSE
+                    BEGIN
+                    IF  mark1
+                    THEN
+                        BEGIN
+                        mark1_line := 0;
+                        mark1_scol := 0;
+                        mark2_line := 0;
+                        mark2_scol := 0;
+                        END;
+                    (*ENDIF*) 
+                    mark1 := false;
+                    END;
+                (*ENDIF*) 
+                END;
+            edk_clear:
+                cmd.length:=0;
+            edk_insert, edk_delete, edk_pick, edk_put, edk_splitjoin:
+                BEGIN
+                ok := false;
+&               ifdef WINDOWS
+                IF  ed_key in [edk_delete, edk_pick, edk_put]
+                THEN
+                    BEGIN
+                    IF  ( block.mode <> vt_mark_off )
+                        AND (block.mark.top <=  block.mark.bottom)
+                        AND (block.mark.left <=  block.mark.right)
+                    THEN
+                        ok := true;
+                    (*ENDIF*) 
+                    END;
+&               endif
+                (*ENDIF*) 
+                IF  NOT ok AND csr_in_workarea
+                THEN
+                    BEGIN
+                    IF  NOT mark1
+                    THEN
+                        BEGIN
+                        mark1_line := eform_line;
+                        mark1_scol := eform_scol;
+                        mark2_line := eform_line;
+                        mark2_scol := eform_scol;
+                        END
+                    ELSE
+                        BEGIN
+                        mark2_line := eform_line;
+                        mark2_scol := eform_scol;
+                        END;
+                    (*ENDIF*) 
+                    ok := true;
+                    END;
+                (*ENDIF*) 
+                IF  mark1_line <> 0
+                THEN
+                    ok := true;
+                (*ENDIF*) 
+                IF  ok
+                THEN
+                    i12exrandkeys (eform, evars, display, edit,
+                          cmd, relkey, block)
+                ELSE
+                    BEGIN
+                    i11message( wrong_csrpos,
+                          frame [active_screen] .sys_msg,
+                          frame [active_screen] .is_error );
+                    edit.csr_switch := false;
+                    edit.csr_set_by_user := false;
+                    END;
+                (*ENDIF*) 
+                END;
+            edk_print :
+                BEGIN
+&               ifdef WINDOWS
+                i13printeform (eform, evars, display,
+                      relkey, edit, false);
+                IF  NOT edit.error_found
+                THEN
+                    BEGIN
+                    msg_content := bsp_c10;
+                    i11_get_msg_11( 0, msg_content,
+                          cin11_win_print, helpmsg, dummy_ok);
+                    IF  i61questionprint (helpmsg,
+                        s30klen (helpmsg, ' ', mxin_screenline),
+                        dummy_errtext, dummy_ok)
+                    THEN
+                        BEGIN
+                        i11message( ok_msg,
+                              frame [active_screen] .sys_msg,
+                              frame [active_screen] .is_error);
+                        edit.print_now := false;
+                        END;
+                    (*ENDIF*) 
+                    END;
+&               else
+                (*ENDIF*) 
+                IF  edit.print_prot
+                THEN
+                    BEGIN
+                    IF  edit.print_now
+                    THEN
+                        i13printeform(eform,evars,
+                              display,relkey,edit,true)
+                    ELSE
+                        i13printeform(eform,evars,
+                              display,relkey,edit,false);
+                    (*ENDIF*) 
+                    edit.print_now := NOT edit.print_now;
+                    END
+                ELSE
+                    BEGIN
+                    i11message( pr_prot, frame [active_screen] .sys_msg,
+                          frame [active_screen] .is_error);
+                    edit.print_prot := true;
+                    END;
+                (*ENDIF*) 
+&               endif
+                END;
+            edk_down :
+                BEGIN
+                i11_forward_scroll ( display, edit );
+                edit.csr_switch := false;
+                edit.csr_set_by_user := false;
+                END;
+            edk_up :
+                BEGIN
+                i11_backward_scroll ( display, edit );
+                edit.csr_switch := false;
+                edit.csr_set_by_user := false;
+                END;
+            edk_top :
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        edit.csr_set_by_user := false;
+                        edit.csr_switch := false;
+                        csr_pos.sline := 1;
+                        csr_pos.scol := first_edit_scol;
+                        END;
+                    (*ENDIF*) 
+                    upper_margin := 1;
+                    left_margin := 1;
+                    END;
+                (*ENDWITH*) 
+            edk_bottom :
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        edit.csr_set_by_user := false;
+                        edit.csr_switch := false;
+                        csr_pos.sline := 1;
+                        csr_pos.scol := first_edit_scol;
+                        END;
+                    (*ENDIF*) 
+                    upper_margin := evars.lines;
+                    IF  upper_margin = 0
+                    THEN
+                        upper_margin := 1;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+            edk_home :
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    edit.csr_set_by_user := false;
+                    edit.csr_switch := false;
+                    left_margin := 1;
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        csr_pos.scol := first_edit_scol
+                    ELSE
+                        IF  csr_pos.screen_part = cin_ls_inputarea
+                        THEN
+                            csr_pos.scol := 6
+                        ELSE
+                            i11message( wrong_csrpos,
+                                  frame [active_screen] .sys_msg,
+                                  frame [active_screen] .is_error );
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+            edk_end :
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    edit.csr_set_by_user := false;
+                    edit.csr_switch := false;
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        len := i14linelength (eform, evars, eform_line);
+                        IF  len > ecols_on_screen
+                        THEN
+                            BEGIN
+                            left_margin := left_margin + ecols_on_screen - 1;
+                            IF  left_margin + ecols_on_screen - 1 > max_cols
+                            THEN
+                                left_margin := (max_cols+1) - ecols_on_screen;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        csr_pos.scol := len - left_margin
+                              + 1 + first_edit_scol;
+                        END
+                    ELSE
+                        IF  csr_pos.screen_part = cin_ls_inputarea
+                        THEN
+                            csr_pos.scol := cmd.length + 6
+                        ELSE
+                            i11message( wrong_csrpos,
+                                  frame [active_screen] .sys_msg,
+                                  frame [active_screen] .is_error );
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+            edk_left:
+                BEGIN
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        edit.csr_set_by_user := false;
+                        edit.csr_switch := false;
+                        csr_pos.scol := first_edit_scol;
+                        END;
+                    (*ENDIF*) 
+                    left_margin := 1;
+                    END;
+                (*ENDWITH*) 
+                END;
+            edk_right:
+                BEGIN
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        edit.csr_set_by_user := false;
+                        edit.csr_switch := false;
+                        csr_pos.scol := first_edit_scol;
+                        END;
+                    (*ENDIF*) 
+                    left_margin := left_margin + ecols_on_screen - 1;
+                    IF  left_margin + ecols_on_screen - 1 > max_cols
+                    THEN
+                        left_margin := (max_cols+1) - ecols_on_screen;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                END;
+            edk_hscroll :
+                BEGIN
+                WITH frame [active_screen ] DO
+                    BEGIN
+                    IF  csr_pos.screen_part = cin_ls_workarea
+                    THEN
+                        BEGIN
+                        edit.csr_set_by_user := false;
+                        edit.csr_switch := false;
+                        END;
+                    (*ENDIF*) 
+                    IF  left_margin + i01g^.vt.parms.scroll_dir >= 1
+                    THEN
+                        IF  left_margin + i01g^.vt.parms.scroll_dir +
+                            ecols_on_screen <= max_cols
+                        THEN
+                            BEGIN
+                            left_margin := left_margin +
+                                  i01g^.vt.parms.scroll_dir;
+                            csr_pos.scol := csr_pos.scol -
+                                  abs (i01g^.vt.parms.scroll_dir);
+                            IF  csr_pos.scol < 1
+                            THEN
+                                csr_pos.scol := 1;
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            BEGIN
+                            left_margin := ( max_cols + 1 ) - ecols_on_screen;
+                            csr_pos.scol := left_margin + ecols_on_screen -1;
+                            END
+                        (*ENDIF*) 
+                    ELSE
+                        BEGIN
+                        left_margin := 1;
+                        csr_pos.scol := 1;
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                END;
+            edk_vscroll :
+                BEGIN
+                IF  csr_pos.screen_part = cin_ls_workarea
+                THEN
+                    BEGIN
+                    edit.csr_set_by_user := false;
+                    edit.csr_switch := false;
+                    END;
+                (*ENDIF*) 
+                i11_vscroll (display);
+                END;
+            edk_open :
+                open_win_file (eform,evars,display,edit);
+            edk_save :
+                save_win_file (eform,evars,display,edit);
+            OTHERWISE:
+                BEGIN
+                IF  error
+                THEN
+                    BEGIN
+                    edit.error_found := true;
+                    edit.error_type := relkey_error;
+                    i11message(unknown_relkey,
+                          frame [active_screen] .sys_msg,
+                          frame [active_screen] .is_error);
+                    END
+                (*ENDIF*) 
+                END
+            END
+        (*ENDCASE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      open_win_file (VAR eform : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area);
+ 
+VAR
+      fname         : tsp00_VFilename;
+      line_no       : integer;
+      line_count    : integer;
+      j             : integer;
+      ignore_crs    : boolean;
+ 
+BEGIN
+ignore_crs   := false;
+line_no      := 1;
+line_count   := 9999;
+FOR j := 1 TO sizeof (fname) DO
+    fname [j] := ' ';
+(*ENDFOR*) 
+fname [1]    := '*';
+fname [2]    := '.';
+fname [3]    := '*';
+i13rfread_file (eform, evars, display, edit,
+      fname, line_no, line_count, ignore_crs );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      save_win_file (VAR eform : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area);
+ 
+VAR
+      fname         : tsp00_VFilename;
+      line_no       : integer;
+      line_count    : integer;
+      j             : integer;
+      direction     : tsp00_VFileOpCodes;
+ 
+BEGIN
+line_no      := 1;
+line_count   := evars.lines;
+FOR j := 1 TO sizeof (fname) DO
+    fname [j] := ' ';
+(*ENDFOR*) 
+fname [1]    := '*';
+fname [2]    := '.';
+fname [3]    := '*';
+direction    := voverwrite;
+i13etfeform_to_file ( eform, evars, display, edit, line_no,
+      line_count, fname, direction );
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      i11keychange : boolean;
+ 
+VAR
+      h_keys : boolean;
+ 
+BEGIN
+&ifdef WINDOWS
+IF  ( [ vt_mark_key, vt_pick_key, vt_put_key  ] <=
+    i01g^.vt.desc.returnkeys )
+THEN
+    i11keychange := false
+ELSE
+    i11keychange := true;
+(*ENDIF*) 
+&else
+IF  ( [ vt_mark_key, vt_pick_key, vt_put_key  ] <=
+    i01g^.vt.desc.returnkeys )
+THEN
+    h_keys := true
+ELSE
+    h_keys := false;
+(*ENDIF*) 
+IF  NOT h_keys AND ( i01g^.set_parms.editor = no_prefix )
+THEN
+    i11keychange := true
+ELSE
+    i11keychange := false;
+(*ENDIF*) 
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11ekedit_key (
+            VAR relkey      : tin_ls_releasemode;
+            VAR ed_key      : tin_edit_key;
+            VAR error       : boolean );
+ 
+BEGIN
+error := false;
+ed_key := edk_nothing;
+CASE relkey OF
+    f_help, f7, f9, f1, f6, f2, f_end, f_exit :
+        ed_key := edk_nothing;
+    f_cmd:
+        ed_key := edk_enter;
+    f_enter:
+        ed_key := edk_enter;
+    f_mark:
+        ed_key := edk_mark;
+    f_clear:
+        ed_key := edk_clear;
+    f_insert:
+        ed_key := edk_insert;
+    f_delete :
+        ed_key := edk_delete ;
+    f_pick :
+        ed_key := edk_pick;
+    f_put :
+        ed_key := edk_put;
+    f3 :
+        BEGIN
+        IF  i11keychange
+        THEN
+            ed_key :=  edk_mark
+        ELSE
+            ed_key :=  edk_splitjoin
+        (*ENDIF*) 
+        END;
+    f8, f_print :
+        ed_key := edk_print;
+    f_down, f12 :
+        BEGIN
+        IF  ( i01g^.vt.parms.key.key <> vt_down_key )
+            AND  i11keychange
+        THEN
+            ed_key := edk_put
+        ELSE
+            ed_key := edk_down;
+        (*ENDIF*) 
+        END;
+    f_up, f11 :
+        BEGIN
+        IF  ( i01g^.vt.parms.key.key <> vt_up_key )
+            AND  i11keychange
+        THEN
+            ed_key := edk_pick
+        ELSE
+            ed_key := edk_up;
+        (*ENDIF*) 
+        END;
+    f_top :
+        ed_key := edk_top;
+    f_bottom :
+        ed_key := edk_bottom;
+&   ifdef WINDOWS
+    f_cursor_home,
+&   endif
+    f_cursor_bol :
+        ed_key := edk_home;
+&   ifdef WINDOWS
+    f_cursor_end,
+&   endif
+    f_cursor_eol :
+        ed_key := edk_end;
+    f_left, f4 :
+        ed_key := edk_left;
+    f_right, f5 :
+        ed_key := edk_right;
+    f_vscroll :
+        ed_key := edk_vscroll;
+    f_hscroll :
+        ed_key := edk_hscroll;
+    f_file_save :
+        ed_key := edk_save;
+    f_file_open :
+        ed_key := edk_open;
+    OTHERWISE:
+        error := true;
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_forward_scroll (
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area );
+ 
+VAR
+      window_length : tin_natural;
+      width         : tin_natural;
+      bot_margin    : tin_natural;
+ 
+BEGIN
+WITH display.frame [display.active_screen ] DO
+    BEGIN
+    i51size(cin_ls_workarea,window_length,width);
+    bot_margin := upper_margin + window_length - 1;
+    i11_get_bot_margin ( edit, upper_margin, window_length - 1,
+          bot_margin );
+    IF  bot_margin > 10000
+    THEN
+        upper_margin := 10000
+    ELSE
+        upper_margin := bot_margin;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_forward_scroll *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_backward_scroll(
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area );
+ 
+VAR
+      window_length : tin_natural;
+      width         : tin_natural;
+      top_margin    : tin_natural;
+ 
+BEGIN
+(* ==================== *)
+(* adjust scroll amount *)
+(* ==================== *)
+i51size(cin_ls_workarea,window_length,width );
+WITH  display, frame [active_screen ] DO
+    BEGIN
+    IF  upper_margin <= window_length
+    THEN
+        BEGIN
+        upper_margin := 1;
+        i11message(top_reached, sys_msg, is_error);
+        END
+    ELSE
+        BEGIN
+        top_margin := upper_margin - window_length + 1;
+        i11_get_top_margin ( edit, upper_margin,
+              window_length - 1, top_margin );
+        upper_margin := top_margin;
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_backward_scroll *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_vscroll (
+            VAR display : tin_display_parms);
+ 
+BEGIN
+WITH display ,frame [display.active_screen ] DO
+    BEGIN
+    IF  ( upper_margin + i01g^.vt.parms.scroll_dir < 1 )
+    THEN
+        BEGIN
+        csr_pos.sline := 1;
+        upper_margin := 1;
+        END
+    ELSE
+        BEGIN
+        csr_pos.sline := csr_pos.sline - abs (i01g^.vt.parms.scroll_dir);
+        upper_margin := upper_margin + i01g^.vt.parms.scroll_dir;
+        END;
+    (*ENDIF*) 
+    IF  upper_margin = 1
+    THEN
+        i11message(top_reached, sys_msg, is_error)
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_vscroll *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_this_cmd(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            this        : tin_natural);
+ 
+BEGIN
+CASE edit.prefix.line [this] .op OF
+    e_no_cmd :
+        (* nothing has to be done *)
+        ;
+    e_ins :
+        i11_ex_ins(eform,evars,display,edit,this);
+    e_del :
+        i11_ex_del(eform,evars,display,edit,this);
+    e_copy :
+        i11_ex_copy(eform,evars,display,edit,this);
+    e_move :
+        i11_ex_move(eform,evars,display,edit,this);
+    e_ftarget :
+        i11_ex_ftarget(edit,this);
+    e_ptarget :
+        i11_ex_ptarget(edit,this);
+    e_dupl :
+        i11_ex_dupl(eform,evars,display,edit,this);
+    e_rshift, e_lshift :
+        i11_ex_shift(eform,evars,display,edit,this);
+    e_center :
+        i11_ex_center(display,edit,this);
+    e_dark :
+        i11_ex_dark ( display, edit, this );
+    e_visible :
+        i11_ex_visible ( edit, this );
+    OTHERWISE:
+        BEGIN
+        edit.error_found := true;
+        edit.msg_id := unknown_ecmd
+        END
+    END
+(*ENDCASE*) 
+END; (* i11_ex_this_cmd *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_ins(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            this        : tin_natural);
+ 
+VAR
+      count      : tin_natural;
+ 
+BEGIN
+WITH edit, edit.prefix DO
+    BEGIN
+    count := line [this] .arg;
+    IF  count < 1
+    THEN
+        count := 1; (* min insert amount *)
+    (*ENDIF*) 
+    i14inserteline(eform,evars,line [this] .eline_nr + 1,
+          count,error_found);
+    IF  error_found
+    THEN
+        msg_id := eform_overflow
+    ELSE
+        BEGIN
+        insert_mode := true;
+        insert_line := line [this] .eline_nr + 1;
+        i11update_prefix_line(prefix,this + 1,length,count);
+        i11_reset_prefix_chain(edit,this,this);
+        display.changed := true;
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_ex_ins *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_del(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            first_del   : tin_natural);
+ 
+VAR
+      last_del   : tin_natural;
+      del_count  : tin_natural;
+ 
+BEGIN
+WITH edit, edit.prefix DO
+    WITH display.frame [current_eform ] DO
+        BEGIN
+        IF  line [first_del] .block_cmd
+        THEN
+            BEGIN
+            i11_find_block_end(edit,first_del,last_del,del_count);
+            IF  del_count > 0
+            THEN
+                msg_id := ok_msg
+            ELSE
+                msg_id := del_pending
+            (*ENDIF*) 
+            END
+        ELSE (*======================================== *)
+            BEGIN
+            del_count := line [first_del] .arg;
+            IF  del_count < 1
+            THEN
+                del_count := 1; (* min del amount *)
+            (*ENDIF*) 
+            i11_find_del_end( edit, first_del, last_del, del_count);
+            END;
+        (*ENDIF*) 
+        (* ==================================================== *)
+        IF  msg_id in [  del_pending, eform_underflow  ]
+        THEN
+            i11message(msg_id, sys_msg, is_error);
+        (* ==================================================== *)
+        (*ENDIF*) 
+        IF  edit.msg_id in [  ok_msg, eform_underflow  ]
+        THEN
+            BEGIN
+            i14deleteeline(eform,evars,line [first_del] .eline_nr,
+                  del_count);
+            insert_mode := true;
+            insert_line := line [first_del] .eline_nr;
+            IF  (insert_line < upper_margin) OR
+                (insert_line > upper_margin +
+                lines_on_screen - 1)
+            THEN
+                i11_ex_center(display,edit,first_del);
+            (*ENDIF*) 
+            display.changed := true;
+            i11update_prefix_line(prefix,last_del + 1,
+                  length,- del_count);
+            i11_reset_prefix_chain(edit,first_del,last_del);
+            END
+        ELSE(* del_pending *)
+            i11_reset_cmd(line [first_del ] )
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDWITH*) 
+END; (* i11_ex_del *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_copy(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            first_copy  : tin_natural);
+ 
+VAR
+      last_copy   : tin_natural;
+      copy_count  : tin_natural;
+      block_count : tin_natural;
+      i           : tin_natural;
+      target      : tin_natural;
+      found       : boolean;
+      error       : boolean;
+ 
+BEGIN
+WITH edit, edit.prefix DO
+    BEGIN
+    block_count := 0;
+    IF  line [first_copy] .block_cmd
+    THEN
+        BEGIN
+        i11_find_block_end(edit,first_copy,last_copy,copy_count);
+        block_count := edit.prefix.line [first_copy] .arg;
+        IF  ( copy_count > 0 )
+        THEN
+            msg_id := ok_msg
+        ELSE
+            msg_id := copy_pending
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        copy_count := edit.prefix.line [first_copy] .arg;
+        IF  ( copy_count < 1 )
+        THEN
+            copy_count := 1; (* min dupl amount *)
+        (*ENDIF*) 
+        last_copy := first_copy;
+        msg_id := ok_msg
+        END;
+    (*ENDIF*) 
+    IF  ( msg_id = ok_msg )
+    THEN
+        BEGIN
+        i11_find_target(edit,last_copy,found);
+        IF  found
+        THEN
+            BEGIN
+            IF  edit.target_kind = ftarget
+            THEN
+                target := line [target_line] .eline_nr + 1
+            ELSE
+                target := line [target_line] .eline_nr;
+            (*ENDIF*) 
+            IF  block_count > 1
+            THEN
+                BEGIN
+                FOR i := 1 TO block_count DO
+                    i14copyeline(eform,evars,
+                          line [first_copy] .eline_nr,
+                          copy_count,target,error);
+                (*ENDFOR*) 
+                copy_count := copy_count * block_count;
+                END
+            ELSE
+                i14copyeline(eform,evars,
+                      line [first_copy] .eline_nr,
+                      copy_count,target,error);
+            (*ENDIF*) 
+            IF  error
+            THEN
+                msg_id := eform_overflow;
+            (*ENDIF*) 
+            END
+        ELSE
+            msg_id := copy_pending
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    CASE msg_id OF
+        ok_msg :
+            WITH display.frame [edit.current_eform ] DO
+                BEGIN
+                target_found := false;
+                display.changed := true;
+                insert_mode := true;
+                IF  (target < upper_margin) OR
+                    (target > upper_margin +
+                    lines_on_screen - 1)
+                THEN
+                    i11_ex_center(display,edit,target_line);
+                (*ENDIF*) 
+                insert_line := target;
+                IF  line [target_line] .op = e_ftarget
+                THEN
+                    i11update_prefix_line(prefix,edit.target_line + 1,
+                          length,copy_count)
+                ELSE
+                    i11update_prefix_line(prefix,edit.target_line,
+                          length,copy_count);
+                (*ENDIF*) 
+                i11_reset_prefix_chain(edit,first_copy,last_copy);
+                i11_reset_prefix_chain(edit,target_line,target_line);
+                END;
+            (*ENDWITH*) 
+        copy_pending :
+            BEGIN
+            i11_reset_cmd(line [first_copy ] );
+            WITH display.frame [edit.current_eform ] DO
+                i11message(copy_pending, sys_msg, is_error)
+            (*ENDWITH*) 
+            END;
+        OTHERWISE:
+            BEGIN
+            error_found := true;
+            error_line := line [first_copy] .eline_nr
+            END
+        END
+    (*ENDCASE*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_ex_copy *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_move(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            first_move  : tin_natural);
+ 
+VAR
+      last_move  : tin_natural;
+      target     : tin_natural;
+      move_count : tin_natural;
+      found      : boolean;
+      error      : boolean;
+ 
+BEGIN
+WITH edit, edit.prefix DO
+    WITH display.frame [current_eform ] DO
+        BEGIN
+        IF  line [first_move] .block_cmd
+        THEN
+            BEGIN
+            i11_find_block_end(edit,first_move,last_move,move_count);
+            IF  ( move_count > 0 )
+            THEN
+                msg_id := ok_msg
+            ELSE
+                msg_id := move_pending
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            move_count := edit.prefix.line [first_move] .arg;
+            IF  ( move_count < 1 )
+            THEN
+                move_count := 1; (* min dupl amount *)
+            (*ENDIF*) 
+            last_move := first_move;
+            msg_id := ok_msg
+            END;
+        (*ENDIF*) 
+        i11_reset_cmd(line [first_move ] );
+        i11_reset_cmd(line [last_move ] );
+        IF  ( msg_id = ok_msg )
+        THEN
+            BEGIN
+            i11_find_target(edit,last_move,found);
+            IF  found
+            THEN
+                BEGIN
+                IF  edit.target_kind = ftarget
+                THEN
+                    target := line [target_line] .eline_nr + 1
+                ELSE
+                    target := line [target_line] .eline_nr;
+                (*ENDIF*) 
+                i14moveeline(eform,evars,line [first_move] .eline_nr,
+                      target,move_count,error);
+                IF  error
+                THEN
+                    msg_id := eform_overflow;
+                (*ENDIF*) 
+                END
+            ELSE
+                msg_id := move_pending
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        CASE msg_id OF
+            ok_msg :
+                BEGIN
+                target_found := false;
+                display.changed := true;
+                insert_mode := true;
+                IF  (target < upper_margin) OR
+                    (target > upper_margin +
+                    lines_on_screen - 1)
+                THEN
+                    i11_ex_center(display,edit,target_line);
+                (*ENDIF*) 
+                insert_line := target;
+                IF  target_line > last_move
+                THEN
+                    insert_line := insert_line - move_count;
+                (*ENDIF*) 
+                IF  target_line > last_move
+                THEN
+                    IF  edit.target_kind = ftarget
+                    THEN
+                        i11update_prefix_line(prefix,last_move + 1,
+                              target_line,- move_count)
+                    ELSE
+                        i11update_prefix_line(prefix,last_move + 1,
+                              target_line - 1,- move_count)
+                    (*ENDIF*) 
+                ELSE
+                    IF  edit.target_kind = ptarget
+                    THEN
+                        i11update_prefix_line(prefix,target_line,
+                              first_move - 1,move_count)
+                    ELSE
+                        i11update_prefix_line(prefix,
+                              target_line + 1,
+                              first_move - 1,move_count);
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                i11_reset_prefix_chain(edit,first_move,last_move);
+                i11_reset_prefix_chain(edit,target_line,target_line);
+                END;
+            move_pending :
+                BEGIN
+                i11_reset_cmd(line [first_move ] );
+                i11message(move_pending, sys_msg, is_error)
+                END;
+            OTHERWISE:
+                BEGIN
+                error_found := true;
+                error_line := line [first_move] .eline_nr
+                END
+            END
+        (*ENDCASE*) 
+        END;
+    (*ENDWITH*) 
+(*ENDWITH*) 
+END; (* i11_ex_move *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_ftarget(
+            VAR edit    : tin_edit_work_area;
+            this        : tin_natural);
+ 
+BEGIN
+WITH edit DO
+    IF  target_found (* already *)
+    THEN
+        BEGIN
+        error_found := true;
+        msg_id := ambiguous_targets
+        END
+    ELSE
+        BEGIN
+        target_found := true;
+        target_line := this;
+        target_kind := ftarget;
+        i11_reset_cmd(prefix.line [this] )
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END; (* i11_ex_ftarget *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_ptarget(
+            VAR edit    : tin_edit_work_area;
+            this        : tin_natural);
+ 
+BEGIN
+WITH edit DO
+    IF  target_found (* already *)
+    THEN
+        BEGIN
+        error_found := true;
+        msg_id := ambiguous_targets
+        END
+    ELSE
+        BEGIN
+        target_found := true;
+        target_line := this;
+        target_kind := ptarget;
+        i11_reset_cmd(prefix.line [this] )
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END; (* i11_ex_ptarget *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_dupl(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            first_dupl  : tin_natural);
+ 
+VAR
+      last_dupl   : tin_natural;
+      dupl_count  : tin_natural;
+      block_count : tin_natural;
+      i           : tin_natural;
+      error       : boolean;
+      is_block    : boolean;
+ 
+BEGIN
+block_count := 0;
+IF  edit.prefix.line [first_dupl] .block_cmd
+THEN
+    BEGIN
+    is_block := true;
+    block_count := edit.prefix.line [first_dupl] .arg;
+    i11_find_block_end(edit,first_dupl,last_dupl,dupl_count);
+    IF  ( dupl_count > 0 )
+    THEN
+        edit.msg_id := ok_msg
+    ELSE
+        edit.msg_id := dupl_pending
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    is_block := false;
+    dupl_count := edit.prefix.line [first_dupl] .arg;
+    IF  ( dupl_count < 1 )
+    THEN
+        dupl_count := 1; (* min dupl amount *)
+    (*ENDIF*) 
+    last_dupl := first_dupl;
+    edit.msg_id := ok_msg
+    END;
+(*ENDIF*) 
+(* ================================== *)
+IF  edit.msg_id = ok_msg
+THEN
+    BEGIN
+    IF  is_block AND ( block_count > 1 )
+    THEN
+        BEGIN
+        FOR i := 1 TO block_count DO
+            BEGIN
+            i14duplicateeline(eform,evars,
+                  edit.prefix.line [first_dupl] .eline_nr,
+                  dupl_count,is_block,error);
+            END;
+        (*ENDFOR*) 
+        END
+    ELSE
+        i14duplicateeline(eform,evars,
+              edit.prefix.line [first_dupl] .eline_nr,
+              dupl_count,is_block,error);
+    (*ENDIF*) 
+    IF  error
+    THEN
+        edit.msg_id := eform_overflow;
+    (*ENDIF*) 
+    END;
+(* ================================== *)
+(*ENDIF*) 
+CASE edit.msg_id OF
+    ok_msg :
+        BEGIN
+        IF  is_block AND ( block_count > 1 )
+        THEN
+            i11update_prefix_line ( edit.prefix,last_dupl + 1,
+                  edit.prefix.length, dupl_count * block_count )
+        ELSE
+            i11update_prefix_line ( edit.prefix,last_dupl + 1,
+                  edit.prefix.length, dupl_count );
+        (*ENDIF*) 
+        edit.insert_mode := true;
+        IF  is_block
+        THEN
+            edit.insert_line := edit.prefix.line [first_dupl] .eline_nr +
+                  dupl_count
+        ELSE
+            edit.insert_line := edit.prefix.line [first_dupl] .eline_nr
+                  + 1;
+        (*ENDIF*) 
+        display.changed := true;
+        i11_reset_prefix_chain(edit,first_dupl,last_dupl);
+        END;
+    dupl_pending :
+        BEGIN
+        WITH display.frame [edit.current_eform ] DO
+            i11message(dupl_pending, sys_msg, is_error);
+        (*ENDWITH*) 
+        i11_reset_cmd( edit.prefix.line [first_dupl] );
+        END;
+    eform_overflow :
+        edit.error_found := true
+    END
+(*ENDCASE*) 
+END; (* i11_ex_dupl *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_shift(
+            VAR eform   : tin_eform_buffer;
+            VAR evars   : tin_eform_vars;
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            first_shift : tin_natural);
+ 
+CONST
+      right   =   true;
+      left    =   false;
+ 
+VAR
+      last_shift  : tin_natural;
+      shift_count : tin_natural;
+      amount      : tin_natural;
+      error       : boolean;
+ 
+BEGIN
+WITH edit.prefix DO
+    BEGIN
+    amount := line [first_shift] .arg;
+    IF  ( amount < 1 )
+    THEN
+        amount := 1; (* min shift amount *)
+    (*ENDIF*) 
+    IF  line [first_shift] .block_cmd
+    THEN
+        BEGIN
+        i11_find_block_end(edit,first_shift,last_shift,shift_count);
+        IF  ( shift_count > 0 )
+        THEN
+            edit.msg_id := ok_msg
+        ELSE
+            edit.msg_id := shift_pending
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        shift_count := 1;
+        last_shift := first_shift;
+        edit.msg_id := ok_msg
+        END;
+    (*ENDIF*) 
+    IF  ( edit.msg_id = ok_msg )
+    THEN
+        BEGIN
+        CASE line [first_shift] .op OF
+            e_rshift :
+                i14shifteline(eform,evars,
+                      line [first_shift] .eline_nr,
+                      shift_count,amount,right,
+                      display.frame [edit.current_eform] . max_cols,
+                      error);
+            e_lshift :
+                i14shifteline(eform,evars,
+                      line [first_shift] .eline_nr,
+                      shift_count,amount,left,
+                      display.frame [edit.current_eform] . max_cols,
+                      error);
+            END;
+        (*ENDCASE*) 
+        i11_reset_prefix_chain(edit,first_shift,first_shift);
+        i11_reset_prefix_chain(edit,last_shift,last_shift);
+        display.changed := true;
+        END
+    ELSE
+        BEGIN (*  edit.msg_id = shift_pending *)
+        WITH display.frame [edit.current_eform ] DO
+            i11message(edit.msg_id, sys_msg, is_error);
+        (*ENDWITH*) 
+        i11_reset_cmd( line [first_shift ] )
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_ex_shift *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_center(
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            this        : tin_natural);
+ 
+VAR
+      halfscreen : tin_natural;
+ 
+BEGIN
+halfscreen := edit.lines_on_screen DIV 2;
+WITH display.frame [display.active_screen] ,
+     edit.prefix.line [this ] DO
+    BEGIN
+    IF  eline_nr > halfscreen
+    THEN
+        BEGIN
+        upper_margin := eline_nr - halfscreen;
+        i11_get_top_margin ( edit, eline_nr, halfscreen, upper_margin );
+        END
+    ELSE
+        upper_margin := 1;
+    (*ENDIF*) 
+    edit.insert_mode := true;
+    edit.insert_line := eline_nr;
+    END;
+(*ENDWITH*) 
+i11_reset_prefix_chain(edit,this,this);
+END; (* i11_ex_center *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_get_top_margin (
+            VAR edit       : tin_edit_work_area;
+            this_line      : tin_natural;
+            cols           : tin_natural;
+            VAR top_margin : tin_natural );
+ 
+VAR
+      this_lno   : tin_natural;
+      lno        : tin_natural;
+      this       : tin_natural;
+ 
+BEGIN
+this := this_line;
+lno := 1;
+WHILE ( lno <= cols ) AND ( this >= 0 ) DO
+    BEGIN
+    IF  ( this > 0 ) AND  i11isdark_ln ( edit.prefix, this, this_lno )
+    THEN
+        this :=  edit.prefix.line [this_lno] .eline_nr - 1
+    ELSE
+        this := this - 1;
+    (*ENDIF*) 
+    lno := lno + 1;
+    END;
+(*ENDWHILE*) 
+IF  ( this <= 0 )
+THEN
+    top_margin := 1
+ELSE
+    IF  ( this < top_margin )
+    THEN
+        top_margin := this;
+    (*ENDIF*) 
+(*ENDIF*) 
+END; (* i11_get_top_margin *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_get_bot_margin (
+            VAR edit       : tin_edit_work_area;
+            this_line      : tin_natural;
+            cols           : tin_natural;
+            VAR bot_margin : tin_natural );
+ 
+VAR
+      this_lno   : tin_natural;
+      first_dark : tin_natural;
+      lno        : tin_natural;
+      this       : tin_natural;
+ 
+BEGIN
+this := this_line;
+FOR lno := 1 TO cols  DO
+    BEGIN
+    IF  ( this > 0 ) AND
+        i11lixbln_in_x_block ( edit.prefix, this,
+        this_lno, first_dark )
+    THEN
+        BEGIN
+        this :=  first_dark + edit.prefix.line [this_lno] .arg;
+        END
+    ELSE
+        BEGIN
+        this := this + 1;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDFOR*) 
+bot_margin := this;
+END; (* i11_get_bot_margin *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_dark(
+            VAR display : tin_display_parms;
+            VAR edit    : tin_edit_work_area;
+            dark_line   : tin_natural);
+ 
+VAR
+      min_eline_nr  : tin_natural;
+      max_eline_nr  : tin_natural;
+      nxt_lno       : tin_natural;
+      last_dark     : tin_natural;
+      dark_count    : tin_natural;
+      block_ok      : boolean;
+ 
+BEGIN
+block_ok  := true;
+WITH edit, prefix, line [dark_line] ,
+     display.frame [current_eform ] DO
+    BEGIN
+    IF  block_cmd
+    THEN
+        BEGIN
+        i11_find_block_end ( edit, dark_line, last_dark, dark_count );
+        IF  dark_count <= 0
+        THEN
+            BEGIN
+            msg_id := dark_pending;
+            i11message( msg_id, sys_msg, is_error );
+            line [dark_line] .op := e_no_cmd;
+            block_ok  := false;
+            END
+        ELSE
+            BEGIN
+            line [last_dark] .content := cin_eprefix;
+            arg := dark_count;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  block_ok
+    THEN
+        BEGIN
+        content := cin_eprefix;
+        block_cmd := false;
+        min_eline_nr := eline_nr;
+        IF  i11isdark_ln ( edit.prefix, eline_nr, nxt_lno )
+        THEN
+            BEGIN
+            IF  nxt_lno <> dark_line
+            THEN
+                (* line [nxt_lno ] wird erweitert und  *)
+                (* line [dark_line ] geloescht.        *)
+                BEGIN
+                min_eline_nr := s60minimal ( line [nxt_lno] .eline_nr ,
+                      eline_nr );
+                max_eline_nr := s60maximal ( line [nxt_lno] .eline_nr +
+                      line [nxt_lno] .arg,
+                      eline_nr + arg );
+                line [nxt_lno] .eline_nr := min_eline_nr;
+                line [nxt_lno] .arg :=  max_eline_nr -  min_eline_nr;
+                i11_reset_prefix_chain ( edit, dark_line, dark_line );
+                END;
+            (*ENDIF*) 
+            i11_dark_preline ( edit, min_eline_nr, nxt_lno );
+            END;
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_ex_dark *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_dark_preline (
+            VAR edit    : tin_edit_work_area;
+            dark_eline  : tin_natural;
+            dark_no     : tin_natural);
+ 
+VAR
+      first_ln    : tin_natural;
+      first_eline : tin_natural;
+      last_ln     : tin_natural;
+      last_eline  : tin_natural;
+ 
+BEGIN
+WITH edit.prefix  DO
+    BEGIN
+    first_ln := dark_no;
+    first_eline := dark_eline;
+    last_eline := first_eline + line [first_ln] .arg;
+    last_ln := first_ln;
+    WHILE i11isdark_ln ( edit.prefix, first_eline - 1, first_ln ) DO
+        BEGIN
+        first_eline :=  line [first_ln] .eline_nr;
+        last_eline :=  s60maximal ( first_eline + line [first_ln] .arg,
+              last_eline );
+        i11_reset_prefix_chain ( edit, last_ln, last_ln );
+        last_ln := first_ln;
+        END;
+    (*ENDWHILE*) 
+    line [first_ln] .eline_nr := first_eline;
+    line [first_ln] .arg := last_eline - first_eline;
+    END;
+(*ENDWITH*) 
+END; (* i11_dark_preline *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_ex_visible (
+            VAR edit    : tin_edit_work_area;
+            dark_ln     : tin_natural);
+ 
+BEGIN
+i11_reset_prefix_chain ( edit, dark_ln, dark_ln );
+END; (* i11_ex_visible *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_find_block_end(
+            VAR edit       : tin_edit_work_area;
+            block_start    : tin_natural;
+            VAR block_end  : tin_natural;
+            VAR block_size : tin_natural);
+ 
+VAR
+      found : boolean;
+ 
+BEGIN
+WITH edit.prefix DO
+    BEGIN
+    block_end := block_start;
+    found := false;
+    WHILE ( (NOT found) AND (block_end <> length) ) DO
+        BEGIN
+        block_end := block_end + 1;
+        IF  ( (line [block_end] .op = line [block_start] .op)
+            AND  line [block_end] .block_cmd )
+        THEN
+            found := true
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  found
+    THEN
+        BEGIN
+        block_size := line [block_end] .eline_nr -
+              line [block_start] .eline_nr + 1;
+        i11_reset_cmd( line [block_end ] );
+        END
+    ELSE
+        block_size := 0
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END; (* i11_find_block_end *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_find_target(
+            VAR edit   : tin_edit_work_area;
+            start      : tin_natural;
+            VAR found  : boolean);
+ 
+VAR
+      target  : tin_natural;
+ 
+BEGIN
+IF  edit.target_found
+THEN
+    found := true
+ELSE
+    BEGIN
+    found := false;
+    target := start;
+    WHILE ( (NOT found) AND (target <> edit.prefix.length) ) DO
+        BEGIN
+        target := target + 1;
+        WITH edit.prefix.line [target ] DO
+            found := ( (op = e_ftarget) OR (op = e_ptarget) )
+        (*ENDWITH*) 
+        END;
+    (*ENDWHILE*) 
+    IF  found
+    THEN
+        BEGIN
+        edit.target_found := true;
+        edit.target_line := target;
+        IF  ( edit.prefix.line [target] .op = e_ftarget )
+        THEN
+            edit.target_kind := ftarget
+        ELSE
+            edit.target_kind := ptarget;
+        (*ENDIF*) 
+        i11_reset_cmd( edit.prefix.line [target ] )
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END; (* i11_find_target *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11update_prefix_line(
+            VAR prefix  : tin_prefix_type;
+            first, last : tin_natural;
+            count       : tsp00_Int2);
+ 
+BEGIN
+IF  last - first >= 0
+THEN
+    WHILE first <= last DO
+        BEGIN
+        WITH prefix.line [first ] DO
+            eline_nr := eline_nr + count;
+        (*ENDWITH*) 
+        first := first + 1;
+        END;
+    (*ENDWHILE*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11sortprefix(
+            VAR prefix   : tin_prefix_type);
+ 
+VAR
+      count,i  : tin_natural;
+      help     : tin_prefix_line;
+      this     : tin_natural;
+ 
+BEGIN
+count := prefix.length;
+FOR i := 1 TO prefix.length DO
+    IF  (  prefix.line [i] .content = cin_eprefix )  AND
+        (  prefix.line [i] .op <> e_dark )
+    THEN
+        prefix.line [i] .eline_nr := 9999;
+    (*ENDIF*) 
+(*ENDFOR*) 
+WHILE count > 1 DO
+    BEGIN
+    this := 1;
+    FOR i := 2 TO count DO
+        BEGIN
+        IF  prefix.line [i] .eline_nr <
+            prefix.line [this] .eline_nr
+        THEN
+            BEGIN
+            help := prefix.line [i] ;
+            prefix.line [i]  := prefix.line [this] ;
+            prefix.line [this ] := help;
+            END;
+        (*ENDIF*) 
+        this := i;
+        END;
+    (*ENDFOR*) 
+    count := count - 1;
+    END;
+(*ENDWHILE*) 
+IF  prefix.length > 0
+THEN
+    REPEAT
+        IF  prefix.line [prefix.length] .eline_nr = 9999
+        THEN
+            BEGIN
+            prefix.line [prefix.length] .eline_nr := 0;
+            prefix.line [prefix.length] .op := e_no_cmd;
+            prefix.line [prefix.length] .arg := 0;
+            prefix.line [prefix.length] .block_cmd := false;
+            prefix.length := prefix.length - 1;
+            END;
+        (*ENDIF*) 
+    UNTIL
+        (prefix.length = 0) OR
+        (prefix.line [prefix.length] .eline_nr <> 9999);
+    (*ENDREPEAT*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_reset_prefix_chain(
+            VAR edit    : tin_edit_work_area;
+            first, last : tin_natural);
+ 
+VAR
+      this         : tin_natural;
+      end_of_chain : boolean;
+ 
+BEGIN
+this := first;
+end_of_chain := false;
+REPEAT
+    edit.prefix.line [this] .content := cin_eprefix;
+    WITH edit.prefix.line [this ] DO
+        BEGIN
+        op := e_no_cmd;
+        block_cmd := false;
+        arg := 1
+        END;
+    (*ENDWITH*) 
+    IF  ( this = last )
+    THEN
+        end_of_chain := true
+    ELSE
+        this := this + 1;
+    (*ENDIF*) 
+UNTIL
+    end_of_chain
+(*ENDREPEAT*) 
+END; (* i11_reset_prefix_chain *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_reset_cmd(
+            VAR cmd_prefix : tin_prefix_line);
+ 
+BEGIN
+WITH cmd_prefix DO
+    BEGIN
+    op := e_no_cmd;
+    block_cmd := false;
+    arg := 1
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_find_del_end(
+            VAR edit     : tin_edit_work_area;
+            first_del    : tin_natural;
+            VAR last_del : tin_natural;
+            del_count    : tin_natural);
+ 
+VAR
+      eodel : tsp00_Int2;
+ 
+BEGIN
+last_del := first_del;
+eodel := edit.prefix.line [last_del] .eline_nr + del_count - 1;
+IF  del_count > 1
+THEN
+    WHILE (edit.prefix.line [last_del] .eline_nr <= eodel)
+          AND (last_del < mxin_prefix) DO
+        last_del := last_del + 1;
+    (*ENDWHILE*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      i11lixbln_in_x_block (
+            VAR prefix    : tin_prefix_type;
+            this          : tin_natural;
+            VAR this_lno  : tin_natural;
+            VAR firstdark : tin_natural ) : boolean;
+ 
+VAR
+      success         : boolean;
+ 
+BEGIN
+firstdark := 0;
+WITH prefix DO
+    BEGIN
+    success := i11isdark_ln ( prefix, this, this_lno );
+    IF  success
+    THEN
+        firstdark := line [this_lno] .eline_nr;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+i11lixbln_in_x_block := success;
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      i11isdark_ln (
+            VAR prefix    : tin_prefix_type;
+            this_eline_no : tin_natural;
+            VAR this_lno  : tin_natural ) : boolean;
+ 
+VAR
+      lno             : tin_natural;
+      success         : boolean;
+ 
+BEGIN
+WITH prefix DO
+    BEGIN
+    lno := 1;
+    success := false;
+    WHILE ( lno <= length )  AND NOT success DO
+        BEGIN
+        WITH line [ lno ] DO
+            BEGIN
+            IF  ( op = e_dark ) AND
+                ( eline_nr <= this_eline_no ) AND
+                ( this_eline_no < eline_nr + arg )
+            THEN
+                BEGIN
+                success := true;
+                this_lno := lno;
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+        lno := lno + 1;
+        END;
+    (*ENDWHILE*) 
+    i11isdark_ln := success;
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11getdark_eline_count (
+            VAR prefix     : tin_prefix_type;
+            start_this     : tin_natural;
+            this           : integer;
+            VAR dark_count : tin_natural );
+ 
+VAR
+      i : tin_natural;
+ 
+BEGIN
+WITH prefix DO
+    BEGIN
+    FOR i := 1 TO length DO
+        BEGIN
+        IF  ( line [i] .op = e_dark ) AND
+            ( line [i] .eline_nr >= start_this ) AND
+            ( line [i] .eline_nr < this )
+        THEN
+            BEGIN
+            dark_count := dark_count + line [i] .arg - 1;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      i11_getdark_scrnline_count (
+            VAR edit       : tin_edit_work_area;
+            this           : tin_natural;
+            lines          : tin_natural;
+            VAR count      : tin_natural );
+ 
+VAR
+      this_lno   : tin_natural;
+      lno        : tin_natural;
+ 
+BEGIN
+count := 0;
+FOR lno := 1 TO lines  DO
+    BEGIN
+    IF  i11isdark_ln ( edit.prefix, this, this_lno )
+    THEN
+        BEGIN
+        this :=  edit.prefix.line [this_lno] .eline_nr
+              + edit.prefix.line [this_lno] .arg;
+        count :=  count + edit.prefix.line [this_lno] .arg - 1;
+        END
+    ELSE
+        this := this + 1;
+    (*ENDIF*) 
+    END;
+(*ENDFOR*) 
+(* IF  count > 0
+      THEN
+      count :=  count - 1; *)
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

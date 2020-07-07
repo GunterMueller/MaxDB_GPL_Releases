@@ -1,0 +1,448 @@
+#!/bin/sh
+# @(#)x_install   6.2   1996-06-14, 6.2.8.8 1998-04-16 , 7.2 2000-04-12
+#
+# If all args are present on command line, run in batch mode (don't ask
+#	any questions).
+#
+
+# Exit codes
+RC=0		# no warnings, no error
+#		4 warnings: each warning sets 1 of lower 4 bits
+RC_SUPERUSER=1	# caller should be superuser
+RC_REMOTE=2	# no REMOTE-SQL: missing /etc/services or wrong node name
+RC_FUTURE_4=4	# keep free for future warning
+RC_FUTURE_8=8	# keep free for future warning
+#		Errors: any combination of upper 4 bits
+RC_ARG=16	# bad command line arg
+RC_MACH=32	# wrong installation (tape is for another machine)
+RC_DBROOT=48	# current working directory != $DBROOT
+RC_NO_OG=64	# $DBOWN or $DBGRP not set
+RC_CH_OG=80	# cannot chown $DBOWN $DBROOT or chgrp $DBGRP $DBROOT
+RC_SPOOL=96	# missing /var/spool/sql (SVR4) or
+		# missing /usr/spool/sql (any machine)
+RC_DBPINST=112
+RC_REGINST=128
+
+# Usage
+SELF=`basename $0`
+USAGE="\nusage: $SELF [-r <dbroot>] [-o <dbown>] [-g <dbgrp>] [-n <node>] \n\
+   -r <dbroot>  root directory for database programs\n\
+   -o <dbown>   owner name for database programs\n\
+   -g <dbgrp>   group name for database programs\n\
+   -n <node>    check node name and prepare for REMOTE-SQL"
+
+CHMOD=/bin/chmod
+ECHO=/bin/echo
+
+PRODUCT="SAPDB"
+RELEASE="7.2"
+SYSVAR="LINUX"
+SYSTEM="RedHat 6.0 i386"
+
+$ECHO "Installation of $PRODUCT $RELEASE started `date`"
+
+# Should be superuser
+ID=`id`
+SUID=`expr "$ID" : "uid=\([0-9]*\)" \| 0`
+if [ $SUID -ne 0 ]
+then
+    $ECHO "\nWARNING: $SELF should be called by superuser"
+    RC=`expr $RC + $RC_SUPERUSER`
+fi
+
+# Get environment
+if [ "$CHMODNRM" = "" ]
+then
+    CHMODNRM=ug=rw,o=r
+fi
+# Get environment
+if [ "$CHMODEXE" = "" ]
+then
+    CHMODEXE=ug=rwx,o=rx
+fi
+# Get environment
+if [ "$CHMODSUID" = "" ]
+then
+    CHMODSUID=u=srx,g=rx,o=r
+fi
+
+# Get user args
+NODE=empty$$
+DBROOT=
+DBOWN=
+while getopts n:r:o:g: OPT
+do
+    case $OPT in
+    n)	# Node name or empty string
+	NODE=$OPTARG
+	;;
+    r)	# Root directory
+	DBROOT=$OPTARG
+	;;
+    o)	# Owner name
+	DBOWN=$OPTARG
+	;;
+    g)	# Group name
+	DBGRP=$OPTARG
+	;;
+    *)	# Bad arg
+	$ECHO "$USAGE"
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_ARG`
+	;;
+    esac
+done
+
+if [ -z "$DBROOT" -o -z "$DBOWN" -o -z "$DBGRP" -o "$NODE" = "empty$$" ]
+then
+    # Interactive mode: verify correct operating system
+    $ECHO "\nThis installation package is only for $SYSVAR $SYSTEM"
+    $ECHO "Is your machine running $SYSVAR $SYSTEM ? (y/n) \c"
+    read ANS
+    case "$ANS" in
+    y* | Y* )
+	$ECHO "Proceeding with installation..."
+	;;
+    * )
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_MACH`
+	;;
+    esac
+else
+    # Batch mode: assume correct operating system
+    $ECHO "\nInstallation for $SYSVAR $SYSTEM"
+fi
+
+# Current working directory must be $DBROOT
+if [ -z "$DBROOT" ]
+then
+    # Arg was not given on command line: ask for it
+    DBROOT=`pwd`
+    $ECHO "\nThe current working directory is $DBROOT"
+    $ECHO "Is the current working directory really DBROOT ? (y/n) \c"
+    read ANS
+    case "$ANS" in
+    y* | Y* )
+	$ECHO "Proceeding with DBROOT=$DBROOT"
+	;;
+    * )
+	$ECHO "Please change directory to DBROOT and start again"
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_DBROOT`
+	;;
+    esac
+else
+    # Batch mode
+    if cd $DBROOT
+    then
+	:
+    else
+	# cd has just written an error msg
+	$ECHO "Unable to cd $DBROOT"
+	$ECHO "$USAGE"
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_DBROOT`
+    fi
+fi
+
+# Database owner name
+if [ -z "$DBOWN" ]
+then
+    $ECHO "\nOwnership of the database programs: Enter user name: \c"
+    read DBOWN
+    if [ -z "$DBOWN" ]
+    then
+	$ECHO "Database owner not set"
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_NO_OG`
+    fi
+fi
+if chown $DBOWN $DBROOT
+then
+    :
+else
+    # chown has just written an error msg
+    $ECHO "Unable to chown $DBOWN $DBROOT"
+    $ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+    exit `expr $RC + $RC_CH_OG`
+fi
+
+# Database group name
+if [ -z "$DBGRP" ]
+then
+    $ECHO "\nGroup of the database programs: Enter group name: \c"
+    read DBGRP
+    if [ -z "$DBGRP" ]
+    then
+	$ECHO "Database group not set"
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+	exit `expr $RC + $RC_NO_OG`
+    fi
+fi
+if chgrp $DBGRP $DBROOT
+then
+    :
+else
+    # chgrp has just written an error msg
+    $ECHO "Unable to chgrp $DBGRP $DBROOT"
+    $ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+    exit `expr $RC + $RC_CH_OG`
+fi
+
+$ECHO "All files will belong to user \"$DBOWN\" and group \"$DBGRP\""
+
+$ECHO "\nSetting ownership and access rights ..."
+find . -exec chown $DBOWN {} \;
+find . -exec chgrp $DBGRP {} \;
+find . -type d -exec $CHMOD $CHMODEXE {} \;
+find . -type f -exec $CHMOD $CHMODNRM {} \;
+if [ -d misc ]
+then
+    find misc -type f -exec $CHMOD $CHMODEXE {} \;
+fi
+if [ -d sap ]
+then
+    find sap -type f -exec $CHMOD $CHMODEXE {} \;
+fi
+if [ -d WebDB/cgi-bin ]
+then
+    find WebDB/cgi-bin -type f -exec $CHMOD $CHMODEXE {} \;
+fi
+if [ -d WebDB ]
+then
+    find WebDB -type f \( -name '*.sh' -o -name '*.ini' \) \
+	-exec $CHMOD $CHMODEXE {} \;
+fi
+$CHMOD $CHMODEXE pgm	#to link kernel to db:xxx
+find bin etc pgm -type f \
+    -exec $CHMOD $CHMODEXE {} \;
+find demo \( -name 'x_*' -o -name '*.ins' \) \
+    -exec $CHMOD $CHMODEXE {} \;
+find etc \( -name '*list' -o -name '*lst' \) \
+    -exec $CHMOD $CHMODNRM {} \;
+
+chown root pgm/dbmsrv
+$CHMOD $CHMODSUID pgm/dbmsrv
+
+
+$ECHO "\nPreparing terminfo files ..."
+for TERMINAL in terminfo/*.ti
+do
+    TERMINFO=$DBROOT/terminfo tic -v $TERMINAL 2> /dev/null
+done
+
+# Even if this file's contents have no effect, they provides inspiration
+if [ -f terminfo/term/charsetnames ]
+then
+    # Ensure standard entries
+    if grep 'vt100[ ][ ]*german' terminfo/term/charsetnames > /dev/null
+    then
+	:
+    else
+	$ECHO "# vt100         german"      >> terminfo/term/charsetnames
+    fi
+else
+    $ECHO "# TERM          TERMCHARSET" >  terminfo/term/charsetnames
+    $ECHO "#"                           >> terminfo/term/charsetnames
+    $ECHO "# vt100         german"      >> terminfo/term/charsetnames
+fi
+
+$ECHO "Setting ownership and access rights for terminfo files..."
+find terminfo -exec chown $DBOWN {} \;
+find terminfo -exec chgrp $DBGRP {} \;
+find terminfo -type d -exec $CHMOD $CHMODEXE {} \;
+find terminfo -type f -exec $CHMOD $CHMODNRM {} \;
+
+$ECHO "\nInstalling/checking work directories ..."
+if [ ! -d wrk ]
+then
+    mkdir wrk
+fi
+$CHMOD $CHMODEXE  wrk
+chgrp $DBGRP     wrk
+chown $DBOWN     wrk
+
+if [ ! -d /usr/spool ]
+then
+    if [ -d /var/spool ]
+    then
+        if ln -s /var/spool /usr/spool
+        then
+            :
+        else
+            $ECHO "\nPlease create a symbolic link so that"
+            $ECHO "/usr/spool leads to /var/spool"
+            $ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+            exit `expr $RC + $RC_SPOOL`
+        fi
+    else
+        if mkdir /usr/spool
+        then
+            :
+        else
+            $ECHO "\nPlease create a directory /usr/spool"
+            $ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+            exit `expr $RC + $RC_SPOOL`
+        fi
+    fi
+fi
+if [ ! -d /usr/spool/sql ]
+then
+    if mkdir /usr/spool/sql
+    then
+        :
+    else
+	$ECHO "\nInstallation of $PRODUCT $RELEASE cancelled `date`"
+        exit `expr $RC + $RC_SPOOL`
+    fi
+fi
+$CHMOD "ugo=rwx" /usr/spool/sql
+chgrp $DBGRP    /usr/spool/sql
+chown $DBOWN    /usr/spool/sql
+
+for DIR in /usr/spool/sql/config /usr/spool/sql/diag /usr/spool/sql/ipc \
+    $DBROOT/wrk/config /usr/spool/sql/spool /usr/spool/sql/fifo
+do
+    if [ ! -d $DIR ]
+    then
+        mkdir $DIR
+    fi
+    chown $DBOWN $DIR
+    chgrp $DBGRP $DIR
+    $CHMOD "ugo=rwx" $DIR
+done
+
+sync
+
+$ECHO "\nUpdate the profiles of all users who are going to work with $PRODUCT"
+$ECHO "Set the environment variables DBNAME, DBROOT and PATH"
+$ECHO "When they login again, they can use $PRODUCT"
+
+$ECHO "\nRegister Installation"
+if $DBROOT/bin/dbmcli -s -R $DBROOT inst_reg -k $DBROOT
+then
+    :
+else
+    $ECHO "\ncould not register installation"
+    exit `expr $RC + $RC_REGINST`
+fi
+
+$ECHO "\nRegister DBProcedure Objects"
+if [ -f $DBROOT/lib/lib64/dbpinstall.so ]
+then
+   if $DBROOT/bin/regsvr32 $DBROOT/lib/lib64/dbpinstall
+   then
+      :
+   else
+      $ECHO "\n could not register $DBROOT/lib/lib64/dbpinstall"
+      exit `expr $RC + $RC_DBPINST`
+   fi
+else
+   if $DBROOT/bin/regsvr32 $DBROOT/lib/dbpinstall
+   then
+       :
+   else
+      $ECHO "\n could not register $DBROOT/lib/dbpinstall"
+      exit `expr $RC + $RC_DBPINST`
+   fi
+fi
+
+if [ "$NODE" = "empty$$" ]
+then
+    # Node name was not entered on command line
+    $ECHO "\nDo you want to use REMOTE-SQL from or to this machine ? \c"
+    read ANS
+    case "$ANS" in
+    y* | Y* )
+	# Ask user later to check node name
+	NODE=check$$
+	;;
+    * )
+	# Don't set up REMOTE-SQL
+	NODE=
+	;;
+    esac
+else
+    # Node name was entered on command line
+    if [ "$NODE" ]
+    then
+	$ECHO
+    fi
+fi
+
+if [ "$NODE" ]
+then
+    # User wants to use REMOTE-SQL: prepare files
+    $ECHO "Preparing files for REMOTE-SQL ..."
+
+    if [ ! -f /usr/spool/sql/config/servertypes ]
+    then
+	$ECHO "# node:dbname   /type" \
+	      >/usr/spool/sql/config/servertypes
+	$ECHO >>/usr/spool/sql/config/servertypes
+	$ECHO "Created /usr/spool/sql/config/servertypes"
+    fi
+    chown $DBOWN /usr/spool/sql/config/servertypes
+    chgrp $DBGRP /usr/spool/sql/config/servertypes
+    $CHMOD $CHMODNRM /usr/spool/sql/config/servertypes
+
+    # Installation procedure for remote sql server
+    if [ -f /etc/services ]
+    then
+	# RECOMMEND: test for 7200 and give warning
+	$ECHO "Checking /etc/services for REMOTE-SQL"
+	if grep -s sql30 /etc/services > /dev/null &&
+	   grep -s sql6  /etc/services > /dev/null
+	then
+	    :
+	else
+	    $ECHO " ... adding it to /etc/services"
+	    if grep -s sql30 /etc/services > /dev/null
+	    then
+		$ECHO "sql6    7210/tcp      ADABAS 6.2" >> /etc/services
+	    else
+		$ECHO "#"                                >> /etc/services
+		$ECHO "sql30   7200/tcp      ADABAS 6.1" >> /etc/services
+		$ECHO "sql6    7210/tcp      ADABAS 6.2" >> /etc/services
+	    fi
+	    $ECHO "NOTE: if you are using NIS (Network Information System),"
+	    $ECHO "      you must add the services to the NIS server."
+	fi
+    else
+	$ECHO "WARNING: Because /etc/services is missing, "
+	$ECHO "         server(s) for REMOTE-SQL can't be used"
+	RC=`expr $RC + $RC_REMOTE`
+    fi
+fi
+
+if [ "$NODE" ]
+then
+    # User wants to use REMOTE-SQL: check node name
+    CURRENT=`uname -n`
+    $ECHO "Currently, the node name of your machine is: $CURRENT"
+    if [ "$NODE" = "check$$" ]
+    then
+	# Node name was not entered on command line (interactive mode)
+	$ECHO "Is this name correct ? \c"
+	read ANS
+	case $ANS in
+	y* | Y* )
+	    ;;
+	* )
+	    $ECHO "WARNING: Before using REMOTE-SQL, please change node name"
+	    RC=`expr $RC + $RC_REMOTE`
+	    ;;
+	esac
+    else
+	# Node name was entered on command line (batch mode)
+	if [ "$CURRENT" != "$NODE" ]
+	then
+	    $ECHO "WARNING: Before using REMOTE-SQL, please change node name to $NODE"
+	    RC=`expr $RC + $RC_REMOTE`
+	fi
+    fi
+fi
+
+$ECHO "\nInstallation of $PRODUCT $RELEASE finished `date`"
+exit $RC
+

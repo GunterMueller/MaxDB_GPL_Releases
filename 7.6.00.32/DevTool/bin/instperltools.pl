@@ -1,0 +1,155 @@
+#!/usr/bin/perl
+#
+# instperltools
+# 2000-05-09 initial
+# 2001-02-19 support for perl 5.6.0
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use File::Basename;
+
+main (@ARGV);
+
+sub main  {
+	instperltools (@_);
+}
+
+sub instperltools {
+	my $path;
+
+	if (@_ < 1) {
+		die "dont know TOOL" unless (defined $ENV{"TOOL"});
+		$path = $ENV{"TOOL"}."/bin";
+	} else {
+		$path = shift;
+	}
+
+	my $perlhashbang = get_perlhashbang ();
+	my $pythonhashbang = get_pythonhashbang ();
+
+	chdir($path) || die "Can't change directory: $!\n";
+
+	foreach (get_readdir ($path)) {
+		next if ($_ eq "." || $_ eq "..");
+
+		if ($_ =~ /\.pl$/) {
+			my $filename = $_;
+			-l "$path/$filename" or fix_hashbang ($path."/".$filename, $perlhashbang);
+			my $base = basename $filename, ".pl";
+			unlink $base;
+			symlink $filename, $base;
+		} elsif ($_ =~ /\.pm$/) {
+			-l "$path/$_" or fix_hashbang ($path."/".$_, $perlhashbang);
+		} elsif ($_ =~ /\.py$/) {
+			my $filename = $_;
+			-l "$path/$filename" or fix_hashbang ($path."/".$filename, $pythonhashbang);
+			my $base = basename $filename, ".py";
+			unlink $base;
+			symlink $filename, $base;
+		}
+	}
+}
+
+sub get_readdir {
+	$_ = shift;
+	opendir (DIR, $_) || die "cannot open directory '$_'\n";
+	my @dir = readdir (DIR);
+	closedir (DIR);
+	return @dir;
+}
+
+sub get_pythonhashbang {
+	chomp (my $env = `which env`);
+	return "#!".$env." python\n";
+}
+
+sub get_perlhashbang {
+	my @perlexe = (
+		"/devtool/local/bin/perl",
+		"/apo/DevTools/local/bin/perl",
+		"/usr/bin/perl",
+		"/bin/env perl",
+		"/usr/bin/env perl");
+	my $perlcmd;
+	my $major;
+	my $minor;
+
+	foreach $cmd (@perlexe) {
+		(my $exe, @_) = split ' ', $cmd;
+
+		# do they know thie executable?
+		next unless ( -x $exe);
+
+		# get version of perl by using the switch -v
+		open (INPUT, $cmd." -v |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /^This is perl, version/g);
+			last if ($_ =~ /^This is perl, v\d\.\d\.\d/g);
+		}
+		close (INPUT);
+		if ($_ =~ /^This is perl, version (\d+)\.(\d+)_(\d+)/) {
+			$major = $1;
+			$minor = $2.$3;
+		} elsif ($_ =~ /^This is perl, v(\d+)\.(\d+).(\d+)/) {
+			$major = $1;
+			$minor = $2.$3;
+		} elsif ($_ =~ /^This is perl, version (\d+)\.(\d+)/) {
+			$major = $1;
+			$minor = $2;
+		}
+
+		# only use perl with major version >= 5
+		next if ($major < 5);
+		$perlcmd = $cmd;
+		last;
+	}
+
+	# tell them the hashbang line
+	return "#!".$perlcmd."\n";
+}
+
+sub fix_hashbang {
+	my $filename = shift;
+	my $hashbang = shift;
+	my $linenumber = 0;
+
+	my @status = stat ($filename);
+	my $mode = $status[2] & 0777;
+
+	open (INPUT, $filename);
+	open (OUTPUT, "> ".$filename."~");
+
+	while (<INPUT>) {
+		if (($linenumber == 0) && ($_ =~ /^#!.+perl$/ || $_ =~ /^#!.+python$/)) {
+			print OUTPUT $hashbang;
+		} else {
+			print OUTPUT $_;
+		}
+		$linenumber++;
+	}
+	close (INPUT);
+	close (OUTPUT);
+	unlink $filename;
+	rename $filename."~", $filename;
+	chmod $mode, $filename;
+}

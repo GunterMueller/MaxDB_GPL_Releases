@@ -1,0 +1,147 @@
+#!/usr/bin/perl
+# archive       *** internal script (called by vmake !)
+#
+# @(#)archive		1997-11-18
+#
+# replace/insert modules into a library
+#
+# 1996-09-04 Josef, enable option '-lib'
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package archive;
+use Env;
+use Carp;
+use ToolLib;
+
+# Get AR
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("archive called with @ARGV\n");
+
+$USAGE = "usage: archive library [objects]\n";
+
+
+@OBJECTS = ();
+
+while ($_ = $ARGV[0], /^-/) {
+    shift;
+    last if /^--$/;
+
+    if (/^-g$|^-p$|^-Y$/) { next } # ignored
+
+    if (/^-k$/ )     { next }     # not used
+
+    if (/^-lib=(.*)/ ) { push @OBJECTS, "$1.lib"; next }
+
+    if(/^-BuildNrFunction\s*=\s*(.*)/i)
+    {
+        ToolLib::SetBuildNrModule($1);
+        $BuildModule = 1;
+        next ;
+    }
+
+} #while
+
+if ( @ARGV < 1 ) { print $USAGE; exit 1 }
+
+$OUTLIB = shift;
+	@OBJECTS = @ARGV;
+
+if ( $BuildModule == 1 )
+{
+    push @OBJECTS, ToolLib::CreateBuildNrModule(@KEEPFLG,$DEBUG?("-g"):());
+}
+
+
+@ARFLAGS;
+
+if ( @ARGV < 1 ) {
+    print "updating table of contents only\n";
+    system("$RANLIB $OUTLIB > $NULL") == 0
+	     or croak "Error while executing \"$RANLIB $OUTLIB >$NULL\"\n".
+		 "message: $!\n";
+}
+else {
+    ToolTrace("archive: $AR @ARFLAGS -out:$OUTLIB @OBJECTS\n" );
+    if ($OS eq "WIN32") {
+        system($AR, @ARFLAGS, $^O =~ /mswin32/i ? "-out:$OUTLIB" : $OUTLIB, @OBJECTS) == 0
+             or croak "Error while executing $AR @ARFLAGS ",  $^O =~ /mswin32/i ? "-out:$OUTLIB" : $OUTLIB, " @OBJECTS\n".
+             "message: $!\n";
+    }
+    else {
+        # 17.06.98 Daniel Dittmar: footnote 1
+        # build archive from ordinary objects
+		mkdir ("../lstfiles", 0775);
+		unlink "../lstfiles/$OUTLIB.lst";
+		open (LSTFILE, ">../lstfiles/$OUTLIB.lst");
+		foreach (@OBJECTS)
+		{
+			print LSTFILE "$_\n";
+		}
+		close (LSTFILE);
+
+		if (($^O eq "solaris") && $ENV{APOMAKE} && ($ENV{VMAKE_OPTION} =~ /u/) )
+		{
+			print ("CC -xar -o $OUTLIB @OBJECTS\n") if ($ENV{NOQUIET});
+			system ("CC", "-xar", "-o", $OUTLIB, @OBJECTS) == 0
+				or croak "Error while executing CC -xar -o $OUTLIB @OBJECTS\n $?";
+		}
+		else
+		{
+			@simpleObjects = grep /\.o$/, @OBJECTS;
+			system($AR, @ARFLAGS, $^O =~ /mswin32/i ? "-out:$OUTLIB" : $OUTLIB, @simpleObjects) == 0
+				 or croak "Error while executing $AR @ARFLAGS ",  $^O =~ /mswin32/i ? "-out:$OUTLIB" : $OUTLIB, " @OBJECTS\n".
+				 "message: $!\n";
+			# add members of each archive argument
+			@arObjects = grep /\.a(.[fsq])?$/, @OBJECTS;
+			foreach $archive (@arObjects) {
+				$objsString = `$AR t $archive`;
+				@all_arMembers = split " ", $objsString;
+				@arMembers = grep /\.o$/, @all_arMembers;
+				system($AR, 'x', $archive);
+				system ($AR, 'r', $OUTLIB, @arMembers) == 0
+				or croak "Error while executing $AR r $OUTLIB @arMembers ".
+					"message: $!\n";
+				unlink @all_arMembers;
+			}
+		}
+    }
+}
+
+__END__
+
+Hier kann ein langer Kommentar stehen!
+
+footnote 1: 17.06.98 Daniel Dittmar
+
+      The trigger compiler requires the complete sqlpl objects
+    as an archive.
+
+      Specifying all the objects in the description made the
+    command line for the $AR command too long.
+
+      Adding libs to the description led to problems linking
+    the program. The linker was not able to find
+    objects embedded in archives embedded in archives.
+
+      Now, the contents of every lib given in the
+    description is extracted and all the objects are added
+    to the target archive.

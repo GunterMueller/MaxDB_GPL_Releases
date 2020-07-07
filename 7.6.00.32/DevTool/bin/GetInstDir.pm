@@ -1,0 +1,175 @@
+#
+# GetInstDir.pm
+#
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+
+package GetInstDir;
+
+
+sub GetVersionLayer {
+	my $RELVER           = $ENV{'RELVER'};
+	my $CORRECTION_LEVEL = $ENV{'CORRECTION_LEVEL'};
+
+	# only for releases >= 72
+	my ($Release) = ($RELVER =~ /^R(\d\d)$/);
+	return undef unless (defined $Release && $Release >= 72);
+
+	# for 72.04.xx or 72.05.xx
+	# the name of the directory is 7240 or 7250
+	my $Correction = $CORRECTION_LEVEL;
+	$Correction *= 10 if ($Release == 72);
+
+	my $VersionLayer = 100 * $Release + $Correction;
+	return ($VersionLayer);
+}
+
+sub GetSDKRoot {
+	my $VersionLayer = GetVersionLayer ();
+	my $INSTROOT = $ENV{'INSTROOT'};
+
+	my $SDKRoot = $INSTROOT."/sdk/".$VersionLayer;
+
+	if ($^O =~ /mswin/i) {
+		$SDKRoot =~ s/\//\\/g;
+	} else {
+		$SDKRoot =~ s/\\/\//g;
+	}
+	return $SDKRoot;
+}
+
+sub GetSDKRootLib {
+	my $BIT64  = $ENV{'BIT64'};
+	my $OSSPEC = $ENV{'OSSPEC'};
+	my $MACH   = $ENV{'MACH'};
+
+	my $SDKRootLib = GetSDKRoot ()."/".GetInstLibReloc();
+
+	if ($^O =~ /mswin/i) {
+		$SDKRootLib .= "/lib64" if ($BIT64 == 1);
+		$SDKRootLib =~ s/\//\\/g;
+	} elsif ($OSSPEC eq 'LINUX' && $MACH eq 'X86_64') {
+		# may be 32 bit clients
+		$SDKRootLib = GetSDKRoot();
+		$SDKRootLib .= "/lib/lib64";
+	} else {
+		$SDKRootLib =~ s/\\/\//g;
+	}
+	return $SDKRootLib;
+}
+
+sub GetSDKRootPgm {
+	my $BIT64  = $ENV{'BIT64'};
+	my $OSSPEC = $ENV{'OSSPEC'};
+	my $MACH   = $ENV{'MACH'};
+
+	my $SDKRootPgm = GetSDKRoot ()."/pgm";
+	$SDKRootPgm .= "/pgm64" unless ($BIT64 != 1 ||
+	$OSSPEC =~ /LINUX/ && $MACH !~ /X86_64|I386/ ||
+	$MACH =~ /HP_IA64|ALPHA|SDBonPPC64/);
+
+	if ($^O =~ /mswin/i) {
+		$SDKRootPgm =~ s/\//\\/g;
+	} else {
+		$SDKRootPgm =~ s/\\/\//g;
+	}
+	return $SDKRootPgm;
+}
+
+sub GetRuntimeBin {
+	my $INSTROOT = $ENV{'INSTROOT'};
+
+	my $VersionLayer = GetVersionLayer ();
+	return undef unless (defined $VersionLayer);
+
+	my $RuntimeDir = $INSTROOT."/runtime/".$VersionLayer."/bin";
+	$RuntimeDir =~ s/\\/\//g;
+	return $RuntimeDir;
+}
+
+sub GetInstRuntime {
+	my $BIT64  = $ENV{'BIT64'};
+	my $OSSPEC = $ENV{'OSSPEC'};
+	my $MACH   = $ENV{'MACH'};
+	my $INSTROOT = $ENV{'INSTROOT'};
+
+	my $VersionLayer = GetVersionLayer ();
+	return undef unless (defined $VersionLayer);
+
+	my $RuntimeDir = $INSTROOT."/runtime/".$VersionLayer;
+	if ($OSSPEC eq 'WIN32' ) {
+		$RuntimeDir .= "/pgm";
+		$RuntimeDir .= "/pgm64" unless ($BIT64 != 1);
+	} elsif ($OSSPEC eq 'LINUX' && $MACH eq 'X86_64') {
+		# may be 32 bit clients
+		$RuntimeDir .= "/lib/lib64";
+	} else {
+		$RuntimeDir .= "/".GetInstLibReloc();
+	}
+
+	$RuntimeDir =~ s/\\/\//g;
+	return $RuntimeDir;
+}
+
+sub GetInstLibReloc
+{
+	my $BIT64  = $ENV{'BIT64'};
+	my $OSSPEC = $ENV{'OSSPEC'};
+	my $MACH   = $ENV{'MACH'};
+	my $InstLibReloc = "lib";
+	$InstLibReloc .= "/lib64" if ( $BIT64 == 1 &&
+	$OSSPEC !~ /WIN32|LINUX/ && $MACH !~ /ALPHA|HP_IA64|SDBonPPC64/);
+
+	return $InstLibReloc;
+}
+
+sub GetInstMiscReloc
+{
+	my $BIT64  = $ENV{'BIT64'};
+	my $OSSPEC = $ENV{'OSSPEC'};
+	my $MACH   = $ENV{'MACH'};
+	my $InstMiscReloc = "misc";
+	$InstMiscReloc .= "/lib64" if ( $BIT64 == 1 &&
+	$OSSPEC !~ /WIN32|LINUX/ && $MACH !~ /ALPHA|HP_IA64|SDBonPPC64/);
+
+	return $InstMiscReloc;
+}
+
+sub GetInstLib
+{
+	my $InstLib = $ENV{INSTROOT};
+	$InstLib .= GetDirectorySeparator().GetInstLibReloc();
+	return $InstLib;
+}
+
+sub GetInstMisc
+{
+	my $InstMisc = $ENV{INSTROOT};
+	$InstMisc .= GetDirectorySeparator().GetInstMiscReloc();
+	return $InstMisc;
+}
+
+sub GetDirectorySeparator()
+{
+	return ($ENV{'OSSPEC'} =~ /WIN32/) ? "\\" : "/";
+}
+
+1;

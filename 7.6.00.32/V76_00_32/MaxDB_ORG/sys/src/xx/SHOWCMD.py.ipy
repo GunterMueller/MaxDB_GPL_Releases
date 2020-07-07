@@ -1,0 +1,124 @@
+#
+# =====================================================
+# @(#) SHOWCMD                   7.3.0.02    2000-11-17
+# =====================================================
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from string import upper
+from installib import *
+
+def createPubSynonym (session, synonym):
+    synonym = upper (synonym)
+    rc = sqlRC (session, """
+            SELECT tablename FROM sysdd.synonyms
+            WHERE synonymowner = USER
+            AND synonymname  = '%s'""" % synonym) 
+#   print rc, synonym
+    if rc == 100:
+        stopIfSqlNotOK (session, 'create public synonym "%s" for domain."%s"'
+            % (synonym, synonym))
+
+def install (session,options):
+    """Installing Views as replacement for SHOWs
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+
+    # for the following views it was decided to drop them
+    # but serverdbs may be needed for the name of the database
+    # columnprivileges is needed as long as we have privileges on columns
+    
+    createReplaceView (session, 'DOMAIN.SERVERDBS', """
+            AS SELECT SERVERDB, SERVERNODE
+               FROM SYSDD.SERVERDBS
+            INTERNAL""")
+
+    stopIfSqlNotOK (session, """GRANT SELECT ON DOMAIN.SERVERDBS TO PUBLIC WITH GRANT OPTION""")
+
+    # Table domain.serverdbs
+
+    stopIfSqlNotOK (session, """COMMENT ON TABLE DOMAIN.SERVERDBS IS 'Name of database instance and servernode'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.SERVERDBS.SERVERDB IS 'Name of database instance'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.SERVERDBS.SERVERNODE IS 'Servernode the database instance is on'""")
+
+    createPubSynonym (session, 'SERVERDBS')
+
+
+    createReplaceView (session, 'DOMAIN.COLUMNPRIVILEGES', """
+              (SCHEMANAME,TABLE_QUALIFIER,TABLE_OWNER,TABLE_NAME,
+               COLUMN_NAME,GRANTOR,GRANTEE,PRIVILEGE,IS_GRANTABLE)
+            AS SELECT
+                 C.SCHEMANAME,HEXTORAW(NULL),C.OWNER,C.TABLENAME,
+                 C.COLUMNNAME,P.GRANTOR, P.GRANTEE,
+                 ASCII(DECODE(SUBSTR(P.PRIVILEGES, LENGTH(P.PRIVILEGES),1),'+',
+                              SUBSTR(P.PRIVILEGES,1,LENGTH(P.PRIVILEGES) - 1),
+                              P.PRIVILEGES)),
+                 ASCII(DECODE(SUBSTR(P.PRIVILEGES,LENGTH(P.PRIVILEGES),1),'+',
+                              'YES','NO'))
+               FROM SYSDD.NEW_PRIVILEGES P, DOMAIN.COLUMNS C
+               WHERE P.TYPE NOT IN('SEQUENCE', 'DBPROC')
+               AND C.SCHEMANAME = P.SCHEMANAME AND C.TABLENAME = P.NAME1
+               AND (C.COLUMNNAME = P.NAME2 OR P.NAME2 IS NULL)
+            INTERNAL""")
+
+    stopIfSqlNotOK (session, """GRANT SELECT ON DOMAIN.COLUMNPRIVILEGES TO PUBLIC WITH GRANT OPTION""")
+
+    # Table domain.columnprivileges
+
+    stopIfSqlNotOK (session, """COMMENT ON TABLE DOMAIN.COLUMNPRIVILEGES IS 'Information about privileges granted to tables or columns'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.SCHEMANAME IS 'Name of the schema of the table'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.TABLE_QUALIFIER IS 'Always NULL'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.TABLE_OWNER IS 'Name of table owner'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.TABLE_NAME IS 'Name of table'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.COLUMN_NAME IS 'Name of column'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.GRANTOR IS 'Database user who granted the privilege'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.GRANTEE IS 'Database user who received the privilege'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.PRIVILEGE IS 'Privilege'""")
+
+    stopIfSqlNotOK (session, """COMMENT ON COLUMN DOMAIN.COLUMNPRIVILEGES.IS_GRANTABLE IS 'Grantee is allowed to grant privilege further  (YES|NO)'""")
+
+    createPubSynonym (session, 'COLUMNPRIVILEGES')
+
+
+    loaderCmd (session, 'COMMIT')
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

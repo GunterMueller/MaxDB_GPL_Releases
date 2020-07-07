@@ -1,0 +1,515 @@
+#ifndef RC_INVOKED
+#ifdef DEBUG
+#else
+#line 65 "vpa00txc"
+#endif
+#endif
+/* aptext.h */
+
+/* esqapi error codes and messages used by Windows LoadString and */
+/* stored in a table in the non-windows versions                  */
+
+#define API_ODBC_00000 (0)
+#define API_TEXT_00000 "00000 Success"
+
+#define API_ODBC_01002 (1)
+#define API_TEXT_01002 "01002 Disconnect error"
+
+#define API_ODBC_01004 (2)
+#define API_TEXT_01004 "01004 Data truncated"
+
+#define API_ODBC_01006 (3)
+#define API_TEXT_01006 "01006 Privilege not revoked"
+
+#define API_ODBC_01S00 (4)
+#define API_TEXT_01S00 "01S00 Invalid connection string attribute"
+
+#define API_ODBC_07001 (5)
+#define API_TEXT_07001 "07001 Wrong number of parameters"
+
+#define API_ODBC_07006 (6)
+#define API_TEXT_07006\
+        "07006 Restricted data type attributes violation"
+
+#define API_ODBC_08001 (7)
+#define API_TEXT_08001 "08001 Unable to connect to data source"
+
+#define API_ODBC_08002 (8)
+#define API_TEXT_08002 "08002 Connection in use"
+
+#define API_ODBC_08003 (9)
+#define API_TEXT_08003 "08003 Connection not open"
+
+#define API_ODBC_08004 (10)
+#define API_TEXT_08004\
+        "08004 Data source rejected establishment of connection"
+
+#define API_ODBC_08007 (11)
+#define API_TEXT_08007 "08007 Connection failure during transaction"
+
+#define API_ODBC_08S01 (12)
+#define API_TEXT_08S01 "08S01 Communication link failure"
+
+#define API_ODBC_21S01 (13)
+#define API_TEXT_21S01\
+        "21S01 Insert value list does not match column list"
+
+#define API_ODBC_21S02 (14)
+#define API_TEXT_21S02\
+        "21S02 Degree of derived table does not match column list"
+
+#define API_ODBC_22001 (15)
+#define API_TEXT_22001 "22001 String data right truncation"
+
+#define API_ODBC_22002 (160)
+#define API_TEXT_22002 "22002 Indicator variable required but not supplied"
+
+#define API_ODBC_22003 (16)
+#define API_TEXT_22003 "22003 Numeric value out of range"
+
+#define API_ODBC_22005 (17)
+#define API_TEXT_22005 "22005 Error in assignment"
+
+#define API_ODBC_22008 (18)
+#define API_TEXT_22008 "22008 Datetime field overflow"
+
+#define API_ODBC_22012 (19)
+#define API_TEXT_22012 "22012 Division by zero"
+
+#define API_ODBC_22026 (20)
+#define API_TEXT_22026 "22026 String data, length mismatch"
+
+#define API_ODBC_23000 (21)
+#define API_TEXT_23000 "23000 Integrity constraint violation"
+
+#define API_ODBC_24000 (22)
+#define API_TEXT_24000 "24000 Invalid cursor state"
+
+#define API_ODBC_25000 (23)
+#define API_TEXT_25000 "25000 Invalid transaction state"
+
+#define API_ODBC_28000 (24)
+#define API_TEXT_28000 "28000 Invalid authorization specification"
+
+#define API_ODBC_34000 (25)
+#define API_TEXT_34000 "34000 Invalid cursor name"
+
+#define API_ODBC_37000 (26)
+#define API_TEXT_37000 "37000 Syntax error or access violation"
+
+#define API_ODBC_3C000 (27)
+#define API_TEXT_3C000 "3C000 Duplicate cursor name"
+
+#define API_ODBC_40001 (28)
+#define API_TEXT_40001 "40001 Serialization failure"
+
+#define API_ODBC_42000 (29)
+#define API_TEXT_42000 "42000 Syntax error or access violation"
+
+#define API_ODBC_70100 (30)
+#define API_TEXT_70100 "70100Operation aborted"
+
+#define API_ODBC_IM001 (31)
+#define API_TEXT_IM001 "IM001 Driver does not support this function"
+
+#define API_ODBC_IM002 (32)
+#define API_TEXT_IM002\
+   "IM002 Data source name not found and no default driver specified"
+
+#define API_ODBC_IM003 (33)
+#define API_TEXT_IM003\
+   "IM003 Driver specified by data source name could not be loaded"
+
+#define API_ODBC_IM004 (34)
+#define API_TEXT_IM004 "IM004 Driver's SQLAllocEnv failed"
+
+#define API_ODBC_IM005 (35)
+#define API_TEXT_IM005 "IM005 Driver's SQLAllocConnect failed"
+
+#define API_ODBC_IM006 (36)
+#define API_TEXT_IM006 "IM006 Drivers SQLSetConnectOption failed"
+
+#define API_ODBC_IM007 (37)
+#define API_TEXT_IM007\
+        "IM007 No data source specified; dialog prohibited"
+
+#define API_ODBC_IM008 (38)
+#define API_TEXT_IM008 "IM008 Dialog failed"
+
+#define API_ODBC_IM009 (39)
+#define API_TEXT_IM009 "IM009 Unable to load translation DLL"
+
+#define API_ODBC_S0001 (40)
+#define API_TEXT_S0001 "S0001 Base table or view already exists"
+
+#define API_ODBC_S0002 (41)
+#define API_TEXT_S0002 "S0002 Base table not found"
+
+#define API_ODBC_S0011 (42)
+#define API_TEXT_S0011 "S0011 Index already exists"
+
+#define API_ODBC_S0012 (43)
+#define API_TEXT_S0012 "S0012 Index not found"
+
+#define API_ODBC_S0021 (44)
+#define API_TEXT_S0021 "S0021 Column already exists"
+
+#define API_ODBC_S0022 (45)
+#define API_TEXT_S0022 "S0022 Column not found"
+
+#define API_ODBC_S1000 (46)
+#define API_TEXT_S1000 "S1000 General error"
+
+#define API_ODBC_S1001 (47)
+#define API_TEXT_S1001 "S1001 Memory allocation failure"
+
+#define API_ODBC_S1002 (48)
+#define API_TEXT_S1002 "S1002 Invalid column number"
+
+#define API_ODBC_S1003 (49)
+#define API_TEXT_S1003 "S1003 Program type out of range"
+
+#define API_ODBC_S1004 (50)
+#define API_TEXT_S1004 "S1004 SQL data type out of range"
+
+#define API_ODBC_S1008 (51)
+#define API_TEXT_S1008 "S1008 Operation canceled"
+
+#define API_ODBC_S1009 (52)
+#define API_TEXT_S1009 "S1009 Invalid argument value"
+
+#define API_ODBC_S1010 (53)
+#define API_TEXT_S1010 "S1010 Function sequence error"
+
+#define API_ODBC_S1012 (54)
+#define API_TEXT_S1012\
+        "S1012 Invalid transaction operation code speficied"
+
+#define API_ODBC_S1015 (55)
+#define API_TEXT_S1015 "S1015 No cursor name available"
+
+#define API_ODBC_S1090 (56)
+#define API_TEXT_S1090 "S1090 Invalid string or buffer length"
+
+#define API_ODBC_S1091 (57)
+#define API_TEXT_S1091 "S1091 Descriptor type out of range"
+
+#define API_ODBC_S1092 (58)
+#define API_TEXT_S1092 "S1092 Option type out of range"
+
+#define API_ODBC_S1093 (59)
+#define API_TEXT_S1093 "S1093 Invalid parameter number"
+
+#define API_ODBC_S1094 (60)
+#define API_TEXT_S1094 "S1094 Invalid scale value"
+
+#define API_ODBC_S1095 (61)
+#define API_TEXT_S1095 "S1095 Function type out of range"
+
+#define API_ODBC_S1096 (62)
+#define API_TEXT_S1096 "S1096 Information type out of range"
+
+#define API_ODBC_S1097 (63)
+#define API_TEXT_S1097 "S1097 Column type out of range"
+
+#define API_ODBC_S1098 (64)
+#define API_TEXT_S1098 "S1098 Scope type out of range"
+
+#define API_ODBC_S1099 (65)
+#define API_TEXT_S1099 "S1099 Nullable type out of range"
+
+#define API_ODBC_S1100 (66)
+#define API_TEXT_S1100 "S1100 Uniqueness option out of range"
+
+#define API_ODBC_S1101 (67)
+#define API_TEXT_S1101 "S1101 Accurancy option out of range"
+
+#define API_ODBC_S1102 (68)
+#define API_TEXT_S1102 "S1102 Table type out of range"
+
+#define API_ODBC_S1103 (69)
+#define API_TEXT_S1103 "S1103 Direction option out of range"
+
+#define API_ODBC_S1106 (70)
+#define API_TEXT_S1106 "S1106 Fetch type out of range"
+
+#define API_ODBC_S1107 (71)
+#define API_TEXT_S1107 "S1107 Row value out of range"
+
+#define API_ODBC_S1108 (72)
+#define API_TEXT_S1108 "S1108 Concurrency option out of range"
+
+#define API_ODBC_S1109 (73)
+#define API_TEXT_S1109 "S1109 Invalid cursor position; no keyset defined"
+
+#define API_ODBC_S1110 (74)
+#define API_TEXT_S1110 "S1110 Invalid driver completion"
+
+#define API_ODBC_S1C00 (75)
+#define API_TEXT_S1C00 "S1C00 Driver not capable"
+
+#define API_ODBC_S1DE0 (76)
+#define API_TEXT_S1DE0 "S1DE0 No data at execution value pending"
+
+#define API_ODBC_S1T00 (77)
+#define API_TEXT_S1T00 "S1T00 Timeout expired"
+
+#define API_ODBC_01S02 (78)
+#define API_TEXT_01S02 "01S02 Option value changed"
+
+#define API_ODBC_S1011 (79)
+#define API_TEXT_S1011 "S1011 Operation is invalid at this time"
+
+#define API_ODBC_01000 (80)
+#define API_TEXT_01000 "01000 General warning"
+
+#define API_ODBC_01S01 (81)
+#define API_TEXT_01S01 "01S01 Error in row"
+
+#define API_ODBC_01S03 (82)
+#define API_TEXT_01S03 "01S03 No rows updated or deleted"
+
+#define API_ODBC_01S04 (83)
+#define API_TEXT_01S04 "01S04 More than one row updated or deleted"
+
+#define API_ODBC_01S05 (84)
+#define API_TEXT_01S05 "01S05 Cancel treated as FreeStmt/Close"
+
+/* ODBC 3.x Error-Codes */
+
+#define API_ODBC_01001 (85)
+#define API_TEXT_01001 "01001 Cursor operation conflict"
+                      
+#define API_ODBC_HY019 (86)
+#define API_TEXT_HY019 \
+    "HY019 Non-character and non-binary data sent in pieces"
+                      
+#define API_ODBC_22007 (87)
+#define API_TEXT_22007 "22007 Invalid datetime format"
+                      
+#define API_ODBC_22018 (88)
+#define API_TEXT_22018 "22018 Invalid character value for cast specification"
+                      
+#define API_ODBC_07005 (89)
+#define API_TEXT_07005 "07005 Prepared statement not a cursor-specification"
+                      
+#define API_ODBC_HY018 (90)
+#define API_TEXT_HY018 "HY018 Server declined cancel request"
+                      
+#define API_ODBC_42S01 (91)
+#define API_TEXT_42S01 "42S01 Base table or view already exists"
+                      
+#define API_ODBC_42S02 (92)
+#define API_TEXT_42S02 "42S02 Base table or view not found"
+                      
+#define API_ODBC_42S11 (93)
+#define API_TEXT_42S11 "42S11 Index already exists"
+                      
+#define API_ODBC_42S12 (94)
+#define API_TEXT_42S12 "42S12 Index not found"
+                      
+#define API_ODBC_42S21 (95)
+#define API_TEXT_42S21 "42S21 Column already exists"
+                      
+#define API_ODBC_42S22 (96)
+#define API_TEXT_42S22 "42S22 Column not found"
+                      
+#define API_ODBC_HY000 (97)
+#define API_TEXT_HY000 "HY000 General error"
+                      
+#define API_ODBC_HY001 (98)
+#define API_TEXT_HY001 "HY000 Memory allocation error"
+                      
+#define API_ODBC_07009 (99)
+#define API_TEXT_07009 "07009 Invalid descriptor index"
+                      
+#define API_ODBC_HY003 (100)
+#define API_TEXT_HY003 "HY003 Invalid application buffer type"
+                      
+#define API_ODBC_HY004 (101)
+#define API_TEXT_HY004 "HY004 Invalid SQL data type"
+                      
+#define API_ODBC_HY008 (102)
+#define API_TEXT_HY008 "HY008 Operation canceled"
+                      
+#define API_ODBC_HY009 (103)
+#define API_TEXT_HY009 "HY009 Invalid use of null pointer"
+                      
+#define API_ODBC_HY024 (104)
+#define API_TEXT_HY024 "HY024 Invalid argument value"
+/* #define API_TEXT_HY024 "HY024 Invalid attribute value" */
+                      
+#define API_ODBC_HY092 (105)
+#define API_TEXT_HY092 "HY092 Invalid attribute/option identifier"
+                      
+#define API_ODBC_HY007 (106)
+#define API_TEXT_HY007 "HY007 Associated statement is not prepared"
+                      
+#define API_ODBC_HY010 (107)
+#define API_TEXT_HY010 "HY010 Function sequence error"
+                      
+#define API_ODBC_HY011 (108)
+#define API_TEXT_HY011 "HY011 Attribute cannot be set now"
+                      
+#define API_ODBC_HY012 (109)
+#define API_TEXT_HY012 "HY012 Invalid transaction operation code"
+                      
+#define API_ODBC_HY090 (110)
+#define API_TEXT_HY090 "HY090 Invalid string or buffer length"
+                      
+#define API_ODBC_HY091 (111)
+/*#define API_TEXT_HY091 "HY091 Invalid descriptor field identifier"*/
+#define API_TEXT_HY091 "HY091 Descriptor type out of range"
+                      
+#define API_ODBC_HY096 (112)
+#define API_TEXT_HY096 "HY096 Invalid information type"
+                      
+#define API_ODBC_HY097 (113)
+#define API_TEXT_HY097 "HY097 Column type out of range"
+                      
+#define API_ODBC_HY098 (114)
+#define API_TEXT_HY098 "HY098 Scope type out of range"
+                      
+#define API_ODBC_HY099 (115)
+#define API_TEXT_HY099 "HY099 Nullable type out of range"
+                      
+#define API_ODBC_HY100 (116)
+#define API_TEXT_HY100 "HY100 Uniqueness option type out of range"
+                      
+#define API_ODBC_HY101 (117)
+#define API_TEXT_HY101 "HY101 Accuracy option type out of range"
+                      
+#define API_ODBC_HY103 (118)
+#define API_TEXT_HY103 "HY103 Invalid retrieval code"
+                      
+#define API_ODBC_HY104 (119)
+#define API_TEXT_HY104 "HY104 Invalid precision or scale value"
+                      
+#define API_ODBC_HY105 (120)
+#define API_TEXT_HY105 "HY105 Invalid parameter type"
+                      
+#define API_ODBC_HY106 (121)
+#define API_TEXT_HY106 "HY106 Fetch type out of range"
+                      
+#define API_ODBC_HY107 (122)
+#define API_TEXT_HY107 "HY107 Row value out of range"
+                      
+#define API_ODBC_HY109 (123)
+#define API_TEXT_HY109 "HY109 Invalid cursor position"
+                      
+#define API_ODBC_HY110 (124)
+#define API_TEXT_HY110 "HY110 Invalid driver completion"
+                      
+#define API_ODBC_HY111 (125)
+#define API_TEXT_HY111 "HY111 Invalid bookmark value"
+                      
+#define API_ODBC_HYC00 (126)
+#define API_TEXT_HYC00 "HYC00 Optional feature not implemented"
+                      
+#define API_ODBC_HYT00 (127)
+#define API_TEXT_HYT00 "HYT00 Timeout expired"
+                      
+/* New States */      
+
+#define API_ODBC_01S06 (158)
+#define API_TEXT_01S06 "01S06 Attempt to fetch before result set returned the first rowset"
+
+#define API_ODBC_01S07 (128)
+#define API_TEXT_01S07 "01S07 Fractional truncation"
+                      
+#define API_ODBC_01S08 (129)
+#define API_TEXT_01S08 "01S08 Error saving File DSN"
+                      
+#define API_ODBC_01S09 (130)
+#define API_TEXT_01S09 "01S09 Invalid keyword"
+                      
+#define API_ODBC_07002 (131)
+#define API_TEXT_07002 "07002 COUNT field incorrect"
+                      
+#define API_ODBC_07S01 (132)
+#define API_TEXT_07S01 "07S01 Invalid use of default parameter"
+                      
+#define API_ODBC_22015 (133)
+#define API_TEXT_22015 "22015 Interval field overflow"
+                      
+#define API_ODBC_22019 (134)
+#define API_TEXT_22019 "22019 Invalid escape character"
+                      
+#define API_ODBC_22025 (135)
+#define API_TEXT_22025 "22025 Invalid escape sequence"
+                      
+#define API_ODBC_25S01 (136)
+#define API_TEXT_25S01 "25S01 Transaction state"
+                      
+#define API_ODBC_25S02 (137)
+#define API_TEXT_25S02 "25S02 Transaction is still active"
+                      
+#define API_ODBC_25S03 (138)
+#define API_TEXT_25S03 "25S03 Transaction is rolled back"
+                      
+#define API_ODBC_40002 (139)
+#define API_TEXT_40002 "40002 Integrity constraint violation"
+                      
+#define API_ODBC_40003 (140)
+#define API_TEXT_40003 "40003 Statement completion unknown"
+                      
+#define API_ODBC_44000 (141)
+#define API_TEXT_44000 "44000 WITH CHECK OPTION violation"
+                      
+#define API_ODBC_HY013 (142)
+#define API_TEXT_HY013 "HY013 Memory management error"
+                      
+#define API_ODBC_HY014 (143)
+#define API_TEXT_HY014 "HY014 Limit on the number of handles exceeded"
+                      
+#define API_ODBC_HY015 (144)
+#define API_TEXT_HY015 "HY015 No cursor name available"
+                      
+#define API_ODBC_HY016 (145)
+#define API_TEXT_HY016 "HY016 Cannot modify an implementation row descriptor"
+                      
+#define API_ODBC_HY017 (146)
+#define API_TEXT_HY017 \
+    "HY017 Invalid use of an automatically allocated descriptor handle"
+                      
+#define API_ODBC_HY020 (147)
+#define API_TEXT_HY020 "HY020 Attempt to concatenate a null value"
+                      
+#define API_ODBC_HY021 (148)
+#define API_TEXT_HY021 "HY021 Inconsistent descriptor information"
+                      
+#define API_ODBC_HY095 (149)
+#define API_TEXT_HY095 "HY095 Function type out of range"
+                      
+#define API_ODBC_HYT01 (150)
+#define API_TEXT_HYT01 "HYT01 Connection timeout expired"
+                      
+#define API_ODBC_HY108 (151)
+#define API_TEXT_HY108 "HY108 Concurrency option out of range"
+                      
+#define API_ODBC_IM010 (152)
+#define API_TEXT_IM010 "IM010 Data source name too long"
+                      
+#define API_ODBC_IM011 (153)
+#define API_TEXT_IM011 "IM011 Data source name too long"
+                      
+#define API_ODBC_IM012 (154)
+#define API_TEXT_IM012 "IM012 DRIVER keyword syntax error"
+                      
+#define API_ODBC_IM013 (155)
+#define API_TEXT_IM013 "IM013 Trace file error"
+                      
+#define API_ODBC_IM014 (156)
+#define API_TEXT_IM014 "IM014 Invalid name of File DSN"
+                      
+#define API_ODBC_IM015 (157)
+#define API_TEXT_IM015 "IM015 Corrupt file data source"
+
+#define API_ODBC_01S10 (159)
+#define API_TEXT_01S10 "01S10 Attempt to fetch by a bookmark offset, offset value ignored"
+
+/* The last ODBC 2.x state */
+#define API_STATES_20_MAX API_ODBC_01S05
+
+
+/* end of aptext.h */

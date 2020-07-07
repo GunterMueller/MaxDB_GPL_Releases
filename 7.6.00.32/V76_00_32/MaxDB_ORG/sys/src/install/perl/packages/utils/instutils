@@ -1,0 +1,215 @@
+import SAPDB::Install::StdIO;
+import SAPDB::Install::System;
+import SAPDB::Install::Registry;
+import SAPDB::Install::Tools;
+import SAPDB::Install::SetUser;
+
+$progpath{'name'} = 'independent program path';
+$progpath{'default'}=getSysProgPath().'/sapdb/indep_prog'; #default
+$progpath{'list'} = 'utils.lst';
+$progpath{'opt'} = 'indep_prog=s';
+$progpath{'mode'}=0775;
+$progpath{'update'}=0;
+
+$usage= '';
+$usage_desc = '';
+
+@paths = (\%progpath);
+$main_path=\%progpath;
+$skip=0;
+@opts=();
+
+my $xserver_info;
+my $niuid = undef;
+my $nigid = undef;
+
+sub preinstall{
+  	my ($data,$prog)=readIndepPath();
+    #  -d $prog or diesoft("independent program path not found\n");
+	$prog =~ /\S/ or $prog = $SAPDB::Install::Values::indep_prog_path;
+	$data =~ /\S/ or $data = $SAPDB::Install::Values::indep_data_path;
+	$prog =~ /\S/ or print2stderr("independent program path not found\n") and diesoft($SAPDB::Install::Values::diemsg);
+	$progpath{'value'}=$prog;
+	return 1 if $^O =~ /mswin/i;
+	if(defined $SAPDB::Install::Values::xserver_info){
+		$xserver_info = $SAPDB::Install::Values::xserver_info;
+	}
+	else{
+		$xserver_info = xserverInfo({'max_ping' => 3});
+	}
+
+	foreach my $key (keys(%$xserver_info)){
+		$key eq 'data' and next;
+		$SAPDB::Install::Values::log->SetMsg("XSERVER INFO: $key = ".$xserver_info->{$key}."\n");
+	}
+
+	if($xserver_info->{'is_running'} and $xserver_info->{'is_updatable'}){
+		unbusy("$prog/pgm/vserver","$prog/pgm/niserver") unless($^O =~ /mswin/i);
+	}
+
+	unless ($^O =~ /mswin/i) {
+		my @sb = stat ("$prog/pgm/niserver");
+		($niuid, $nigid) = @sb[4,5];
+	}
+
+	$prog =~ /\S/ or $prog = $SAPDB::Install::Values::indep_prog_path;
+}
+
+sub postinstall{
+	unless ($^O =~ /mswin/i){
+		chmod (0500, $progpath{'value'}.'/pgm/starter');
+		chown (0, $packobj->GID, $progpath{'value'}.'/pgm/starter/sdbstarter');
+		chmod (04510, $progpath{'value'}.'/pgm/starter/sdbstarter');
+	}
+	#
+	#  mscs support 
+	#
+	
+	if($^O =~ /mswin/i and $SAPDB::Install::Config{'IsCluster'}){
+		my @clu_files = ('serv'); 
+		my @sys_files = ('SAPDBMSCSEx.dll',
+						'sapdbmscsman.dll', 'SAPDBMSCSMan.exe',
+						'SAPDBMSCSRes.dll'); 
+		unless($packobj->PrepareMSCS(\@clu_files,\@sys_files)){
+			diesoft($diemsg);
+		}
+	}
+	
+}
+
+sub registerWin{
+	my $path = $progpath{'value'};
+	$path=~s/\//\\/g;
+	{
+		sub xserver_test{
+			my $text=$_[0];
+			if($text =~ /.*is\ already\ installed.*/){
+				sub myfunc{
+					my ($text)=@_;
+					($text=~/removed\ successfully/) and return 1;
+					return 0;
+				}
+				callsystem("\"$path\\bin\\x_server.exe\" remove",\&myfunc);
+				callsystem("\"$path\\bin\\x_server.exe\" install",\&xserver_test);
+				return 1;
+			}
+			elsif($text =~ /.*installed\ successfully.*/){
+				return 1;
+			}
+			else{
+				print2stderr("cannot install x_server as service\n");
+				return 0;
+			}
+		}
+		callsystem("\"$path\\bin\\x_server.exe\" install",\&xserver_test);
+	}
+	setSysPath("$path\\bin;$path\\pgm");
+}
+
+sub registerUX{
+
+	if($xserver_info->{'is_running'} and $xserver_info->{'is_updatable'}){
+
+		my $progdir = $progpath{'value'};
+
+		#
+		# this is only to stop niserver
+		#
+		my $libdir =
+		(-r $progdir.'/lib/libsapni.so') ? $progdir.'/lib' :
+		(-r $progdir.'/lib/libsapni.sl') ? $progdir.'/lib' :
+		undef;
+
+		my $ld_library_path =
+		(exists $ENV{'LD_LIBRARY_PATH'}) ? $ENV{'LD_LIBRARY_PATH'} :
+		undef;
+
+		if (defined $libdir) {
+			if (defined $ld_library_path) {
+				$ENV{'LD_LIBRARY_PATH'} = $ld_library_path.':'.$libdir;
+			} else {
+				$ENV{'LD_LIBRARY_PATH'} = $libdir;
+			}
+		}
+
+		SAPDB::Install::SetUser::SetUser ($niuid, $nigid)
+		if (defined $niuid && defined $nigid);
+
+		#
+		# pgm/niserver -u is for unbusy
+		#
+
+		callsystem($progdir.'/pgm/niserver -u',sub {return 1},1);
+		SAPDB::Install::SetUser::SetUser ()
+		if (defined $niuid && defined $nigid);
+
+		if (defined $libdir) {
+			if (defined $ld_library_path) {
+				$ENV{'LD_LIBRARY_PATH'} = $ld_library_path;
+			} else {
+				delete $ENV{'LD_LIBRARY_PATH'};
+			}
+		}
+
+		callsystem($progdir.'/bin/x_server update',sub {return 1},1);
+	}
+}
+
+
+*register =             $^O =~ /^MsWin/i ? \&registerWin :
+        \&registerUX;
+
+
+sub unregisterWin{
+    my $path = $regpackobj->Path;
+	$path=~s/\//\\/g;
+	my $success = 0;
+
+	sub xservertest{
+		my ($text) = @_;
+		$text =~ /removed\s+successfully/s and $success = 1 and return 1;
+		return 0;
+	}
+	callsystem("\"$path\\bin\\x_server.exe\" stop",sub{return 1;},1);
+	callsystem("\"$path\\bin\\x_server.exe\" remove",\&xservertest,1);
+	$success or print2stderr("cannot remove x_server service\n");
+
+}
+
+sub unregisterUX{
+	return 1 if ((caller)[0] eq 'SAPDB::Install::Misc') ; # do not stop x_server in update case
+	my $path = $regpackobj->Path;
+	callsystem("$path/bin/x_server stop",sub{return 1;},1);
+}
+
+
+*unregister =           $^O =~ /^MsWin/i ? \&unregisterWin :
+        \&unregisterUX;
+
+if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+	*register = sub {
+		return 1;
+	};
+	*unregister = \&register;
+}
+
+
+
+
+sub preuninstall{
+
+}
+
+sub postuninstall{
+	my ($data,$prog)=readIndepPath();
+	opendir(DH,"$data/wrk") or print2stderr("cannot open dir \"$data/wrk\"\n");
+	foreach (readdir(DH)){
+		if(/dbmsrv\.prt|xserver.*\.p|niserver.*\.p|niserver.*\.trace|dbmsrv_.+\.dmp|dbmsrv_.+\.err/){
+			-f "$data/wrk/$_" and (unlink("$data/wrk/$_") or print2stderr("cannot delete file \"$data/wrk/$_\": $!\n"));
+		}
+	}
+	closedir(DH);
+}
+
+1;
+

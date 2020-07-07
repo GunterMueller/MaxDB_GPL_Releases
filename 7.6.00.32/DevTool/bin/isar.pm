@@ -1,0 +1,381 @@
+#!/usr/bin/perl
+#
+# isar.pm
+#
+# for help see 'sub PrintHelp'
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package isar;
+
+use Env;
+use Getopt::Long;
+use File::Basename;
+use File::Copy;
+
+use Exporter;
+
+@ISA = ('Exporter');
+@EXPORT = ('isar');
+
+$ProgramVersion = "isar.pm 1.02";
+
+sub isar {
+	my @CarCmd = {};
+	my @DryCmd = {};
+	local @ARGV = @_;
+
+	$Date = time ();
+	local @CarFilenames = ();
+
+	# allow use of '-xvf' as a bundled option
+	if ((GetPerlVersion ()) >= 5.004) {
+		Getopt::Long::config ("bundling");
+	}
+
+	GetOptions (
+	'f=s', \$CarFilename, 'c', \$CreateFlag, 'x', \$ExtractFlag,
+	't', \$TestFlag, 'v', \$VerboseFlag,
+	'A=s',\$ListFilename, 'version', \$VersionWanted,
+	'help', \$HelpWanted, 'h', \$HelpWanted);
+
+	if (defined $VersionWanted) {
+		PrintVersion ();
+		return 0;
+	}
+
+	if (defined $HelpWanted) {
+		PrintHelp ();
+		return 0;
+	}
+
+	CheckOptions ();
+
+	if ($^O =~ /^MsWin/i) {
+		@CarCmd = $ENV{'TOOL'}."\\bin\\SAPCAR.exe";
+	} else {
+		@CarCmd = "SAPCAR";
+	}
+	@DryCmd = @CarCmd;
+
+	if (defined $VerboseFlag) {
+		push @CarCmd, "-v";
+	}
+
+	if (defined $TestFlag) {
+		push @CarCmd, "-t";
+		$SwpFilename = GetInputFile ($CarFilename);
+		push @CarCmd, "-f", $SwpFilename;
+	}
+
+	if (defined $ExtractFlag) {
+		push @CarCmd, "-x";
+		$SwpFilename = GetInputFile ($CarFilename);
+		push @CarCmd, "-f", $SwpFilename;
+	}
+
+	if (defined $CreateFlag) {
+		@CarFilenames = split (/,/, $CarFilename);
+		$SwpFilename = "~".basename ($CarFilenames[0]);
+		push @CarCmd, "-f", $SwpFilename;
+
+		push @CarCmd, "-c", "-A";
+		push @DryCmd, "-l", "-A";
+
+		if (defined $ListFilename) {
+			# get filelist from file (with -A option)
+#			die "isar: permission denied for file ".$ListFilename
+#				 unless ( -r $ListFilename);
+			push @CarCmd, $ListFilename;
+			push @DryCmd, $ListFilename;
+		} elsif (defined $ARGV[0]) {
+			# get filelist from parameter list
+			$TmpFilename = "list.tmp";
+			open (TMP_FILE, "> ".$TmpFilename);
+			my $Line = undef;
+			foreach (@ARGV) {
+				print TMP_FILE $Line;
+				$Line = $_."\n";
+			}
+			# CAR does not like '\n' in last line
+			chomp $Line;
+			print TMP_FILE $Line;
+			close (TMP_FILE);
+			push @CarCmd, $TmpFilename;
+			push @DryCmd, $ListFilename;
+		} else {
+			# get filelist from <STDIN>
+			$TmpFilename = "list.tmp";
+			open (TMP_FILE, "> ".$TmpFilename);
+			my $Line = undef;
+			while (<STDIN>) {
+				print TMP_FILE $Line;
+				chomp;
+				$Line = $_."\n";
+			}
+			# CAR does not like '\n' in last line
+			chomp $Line;
+			print TMP_FILE $Line;
+			close (TMP_FILE);
+			push @CarCmd, $TmpFilename;
+			push @DryCmd, $ListFilename;
+		}
+
+		my @MissingFiles = DryRun (@DryCmd);
+		if ($#MissingFiles >= 0) {
+			die "$0: error missing files\n".
+			join ("\n", @MissingFiles)."\n";
+		}
+	}
+
+	ExecuteCarCmd ($TmpFilename, @CarCmd);
+	if (defined $CreateFlag) {
+		WriteCarFiles ( \@CarFilenames, $SwpFilename);
+		unlink $SwpFilename;
+	}
+
+	if ((defined $ExtractFlag) or (defined $TestFlag)) {
+		ClearInputFile ($CarFilename);
+	}
+	return 0;
+}
+
+sub CheckOptions {
+	die "$0: please use either -x, -t or -c flag\n"
+		if (((defined $CreateFlag) and (defined $ExtractFlag))
+		or ((defined $CreateFlag) and (defined $TestFlag))
+		or ((defined $ExtractFlag) and (defined $TestFlag))
+		or ((!defined $CreateFlag) and (!defined $ExtractFlag)));
+	die "$0: filename required\n"
+		if (!defined $CarFilename);
+}
+
+sub DryRun {
+	my @DryCmd = @_;
+	my $LogFileName = "files.log";
+	my $Err = undef;
+	my @MissingFiles = ();
+
+	open (IN_FILE, join (" ", @DryCmd)." |");
+	while (<IN_FILE>) {
+		chomp;
+		unless (defined $Err) {
+			if ($_ =~ /some files are missing/) {
+				$Err = "missing files";
+				next;
+			} else {
+				$Err = "unexpected error";
+				print join (" ", @DryCmd)."\n";
+				print $Err."\n";
+			}
+		}
+		print $_."\n";
+	}
+	close IN_FILE;
+
+	if ($Err eq "missing files") {
+		open (LOG_FILE, $LogFileName);
+		while (<LOG_FILE>) {
+			# skip comments
+			next if ($_ =~ /^# /);
+			push @MissingFiles, $_;
+		}
+
+		close LOG_FILE;
+	}
+
+	unlink $LogFileName;
+	return @MissingFiles;
+}
+
+sub ExecuteCarCmd {
+	(local $TmpFilename, local @CarCmd) = @_;
+
+	#print join (" ", @CarCmd)."\n";
+	my $RC = system (@CarCmd);
+	unlink $TmpFilename if ( -e $TmpFilename );
+	if ($RC != 0) {
+		die "isar: execution of \"".(join " ", @CarCmd)."\" failed";
+	}
+}
+
+sub WriteCarFiles {
+	my ($rCarFilenames, $SwpFilename) = @_;
+	my @CarFilenames = @$rCarFilenames;
+
+	my @fhWrite = ();
+	my $fhRead = OpenFileRead ($SwpFilename);
+	foreach $CarFilename (@CarFilenames) {
+		push @fhWrite, OpenFileWrite ($CarFilename);
+	}
+
+	while (true) {
+		($ReadLen, $Len) = ReadIntoBuffer ($fhRead, $Buffer, 4096, $Len);
+		last if ($ReadLen == 0);
+		if ($State == $ST_BINARY) {
+			foreach $fh (@fhWrite) {
+				WriteFH ($fh, $Buffer, $Len);
+			}
+			$Len = 0;
+			next;
+		}
+	}
+
+	close ($fhRead);
+	foreach $fh (@fhWrite) {
+		close ($fh);
+	}
+}
+
+sub ReadIntoBuffer {
+	my $ReadLen;
+	my $Offset = $_[3];
+
+	$ReadLen = sysread ($_[0], $_[1], $_[2], $Offset);
+	die "isar: error reading ".$CarFilename unless (defined $ReadLen);
+	$Offset += $ReadLen if ($ReadLen >= 0);
+	return ($ReadLen, $Offset);
+}
+
+sub OpenFileWrite {
+        local $Filename = $_[0];
+        if ($Filename =~ m/:/g) {
+               	local @RemCmd = ("|");
+				if (RunningWindows()) {
+					push @RemCmd, "_rem";
+				} else {
+					push @RemCmd, "rem";
+				}
+				push @RemCmd, "write";
+               	local $Pos = pos ($Filename);
+               	push @RemCmd, substr ($Filename, 0, $Pos -1);
+               	push @RemCmd, substr ($Filename, $Pos);
+                # print ("open ".join (" ", @RemCmd)."\n");
+               	open (WRITE, join " ", @RemCmd)
+                       	|| die "isar: cannot open ".(join " ", @RemCmd);
+               	binmode (WRITE);
+               	return (WRITE);
+        } else {
+                unless (defined (&O_RDWR)) {
+                        require Fcntl;
+                        import Fcntl qw/O_RDWR O_CREAT O_EXCL O_RDONLY O_TRUNC /;
+                }
+                my $fhLocal = "\:\:$Filename";
+		sysopen ($fhLocal, $Filename, &O_RDWR | &O_CREAT | &O_TRUNC)
+                        || die "isar: cannot open ".$Filename." read write";
+        	binmode ($fhLocal);
+	        return ($fhLocal);
+	 }
+}
+
+sub OpenFileRead {
+        local $Filename = $_[0];
+        if ($Filename =~ m/:/g) {
+               	local @RemCmd = ();
+				if (RunningWindows()) {
+					push @RemCmd, "_rem";
+				} else {
+					push @RemCmd, "rem";
+				}
+				push @RemCmd, "read";
+               	local $Pos = pos ($Filename);
+               	push @RemCmd, substr ($Filename, 0, $Pos -1);
+               	push @RemCmd, substr ($Filename, $Pos);
+		push @RemCmd, "|";
+		#print ("open ".join (" ", @RemCmd)."\n");
+		open (READ, join " ", @RemCmd)
+                       	|| die "isar: cannot open ".(join " ", @RemCmd);
+               	binmode (READ);
+               	return (READ);
+        } else {
+                unless (defined (&O_RDONLY)) {
+                        require Fcntl;
+                        import Fcntl qw/O_RDWR O_CREAT O_EXCL O_RDONLY O_TRUNC /;
+                }
+                my $fhLocal = "\:\:$Filename";
+                sysopen ($fhLocal, $Filename, &O_RDONLY)
+                        || die "isar: cannot open ".$Filename." read only";
+        	binmode ($fhLocal);
+		return ($fhLocal);
+        }
+}
+
+sub WriteFH {
+        my $LenWant = $_[2];
+        my $LenPut;
+        $LenPut = syswrite ($_[0], $_[1], $LenWant);
+        die "isar: could not write" unless ($LenWant == $LenPut);
+        return ($LenPut);
+}
+
+sub GetInputFile {
+	if ($_[0] =~ m/:/g) {
+		local $Filename = "~".basename($_[0]);
+		local $fhWrite = OpenFileWrite ($Filename);
+		local $fhRead = OpenFileRead ($_[0]);
+		local $Buffer;
+		local $LenWant = 4096;
+		local $LenGot;
+
+		while (true) {
+			$LenGot = sysread ($fhRead, $Buffer, $LenWant);
+			last if ($LenGot == 0);
+			syswrite ($fhWrite, $Buffer, $LenGot);
+		}
+
+		close ($fhRead);
+		close ($fhWrite);
+		return ($Filename);
+	} else {
+		return ($_[0]);
+	}
+}
+
+sub ClearInputFile {
+        if ($_[0] =~ m/:/g) {
+		unlink ("~".(basename ($_[0])));
+	}
+}
+
+sub GetPerlVersion {
+	return ($]);
+}
+
+sub RunningWindows {
+        return ((defined $ENV{"OS"}) and ($ENV{"OS"} =~ /^Windows/i));
+}
+
+sub PrintVersion {
+	print $ProgramVersion."\n";
+}
+
+sub PrintHelp {
+	print "isar --help, isar -h\n";
+	print "isar --version\n";
+	print "isar -x[v]f [host:]archive\n";
+	print "isar -t[v]f [host:]archive\n";
+	print "isar -c[v]f [host:]archive[,[host:]archive][,...]\n\t[-A listfile]\n";
+	print "isar -c[v]f [host:]archive[,[host:]archive][,...]\n\tfile_0 file_1 file_2 ...\n";
+	print "isar -c[v]f [host:]archive[,[host:]archive][,...]\n\tuse <STDIN> to pipe in filelist\n";
+}
+
+1;

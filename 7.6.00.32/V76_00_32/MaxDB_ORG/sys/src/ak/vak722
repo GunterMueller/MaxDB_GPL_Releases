@@ -1,0 +1,2183 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-22
+*****************************************************
+modname : VAK722
+changed : 2000-11-22
+module  : Catalog_Select_Optimizer
+ 
+Author  : ThomasA
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : Optimizer for catalog selects
+ 
+Define  :
+ 
+        PROCEDURE
+              a722add_col_qual (
+                    VAR acv      : tak_all_command_glob;
+                    VAR a41v     : tak40_show_glob;
+                    VAR mblock   : tgg00_MessBlock;
+                    colno        : integer;
+                    VAR startkey : tgg00_SysInfoKey;
+                    VAR stopkey  : tgg00_SysInfoKey;
+                    pos_info     : tak40_int2_arr_ptr);
+ 
+        FUNCTION
+              a722test_col_qual (
+                    VAR acv   : tak_all_command_glob;
+                    VAR a41v  : tak40_show_glob;
+                    colname   : tak_oldidentifier;
+                    def_byte  : char;
+                    value_ptr : tsp00_MoveObjPtr;
+                    value_len : integer;
+                    pos_info  : tak40_int2_arr_ptr) : boolean;
+ 
+        PROCEDURE
+              a722update_strategy (
+                    VAR acv       : tak_all_command_glob;
+                    VAR cat_strat : tgg07_StrCatalog);
+ 
+        PROCEDURE
+              a722strategy (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    VAR eval_info  : tak71_page_eval_rec;
+                    VAR gg_strategy: tgg07_StrategyInfo;
+                    VAR strat_len  : tsp00_Int2);
+ 
+        FUNCTION
+              a722full_one_level_id (VAR strat : tgg07_StrategyInfo) : boolean;
+ 
+        FUNCTION
+              a722full_two_level_id (VAR strat : tgg07_StrategyInfo) : boolean;
+ 
+        PROCEDURE
+              a722init_epos_reccol_relation(
+                    VAR acv       : tak_all_command_glob;
+                    VAR pos_info  : tak40_int2_arr_ptr);
+ 
+        PROCEDURE
+              a722finalize_epos_reccol_relation(
+                    VAR acv       : tak_all_command_glob;
+                    VAR pos_info  : tak40_int2_arr_ptr);
+ 
+.CM *-END-* define --------------------------------------
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01char_size         : integer;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Identifier_Handling : VAK061;
+ 
+        PROCEDURE
+              a061get_colname (
+                    VAR col_info : tak00_columninfo;
+                    VAR colname  : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10dispose (
+                    VAR acv : tak_all_command_glob;
+                    VAR p : tgg00_StackListPtr);
+ 
+        PROCEDURE
+              a10new (
+                    VAR acv  : tak_all_command_glob;
+                    obj_size : tsp00_Int4;
+                    VAR p    : tgg00_StackListPtr);
+ 
+        PROCEDURE
+              a10_rel_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey);
+ 
+      ------------------------------ 
+ 
+        FROM
+              CatalogWrapper : VAK103;
+ 
+        FUNCTION
+              a103GetColumn (
+                    VAR BaseRec : tak_baserecord;
+                    ColIndex    : integer) : tak00_colinfo_ptr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_update_statistics : VAK28;
+ 
+        FUNCTION
+              a28prim_pages (
+                    VAR acv     : tak_all_command_glob;
+                    VAR baserec : tak_baserecord) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_show_tools : VAK40;
+ 
+        PROCEDURE
+              a40get_catalog_table (
+                    VAR acv  : tak_all_command_glob;
+                    VAR a41v : tak40_show_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_show_syntax : VAK41;
+ 
+        PROCEDURE
+              a41init_show_glob (
+                    VAR a41v  : tak40_show_glob;
+                    mess_code : tsp00_CodeType);
+ 
+        PROCEDURE
+              a41get_table (
+                    VAR acv      : tak_all_command_glob;
+                    show_kind    : tgg00_ShowKind;
+                    VAR base_ptr : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select : VKB720;
+ 
+        PROCEDURE
+              k720_maxresult_get (
+                    strat_maxcnt       : tsp00_Int4;
+                    VAR maxresult      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_get : VKB71;
+ 
+        PROCEDURE
+              k71sel_qualification_test (
+                    VAR mblock    : tgg00_MessBlock;
+                    VAR sel       : tgg00_SelectFieldsParam;
+                    check_new_rec : boolean;
+                    VAR rec       : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 :  VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01unicode        : boolean;
+              g01nil_stack_desc : tgg00_StackDesc;
+              g01glob           : tgg00_KernelGlobals;
+ 
+        PROCEDURE
+              g01mblock_init (
+                    VAR source_trans : tgg00_TransContext;
+                    mess_type  : tgg00_MessType;
+                    mess2_type : tgg00_MessType2;
+                    VAR mblock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04incheck (
+                    VAR mblock : tgg00_MessBlock;
+                    stpos : integer);
+ 
+        PROCEDURE
+              g04value_locate (
+                    VAR stackentry    : tgg00_StackEntry;
+                    VAR mblock        : tgg00_MessBlock;
+                    VAR operand_addr  : tsp00_MoveObjPtr;
+                    VAR len           : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_allocator_interface : VGG941;
+ 
+        FUNCTION
+              gg941Allocate(
+                    VAR TransContext : tgg00_TransContext;
+                    wantedBytes      : integer) : tsp00_Addr;
+ 
+        PROCEDURE
+              gg941Deallocate(
+                    VAR TransContext : tgg00_TransContext;
+                    VAR p            : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalForcedUnicodeFill (
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : tsp00_C2 );
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id   : tsp00_C6;
+                    mod_num  : tsp00_Int4;
+                    obj_upb  : tsp00_Int4;
+                    obj      : tsp00_MoveObjPtr;
+                    obj_pos  : tsp00_Int4;
+                    length   : tsp00_Int4;
+                    fillchar : char;
+                    VAR e    : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove  (
+                    mod_id          : tsp00_C6;
+                    mod_intern_num  : tsp00_Int4;
+                    source_upb      : tsp00_Int4;
+                    destin_upb      : tsp00_Int4;
+                    source          : tsp00_MoveObjPtr;
+                    source_pos      : tsp00_Int4;
+                    destin          : tsp00_MoveObjPtr;
+                    d_pos           : tsp00_Int4;
+                    length          : tsp00_Int4;
+                    VAR e           : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id          : tsp00_C6;
+                    mod_intern_num  : tsp00_Int4;
+                    source_upb      : tsp00_Int4;
+                    destin_upb      : tsp00_Int4;
+                    source          : tsp00_MoveObjPtr;
+                    source_pos      : tsp00_Int4;
+                    destin          : tsp00_MoveObjPtr;
+                    destin_pos      : tsp00_Int4;
+                    length          : tsp00_Int4;
+                    VAR e           : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        FUNCTION
+              s30lnr (
+                    VAR str : tak_oldidentifier;
+                    val   : char;
+                    start : tsp00_Int4;
+                    cnt   : tsp00_Int4) : tsp00_Int4;
+ 
+        FUNCTION
+              s30lnr_defbyte (
+                    str       : tsp00_MoveObjPtr;
+                    defbyte   : char;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01name (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Name);
+ 
+        PROCEDURE
+              t01addr (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    bufaddr  : tsp00_Addr);
+ 
+        PROCEDURE
+              t01knl_identifier (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    identifier : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              t01basis_error (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01identifier (
+                    level      : tgg00_Debug;
+                    identifier : tsp00_Identifier);
+ 
+        PROCEDURE
+              t01lkey (
+                    debug : tgg00_Debug;
+                    VAR k : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              t01moveobj (
+                    debug       : tgg00_Debug;
+                    VAR moveobj : tsp00_MoveObj;
+                    startpos    : tsp00_Int4;
+                    endpos      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01qual (debug : tgg00_Debug; VAR part1 : tgg00_QualBuf);
+ 
+        PROCEDURE
+              t01stackentry (
+                    debug          : tgg00_Debug;
+                    VAR st         : tgg00_StackEntry;
+                    entry_index    : integer);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+ 
+Synonym :
+ 
+        PROCEDURE
+              a10dispose;
+ 
+              tak_sysbufferaddress tgg00_StackListPtr
+ 
+        PROCEDURE
+              a10new;
+ 
+              tak_sysbufferaddress tgg00_StackListPtr
+ 
+        FUNCTION
+              s30lnr;
+ 
+              tsp00_MoveObj tak_oldidentifier;
+&             ifdef trace
+ 
+        PROCEDURE
+              t01lkey;
+ 
+              tgg00_Lkey tgg00_SysInfoKey
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+TYPE
+      tak722_pos_ext_info = tak40_int2_arr_ptr;
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a722add_col_qual (
+            VAR acv      : tak_all_command_glob;
+            VAR a41v     : tak40_show_glob;
+            VAR mblock   : tgg00_MessBlock;
+            colno        : integer;
+            VAR startkey : tgg00_SysInfoKey;
+            VAR stopkey  : tgg00_SysInfoKey;
+            pos_info     : tak40_int2_arr_ptr);
+ 
+CONST
+      _c_exit_loop = csp_maxint2;
+ 
+VAR
+      _and_cnt       : integer;
+      _and_st        : integer;
+      _ix            : integer;
+      _jx            : integer;
+      _first_jmp     : integer;
+      _curr_st       : integer;
+      _start_st      : integer;
+      _end_st        : integer;
+      _cnt_st        : integer;
+      _extcolno      : integer;
+      _qual_st       : integer;
+      _qual_start    : integer;
+      _plus_st       : integer;
+      _rollback_st   : integer;
+      _len           : integer;
+      _op_addr       : tsp00_MoveObjPtr;
+      _cat_strat     : tgg07_StrCatalog;
+      _col_ptr       : tak00_colinfo_ptr;
+ 
+BEGIN
+(* the procedure constructs the qualification for the given       *)
+(* column identified by colno                                     *)
+(* IN : The initial condition is expected in acv.a_mblock         *)
+(* IN : The longinfos describing the current catalog table is     *)
+(*      expected in a4p_arr.pinfop                                *)
+(* OUT : mblock                                                   *)
+FOR _ix := 1 TO mxak40_shinfo DO
+    pos_info^[ _ix ] := 0;
+(*ENDFOR*) 
+IF  a41v.a4strategy.str_catalog.scat_qual_cols[ colno ] AND
+    ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    (* qualification for column colno does exist, extact *)
+    (* corresponding qualification from message buffer   *)
+    (* into mblock                                       *)
+    _cat_strat.scat_show_kind := a41v.a4sh_kind;
+    FOR _ix := a41v.a4p_arr.pinfop^.sresult.bfirstindex TO
+          a41v.a4p_arr.pinfop^.sresult.blastindex DO
+        BEGIN
+        _col_ptr := a103GetColumn (a41v.a4p_arr.pinfop^.sbase, _ix);
+        IF  _col_ptr^.ccolstack.etype = st_fixcol
+        THEN
+            pos_info^[_col_ptr^.ccolstack.epos] := _col_ptr^.cextcolno - 1;
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    ;
+&   ifdef trace
+    t01int4 (ak_sem, 'colno       ', colno);
+    t01qual (ak_sem, acv.a_mblock.mb_qual^);
+    t01qual (ak_sem, mblock.mb_qual^);
+&   endif
+    _start_st := acv.a_mblock.mb_qual^.mqual_pos;
+    IF  ( _start_st > 0 )
+    THEN
+        BEGIN
+        IF  ( acv.a_mblock.mb_st^[_start_st].etype = st_jump_output )
+        THEN
+            (* message buffer contains output columns *)
+            _start_st := _start_st + acv.a_mblock.mb_st^[_start_st].epos - 1;
+        (*ENDIF*) 
+        _end_st  := acv.a_mblock.mb_qual^.mqual_pos +
+              acv.a_mblock.mb_qual^.mqual_cnt - 1;
+        END
+    ELSE
+        BEGIN
+        _start_st := 1;
+        _end_st   := 0
+        END;
+    (*ENDIF*) 
+    _qual_st := cak_is_undefined;
+    _first_jmp := 0;
+    _and_cnt := -1;
+    WHILE ( _start_st <= _end_st ) AND ( acv.a_returncode = 0 ) DO
+        BEGIN
+        _curr_st := _start_st;
+        ak722next_and_part (acv, _cat_strat, pos_info,
+              _start_st, _end_st, _cnt_st, _extcolno);
+        IF  ( _extcolno = colno )
+        THEN
+            BEGIN
+            (* top and qualification for required column *)
+            (* found, move into message buffer           *)
+            IF  ( a41v.a4tab_len = 0 ) AND NOT g01unicode
+            THEN
+                ak722eval_start_stop_key (acv,
+                      _curr_st, _cnt_st,
+                      mblock.mb_type2 <> mm_first,
+                      startkey, stopkey);
+&           ifdef trace
+            (*ENDIF*) 
+            t01int4 (ak_sem, 'qual_st     ', _qual_st);
+            t01int4 (ak_sem, 'cnt_st      ', _cnt_st);
+            t01int4 (ak_sem, 'mfirst_free ', mblock.mb_qual^.mfirst_free);
+&           endif
+            _rollback_st := _qual_st;
+            IF  ( _qual_st = cak_is_undefined )
+            THEN
+                IF  ( mblock.mb_qual^.mfirst_free +
+                    _cnt_st - 1 <= mblock.mb_st_max )
+                THEN
+                    _qual_st := mblock.mb_qual^.mfirst_free - 1
+                ELSE (* curr qual too large, try next *)
+                    _cnt_st := 0
+                (*ENDIF*) 
+            ELSE
+                IF  ( _qual_st + 1 + _cnt_st + _and_cnt + 1 <=
+                    mblock.mb_st_max )
+                THEN
+                    BEGIN
+                    _qual_st     := _qual_st + 1;
+                    IF  ( _and_cnt = 0 )
+                    THEN
+                        _first_jmp := _qual_st;
+                    (*ENDIF*) 
+                    mblock.mb_st^[_qual_st].etype := st_jump_false;
+                    mblock.mb_st^[_qual_st].eop   := op_null;
+                    END
+                ELSE (* curr qual too large, try next *)
+                    _cnt_st := 0;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  ( _cnt_st > 0 )
+            THEN
+                _and_cnt := _and_cnt + 1;
+&           ifdef trace
+            (*ENDIF*) 
+            t01int4 (ak_sem, 'cnt_st      ', _cnt_st);
+&           endif
+            _plus_st    := 0;
+            _ix         := _curr_st;
+            _qual_start := _qual_st + 1;
+            WHILE ( _ix <= _curr_st + _cnt_st - 1 ) DO
+                BEGIN
+                _qual_st := _qual_st + 1;
+                _op_addr := NIL;
+                CASE acv.a_mblock.mb_st^[_ix].etype OF
+                    st_fixcol :
+                        BEGIN
+                        mblock.mb_st^[_qual_st].etype    := st_result;
+                        mblock.mb_st^[_qual_st].eop      := op_eq_all;
+                        mblock.mb_st^[_qual_st].epos     := cak_sysbufferoffset + 1;
+                        mblock.mb_st^[_qual_st].elen_var := -1;
+                        IF  g01unicode
+                        THEN
+                            mblock.mb_st^[_qual_st].ecol_tab[1] := csp_unicode_def_byte
+                        ELSE
+                            mblock.mb_st^[_qual_st].ecol_tab[1] := bsp_c1;
+                        (*ENDIF*) 
+                        mblock.mb_st^[_qual_st].ecol_tab[2] := chr(0);
+                        IF  ( acv.a_mblock.mb_st^[_ix].eop <> op_none )
+                        THEN
+                            IF  _qual_st + 2 + _cnt_st + _and_cnt + 1
+                                <= mblock.mb_st_max
+                            THEN
+                                BEGIN
+                                _qual_st := _qual_st + 1;
+                                mblock.mb_st^[_qual_st].etype := st_op;
+                                mblock.mb_st^[_qual_st].eop   := acv.a_mblock.mb_st^[_ix].eop;
+                                _plus_st := _plus_st + 1;
+                                _jx := _qual_start;
+                                WHILE ( _jx <= _qual_st ) DO
+                                    BEGIN
+                                    IF  ( mblock.mb_st^[_jx].
+                                        etype = st_jump_true )
+                                    THEN
+                                        mblock.mb_st^[_jx].epos :=
+                                              succ(mblock.mb_st^[_jx].epos);
+                                    (*ENDIF*) 
+                                    _jx := succ(_jx);
+                                    END;
+                                (*ENDWHILE*) 
+                                END
+                            ELSE
+                                BEGIN
+                                _qual_st := _rollback_st;
+                                _and_cnt := _and_cnt - 1;
+                                _ix      := _c_exit_loop;
+                                END;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                        END;
+                    st_value :
+                        g04value_locate (acv.a_mblock.mb_st^[_ix], acv.a_mblock, _op_addr, _len);
+                    OTHERWISE
+                        mblock.mb_st^[_qual_st] := acv.a_mblock.mb_st^[_ix];
+                    END;
+                (*ENDCASE*) 
+                IF  ( _op_addr <> NIL )
+                THEN
+                    BEGIN
+                    mblock.mb_st^[_qual_st]         := acv.a_mblock.mb_st^[_ix];
+                    mblock.mb_st^[_qual_st].etype   := st_value;
+                    mblock.mb_st^[_qual_st].epos    :=
+                          mblock.mb_data_len  + 1;
+                    mblock.mb_st^[_qual_st].elen_var:= _len;
+                    IF  ( mblock.mb_data_len +
+                        mblock.mb_st^[_qual_st].elen_var >
+                        mblock.mb_data_size DIV 2 )
+                    THEN
+                        BEGIN
+                        _qual_st := _rollback_st;
+                        _and_cnt := _and_cnt - 1
+                        END
+                    ELSE
+                        BEGIN
+                        SAPDB_PascalOverlappingMove ('VAK722',   1,    
+                              mblock.mb_st^[_qual_st].elen_var,
+                              mblock.mb_data_size,
+                              @_op_addr^, 1,
+                              @mblock.mb_data^.mbp_4kbuf,
+                              mblock.mb_data_len + 1,
+                              mblock.mb_st^[_qual_st].elen_var, acv.a_returncode);
+                        mblock.mb_data_len  :=
+                              mblock.mb_data_len +
+                              mblock.mb_st^[_qual_st].elen_var;
+                        END;
+                    (*ENDIF*) 
+                    END;
+&               ifdef trace
+                (*ENDIF*) 
+                IF  _qual_st > 0
+                THEN
+                    t01stackentry (ak_sem,
+                          mblock.mb_st^[_qual_st], _qual_st);
+&               endif
+                (*ENDIF*) 
+                _ix := _ix + 1
+                END;
+            (*ENDWHILE*) 
+            _cnt_st := _cnt_st + _plus_st
+            END;
+        (*ENDIF*) 
+        _start_st := _start_st + 1
+        END;
+    (*ENDWHILE*) 
+    _jx     := _first_jmp;
+    _and_st := _qual_st + _and_cnt;
+    FOR _ix := 1 TO _and_cnt DO
+        BEGIN
+        WHILE ( mblock.mb_st^[_jx].etype <> st_jump_false ) AND
+              ( mblock.mb_st^[_jx].eop <> op_null ) DO
+            _jx := _jx + 1;
+        (*ENDWHILE*) 
+        _qual_st := _qual_st + 1;
+        mblock.mb_st^[_qual_st].etype    := st_op;
+        mblock.mb_st^[_qual_st].eop      := op_and;
+        mblock.mb_st^[_qual_st].epos     := 0;
+        mblock.mb_st^[_qual_st].elen_var := 0;
+        mblock.mb_st^[_qual_st].ecol_tab := cgg_zero_c2;
+        mblock.mb_st^[_jx].epos := _and_st - _jx + 1;
+        mblock.mb_st^[_jx].eop  := op_none;
+        _and_st                 := _and_st - 1;
+        _jx                     := _jx + 1;
+        END;
+    (*ENDFOR*) 
+    IF  ( _qual_st <> cak_is_undefined )
+    THEN
+        BEGIN
+        mblock.mb_qual^.mqual_cnt := _qual_st -
+              mblock.mb_qual^.mqual_pos + 1;
+        mblock.mb_qual^.mfirst_free := _qual_st + 1;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak722eval_start_stop_key (
+            VAR acv      : tak_all_command_glob;
+            stack_index  : integer;
+            stack_cnt    : integer;
+            stopkey_only : boolean;
+            VAR startkey : tgg00_SysInfoKey;
+            VAR stopkey  : tgg00_SysInfoKey);
+ 
+CONST
+      _c_exit_loop = csp_maxint2;
+ 
+TYPE
+ 
+      tkey_identifier = RECORD
+            tk_len : integer;
+            tk_id  : tsp00_KnlIdentifier;
+      END;
+ 
+ 
+VAR
+      _exit_loop       : boolean;
+      _op              : tgg00_StackOpType;
+      _def_byte        : char;
+      _ix              : integer;
+      _val_pos         : tsp00_Int4;
+      _val_end_pos     : tsp00_Int4;
+      _val_index       : tsp00_Int4;
+      _like_val_index  : tsp00_Int4;
+      _start_key_index : tsp00_Int4;
+      _stop_key_index  : tsp00_Int4;
+      _startvallen     : tsp00_Int4;
+      _stopvallen      : tsp00_Int4;
+      _startkey_n      : tkey_identifier;
+      _stopkey_n       : tkey_identifier;
+      _startval        : tsp00_MoveObjPtr;
+      _stopval         : tsp00_MoveObjPtr;
+ 
+BEGIN
+_like_val_index    := cak_is_undefined;
+_start_key_index   := cak_is_undefined;
+_stop_key_index    := cak_is_undefined;
+_startkey_n.tk_len := 0;
+_stopkey_n.tk_len  := 0;
+_op := op_none;
+IF  (stack_cnt >= 2) AND
+    (acv.a_mblock.mb_st^[stack_index].etype = st_fixcol) AND
+    (acv.a_mblock.mb_st^[stack_index].eop   = op_none)
+THEN
+    BEGIN
+    _val_index := stack_index + 1;
+    IF  (acv.a_mblock.mb_st^[_val_index].etype        = st_build_in_func) AND
+        (acv.a_mblock.mb_st^[_val_index].eop_build_in = op_b_expand)
+    THEN
+        _val_index := _val_index + 1;
+    (*ENDIF*) 
+    _ix        := _val_index;
+    _exit_loop := false;
+    WHILE NOT _exit_loop DO
+        BEGIN
+        IF  _ix < stack_index + stack_cnt
+        THEN
+            BEGIN
+            IF  acv.a_mblock.mb_st^[_ix].etype = st_value
+            THEN
+                BEGIN
+                _op := acv.a_mblock.mb_st^[_ix].eop;
+                IF  _op = op_none
+                THEN
+                    _ix := _ix + 1
+                ELSE
+                    _exit_loop := true
+                (*ENDIF*) 
+                END
+            ELSE
+                _exit_loop := true
+            (*ENDIF*) 
+            END
+        ELSE
+            _exit_loop := true;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+&   ifdef trace
+    t01int4 (ak_strat, 'ix          ', _ix);
+    t01int4 (ak_strat, 'stack_index ', stack_index);
+    t01int4 (ak_strat, 'stack_cnt   ', stack_cnt);
+&   endif
+    IF  _ix = stack_index + stack_cnt - 1
+    THEN
+        BEGIN
+        IF  _op = op_none
+        THEN
+            BEGIN
+            IF  acv.a_mblock.mb_st^[_ix].etype = st_op
+            THEN
+                _op := acv.a_mblock.mb_st^[_ix].eop;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        _op := op_none;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+CASE _op OF
+    op_between :
+        BEGIN
+        _start_key_index := _val_index;
+        _stop_key_index  := _val_index + 1
+        END;
+    op_in :
+        BEGIN
+        IF  acv.a_mblock.mb_st^[_ix].ecol_tab[1] <> chr(1)
+        THEN (* sort in list *)
+            g04incheck (acv.a_mblock, _ix);
+        (*ENDIF*) 
+        _start_key_index := _val_index;
+        _stop_key_index  := _ix - 1
+        END;
+    op_like :
+        _like_val_index  := _val_index;
+    op_le, op_lt :
+        _stop_key_index  := _val_index;
+    op_ge, op_gt :
+        _start_key_index := _val_index;
+    op_eq :
+        BEGIN
+        _start_key_index := _val_index;
+        _stop_key_index  := _val_index;
+        END;
+    OTHERWISE ;
+    END;
+(*ENDCASE*) 
+&ifdef trace
+t01int4 (ak_strat, 'like_val_ind', _like_val_index);
+t01int4 (ak_strat, 'startkey_ind', _start_key_index);
+t01int4 (ak_strat, 'stopkey_ind ', _stop_key_index);
+&endif
+IF  _like_val_index <> cak_is_undefined
+THEN
+    BEGIN
+    g04value_locate (acv.a_mblock.mb_st^[_like_val_index], acv.a_mblock,
+          _startval, _startvallen);
+    _val_pos     := 2;
+    _val_end_pos := succ(_startvallen);
+&   ifdef trace
+    t01moveobj (ak_strat, _startval^, _val_pos, _val_end_pos);
+&   endif
+    WHILE _val_pos < _val_end_pos DO
+        BEGIN
+        IF  _startval^[_val_pos] in
+            [csp_star1, csp_any1, csp_cclass]
+        THEN
+            BEGIN
+            _stopkey_n.tk_len  := _val_pos - 2;
+            IF  _stopkey_n.tk_len > sizeof (_stopkey_n.tk_id)
+            THEN
+                _stopkey_n.tk_len := sizeof (_stopkey_n.tk_id);
+            (*ENDIF*) 
+            SAPDB_PascalMove ('VAK722',   2,    
+                  _startvallen, sizeof (_stopkey_n.tk_id),
+                  _startval, 2,
+                  @_stopkey_n.tk_id, 1, _stopkey_n.tk_len,
+                  acv.a_returncode);
+            IF  (NOT stopkey_only) AND
+                (acv.a_returncode = 0)
+            THEN
+                BEGIN
+                _startkey_n.tk_len := _stopkey_n.tk_len;
+                SAPDB_PascalMove ('VAK722',   3,    
+                      _startvallen, sizeof (_startkey_n.tk_id),
+                      _startval, 2,
+                      @_startkey_n.tk_id, 1, _startkey_n.tk_len,
+                      acv.a_returncode)
+                END;
+            (*ENDIF*) 
+            _val_pos := _c_exit_loop
+            END
+        ELSE
+            _val_pos := _val_pos + 1;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    END
+ELSE
+    BEGIN
+    IF  (_start_key_index <> cak_is_undefined) AND NOT stopkey_only
+    THEN
+        BEGIN
+        g04value_locate (acv.a_mblock.mb_st^[_start_key_index], acv.a_mblock,
+              _startval, _startvallen);
+        _startkey_n.tk_len := _startvallen - 1;
+        IF  _startkey_n.tk_len > sizeof (_startkey_n.tk_id)
+        THEN
+            _startkey_n.tk_len := sizeof (_startkey_n.tk_id);
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK722',   4,    
+              _startvallen, sizeof (_startkey_n.tk_id),
+              _startval, 2,
+              @_startkey_n.tk_id, 1, _startkey_n.tk_len,
+              acv.a_returncode)
+        END;
+    (*ENDIF*) 
+    IF  (_stop_key_index <> cak_is_undefined) AND
+        (acv.a_returncode = 0)
+    THEN
+        BEGIN
+        g04value_locate (acv.a_mblock.mb_st^[_stop_key_index], acv.a_mblock,
+              _stopval, _stopvallen);
+        _stopkey_n.tk_len := _stopvallen - 1;
+        IF  _stopkey_n.tk_len > sizeof (_stopkey_n.tk_id)
+        THEN
+            _stopkey_n.tk_len := sizeof (_stopkey_n.tk_id);
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK722',   5,    
+              _stopvallen, sizeof (_stopkey_n.tk_id),
+              _stopval, 2,
+              @_stopkey_n.tk_id, 1, _stopkey_n.tk_len,
+              acv.a_returncode)
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  NOT stopkey_only AND (_startkey_n.tk_len > 0)
+THEN
+    BEGIN
+    IF  g01unicode
+    THEN
+        _def_byte := csp_unicode_def_byte
+    ELSE
+        _def_byte := bsp_c1;
+    (*ENDIF*) 
+    _startkey_n.tk_len := s30lnr_defbyte (@_startkey_n.tk_id, _def_byte,
+          1, _startkey_n.tk_len);
+    _ix := _startkey_n.tk_len;
+    REPEAT
+        IF  _ix > 0
+        THEN
+            IF  _startkey_n.tk_id[_ix] <> chr(0)
+            THEN
+                BEGIN
+                _startkey_n.tk_id[_ix] :=
+                      pred (_startkey_n.tk_id[_ix]);
+                _startkey_n.tk_len := _ix;
+                FOR _ix := _startkey_n.tk_len + 1 TO
+                      sizeof (_startkey_n.tk_id) DO
+                    _startkey_n.tk_id[_ix] := chr(255);
+                (*ENDFOR*) 
+                _startkey_n.tk_len := sizeof (_startkey_n.tk_id);
+                _ix := _c_exit_loop;
+                END
+            ELSE
+                _ix := _ix - 1
+            (*ENDIF*) 
+        ELSE
+            _ix := _c_exit_loop;
+        (*ENDIF*) 
+    UNTIL
+        _ix = _c_exit_loop;
+    (*ENDREPEAT*) 
+    FOR _ix := _startkey_n.tk_len + 1 TO
+          sizeof (_startkey_n.tk_id) DO
+        _startkey_n.tk_id[_ix] := chr(0);
+    (*ENDFOR*) 
+    startkey.skeylen     := mxak_standard_sysk + _startkey_n.tk_len;
+    startkey.sidentifier := _startkey_n.tk_id;
+    END;
+(*ENDIF*) 
+IF  _stopkey_n.tk_len > 0
+THEN
+    BEGIN
+    FOR _ix := _stopkey_n.tk_len + 1 TO sizeof (_stopkey_n.tk_id) DO
+        _stopkey_n.tk_id[_ix] := chr(255);
+    (*ENDFOR*) 
+    IF  _stopkey_n.tk_id < stopkey.sidentifier
+    THEN
+        BEGIN
+        stopkey.skeylen     := mxak_standard_sysk + _stopkey_n.tk_len;
+        stopkey.sidentifier := _stopkey_n.tk_id
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+t01lkey (ak_strat, startkey);
+t01lkey (ak_strat, stopkey);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a722strategy (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            VAR eval_info  : tak71_page_eval_rec;
+            VAR gg_strategy: tgg07_StrategyInfo;
+            VAR strat_len  : tsp00_Int2);
+ 
+VAR
+      _ix            : tsp00_Int4;
+      _start_st      : integer;
+      _end_st        : integer;
+      _extcolno      : integer;
+      _cnt_st        : integer;
+      _pos_info      : tak722_pos_ext_info;
+ 
+BEGIN
+&ifdef trace
+t01int4( ak_sem, 'bpages      ', dmli.d_sparr.pbasep^.sresult.bpages );
+t01knl_identifier( ak_sem, 'tablename   ', dmli.d_sparr.pbasep^.sresult.btablen^ );
+t01qual( ak_sem, acv.a_mblock.mb_qual^ );
+&endif
+a722init_epos_reccol_relation( acv, _pos_info );
+FOR _ix := 1 TO mxak40_shinfo DO
+    _pos_info^[ _ix ] := 0;
+(*ENDFOR*) 
+IF  dmli.d_sparr.pbasep^.sresult.bpages < 1
+THEN
+    dmli.d_sparr.pbasep^.sresult.bpages := 1;
+(*ENDIF*) 
+IF  ( dmli.d_rowno >= cgg04_valid_rowno )
+THEN
+    BEGIN
+    k720_maxresult_get( gg_strategy.str_rowno, _ix);
+    IF  ( _ix = 0 )
+    THEN
+        gg_strategy.str_res_possible := false;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+eval_info.pev_wholeIO_pages    := IS_UNDEFINED_GG07;
+eval_info.pev_readInvIO_pages  := IS_UNDEFINED_GG07;
+(* initial value = all records qualified *)
+eval_info.pev_readIO_pages      := dmli.d_sparr.pbasep^.sresult.bpages;
+eval_info.pev_readIO_rows       := dmli.d_sparr.pbasep^.sresult.brows;
+eval_info.pev_readIO_rows_min   := dmli.d_sparr.pbasep^.sresult.brows;
+(* initial value = search thru all pages *)
+gg_strategy.str_strategy               := strat_catalog;
+gg_strategy.str_key_order_support      := kos_no_support;
+gg_strategy.str_out_keyseqlen          := NOT_SEQUENCED_GG07;
+gg_strategy.str_catalog.scat_show_kind := dmli.d_sparr.pbasep^.sresult.bshowkind;
+gg_strategy.str_catalog.scat_upd_strat := false;
+gg_strategy.str_catalog.scat_authname  := cak_is_undefined;
+gg_strategy.str_catalog.scat_tablename := cak_is_undefined;
+gg_strategy.str_catalog.scat_username  := cak_is_undefined;
+gg_strategy.str_catalog.scat_columnname:= cak_is_undefined;
+FOR _ix := 1 TO MAX_SHOW_COLUMNS_GG04 DO
+    BEGIN
+    gg_strategy.str_catalog.scat_col_needed[_ix] := false;
+    gg_strategy.str_catalog.scat_qual_cols [_ix] := false
+    END;
+(*ENDFOR*) 
+_start_st := acv.a_mblock.mb_qual^.mqual_pos;
+IF  ( _start_st > 0 )
+THEN
+    BEGIN
+    IF  ( acv.a_mblock.mb_st^[_start_st].etype = st_jump_output )
+    THEN
+        BEGIN
+        (* message buffer contains output columns *)
+        _start_st := _start_st + acv.a_mblock.mb_st^[ _start_st ].epos - 1;
+        _end_st   := _start_st - 1;
+        END
+    ELSE
+        _end_st := 0;
+    (*ENDIF*) 
+    ak722analyze_output( acv, _end_st, gg_strategy, _pos_info );
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        BEGIN
+        _end_st := acv.a_mblock.mb_qual^.mqual_pos +
+              acv.a_mblock.mb_qual^.mqual_cnt - 1;
+        WHILE ( _start_st <= _end_st ) DO
+            BEGIN
+            ak722next_and_part( acv, gg_strategy.str_catalog, _pos_info,
+                  _start_st, _end_st, _cnt_st, _extcolno );
+            IF  ( _extcolno <> cak_is_undefined )
+            THEN
+                gg_strategy.str_catalog.scat_qual_cols[ _extcolno ] := true
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4( ak_sem, 'authname    ', gg_strategy.str_catalog.scat_authname );
+    t01int4( ak_sem, 'username    ', gg_strategy.str_catalog.scat_username );
+    t01int4( ak_sem, 'tablename   ', gg_strategy.str_catalog.scat_tablename );
+    t01int4( ak_sem, 'columnname  ', gg_strategy.str_catalog.scat_columnname );
+    FOR _ix := 1 TO MAX_SHOW_COLUMNS_GG04 DO
+        IF   gg_strategy.str_catalog.scat_qual_cols[_ix]
+        THEN
+            t01int4 (ak_sem, 'qualified   ', _ix);
+&       endif
+        (*ENDIF*) 
+    (*ENDFOR*) 
+    IF  ( a722full_one_level_id( gg_strategy ) )
+    THEN
+        BEGIN
+        gg_strategy.str_catalog.scat_tablename  := cak_is_undefined;
+        gg_strategy.str_catalog.scat_username   := cak_is_undefined;
+        gg_strategy.str_catalog.scat_columnname := cak_is_undefined;
+        eval_info.pev_wholeIO_pages:= 2;
+        eval_info.pev_readIO_pages :=
+              trunc(( 1 / dmli.d_sparr.pbasep^.sresult.bpages ) + 1 );
+        END
+    ELSE
+        BEGIN
+        IF  ( a722full_two_level_id  ( gg_strategy ) )
+        THEN
+            BEGIN
+            (* object is completely specified *)
+            eval_info.pev_wholeIO_pages:= 4;
+            eval_info.pev_readIO_pages :=
+                  trunc(( 2 / dmli.d_sparr.pbasep^.sresult.bpages ) + 1 );
+            END
+        ELSE
+            BEGIN
+            (* set any stack pointer *)
+            gg_strategy.str_catalog.scat_tablename := 1;
+            IF  ( NOT a722full_two_level_id( gg_strategy ) )
+            THEN
+                (* scat_username and scat_columnname are cak_is_undefined *)
+                gg_strategy.str_catalog.scat_authname := cak_is_undefined;
+            (*ENDIF*) 
+            gg_strategy.str_catalog.scat_tablename   := cak_is_undefined;
+            gg_strategy.str_catalog.scat_username    := cak_is_undefined;
+            gg_strategy.str_catalog.scat_columnname  := cak_is_undefined;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  ( eval_info.pev_wholeIO_pages = IS_UNDEFINED_GG07 )
+    THEN
+        eval_info.pev_wholeIO_pages  := dmli.d_sparr.pbasep^.sresult.bpages * 2;
+    (*ENDIF*) 
+    strat_len := STRATEGY_START_MXGG07 + sizeof( tgg07_StrCatalog );
+    END;
+(*ENDIF*) 
+a722finalize_epos_reccol_relation( acv, _pos_info );
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a722test_col_qual (
+            VAR acv   : tak_all_command_glob;
+            VAR a41v  : tak40_show_glob;
+            colname   : tak_oldidentifier;
+            def_byte  : char;
+            value_ptr : tsp00_MoveObjPtr;
+            value_len : integer;
+            pos_info  : tak40_int2_arr_ptr) : boolean;
+ 
+CONST
+      _c_check_new_rec = true;
+      _c_exit_loop     = csp_maxint2;
+ 
+VAR
+      _and_cnt       : integer;
+      _colno         : integer;
+      _ix            : integer;
+      _jx            : integer;
+      _kx            : integer;
+      _pos           : integer;
+      (* PTS 1108744 E.Z. *)
+      _and_st        : integer;
+      _curr_st       : integer;
+      _start_st      : integer;
+      _end_st        : integer;
+      _cnt_st        : integer;
+      _extcolno      : integer;
+      _qual_st       : integer;
+      _colname_len   : integer;
+      _io_len        : integer;
+      _cat_strat     : tgg07_StrCatalog;
+      _rec_buf       : tgg00_Rec;
+      _data          : tsp00_Buf;
+      _qual          : tgg00_QualBuf;
+      _mblock        : tgg00_MessBlock;
+      _col_ptr       : tak00_colinfo_ptr;
+      _found         : boolean;
+      _idef_byte     : char;
+ 
+BEGIN
+(* the procedure constructs the qualification for the given       *)
+(* column identified by colname and checks if the value fulfills  *)
+(* that condition. In this case TRUE is returned, otherwise FALSE *)
+(* IN : The initial condition is expected in acv.a_mblock       *)
+(* IN : The longinfos describing the current catalog table is     *)
+(*      expected in a4p_arr.pinfop                                *)
+FOR _ix := 1 TO mxak40_shinfo DO
+    pos_info^[ _ix ] := 0;
+(*ENDFOR*) 
+a722test_col_qual := true;
+_idef_byte        := def_byte;
+_colno            := 1;
+_pos              := 1;
+_found            := false;
+_cat_strat.scat_show_kind := a41v.a4sh_kind;
+IF  g01unicode
+THEN
+    IF  _idef_byte = ' '
+    THEN
+        _idef_byte := csp_unicode_def_byte;
+    (*ENDIF*) 
+(*ENDIF*) 
+;
+&ifdef trace
+t01identifier (ak_sem, colname);
+t01moveobj    (ak_sem, value_ptr^, 1, value_len);
+&endif
+IF  a41v.a4systab_select AND (a41v.a4p_arr.pinfop <> NIL) AND
+    (acv.a_returncode = 0)
+THEN (* determine column number of column colname *)
+    BEGIN
+    _colname_len := s30lnr (colname, bsp_c1, 1, sizeof (colname));
+    FOR _ix := a41v.a4p_arr.pinfop^.sresult.bfirstindex TO
+          a41v.a4p_arr.pinfop^.sresult.blastindex DO
+        BEGIN
+        _col_ptr := a103GetColumn (a41v.a4p_arr.pinfop^.sbase, _ix);
+        IF  ( _col_ptr^.ccolstack.etype = st_fixcol )
+        THEN
+            BEGIN
+            _jx    := a01char_size;
+            _kx    := 1;
+            WHILE ( _kx <= _colname_len ) DO
+                BEGIN
+                IF  _jx > ord (_col_ptr^.ccolumnn_len)
+                THEN
+                    _kx := _c_exit_loop
+                ELSE
+                    IF  ( _col_ptr^.ccolumnn[_jx] <> colname[_kx] )
+                    THEN
+                        _kx := _c_exit_loop
+                    ELSE
+                        BEGIN
+                        _kx := _kx + 1;
+                        _jx := _jx + a01char_size
+                        END;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDWHILE*) 
+            IF  ( _kx <> _c_exit_loop )
+            THEN
+                BEGIN
+                _found  := true;
+                _io_len := _col_ptr^.cinoutlen;
+                _colno  := _col_ptr^.cextcolno - 1
+                END;
+            (*ENDIF*) 
+            pos_info^[_col_ptr^.ccolstack.epos] := _col_ptr^.cextcolno - 1
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+t01int4 (ak_sem, 'colno       ', _colno);
+IF  _found
+THEN
+    t01int4 (ak_sem, 'qualified   ',
+          ord (a41v.a4strategy.str_catalog.scat_qual_cols[_colno]));
+&endif
+(*ENDIF*) 
+IF  _found                                             AND
+    a41v.a4strategy.str_catalog.scat_qual_cols[_colno] AND
+    (acv.a_returncode = 0)
+THEN
+    BEGIN
+    (* qualification for column colno does exist, extact *)
+    (* corresponding qualification from message buffer   *)
+    (* into mblock                                       *)
+    _start_st := acv.a_mblock.mb_qual^.mqual_pos;
+    IF  _start_st > 0
+    THEN
+        BEGIN
+        IF  acv.a_mblock.mb_st^[_start_st].etype = st_jump_output
+        THEN
+            BEGIN
+            (* message buffer contains output columns *)
+            _start_st := _start_st + acv.a_mblock.mb_st^[_start_st].epos - 1;
+            _end_st   := _start_st - 1
+            END
+        ELSE
+            _end_st := 0;
+        (*ENDIF*) 
+        _end_st := acv.a_mblock.mb_qual^.mqual_pos +
+              acv.a_mblock.mb_qual^.mqual_cnt - 1;
+        g01mblock_init (acv.a_transinf.tri_trans,
+              m_insert, mm_nil, _mblock);
+        _mblock.mb_struct               := mbs_stack_addr;
+        _mblock.mb_data                 := @_data;
+        _mblock.mb_data_size            := sizeof (_data);
+        _mblock.mb_st_size              := (_end_st - _start_st + 1) *
+              sizeof (tgg00_StackEntry);
+        a10new (acv, _mblock.mb_st_size, _mblock.mb_st);
+        IF  _mblock.mb_st = NIL
+        THEN
+            _end_st := _start_st - 1;
+        (*ENDIF*) 
+        _mblock.mb_st_max := _mblock.mb_st_size DIV sizeof (tgg00_StackEntry);
+        _qual.mtree             := b01niltree_id;
+        _mblock.mb_qual   := @_qual;
+        _mblock.mb_qual^.mstack_desc    := g01nil_stack_desc;
+        _mblock.mb_qual^.mst_addr       := _mblock.mb_st;
+        _mblock.mb_qual_size            := sizeof (_qual);
+        _qual_st := cak_is_undefined;
+        _and_cnt := -1;
+        WHILE _start_st <= _end_st DO
+            BEGIN
+            _curr_st := _start_st;
+            ak722next_and_part (acv, _cat_strat, pos_info,
+                  _start_st, _end_st, _cnt_st, _extcolno);
+            IF  _extcolno = _colno
+            THEN
+                BEGIN
+                (* top and qualification for required column *)
+                (* found, move into message buffer           *)
+                _and_cnt := _and_cnt + 1;
+                IF  _qual_st = cak_is_undefined
+                THEN
+                    _qual_st := 0
+                ELSE
+                    BEGIN
+                    _qual_st := _qual_st + 1;
+                    _mblock.mb_st^[_qual_st].etype :=
+                          st_jump_false;
+                    _mblock.mb_st^[_qual_st].eop   := op_null
+                    END;
+                (*ENDIF*) 
+                FOR _ix := _curr_st TO _curr_st + _cnt_st - 1 DO
+                    BEGIN
+                    _qual_st := _qual_st + 1;
+                    _mblock.mb_st^[_qual_st] := acv.a_mblock.mb_st^[_ix];
+                    IF  acv.a_mblock.mb_st^[_ix].etype = st_fixcol
+                    THEN
+                        _mblock.mb_st^[_qual_st].epos := 1;
+&                   ifdef trace
+                    (*ENDIF*) 
+                    t01stackentry (ak_sem, acv.a_mblock.mb_st^[_ix], _ix);
+&                   endif
+                    END;
+                (*ENDFOR*) 
+                END;
+            (*ENDIF*) 
+            _start_st := _start_st + 1
+            END;
+        (*ENDWHILE*) 
+        IF  _qual_st <> cak_is_undefined
+        THEN
+            BEGIN
+            _jx := 1;
+            (* PTS 1108744 E.Z. *)
+            _and_st := _qual_st + _and_cnt;
+            FOR _ix := 1 TO _and_cnt DO
+                BEGIN
+                WHILE (_mblock.mb_st^[_jx].etype <>
+                      st_jump_false)
+                      OR
+                      (_mblock.mb_st^[_jx].eop <> op_null) DO
+                    _jx := _jx + 1;
+                (*ENDWHILE*) 
+                _qual_st := _qual_st + 1;
+                _mblock.mb_st^[_qual_st].etype    := st_op;
+                _mblock.mb_st^[_qual_st].eop      := op_and;
+                _mblock.mb_st^[_qual_st].epos     := 0;
+                _mblock.mb_st^[_qual_st].elen_var := 0;
+                _mblock.mb_st^[_qual_st].ecol_tab := cgg_zero_c2;
+                (* PTS 1108744 E.Z. *)
+                _mblock.mb_st^[_jx].epos := _and_st - _jx + 1;
+                _and_st                  := _and_st - 1;
+                _mblock.mb_st^[_jx].eop  := op_none
+                END;
+            (*ENDFOR*) 
+            _mblock.mb_qual^.mqual_pos   := 1;
+            _mblock.mb_qual^.mqual_cnt   := _qual_st;
+            _mblock.mb_qual^.mfirst_free := _qual_st + 1;
+            SAPDB_PascalMove ('VAK722',   6,    
+                  acv.a_mblock.mb_data_size, _mblock.mb_data_size,
+                  @acv.a_mblock.mb_data^.mbp_buf, 1,
+                  @_mblock.mb_data^.mbp_buf, 1,acv.a_mblock.mb_data_len,
+                  acv.a_returncode);
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                _mblock.mb_data_len  := acv.a_mblock.mb_data_len ;
+                _rec_buf.keylen    := 0;
+                _rec_buf.len       := cgg_rec_key_offset + 1 + value_len;
+                _rec_buf.info[1]     := _idef_byte;
+                SAPDB_PascalMove ('VAK722',   7,    
+                      value_len, sizeof (_rec_buf.buf),
+                      @value_ptr^, 1, @_rec_buf.info, 2, value_len,
+                      acv.a_returncode);
+                IF  value_len + 1 < _io_len
+                THEN
+                    IF  _idef_byte = csp_unicode_def_byte
+                    THEN
+                        SAPDB_PascalForcedUnicodeFill (
+                              sizeof (_rec_buf.buf), @_rec_buf.buf,
+                              cgg_rec_key_offset + 1 + value_len + 1,
+                              _io_len - 1 - value_len,
+                              csp_unicode_blank)
+                    ELSE
+                        SAPDB_PascalFill ('VAK722',   8,    
+                              sizeof (_rec_buf.buf), @_rec_buf.buf,
+                              cgg_rec_key_offset + 1 + value_len + 1,
+                              _io_len - 1 - value_len, _idef_byte,
+                              acv.a_returncode)
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+&               ifdef trace
+                t01qual (ak_sem, _mblock.mb_qual^);
+&               endif
+                a41v.a4sel^.sfp_m_result_addr := @_mblock.mb_data;
+                a41v.a4sel^.sfp_m_result_size := _mblock.mb_data_size;
+                a41v.a4sel^.sfp_m_result_len  := 0;
+                (* PTS 1105092 E.Z. *)
+                a41v.a4sel^.sfp_sqlmode       := acv.a_sqlmode;
+                _mblock.mb_trns := @acv.a_transinf.tri_trans;
+                k71sel_qualification_test (_mblock, a41v.a4sel^,
+                      NOT _c_check_new_rec, _rec_buf);
+&               ifdef trace
+                t01basis_error (ak_sem, 'k71 return  ',
+                      _mblock.mb_trns^.trError_gg00);
+&               endif
+                IF  _mblock.mb_trns^.trError_gg00 <> e_ok
+                THEN
+                    BEGIN
+                    a722test_col_qual := false;
+                    IF  _mblock.mb_trns^.trError_gg00 <> e_qual_violation
+                    THEN
+                        a07_b_put_error (acv,
+                              _mblock.mb_trns^.trError_gg00, 1)
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  _mblock.mb_st <> NIL
+        THEN
+            a10dispose (acv, _mblock.mb_st)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a722update_strategy (
+            VAR acv       : tak_all_command_glob;
+            VAR cat_strat : tgg07_StrCatalog);
+ 
+VAR
+      _ix       : integer;
+      _start_st : integer;
+      _end_st   : integer;
+      _cnt_st   : integer;
+      _extcolno : integer;
+      _a41v     : tak40_show_glob;
+      _pos_info : tak722_pos_ext_info;
+      _col_ptr  : tak00_colinfo_ptr;
+ 
+BEGIN
+a722init_epos_reccol_relation( acv, _pos_info );
+FOR _ix := 1 TO mxak40_shinfo DO
+    _pos_info^[ _ix ] := 0;
+(*ENDFOR*) 
+_start_st := acv.a_mblock.mb_qual^.mqual_pos;
+IF  _start_st > 0
+THEN
+    BEGIN
+    (* determine structure of current catalog table *)
+    a41init_show_glob (_a41v, acv.a_cmd_packet_header.sp1h_mess_code);
+    _a41v.a4sh_kind := cat_strat.scat_show_kind;
+    _a41v.a4systab_select := true; (* PTS 1119703 *)
+    a40get_catalog_table (acv, _a41v);
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        FOR _ix := _a41v.a4p_arr.pinfop^.sresult.bfirstindex TO
+              _a41v.a4p_arr.pinfop^.sresult.blastindex DO
+            BEGIN
+            _col_ptr := a103GetColumn (_a41v.a4p_arr.pinfop^.sbase, _ix);
+            IF  _col_ptr^.ccolstack.etype = st_fixcol
+            THEN
+                _pos_info^[_col_ptr^.ccolstack.epos] := _col_ptr^.cextcolno - 1;
+            (*ENDIF*) 
+            END;
+        (*ENDFOR*) 
+        a10_rel_sysinfo (acv, _a41v.a4p_arr.pinfop^.syskey);
+        IF  acv.a_mblock.mb_st^[_start_st].etype = st_jump_output
+        THEN
+            (* message buffer contains output columns *)
+            _start_st := _start_st + acv.a_mblock.mb_st^[_start_st].epos - 1;
+        (*ENDIF*) 
+        _end_st := acv.a_mblock.mb_qual^.mqual_pos +
+              acv.a_mblock.mb_qual^.mqual_cnt - 1;
+        WHILE _start_st <= _end_st DO
+            ak722next_and_part (acv, cat_strat, _pos_info,
+                  _start_st, _end_st, _cnt_st, _extcolno);
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+a722finalize_epos_reccol_relation( acv, _pos_info );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak722analyze_output (
+            VAR acv      : tak_all_command_glob;
+            output_end   : integer;
+            VAR strat    : tgg07_StrategyInfo;
+            pos_info     : tak722_pos_ext_info);
+ 
+VAR
+      _b_err     : tgg00_BasisError;
+      _colind    : integer;
+      _st_pos    : integer;
+      _base_ptr  : tak_sysbufferaddress;
+      _col_ptr   : tak00_colinfo_ptr;
+&     ifdef trace
+      _colname   : tsp00_KnlIdentifier;
+&     endif
+ 
+BEGIN
+a41get_table (acv, strat.str_catalog.scat_show_kind, _base_ptr, _b_err);
+IF  ( _b_err = e_ok )
+THEN
+    BEGIN
+    acv.a_sample_pages := a28prim_pages( acv, _base_ptr^.sbase );
+    FOR _colind := _base_ptr^.sbase.bfirstindex TO _base_ptr^.sbase.blastindex DO
+        BEGIN
+        (* loop over all columns *)
+        _col_ptr := a103GetColumn (_base_ptr^.sbase, _colind);
+        IF  ( _col_ptr^.creccolno > 1 ) AND
+            NOT ( ctexpression in _col_ptr^.ccolpropset )
+        THEN
+            BEGIN
+            (* remember all columns *)
+            pos_info^[ _col_ptr^.ccolstack.epos ] := _col_ptr^.creccolno - 1;
+            _st_pos := acv.a_mblock.mb_qual^.mqual_pos + 1;
+            IF  NOT (ctinvisible in _col_ptr^.ccolpropset) AND
+                NOT (ctdropped   in _col_ptr^.ccolpropset)
+            THEN
+                BEGIN
+                (* check given colunm against output columns *)
+                WHILE  _st_pos <= output_end DO
+                    BEGIN
+                    IF  (acv.a_mblock.mb_st^[_st_pos].etype = st_fixcol) AND
+                        (acv.a_mblock.mb_st^[_st_pos].epos <=
+                        _col_ptr^.ccolstack.epos) AND
+                        (acv.a_mblock.mb_st^[_st_pos].epos +
+                        acv.a_mblock.mb_st^[_st_pos].elen_var
+                        >= _col_ptr^.ccolstack.epos +
+                        _col_ptr^.ccolstack.elen_var)
+                    THEN
+                        BEGIN
+&                       ifdef trace
+                        a061get_colname (_col_ptr^, _colname);
+                        t01knl_identifier (ak_sem, 'column      ', _colname);
+                        t01stackentry (ak_sem, _col_ptr^.ccolstack,
+                              _colind - _base_ptr^.sbase.bfirstindex);
+                        t01stackentry (ak_sem, acv.a_mblock.mb_st^[_st_pos], _st_pos);
+&                       endif
+                        _st_pos := output_end;
+                        (* remember out put columns *)
+                        strat.str_catalog.
+                              scat_col_needed[_col_ptr^.creccolno-1] := true;
+                        END;
+                    (*ENDIF*) 
+                    _st_pos := _st_pos + 1;
+                    END;
+                (*ENDWHILE*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    END
+ELSE
+    a07_b_put_error (acv, _b_err, 1);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak722next_and_part (
+            VAR acv      : tak_all_command_glob;
+            VAR cat_strat: tgg07_StrCatalog;
+            pos_info     : tak722_pos_ext_info;
+            VAR start_st : integer;
+            end_st       : integer;
+            VAR st_cnt   : integer;
+            VAR extcolno : integer);
+ 
+CONST
+      _c_star_any_class_found = csp_maxint2;
+ 
+VAR
+      _ix            : integer;
+      _end_pos       : integer;
+      _curr_colno    : integer;
+      _aux_st_pos    : integer;
+      _st_pos        : integer;
+      _val_pos       : integer;
+      _value_st      : integer;
+      _vallen        : tsp00_Int4;
+      _value         : tsp00_MoveObjPtr;
+      _opt_ptr       : tsp00_MoveObjPtr;
+      _one_col_qual  : boolean;
+      _top_and_found : boolean;
+      _is_equal      : boolean;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_sem, 'start_st    ', start_st);
+t01int4 (ak_sem, 'end_st      ', end_st);
+&endif
+IF  ( acv.a_mblock.mb_qual^.mst_optimize_pos > 0 )
+THEN
+    _opt_ptr := @acv.a_mblock.mb_data^.
+          mbp_buf[ acv.a_mblock.mb_qual^.mst_optimize_pos ]
+ELSE
+    _opt_ptr := NIL;
+(*ENDIF*) 
+_top_and_found := false;
+_st_pos        := start_st;
+IF  ( acv.a_mblock.mb_st^[ start_st ].etype = st_jump_false )
+THEN
+    start_st := start_st + 1;
+(*ENDIF*) 
+_one_col_qual := true;
+extcolno      := cak_is_undefined;
+WHILE NOT _top_and_found DO
+    BEGIN
+    IF  ( acv.a_mblock.mb_st^[_st_pos].etype = st_fixcol )
+    THEN
+        BEGIN
+        _curr_colno := pos_info^[ acv.a_mblock.mb_st^[_st_pos].epos ];
+&       ifdef trace
+        t01int4 (ak_sem, '_curr_colno ', _curr_colno);
+&       endif
+        IF  ( _curr_colno > 0 )
+        THEN
+            BEGIN
+            IF  ( (*previous*)
+                extcolno <> cak_is_undefined )
+            THEN
+                IF  ( _curr_colno <> (*previous*)
+                    extcolno )
+                THEN
+                    _one_col_qual := false;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            extcolno                 := _curr_colno;
+            cat_strat.scat_col_needed[ extcolno ] := true;
+&           ifdef trace
+            t01int4 (ak_sem, 'col_needed  ', extcolno );
+&           endif
+            END
+        ELSE
+            a07_b_put_error (acv, e_invalid, 1);
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  ( acv.a_mblock.mb_st^[ _st_pos ].etype = st_subquery )
+        THEN
+            _one_col_qual := false;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    _st_pos := _st_pos + 1;
+    IF  ( _st_pos > end_st )
+    THEN
+        _top_and_found := true
+    ELSE
+        BEGIN
+        IF  ( acv.a_mblock.mb_st^[_st_pos].etype = st_jump_false ) OR
+            ( acv.a_mblock.mb_st^[_st_pos].eop   = op_and ) OR
+            ( acv.a_mblock.mb_st^[_st_pos].eop   = op_upd_view_and )
+        THEN
+            BEGIN
+            _aux_st_pos := _st_pos;
+            IF  ( acv.a_mblock.mb_st^[_st_pos].etype <> st_jump_false )
+            THEN
+                (* op_and, op_upd_view_and *)
+                _st_pos := _st_pos + 1;
+            (*ENDIF*) 
+            WHILE ( _aux_st_pos <= end_st ) AND NOT _top_and_found DO
+                BEGIN
+                IF  ( acv.a_mblock.mb_st^[_aux_st_pos].eop
+                    in [ op_and, op_upd_view_and ] )
+                THEN
+                    BEGIN
+                    _aux_st_pos := _aux_st_pos + 1;
+                    IF  ( _aux_st_pos > end_st )
+                    THEN
+                        _top_and_found := true
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_st^[_aux_st_pos].etype = st_jump_false )
+                    THEN
+                        BEGIN
+                        _aux_st_pos := _aux_st_pos +
+                              acv.a_mblock.mb_st^[_aux_st_pos].epos;
+                        IF  ( _aux_st_pos > end_st )
+                        THEN
+                            _top_and_found := true
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        _aux_st_pos := end_st + 1;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDWHILE*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+;
+(* _top_and_found allways true, because above "while NOT _top_and_found" !#? *)
+IF  _top_and_found
+THEN
+    BEGIN
+    IF  NOT _one_col_qual
+    THEN
+        (* e.g. L2-term *)
+        extcolno := cak_is_undefined;
+    (*ENDIF*) 
+    st_cnt := _st_pos - start_st;
+    IF  ( acv.a_mblock.mb_st^[_st_pos - 1].eop in [op_and, op_upd_view_and] )
+    THEN
+        st_cnt := st_cnt - 1;
+&   ifdef trace
+    (*ENDIF*) 
+    t01int4 (ak_sem, 'top and fnd ', ord (_top_and_found));
+    t01int4 (ak_sem, 'col no      ', extcolno);
+    t01int4 (ak_sem, 'stack cnt   ', st_cnt);
+    FOR _ix := 1 TO st_cnt DO
+        t01stackentry (ak_sem, acv.a_mblock.mb_st^[start_st+_ix-1], start_st+_ix-1);
+    (*ENDFOR*) 
+&   endif
+    IF  ( extcolno <> cak_is_undefined ) AND
+        ( acv.a_mblock.mb_st^[start_st].etype = st_fixcol) AND
+        ( acv.a_mblock.mb_st^[start_st].eop   = op_none)
+    THEN
+        BEGIN
+        _is_equal := false;
+        _value_st := start_st + 1;
+        CASE st_cnt OF
+            2 :
+                BEGIN
+                (* check equal conditions *)
+                IF  ( acv.a_mblock.mb_st^[start_st+1].etype = st_value )  AND
+                    ( acv.a_mblock.mb_st^[start_st+1].eop   = op_eq )
+                THEN
+                    _is_equal := true
+                (*ENDIF*) 
+                END;
+            3 :
+                BEGIN
+                (* look for equal condition 'column = value' *)
+                (* first                                     *)
+                IF  ( acv.a_mblock.mb_st^[start_st+1].etype = st_value )  AND
+                    ( acv.a_mblock.mb_st^[start_st+2].etype = st_op )     AND
+                    ( acv.a_mblock.mb_st^[start_st+2].eop   = op_eq )
+                THEN
+                    _is_equal := true;
+                (* look for like condition that can be *)
+                (* substituted by equal                *)
+                (*ENDIF*) 
+                IF  NOT _is_equal                              AND
+                    ( acv.a_mblock.mb_st^[start_st+1].etype    = st_value )  AND
+                    ( acv.a_mblock.mb_st^[start_st+2].etype    = st_op )     AND
+                    ( acv.a_mblock.mb_st^[start_st+2].eop      = op_like )   AND
+                    ( acv.a_mblock.mb_st^[start_st+2].elen_var = 0 )
+                THEN
+                    BEGIN
+                    (* The condition goes <column> LIKE '<pattern>'; *)
+                    (* if there is no special symbol (e.g. * or ?),  *)
+                    (* we substitute it by <column> = '<pattern>'.   *)
+                    (* PTS 1102300 E.Z. *)
+                    g04value_locate (acv.a_mblock.mb_st^[_value_st], acv.a_mblock,
+                          _value, _vallen);
+                    _val_pos := 1;
+                    IF  NOT (
+                        (_value = NIL) OR
+                        (_vallen = 0) OR
+                        (* the next line could be removed if all values are handled as fields *)
+                        (_value^[1] = csp_default_byte) OR
+                        ( acv.a_mblock.mb_st^[ _value_st ].ecol_tab[ 1 ] in
+                        [ cgg04_param_in_between_expr, cgg04_param_in_in_expr]) OR
+                        ((acv.a_mblock.mb_st^[ _value_st ].ecol_tab[ 1 ] = chr(0)) AND
+                        ( acv.a_mblock.mb_st^[ _value_st ].ecol_tab[ 2 ] <> chr(0)))
+                        )
+                    THEN
+                        BEGIN (* no parameter *)
+                        _val_pos := _val_pos + 1;
+                        _end_pos := succ(_vallen);
+                        WHILE ( _val_pos < _end_pos ) DO
+                            BEGIN
+                            IF  ( _value^[_val_pos] in
+                                [csp_star1, csp_any1, csp_cclass] )
+                            THEN
+                                _val_pos := _c_star_any_class_found
+                            ELSE
+                                _val_pos := _val_pos + 1;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDWHILE*) 
+                        IF  ( _val_pos <> _c_star_any_class_found )
+                        THEN
+                            BEGIN
+                            (* substitution by equal possible *)
+                            IF  ( _opt_ptr <> NIL )
+                            THEN
+                                _opt_ptr^[start_st-acv.a_mblock.mb_qual^.mqual_pos+2] :=
+                                      chr(op_eq);
+                            (*ENDIF*) 
+                            _is_equal                 := true;
+                            acv.a_mblock.mb_st^[start_st + 2].eop := op_eq
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        cat_strat.scat_upd_strat := true
+                    (*ENDIF*) 
+                    END;
+                (* look for conditions EXPAND(column) = value *)
+                (* RFILL (column,..,Blank) = value            *)
+                (*ENDIF*) 
+                IF  NOT _is_equal AND
+                    ( acv.a_mblock.mb_st^[start_st+2].etype = st_value ) AND
+                    ( acv.a_mblock.mb_st^[start_st+2].eop   = op_eq )
+                THEN
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_st^[start_st+1].etype = st_build_in_func )
+                        AND
+                        ((( acv.a_mblock.mb_st^[start_st+1].eop_build_in = op_b_rfill ) AND
+                        (   acv.a_mblock.mb_st^[start_st+1].ecol_tab[1]  = bsp_c1    ))
+                        OR
+                        ( acv.a_mblock.mb_st^[start_st+1].eop_build_in = op_b_expand ))
+                    THEN
+                        BEGIN
+                        _value_st := start_st + 2;
+                        _is_equal := true
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            4 :
+                IF  ( acv.a_mblock.mb_st^[start_st  ].etype = st_fixcol ) AND
+                    ( acv.a_mblock.mb_st^[start_st+2].etype = st_value  )  AND
+                    ( acv.a_mblock.mb_st^[start_st+3].etype = st_op     )  AND
+                    ( acv.a_mblock.mb_st^[start_st+3].eop   = op_eq     )
+                THEN
+                    BEGIN
+                    IF  ( acv.a_mblock.mb_st^[start_st+1].etype = st_build_in_func)
+                        AND
+                        ((( acv.a_mblock.mb_st^[start_st+1].eop_build_in = op_b_rfill ) AND
+                        (  acv.a_mblock.mb_st^[start_st+1].ecol_tab[1]  = bsp_c1      ))
+                        OR
+                        ( acv.a_mblock.mb_st^[start_st+1].eop_build_in = op_b_expand ))
+                    THEN
+                        BEGIN
+                        _value_st := start_st + 2;
+                        _is_equal := true
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            OTHERWISE ;
+            END;
+        (*ENDCASE*) 
+        IF  _is_equal
+        THEN
+            BEGIN
+            CASE extcolno OF
+                1 :
+                    cat_strat.scat_authname := _value_st;
+                2 :
+                    CASE cat_strat.scat_show_kind OF
+                        sh_all_new_privileges,
+                        sh_new_privileges,
+                        sh_p_prog :
+                            BEGIN
+                            END;
+                        OTHERWISE
+                            cat_strat.scat_tablename := _value_st; (* PTS 1108747 *)
+                        END;
+                    (*ENDCASE*) 
+                3 :
+                    CASE cat_strat.scat_show_kind OF
+                        sh_procedure, sh_variables :
+                            cat_strat.scat_columnname := _value_st; (* PTS 1108747 *)
+                        sh_object :
+                            cat_strat.scat_authname := _value_st;
+                        sh_cons_columns, sh_all_cons_columns,
+                        sh_column, sh_all_column,
+                        sh_table_stat,  sh_st_table, sh_pages,
+                        sh_table, sh_all_table,
+                        sh_trigger, sh_all_triggers,
+                        sh_show_view, sh_view, sh_all_views,
+                        sh_st_index, sh_indexpages,
+                        sh_index, sh_all_index, sh_odbc_index :
+                            IF  (cat_strat.scat_authname = cak_is_undefined) AND
+                                g01glob.db_is_for_sapr3
+                            THEN
+                                cat_strat.scat_authname := _value_st;
+                            (*ENDIF*) 
+                        sh_all_new_privileges,
+                        sh_new_privileges,
+                        sh_p_prog :
+                            cat_strat.scat_tablename := _value_st;
+                        OTHERWISE ;
+                        END;
+                    (*ENDCASE*) 
+                6 :
+                    IF  (cat_strat.scat_show_kind = sh_link) OR
+                        (cat_strat.scat_show_kind = sh_all_foreign_key)
+                    THEN
+                        cat_strat.scat_username := _value_st;
+                    (*ENDIF*) 
+                7 :
+                    IF  (cat_strat.scat_show_kind = sh_link) OR
+                        (cat_strat.scat_show_kind = sh_all_foreign_key)
+                    THEN
+                        cat_strat.scat_columnname := _value_st;
+                    (*ENDIF*) 
+                OTHERWISE ;
+                END;
+            (*ENDCASE*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+start_st := _st_pos;
+WHILE _st_pos <= end_st DO
+    IF  acv.a_mblock.mb_st^[_st_pos].eop in [op_and, op_upd_view_and]
+    THEN
+        BEGIN
+        _st_pos   := _st_pos + 1;
+        start_st := start_st + 1
+        END
+    ELSE
+        _st_pos := end_st + 1;
+    (*ENDIF*) 
+(*ENDWHILE*) 
+&ifdef trace
+t01int4 (ak_sem, 'start_st    ', start_st);
+t01int4 (ak_sem, 'st_cnt      ', st_cnt);
+t01int4 (ak_sem, 'extcolno    ', extcolno);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a722full_one_level_id (VAR strat : tgg07_StrategyInfo) : boolean;
+ 
+BEGIN
+a722full_one_level_id := false;
+CASE strat.str_catalog.scat_show_kind OF
+    sh_dbfunctions, sh_st_user, sh_object :
+        IF  strat.str_catalog.scat_authname  <> cak_is_undefined
+        THEN
+            BEGIN
+            a722full_one_level_id := true;
+&           ifdef trace
+            t01name( ak_sem, 'full_one_level_id ' );
+&           endif
+            END;
+        (*ENDIF*) 
+    OTHERWISE ;
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a722full_two_level_id (VAR strat : tgg07_StrategyInfo) : boolean;
+ 
+BEGIN
+a722full_two_level_id := false;
+CASE strat.str_catalog.scat_show_kind OF
+    sh_all_column,
+    sh_all_constraint,
+    sh_all_cons_columns,
+    sh_all_foreign_key,
+    sh_all_index,
+    sh_all_priv_granted,
+    sh_all_new_privileges,
+    sh_all_ref_columns,
+    sh_all_table,
+    sh_all_triggers,
+    sh_all_views,
+    sh_all_view_uses_table,
+    sh_column,
+    sh_odbc_columns,
+    sh_constraint,
+    sh_cons_columns,
+    sh_domain_constraints,
+    sh_show_view,
+    sh_index,
+    sh_odbc_index,
+    sh_new_privileges,
+    sh_odbc_st_index,
+    sh_odbc_st_table,
+    sh_pages,
+    sh_param_trigger,
+    sh_p_prog,
+    sh_procedure, (* PTS 1108747 *)
+    sh_ref_column,
+    sh_st_index,
+    (* PTS 1111576 E.Z. *)
+    sh_st_table,
+    sh_table,
+    sh_table_stat,
+    sh_trigger,
+    sh_u_domain,
+    sh_view,
+    sh_view_uses_table,
+    sh_tablestoragedetails :
+        IF  (strat.str_catalog.scat_authname  <> cak_is_undefined) AND
+            (strat.str_catalog.scat_tablename <> cak_is_undefined)
+        THEN
+            BEGIN
+            a722full_two_level_id := true;
+&           ifdef trace
+            t01name( ak_sem, 'full_two_level_id ' );
+&           endif
+            END;
+        (*ENDIF*) 
+    sh_variables :
+        a722full_two_level_id := true;
+    sh_link :
+        IF  ((strat.str_catalog.scat_authname <> cak_is_undefined) AND
+            (strat.str_catalog.scat_tablename <> cak_is_undefined))
+            OR
+            ((strat.str_catalog.scat_username  <> cak_is_undefined) AND
+            (strat.str_catalog.scat_columnname <> cak_is_undefined))
+        THEN
+            BEGIN
+            a722full_two_level_id := true;
+&           ifdef trace
+            t01name( ak_sem, 'full_two_level_id ' );
+&           endif
+            END;
+        (*ENDIF*) 
+    OTHERWISE ;
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a722init_epos_reccol_relation(
+            VAR acv       : tak_all_command_glob;
+            VAR pos_info  : tak40_int2_arr_ptr);
+ 
+VAR
+ 
+      _cast  : RECORD
+            CASE integer OF
+                1 :
+                    (addr: tsp00_Addr);
+                2 :
+                    (iptr : tak40_int2_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+pos_info   := NIL;
+_cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+      mxak40_shinfo * sizeof(tsp00_Int2) );
+pos_info := _cast.iptr;
+&ifdef trace
+t01addr( ak_join, 'pos_info    ', _cast.addr );
+&endif
+IF  ( pos_info = NIL )
+THEN
+    a07_b_put_error( acv, e_no_more_memory, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a722finalize_epos_reccol_relation(
+            VAR acv       : tak_all_command_glob;
+            VAR pos_info  : tak40_int2_arr_ptr);
+ 
+VAR
+ 
+      _cast  : RECORD
+            CASE integer OF
+                1 :
+                    (addr: tsp00_Addr);
+                2 :
+                    (iptr : tak40_int2_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+IF  ( pos_info <> NIL )
+THEN
+    BEGIN
+    _cast.iptr := pos_info;
+    pos_info   := NIL;
+&   ifdef trace
+    t01addr( ak_join, 'pos_info    ', _cast.addr );
+&   endif
+    gg941Deallocate( acv.a_transinf.tri_trans, _cast.addr );
+    END;
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

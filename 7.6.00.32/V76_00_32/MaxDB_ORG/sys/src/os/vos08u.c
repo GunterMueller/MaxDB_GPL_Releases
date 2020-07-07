@@ -1,0 +1,864 @@
+/*!
+  @file           vos08u.c
+  @author         RaymondR
+  @brief          sqlexec
+  @see            
+
+\if EMIT_LICENCE
+
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+
+
+\endif
+*/
+
+
+
+
+//
+// INCLUDE FILES
+//
+#include "gos00.h"
+#include "heo46.h"
+#include "geo007_1.h"
+#include "geo007_2.h"
+#include "gos44.h"
+
+
+//
+//  DEFINES
+//
+
+#define MOD__  "VOS08UC : "
+#define MF__   MOD__"UNDEFINED"
+
+
+#define ENVVARNAME                     "PATH"
+#define MX_OBJ_LEN                     100
+#define PIPE_BUFFER_SIZE               512
+
+#define BATCH_MODE_CHARACTER           '#'
+#define COMMAND_PROC                   "command.com"
+#define CMD_PROC                       "cmd.exe"
+#define COMMAND_PROCESSOR_OPT          "/c "
+#define TITLE_COMMAND                  "title"
+
+#define MX_EXTENSIONS_LIST_SIZE \
+        ( sizeof (ExtensionList) / sizeof (*ExtensionList) )
+
+//
+//  MACROS
+//
+
+
+//
+//  LOCAL TYPE AND STRUCT DEFINITIONS
+//
+
+typedef struct sqlexec_result
+  {
+  unsigned short    usSessID;
+  unsigned short    usResult;
+  } SQLEXEC_RESULT;
+
+
+//
+// EXTERNAL VARIABLES
+//
+
+
+//
+//  EXPORTED VARIABLES
+//
+
+
+//
+// LOCAL VARIABLES
+//
+
+static SQLEXEC_RESULT   Result;
+
+#if defined(_WIN32)
+ static PCHAR ExtensionList [] = { ".EXE", ".COM", ".PIF", ".CMD", ".BAT" };
+#else
+ static PCHAR ExtensionList [] = { ".EXE", ".COM", ".CMD", ".BAT" };
+#endif
+
+
+
+//
+// LOCAL FUNCTION PROTOTYPES
+//
+
+static APIRET sql08u_get_path                  ( PATHNAME pszFullPathName,
+                                                 PSZ      pszFileName );
+
+#if defined(_WIN32)
+ static APIRET sql08u_create_batch_mode_thread ( HANDLE     *pNewStdHandle,
+                                                 ERRORTEXT  pszErrMsg );
+#endif
+
+//
+// ========================== GLOBAL FUNCTIONS ================================
+//
+
+
+VOID    sqlexec (   tsp00_ExecArgLine   pszCommand,
+                    tsp00_ExecMode      eMode,
+                    tsp00_ExecReturn   *peResult,
+                    ERRORTEXT           pszErrMsg,
+                    PINT2               pfProgResult     )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sqlexec"
+  CHAR                 szCmdLine [ sizeof ( tsp00_ExecArgLine ) + 1 + 512 ];
+  CHAR                 szProgName[ sizeof ( tsp00_ExecArgLine ) + 1 ];
+  PCHAR                pszArgs;
+  ULONG                ulCmdLineLen  = 0;
+  ULONG                ulArgsLen     = 0;
+  ULONG                ulCnt;
+  BOOL                 bBatchMode;
+  PATHNAME             szFullProgName;
+  APIRET               rc            = NO_ERROR;
+
+  #if defined(_WIN32)
+   static HANDLE       NewStdHandle  = INVALID_HANDLE_VALUE;
+   HANDLE              SaveStdout;
+   HANDLE              SaveStderr;
+   DWORD               ExitCode;
+   STARTUPINFO         StartupInfo;
+   PROCESS_INFORMATION ProcessInfo;
+   ULONG               ulCreate;
+   CHAR                szCurrTitle[80];
+   ULONG               ulLen;
+   ULONG               ulProgNameLen = 0;
+   #if defined ( RUN_ICONIZED )
+    PCHAR              pszTitle;
+   #endif
+  #else
+   PCHAR               pszTitle;
+   STARTDATA           NewSession;
+   STARTDATA           DummySession;   //  OS2 V2.00 bug passing
+   UCHAR               szObjBuf        [ MX_OBJ_LEN ];
+   UCHAR               szDummyObjBuf   [ MX_OBJ_LEN ];
+   ULONG               ulSessID;
+   PID                 ulExecPid;
+
+   HQUEUE              hQueue;
+   REQUESTDATA         Request;
+   ULONG               ulQueueDataLength;
+   PVOID               pQueueData;
+   BYTE                ucQueueDataPriority;
+  #endif
+
+
+  DBGIN;
+
+
+  memset ( pszErrMsg, ' ', sizeof ( ERRORTEXT ) );
+
+  if ( !pszCommand || !*pszCommand )
+    {
+    *peResult = ex_notok;
+
+    sql46c_build_error_string ( pszErrMsg, ERRMSG_NO_CMD, 0 );
+    DBG1  (( MF__,"No Command to execute!" ));
+    MSGD  (( ERR_NO_CMD ));
+
+    DBGOUT;
+    return;
+    }
+
+  if ( eMode == sync_same_session )
+    {
+    *peResult = ex_notok;
+
+    sql46c_build_error_string ( pszErrMsg, ERRMSG_SYNC_SAME, 0 );
+    DBG1  (( MF__,"Synchronous start "
+                   "of the same session is not implemented"));
+    MSGD  (( ERR_SYNC_SAME ));
+
+    DBGOUT;
+    return;
+    }
+
+  if ( pszCommand[ 0 ] == BATCH_MODE_CHARACTER )
+    {
+    bBatchMode = TRUE;
+
+    // --- skip blanks behind the batch mode character
+    for ( ulCnt = 1; pszCommand[ulCnt] == ' ' && ulCnt < sizeof(tsp00_ExecArgLine);
+          ulCnt++ ) {;}
+
+    eo46PtoC( szCmdLine, (PCHAR)pszCommand + ulCnt,
+                 (SHORT)(sizeof(tsp00_ExecArgLine) - ulCnt) );
+    }
+  else
+    {
+    bBatchMode = FALSE;
+    eo46PtoC ( szCmdLine, pszCommand, sizeof(tsp00_ExecArgLine));
+    }
+
+
+  pszArgs = strchr ( szCmdLine, ' ' );
+
+  if ( pszArgs )
+    {
+    ulCmdLineLen = (ULONG)strlen ( szCmdLine );
+    ulArgsLen    = (ULONG)strlen ( pszArgs );
+
+    if (( ulCmdLineLen - ulArgsLen ) > sizeof(tsp00_ExecProg) )
+      {
+      *peResult = ex_notok;
+      sql46c_build_error_string ( pszErrMsg, ERRMSG_CMD_LENGTH,
+                                  ulCmdLineLen - ulArgsLen );
+      DBG1  (( MF__,"Command length: %d", ( ulCmdLineLen - ulArgsLen )));
+      MSGD (( ERR_CMD_LENGTH, ulCmdLineLen - ulArgsLen ));
+
+      DBGOUT;
+      return;
+      }
+
+    strncpy ( szProgName, szCmdLine, ulCmdLineLen - ulArgsLen );
+    szProgName [ ulCmdLineLen - ulArgsLen ] = 0;
+
+    #if defined(_WIN32)
+     ulProgNameLen = ulCmdLineLen - ulArgsLen;
+
+     // --- WORK AROUND (Windows 95 is modifying the console title)
+#if _MSC_VER >= 1400
+     if ( !stricmp ( szProgName, TITLE_COMMAND ))
+#else
+	 if ( !strcmpi ( szProgName, TITLE_COMMAND ))
+#endif
+	 {
+       SetConsoleTitle ( pszArgs );
+
+       *pfProgResult = 0;
+       *peResult     = ex_ok;
+
+       DBGOUT;
+       return;
+       }
+    #endif
+    }
+  else
+    {
+    strcpy ( szProgName, szCmdLine );
+    }
+
+
+  rc = sql08u_get_path ( szFullProgName, szProgName );
+
+  #if defined(_WIN32)
+   if ( sql02_get_platform_id () == VER_PLATFORM_WIN32_NT )
+     {
+     if ( rc )
+       {
+       SAPDB_memmove (szCmdLine + sizeof(COMMAND_PROCESSOR_OPT) - 1,
+                szCmdLine, strlen(szCmdLine) + 1);
+       SAPDB_memcpy  (szCmdLine, COMMAND_PROCESSOR_OPT,
+                sizeof( COMMAND_PROCESSOR_OPT ) - 1);
+
+       sql08u_get_path ( szFullProgName, CMD_PROC );
+       }
+     pszArgs = szCmdLine;
+     }
+   else
+     {
+     if ( rc )
+       {
+       sql08u_get_path ( szFullProgName, COMMAND_PROC );
+
+       ulLen = (ULONG)strlen (szFullProgName);
+
+       SAPDB_memmove (szCmdLine + ulLen + 1 + sizeof( COMMAND_PROCESSOR_OPT ) - 1,
+                szCmdLine, strlen(szCmdLine) + 1);
+       SAPDB_memcpy  (szCmdLine, szFullProgName, ulLen );
+       szCmdLine[ ulLen ] = ' ';
+       SAPDB_memcpy  (szCmdLine + ulLen + 1, COMMAND_PROCESSOR_OPT,
+                sizeof( COMMAND_PROCESSOR_OPT ) - 1);
+       }
+     else
+       {
+       ulLen = (ULONG)strlen (szFullProgName);
+
+       if ( pszArgs )
+         {
+         SAPDB_memmove (szCmdLine + ulLen - ulProgNameLen,
+                  szCmdLine, strlen(szCmdLine) + 1);
+         SAPDB_memcpy  (szCmdLine, szFullProgName, ulLen);
+         }
+       else
+         strcpy ( szCmdLine, szFullProgName );
+       }
+
+     pszArgs = szCmdLine;
+     }
+  #else
+   if ( rc )
+     {
+     *peResult = ex_notok;
+     sql46c_build_error_string ( pszErrMsg, ERRMSG_CANNOT_EXECUTE_CMD, rc );
+     DBG1  (( MF__, ERRMSG_CANNOT_EXECUTE_CMD, rc ));
+     MSGD (( ERR_CANNOT_EXECUTE_CMD, rc ));
+
+     DBGOUT;
+
+     return;
+     }
+  #endif
+
+
+  #if defined(_WIN32)
+   // --- get the title of the current console window
+   GetConsoleTitle ( szCurrTitle, sizeof(szCurrTitle) - 1 );
+
+   ZeroMemory(&StartupInfo, sizeof(StartupInfo));
+   StartupInfo.cb      = sizeof(StartupInfo);
+
+   if ( bBatchMode )
+     {
+     #if defined ( RUN_ICONIZED )
+      // --- Specify the session title
+      pszTitle = strrchr ( szFullProgName, '\\' );
+
+      if ( pszTitle && *( pszTitle + 1))
+        pszTitle++;
+      else
+        pszTitle = szProgName;
+
+      strupr ( pszTitle );
+
+      StartupInfo.lpTitle         = pszTitle;
+      StartupInfo.dwFlags         = STARTF_USESHOWWINDOW;
+      StartupInfo.wShowWindow     = SW_SHOWMINNOACTIVE;
+      ulCreate                    = CREATE_NEW_CONSOLE |
+                                    CREATE_NEW_PROCESS_GROUP;
+     #else
+      ulCreate                    = 0;
+      StartupInfo.lpTitle         = szCurrTitle;
+      StartupInfo.dwFlags         = 0;
+
+      SaveStdout                  = GetStdHandle(STD_OUTPUT_HANDLE);
+      SaveStderr                  = GetStdHandle(STD_ERROR_HANDLE);
+
+      if ( NewStdHandle  == INVALID_HANDLE_VALUE )
+        {
+        rc = sql08u_create_batch_mode_thread ( &NewStdHandle, pszErrMsg );
+
+        if ( rc != NO_ERROR )
+          {
+          DBGOUT;
+          return;
+          }
+        }
+
+
+      if ( (!SetStdHandle(STD_OUTPUT_HANDLE, NewStdHandle) ) ||
+           (!SetStdHandle(STD_ERROR_HANDLE,  NewStdHandle) ))
+        {
+        rc = GetLastError();
+        sql46c_build_error_string ( pszErrMsg, ERRMSG_SET_STD_HANDLE, rc );
+        MSGD (( ERR_SET_STD_HANDLE, rc ));
+        DBG1  (( MF__, "Could not set standard handle, rc = %d", rc ));
+        DBGOUT;
+        return;
+        }
+     #endif
+     }
+   else
+     {
+     ulCreate = CREATE_NEW_CONSOLE |
+                CREATE_NEW_PROCESS_GROUP;
+     }
+
+   DBG3((MF__, "Creating process, PgmName=%s, CmdLine=\"%s\"",
+               szFullProgName, szCmdLine));
+
+
+   if (CreateProcess(szFullProgName, pszArgs, NULL, NULL, TRUE, ulCreate,
+                     NULL, NULL, &StartupInfo, &ProcessInfo ))
+     {
+
+     if ( eMode != async )
+       {
+       if ( sql02_get_platform_id () == VER_PLATFORM_WIN32_NT )
+         WaitForSingleObject(ProcessInfo.hProcess, INFINITE);
+       else
+         {
+         // --- WORK AROUND (Windows 95 is modifying the current console title)
+         SLEEP ( 200 );
+         SetConsoleTitle ( szCurrTitle );
+
+         while(WaitForSingleObject(ProcessInfo.hProcess, 1000) == WAIT_TIMEOUT)
+           SetConsoleTitle ( szCurrTitle );
+         }
+
+       if (GetExitCodeProcess(ProcessInfo.hProcess, &ExitCode))
+         *pfProgResult = ( INT2 ) ExitCode;
+       else
+         {
+         rc = GetLastError();
+         sql46c_build_error_string ( pszErrMsg, ERRMSG_SYNC_START, rc );
+         DBG1  (( MF__, "Could not fetch result of sync session" ));
+         MSGD (( ERR_SYNC_START, rc ));
+         }
+       }
+     CloseHandle(ProcessInfo.hThread);
+     CloseHandle(ProcessInfo.hProcess);
+
+     SetConsoleTitle ( szCurrTitle );
+     }
+   else
+     {
+     SetConsoleTitle ( szCurrTitle );
+
+     rc = GetLastError();
+     *peResult = ex_notok;
+     sql46c_build_error_string ( pszErrMsg,ERRMSG_START_SESSION, rc );
+     DBG1  ((MF__, "Could not start new process"));
+     MSGD ((ERR_START_SESSION, rc));
+     DBGOUT;
+     return;
+     }
+
+   #if !defined ( RUN_ICONIZED )
+    if (( bBatchMode ) &&
+        ( !SetStdHandle(STD_OUTPUT_HANDLE, SaveStdout) ||
+          !SetStdHandle(STD_ERROR_HANDLE,  SaveStderr) ))
+      {
+      rc = GetLastError();
+      sql46c_build_error_string ( pszErrMsg, ERRMSG_SET_STD_HANDLE, rc );
+      MSGD (( ERR_SET_STD_HANDLE, rc ));
+      DBG1  (( MF__, "Could not set standard handle, rc = %d", rc ));
+      DBGOUT;
+      return;
+      }
+   #endif
+  #else
+   // --- Specify the session title
+   pszTitle = strrchr ( szFullProgName, '\\' );
+
+   if ( pszTitle && *( pszTitle + 1))
+     pszTitle++;
+   else
+     pszTitle = szProgName;
+
+   strupr ( pszTitle );
+
+   // --- Specify the various session start parameters
+   NewSession.PgmTitle         = pszTitle;
+   NewSession.Length           = 60;//sizeof ( STARTDATA );
+   NewSession.TraceOpt         = SSF_TRACEOPT_NONE;
+   NewSession.PgmName          = szFullProgName;
+   NewSession.PgmInputs        = pszArgs;
+   NewSession.Environment      = NULL;
+   NewSession.InheritOpt       = SSF_INHERTOPT_PARENT;
+   NewSession.SessionType      = SSF_TYPE_DEFAULT;
+   NewSession.IconFile         = NULL;
+   NewSession.PgmHandle        = 0;
+
+   if ( bBatchMode )
+     {
+     NewSession.PgmControl   = SSF_CONTROL_INVISIBLE;
+     NewSession.FgBg         = SSF_FGBG_BACK;
+     }
+   else
+     {
+     NewSession.PgmControl   = SSF_CONTROL_VISIBLE | SSF_CONTROL_MAXIMIZE;
+     NewSession.FgBg         = SSF_FGBG_FORE;
+     }
+
+   NewSession.ObjectBuffer     = szObjBuf;
+   NewSession.ObjectBuffLen    = 100;
+   NewSession.InitXPos         = 0;
+   NewSession.InitYPos         = 0;
+   NewSession.InitXSize        = 300;
+   NewSession.InitYSize        = 150;
+   NewSession.Reserved         = 0;
+
+
+   // Specify a dummy session to pass an OS2 V2.00 bug
+   DummySession.Length           = sizeof ( STARTDATA );
+   DummySession.FgBg             = SSF_FGBG_BACK;
+   DummySession.TraceOpt         = SSF_TRACEOPT_NONE;
+   DummySession.PgmTitle         = " ";
+   DummySession.PgmName          = " ";
+   DummySession.PgmInputs        = NULL;
+   DummySession.Environment      = NULL;
+   DummySession.InheritOpt       = SSF_INHERTOPT_PARENT;
+   DummySession.SessionType      = SSF_TYPE_PM;
+   DummySession.IconFile         = NULL;
+   DummySession.PgmHandle        = 0;
+   DummySession.PgmControl       = SSF_CONTROL_INVISIBLE;
+   DummySession.ObjectBuffer     = szDummyObjBuf;
+   DummySession.ObjectBuffLen    = 100;
+   DummySession.InitXPos         = 0;
+   DummySession.InitYPos         = 0;
+   DummySession.InitXSize        = 0;
+   DummySession.InitYSize        = 0;
+   DummySession.Reserved         = 0;
+   DummySession.Related          = SSF_RELATED_CHILD;
+   DummySession.TermQ            = SQLEXEC_QUEUE_NAME;
+
+
+   if ( eMode != async )
+     {
+     NewSession.Related   = SSF_RELATED_CHILD;
+     NewSession.TermQ     = SQLEXEC_QUEUE_NAME;
+
+     rc = DosCreateQueue ( &hQueue, QUE_FIFO, SQLEXEC_QUEUE_NAME );
+
+     if ( rc )
+       {
+       *peResult = ex_notok;
+       FREE_MEM(( PVOID ) NewSession.PgmName );
+
+       sql46c_build_error_string ( pszErrMsg, ERRMSG_SYNC_START, rc );
+       DBG1  (( MF__, "Could not start a synchronous session" ));
+       MSGD (( ERR_SYNC_START, rc ));
+
+       DBGOUT;
+       return;
+       }
+     }
+   else
+     {
+     NewSession.Related   = SSF_RELATED_INDEPENDENT;
+     NewSession.TermQ     = NULL;
+     }
+
+
+   // Start a dummy session to pass an OS2 V2.00 bug
+   DosStartSession ( &DummySession, &ulSessID, &ulExecPid );
+
+   rc = DosStartSession ( &NewSession, &ulSessID, &ulExecPid );
+
+   if ( rc && rc != ERROR_SMG_START_IN_BACKGROUND )
+     {
+     *peResult = ex_notok;
+     DosCloseQueue ( hQueue );
+     FREE_MEM(( PVOID ) NewSession.PgmName );
+
+
+     sql46c_build_error_string ( pszErrMsg, ERRMSG_START_SESSION, rc );
+     DBG1  (( MF__, "Could not start a new session" ));
+     MSGD (( ERR_START_SESSION, rc ));
+
+     DBGOUT;
+     return;
+     }
+
+
+   if ( eMode != async )
+     {
+     rc = DosReadQueue ( hQueue, &Request, &ulQueueDataLength,
+                         &pQueueData, 0, DCWW_WAIT, &ucQueueDataPriority, 0 );
+
+     if ( rc )
+       {
+       *peResult = ex_notok;
+       DosCloseQueue ( hQueue );
+       FREE_MEM(( PVOID ) NewSession.PgmName );
+
+
+       sql46c_build_error_string ( pszErrMsg, ERRMSG_SYNC_END, rc );
+       DBG1  (( MF__,
+               "Termination of a synchronous session undefined" ));
+       MSGD (( ERR_SYNC_END, rc ));
+
+       DBGOUT;
+       return;
+       }
+
+     SAPDB_memcpy ( &Result, pQueueData, 2 * sizeof ( unsigned short ));
+     DosFreeMem ( pQueueData );
+
+     *pfProgResult = ( INT2 ) Result.usResult;
+
+     rc = DosCloseQueue ( hQueue );
+
+     if ( rc )
+       {
+       *peResult = ex_notok;
+       FREE_MEM(( PVOID ) NewSession.PgmName );
+
+       sql46c_build_error_string ( pszErrMsg, ERRMSG_SYNC_END, rc );
+       DBG1  (( MF__,
+               "Termination of a synchronous session undefined" ));
+       MSGD (( ERR_SYNC_END, rc ));
+
+       DBGOUT;
+
+       return;
+       }
+     }
+  #endif
+
+  *peResult = ex_ok;
+
+  DBGOUT;
+  return;
+  }
+
+
+//
+// ========================== LOCAL FUNCTIONS =================================
+//
+
+static APIRET sql08u_get_path ( PATHNAME pszFullPathName,
+                                PSZ      pszFileName )
+  {
+  #undef  MF__
+  #define MF__ MOD__"sql08u_get_path"
+  ULONG         ulIndex;
+  PSZ           pszSlash;
+  PSZ           pszBackSlash;
+  PSZ           pszPoint;
+  PSZ           pszFile;
+  APIRET        rc        = NO_ERROR;
+  LONG          lAtt      = 0;
+  ULONG         ulTmp     = 0;
+
+  #if defined (_WIN32)
+   PSZ          pszTail   = NULL;
+  #endif
+
+
+  DBGIN;
+
+  DBG3 (( MF__, "%d extensions to search", MX_EXTENSIONS_LIST_SIZE ));
+
+  pszSlash     = strrchr ( pszFileName, '/' );
+  pszBackSlash = strrchr ( pszFileName, '\\' );
+
+  if ( pszBackSlash > pszSlash )
+    pszSlash = pszBackSlash;
+
+  if ( pszSlash && *( pszSlash + 1 ))
+    pszFile = pszSlash + 1;
+  else
+    pszFile = pszFileName;
+
+  pszPoint = strrchr ( pszFile, '.' );
+
+  if ( pszPoint && *( pszPoint + 1 ) == '\0' )
+    {
+    *pszPoint = '\0';
+    pszPoint  = NULL;
+    }
+
+  for ( ulIndex = 0; ulIndex < MX_EXTENSIONS_LIST_SIZE; ulIndex++ )
+    {
+    if ( !pszPoint || ulIndex )
+      {
+      // --- no extension or next loop
+      strcat ( pszFile, ExtensionList [ ulIndex ] );
+      pszPoint = strrchr ( pszFile, '.' );
+      }
+
+    if ( pszSlash )
+      {
+      DBG3 ((MF__, "Trying to open %s...", pszFileName));
+
+      rc = sql44c_get_file_info ( pszFileName, &lAtt, &ulTmp, &ulTmp );
+
+      if (( rc == NO_ERROR ) && ( !(lAtt &= FILE_DIRECTORY) ))
+        {
+        strcpy ( pszFullPathName, pszFileName );
+
+        DBGOUT;
+        return ( NO_ERROR );
+        }
+      }
+    else
+      {
+      DBG3 ((MF__, "Looking for %s...", pszFile));
+
+      #if defined (_WIN32)
+       if ( SearchPath ( NULL, pszFile, ExtensionList [ ulIndex ],
+                         sizeof(PATHNAME) - 1, pszFullPathName, &pszTail))
+         {
+         DBGOUT;
+         return ( NO_ERROR );
+         }
+       else
+         {
+         rc = GetLastError();
+         }
+      #else
+       rc = DosSearchPath ( SEARCH_IGNORENETERRS   |
+                            SEARCH_ENVIRONMENT     |
+                            SEARCH_CUR_DIRECTORY,
+                            ENVVARNAME,
+                            pszFile,
+                            pszFullPathName,
+                            sizeof(PATHNAME) - 1);
+       if (rc == NO_ERROR)
+         {
+         //
+         // --- 'DosSearchPath' BUG FIX:
+         //     check if the found name is a directory name in curr. directory
+         //
+         rc = sql44c_get_file_info ( pszFullPathName, &lAtt, &ulTmp, &ulTmp );
+
+         if (( rc == NO_ERROR ) && ( !(lAtt &= FILE_DIRECTORY) ))
+           {
+           DBGOUT;
+           return ( NO_ERROR );
+           }
+         }
+      #endif
+
+      DBG3 ((MF__, "not found, rc=%d", rc));
+      }
+
+    if ( pszPoint )
+      *pszPoint = '\0';
+
+    }
+
+  DBGOUT;
+  return ( rc );
+  }
+
+/*------------------------------*/
+
+#if defined(_WIN32)
+
+ static VOID _System  sql08u_batch_mode_thread ( HANDLE  *pReadHandle )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql08u_batch_mode_thread"
+   CHAR                 szLine[PIPE_BUFFER_SIZE];
+   ULONG                ulRead;
+   PSZ                  pszBatchDiagFileEnabled;
+   PSZ                  pszDBRoot;
+   ULONG                ulWritten;
+   APIRET               rc      = NO_ERROR;
+   HANDLE               hFile   = INVALID_HANDLE_VALUE;
+   PATHNAME             szBatchDiagFileName;
+
+  //
+  // --- write a diagfile?
+  //
+  rc = GETENV ( BATCH_DIAG_FILE_ENV_VAR, &pszBatchDiagFileEnabled );
+
+  if (( rc == NO_ERROR )  && ( *pszBatchDiagFileEnabled )  &&
+      ( ! strcmp ( "YES", strupr ( pszBatchDiagFileEnabled ))))
+    {
+    if ( sql01c_get_dbroot ( &pszDBRoot ) )
+      sql44c_subst_log_parts ( szBatchDiagFileName, FULL_BATCH_DIAGFILE_NAME );
+    else
+      sql44c_subst_log_parts ( szBatchDiagFileName, BATCH_DIAGFILE_NAME );
+
+    hFile = CreateFile( szBatchDiagFileName,
+                        GENERIC_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL |
+                        FILE_FLAG_WRITE_THROUGH, NULL );
+
+    if ( hFile == INVALID_HANDLE_VALUE )
+      {
+      rc = GetLastError();
+      MSGD (( ERR_CREATING_BAT_DIAG_FILE, rc ));
+      }
+    }
+
+   for ( ; ; )
+     {
+     if (!ReadFile(*pReadHandle, szLine, sizeof(szLine),
+                   &ulRead, NULL))
+       {
+       rc = GetLastError();
+
+       if (rc != ERROR_BROKEN_PIPE )
+         {
+         MSGD (( ERR_READ_PIPE, "BATCH", rc ));
+         SLEEP ( 500 );
+         }
+       }
+     else if ( hFile != INVALID_HANDLE_VALUE )
+       WriteFile ( hFile, szLine, ulRead, &ulWritten, NULL );
+     }
+
+   DBGOUT;
+   return;
+   }
+
+ /*------------------------------*/
+
+ static APIRET sql08u_create_batch_mode_thread ( HANDLE     *pNewStdHandle,
+                                                 ERRORTEXT  pszErrMsg )
+   {
+   #undef  MF__
+   #define MF__ MOD__"sql08u_create_batch_mode_thread"
+   APIRET               rc = NO_ERROR;
+   SECURITY_ATTRIBUTES  saAttr;
+   static HANDLE        ReadHandle; // must be static, it's used by the thread
+   TID                  Tid;
+   HANDLE               hThrd;
+
+   saAttr.nLength              = sizeof(SECURITY_ATTRIBUTES);
+   saAttr.bInheritHandle       = FALSE;
+   saAttr.lpSecurityDescriptor = NULL;
+
+   if (!CreatePipe( &ReadHandle, pNewStdHandle, &saAttr, PIPE_BUFFER_SIZE))
+     {
+     rc = GetLastError();
+     sql46c_build_error_string ( pszErrMsg, ERRMSG_CREATE_PIPE, rc );
+     MSGD (( ERR_CREATE_PIPE, "BATCH", rc ));
+     DBG1  (( MF__, "Could not create pipe, rc = %d", rc  ));
+     DBGOUT;
+     return ( rc );
+     }
+
+   rc = CREATE_THREAD( &Tid, &hThrd, sql08u_batch_mode_thread,
+                       &ReadHandle, CREATE_THRD_SUSPENDED, 4096 );
+
+   if (rc != NO_ERROR)
+     {
+     sql46c_build_error_string ( pszErrMsg, ERRMSG_CREATE_THREAD, rc );
+     MSGD ((ERR_CREATING_THREAD, "BATCH", rc));
+     DBG1 ((MF__, "Could not create thread: '%s', rc = %d", "BATCH", rc))
+     DBGOUT;
+     return ( rc );
+     }
+
+   rc = RESUME_THREAD( Tid, hThrd );
+
+   if (rc != NO_ERROR)
+     {
+     sql46c_build_error_string ( pszErrMsg, ERRMSG_RESUMING_THREAD, rc );
+     MSGD ((ERR_CREATING_THREAD, "BATCH", rc));
+     DBG1 ((MF__, "Cannot resume thread: '%s', rc = %d", "BATCH", rc))
+     DBGOUT;
+     return ( rc );
+     }
+
+   DBGOUT;
+   return ( rc );
+   }
+#endif
+
+//
+// =============================== END ========================================
+//

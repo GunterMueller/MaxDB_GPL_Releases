@@ -1,0 +1,165 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package XMLElement;
+
+use Exporter;
+@ISA = ('Exporter');
+@Export =
+	('new', 'GetType', 'SetAttribute', 'GetAttribute', 'SetContent',
+	 'GetContent', 'SetParent', 'GetParent', 'Insert', 'VisitParent',
+	 'VisitChild', 'VisitNeighbor');
+
+sub new {
+	my $self = {};
+	bless $self;
+
+	$self->{Type} = $_[1];
+	$self->{Content} = undef;
+	$self->{Parent} = 0;
+	$self->{Child} = 0;
+	$self->{Neighbor} = 0;
+	$self->{Attribute} = XMLAttribute->new();
+	return $self;
+}
+
+sub GetType {
+	$self = shift;
+	return $self->{Type};
+}
+
+sub SetAttribute {
+	$self = shift;
+	my $Key = shift;
+	my $Value = shift;
+	$self->{Attribute}->Set($Key, $Value);
+}
+
+sub GetAttribute {
+	$self = shift;
+	my $Key = shift;
+	return ($self->{Attribute}->Get($Key));
+}
+
+sub SetContent {
+	$self = shift;
+	$self->{Content} = shift;
+}
+
+sub GetContent {
+	$self = shift;
+	return $self->{Content};
+}
+
+sub SetParent {
+	$self = shift;
+	$self->{Parent} = shift;
+}
+
+sub GetParent {
+	$self = shift;
+	return $self->{Parent};
+}
+
+sub Insert {
+	$self = shift;
+
+	return if ($self->{Parent} == 0);
+
+	if ($self->{Parent}->{Child} == 0) {
+		$self->{Parent}->{Child} = $self;
+		return;
+	}
+
+	my $Element = $self->{Parent}->{Child};
+	while ($Element->{Neighbor} != 0) {
+		$Element = $Element->{Neighbor};
+	}
+	$Element->{Neighbor} = $self;
+}
+
+sub Print {
+	$self = shift;
+
+	print "XMLElement\n";
+	print "\t".$self."\n";
+	print "\tType ".$self->{Type}."\n";
+	if (defined $self->{Content}) {
+		print "\tContent ".$self->{Content}."\n";
+	} else {
+		print "\tContent undef\n";
+	}
+	print "\tNext ".$self->{Neighbor}."\n";
+	print "\tChild ".$self->{Child}."\n";
+	print "\tParent ".$self->{Parent}."\n";
+}
+
+sub VisitParent {
+	$self = shift;
+	if ($self->{Parent} != 0) {
+		$self = $self->{Parent};
+		return $self;
+	}
+	return 0;
+}
+
+sub  VisitChild {
+	$self = shift;
+	if ($self->{Child} != 0) {
+		$self = $self->{Child};
+		return $self;
+	}
+	return 0;
+}
+
+sub VisitNeighbor {
+	$self = shift;
+	if ($self->{Neighbor} != 0) {
+		$self = $self->{Neighbor};
+		return $self;
+	}
+	return 0;
+}
+
+package XMLAttribute;
+
+sub new {
+	my $self = {};
+	bless $self;
+	return $self;
+}
+
+sub Set {
+	$self = shift;
+	my $Key = shift;
+	my $Value = shift;
+	$self->{$Key} = $Value;
+}
+
+sub Get {
+	$self = shift;
+	$_ = shift;
+	return $self->{$_};
+}
+
+1;
+

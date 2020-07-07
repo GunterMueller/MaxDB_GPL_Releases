@@ -1,0 +1,1999 @@
+.pb '~'
+.ad 8
+.ll 72
+.bm 3
+.fm 2
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 5
+.hm 2
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VBD37$
+.tt 2 $$$
+.tt 3 $ThomasA$BD_modify_table$2001-03-30$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+Module  :  BD_modify_table
+=========
+.sp
+Purpose : modify record layout of a base table
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              b37_init_conversion_info (
+                    VAR t              : tgg00_TransContext;
+                    ignore_err         : boolean;
+                    source_stack       : tgg00_StackListPtr;
+                    src_col_cnt        : integer;
+                    target_stack       : tgg00_StackListPtr;
+                    trunc_pos          : integer;
+                    trunc_cnt          : integer;
+                    VAR is_sorted      : boolean;
+                    VAR addClusterKey  : boolean;
+                    VAR FixedColLength : integer;
+                    VAR code_tab       : tgg03_colinf;
+                    VAR trunc_col      : tgg03_colinf;
+                    VAR frac_col       : tgg03_colinf;
+                    VAR not_null_col   : tgg03_not_null;
+                    VAR check_col      : tgg03_check_col);
+ 
+        PROCEDURE
+              b37table_modify (VAR t  : tgg00_TransContext;
+                    ignore_err        : boolean;
+                    is_sorted         : boolean;
+                    VAR source_id     : tgg00_FileId;
+                    VAR source_index  : tgg00_FileId;
+                    VAR target_id     : tgg00_FileId;
+                    source_stack      : tgg00_StackListPtr (*ptocSynonym const tgg00_StackEntry**);
+                    src_col_cnt       : integer;
+                    target_stack      : tgg00_StackListPtr (*ptocSynonym const tgg00_StackEntry**);
+                    trunc_pos         : integer;
+                    trunc_cnt         : integer;
+                    pResultSampleInfo : tgg00_SampleInfoPtr);
+ 
+        PROCEDURE
+              b37_unload_rewrite_table (
+                    VAR t           : tgg00_TransContext;
+                    VAR treeid      : tgg00_FileId;
+                    unload_info     : tgg03_unloadInfoPtr;
+                    ret_buf_size    : tsp00_Int4;
+                    VAR ret_buf     : tsp00_MoveObj;
+                    VAR ret_buf_len : tsp00_Int4);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              KB_change_key : VKB66;
+ 
+        PROCEDURE
+              k66move_and_map (map_info : integer;
+                    VAR source_buf : tsp00_Buf;
+                    src_col_pos    : integer;
+                    src_col_len    : integer;
+                    VAR target_buf : tsp00_Buf;
+                    tar_col_pos    : integer;
+                    VAR moved_len  : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_get : VKB71;
+ 
+        PROCEDURE
+              k71num_err_to_b_err (num_err : tsp00_NumError;
+                    VAR e : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_ServerTasks : VKB900;
+ 
+        PROCEDURE
+              kb900PrefetchLeaves (VAR t : tgg00_TransContext;
+                    VAR fileid   : tgg00_FileId;
+                    pno          : tsp00_PageNo);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        FUNCTION
+              b01no_of_data_devs : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_2 : VBD02;
+ 
+        PROCEDURE
+              bd02AddRecordWithSpecialKey (
+                    VAR trans  : tgg00_TransContext;
+                    VAR fileId : tgg00_FileId;
+                    VAR rec    : tgg00_Rec);
+ 
+        PROCEDURE
+              b02add_record (VAR t : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    VAR b          : tgg00_Rec);
+ 
+        PROCEDURE
+              b02repl_record (VAR t : tgg00_TransContext;
+                    VAR file_id     : tgg00_FileId;
+                    VAR b           : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_3 : VBD03;
+ 
+        PROCEDURE
+              b03select_invrec (VAR t : tgg00_TransContext;
+                    VAR file_ids     : tgg00_TwoFileIds;
+                    VAR keypair      : tgg00_TwoKeys;
+                    VAR stop_keypair : tgg00_TwoKeys;
+                    VAR start_key    : tgg00_Lkey;
+                    VAR invrange_set : tgg00_BdInvSet;
+                    recbuf_size      : tsp00_Int4;
+                    recbuf_ptr       : tsp00_MoveObjPtr;
+                    VAR sel          : tgg00_SelectFieldsParam;
+                    VAR stack_desc   : tgg00_StackDesc;
+                    VAR granted_lock : tgg00_LockReqMode);
+ 
+      ------------------------------ 
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4;
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tbd_nodeptr;
+                    curr_buf_cnt   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_9 : VBD09;
+ 
+        PROCEDURE
+              bd09InitLoad (
+                    VAR t              : tgg00_TransContext;
+                    VAR file_id        : tgg00_FileId;
+                    set_read_only      : boolean;
+                    VAR rightmost_leaf : tsp00_PageNo);
+ 
+        PROCEDURE
+              bd09InitUnload (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              nodehandling : VBD13;
+ 
+        PROCEDURE
+              bd13GetNode (VAR Current : tbd_current_tree;
+                    Pno          : tsp00_PageNo;
+                    PageLockMode : tbd00_PageLockMode;
+                    NodeReq      : tbd_node_request;
+                    VAR Nptrs    : tbd_node_ptrs);
+ 
+        PROCEDURE
+              b13init_default_data_page (
+                    VAR FileId  : tgg00_FileId;
+                    Level       : tsp00_Int2;
+                    NewPno      : tsp00_PageNo;
+                    VAR Nptrs   : tbd_node_ptrs);
+ 
+        PROCEDURE
+              b13new_node (lno  : tsp00_Int2;
+                    VAR nptr    : tbd_node_ptrs;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              b13r_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree;
+                    lru_info    : tbd_lru_info);
+ 
+        PROCEDURE
+              b13w_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current      : tbd_current_tree);
+ 
+        PROCEDURE
+              bd13WriteExclusiveLockedRoot (
+                    VAR Trans     : tgg00_TransContext;
+                    VAR FileId    : tgg00_FileId;
+                    VAR RootNptrs : tbd_node_ptrs );
+ 
+      ------------------------------ 
+ 
+        FROM
+              systembufferinterface : VBD20;
+ 
+        FUNCTION
+              bd20GetDestinationConverterVersion (
+                    TaskId  : tsp00_TaskId;
+                    pCBlock : tbd_nodeptr) : tgg00_ConverterVersion;
+ 
+      ------------------------------ 
+ 
+        FROM
+              treehandling         : VBD30;
+ 
+        PROCEDURE
+              b30load_table (VAR lnptr : tbd_node_ptrs;
+                    VAR nptr           : tbd_node_ptrs;
+                    only_left          : boolean;
+                    VAR current        : tbd_current_tree);
+ 
+        PROCEDURE
+              bd30BuildCurrent (
+                    VAR trans   : tgg00_TransContext;
+                    VAR fileId  : tgg00_FileId;
+                    VAR current : tbd_current_tree);
+ 
+        PROCEDURE
+              bd30GetNextLeafPage (
+                    VAR nextLeafPage : tsp00_PageNo;
+                    VAR nptr         : tbd_node_ptrs;
+                    VAR current      : tbd_current_tree);
+ 
+        PROCEDURE
+              bd30GetTree (
+                    VAR trans            : tgg00_TransContext;
+                    VAR fileId           : tgg00_FileId;
+                    VAR current          : tbd_current_tree;
+                    messType             : tgg00_MessType;
+                    bLockTreeExcl        : boolean;
+                    bSynchronizeExclLock : boolean);
+ 
+        PROCEDURE
+              bd30ReleaseTree (
+                    VAR current : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              FileDir_Wrapper : VBD998;
+ 
+        FUNCTION
+              bd998AreRecordsPacked(
+                    VAR trans : tgg00_TransContext;
+                    VAR surr  : tgg00_Surrogate(*ptocConst*)) : boolean;
+ 
+        PROCEDURE
+              bd998ModifyPageAndRecordCount (
+                    VAR trans           : tgg00_TransContext;
+                    convVersion         : tgg00_ConverterVersion;
+                    VAR fileNo          : tgg00_Surrogate;
+                    leafPageCountDelta  : tsp00_Int4;
+                    indexPageCountDelta : tsp00_Int4;
+                    entryCountDelta     : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              bd999PackRow (
+                    VAR Source      : tgg00_Rec;
+                    VAR Destination : tgg00_Rec) : tgg00_RecPtr;
+ 
+        FUNCTION
+              bd999UnpackRow (
+                    VAR Source      : tgg00_Rec;
+                    VAR Destination : tgg00_Rec) : tgg00_RecPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01nil_sel        : tgg00_SfpInitPart;
+              g01nil_stack_desc : tgg00_StackDesc;
+ 
+        PROCEDURE
+              g01opmsg (msg_prio : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C24;
+                    msg_value : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Check-Date-Time : VGG03;
+ 
+        PROCEDURE
+              g03fdcheck_date (VAR sbuf : tsp00_Buf;
+                    VAR dbuf  : tsp00_Buf;
+                    spos      : tsp00_Int4;
+                    dpos      : tsp00_Int4;
+                    actlen    : integer;
+                    format    : tgg00_DateTimeFormat;
+                    VAR b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              g03ftcheck_time (VAR sbuf : tsp00_Buf;
+                    VAR dbuf  : tsp00_Buf;
+                    spos      : tsp00_Int4;
+                    dpos      : tsp00_Int4;
+                    actlen    : integer;
+                    format    : tgg00_DateTimeFormat;
+                    VAR b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              g03ftscheck_timestamp (VAR sbuf : tsp00_Buf;
+                    VAR dbuf  : tsp00_Buf;
+                    spos      : tsp00_Int4;
+                    dpos      : tsp00_Int4;
+                    actlen    : integer;
+                    format    : tgg00_DateTimeFormat;
+                    language  : tsp00_C3;
+                    VAR b_err : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04locate_col (VAR st : tgg00_StackEntry;
+                    rec_buf        : tgg00_RecPtr;
+                    VAR varcol_pos : tgg00_VarColPosList;
+                    VAR col_pos    : integer;
+                    VAR col_len    : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_cpp_auxiliary_functions : VGG06;
+ 
+        FUNCTION
+              gg06PnoGet (VAR Cint4 : tgg90_Cint4): tsp00_Int4;
+ 
+        FUNCTION
+              gg06Align (
+                    length    : tsp00_Int4;
+                    alignment : tsp00_Int4) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : char;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalUnicodeFill (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    obj_upb     : tsp00_Int4;
+                    obj         : tsp00_MoveObjPtr;
+                    obj_pos     : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    fillchar    : tsp00_C2;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        FUNCTION
+              s30lnr_defbyte (str : tsp00_BufAddr;
+                    defbyte   : char;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+ 
+        PROCEDURE
+              s30surrogate_incr (VAR surrogate : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              PUTSTRING-Conversions : VSP43;
+ 
+        PROCEDURE
+              s43lfrac (
+                    VAR source  : tsp00_Buf;
+                    spos        : tsp00_Int4;
+                    slen        : integer;
+                    VAR diglen  : integer;
+                    VAR digfrac : integer;
+                    VAR bytelen : integer);
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01basis_error (debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01bool (debug : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01buf (layer : tgg00_Debug;
+                    VAR buf : tsp00_Buf;
+                    start_p : integer;
+                    stop_p  : integer);
+ 
+        PROCEDURE
+              t01int4 (layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+ 
+        PROCEDURE
+              t01name (layer : tgg00_Debug;
+                    nam : tsp00_Name);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              g03fdcheck_date;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              g03ftcheck_time;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              g03ftscheck_timestamp;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        FUNCTION
+              s30lnr_defbyte;
+ 
+              tsp00_MoveObjPtr tsp00_BufAddr
+ 
+        PROCEDURE
+              s30surrogate_incr;
+ 
+              tsp00_C8 tgg00_Surrogate
+ 
+        PROCEDURE
+              s43lfrac;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              b06dump_bad_page;
+ 
+              tbd_univ_ptr tbd_nodeptr
+ 
+        FUNCTION
+              bd20GetDestinationConverterVersion;
+ 
+              tbd02_pDataCBlock tbd_nodeptr
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenP / ThomasA
+.sp
+.cp 3
+Created : 1993-06-01
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 2000-05-17
+.sp
+***********************************************************
+.sp
+.cp 8
+.fo
+.oc _/1
+Specification:
+ 
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 8
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 15
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_uni_to_ascii       = 128;
+      c_ascii_to_uni       = 129;
+      c_only_left          = true;
+      c_no_usage_count     = false;
+      c_undefined          = MAX_INT2_SP00;
+ 
+TYPE
+ 
+      tbd37prefetch_context = RECORD
+            pf_pno            : tsp00_PageNo;
+            pf_leftmost_pno   : tsp00_PageNo;
+            pf_nptr           : tbd_node_ptrs;
+            pf_curr_index     : integer;
+            pf_max_index      : integer;
+            pf_prefetch_start : boolean;
+            pf_prefetch_end   : boolean;
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b37table_modify (VAR t  : tgg00_TransContext;
+            ignore_err        : boolean;
+            is_sorted         : boolean;
+            VAR source_id     : tgg00_FileId;
+            VAR source_index  : tgg00_FileId;
+            VAR target_id     : tgg00_FileId;
+            source_stack      : tgg00_StackListPtr;
+            src_col_cnt       : integer;
+            target_stack      : tgg00_StackListPtr;
+            trunc_pos         : integer;
+            trunc_cnt         : integer;
+            pResultSampleInfo : tgg00_SampleInfoPtr);
+ 
+CONST
+      c_work_st_max   = 2;
+      c_set_read_only = true;
+ 
+VAR
+      use_index      : boolean;
+      addClusterKey  : boolean;
+      packRow        : boolean;
+      dummy_mode     : tgg00_LockReqMode;
+      key_len        : tsp00_IntMapC2;
+      nil_set        : tgg00_BdInvSet;
+      records        : tsp00_Int4;
+      leafnodes      : tsp00_Int4;
+      page_pos       : integer;
+      page_space     : integer;
+      curr_index     : integer;
+      MaxRecIndex    : tsp00_Int4;
+      FixedColLength : integer;
+      pno            : tsp00_PageNo;
+      rightmost_leaf : tsp00_PageNo;
+      source_ptr     : tsp00_BufAddr;
+      pRec           : tgg00_RecPtr;
+      pTargetBuf     : tgg00_RecPtr;
+      src_nptr       : tbd_node_ptrs;
+      target_nptr    : tbd_node_ptrs;
+      prev_nptr      : tbd_node_ptrs;
+      source_current : tbd_current_tree;
+      target_current : tbd_current_tree;
+      syskey         : tgg00_Surrogate;
+      start_key      : tgg00_Lkey;
+      source_ids     : tgg00_TwoFileIds;
+      start_keys     : tgg00_TwoKeys;
+      stop_keys      : tgg00_TwoKeys;
+      stack_desc     : tgg00_StackDesc;
+      stack_entry    : tgg00_StackEntry;
+      source_buf     : tgg00_Rec;
+      target_buf     : tgg00_Rec;
+      prefetch_ctxt  : tbd37prefetch_context;
+      work_st        : ARRAY[1..c_work_st_max ] OF tgg00_StackEntry;
+      not_null_col   : tgg03_not_null; (* PTS 1116259 M.Ki. *)
+      code_tab       : tgg03_colinf;
+      trunc_col      : tgg03_colinf;
+      frac_col       : tgg03_colinf;
+      check_col      : tgg03_check_col;
+      sel            : tgg00_SelectFieldsParam;
+      unpackedRow    : tgg00_Rec;
+ 
+BEGIN
+IF  t.trError_gg00 = e_ok
+THEN
+    BEGIN
+    packRow := bd998AreRecordsPacked(t, target_id.fileTabId_gg00);
+    bd37pf_context_init (prefetch_ctxt);
+    t.trError_gg00 := e_ok;
+    syskey     := cgg_zero_id;
+    records    := 0;
+    leafnodes  := 0;
+    page_pos   := 1;
+    page_space := MAX_RECLEN_GG00;
+    use_index  := source_index.fileTfn_gg00 = tfnMulti_egg00;
+    IF  use_index
+    THEN
+        BEGIN
+        source_ids.file_id   := source_id;
+        source_ids.inv_id    := source_index;
+        stack_desc           := g01nil_stack_desc;
+        stack_desc.mst_addr  := @stack_entry;
+        stack_desc.mst_max   := 1;
+        stack_desc.mqual_cnt := 1;
+        stack_desc.mqual_pos := 1;
+        WITH stack_desc.mst_addr^[1] DO
+            BEGIN
+            etype    := st_rec_output;
+            eop      := op_none;
+            epos     := 0;
+            elen_var := 0;
+            ecol_tab := cgg_zero_c2
+            END;
+        (*ENDWITH*) 
+        start_keys.listkey.keyLen_gg00 := 0;
+        start_keys.reckey.keyLen_gg00  := 0;
+        stop_keys.listkey.keyLen_gg00  := 0;
+        stop_keys.reckey.keyLen_gg00   := 0;
+        start_key.keyLen_gg00          := 0;
+        sel.sfp_init_part              := g01nil_sel;
+        WITH sel DO
+            BEGIN
+            sfp_bd_mess_type  := m_select;
+            sfp_bd_mess2_type := mm_next;
+            sfp_m_result_addr := @source_buf;
+            sfp_m_result_size := sizeof (source_buf);
+            sfp_work_st_addr  := @work_st;
+            sfp_work_st_max   := c_work_st_max;
+            sfp_work_st_size  := c_work_st_max * sizeof (tgg00_StackEntry);
+            sfp_workbuf_addr  := NIL;
+            sfp_workbuf_size  := 0
+            END
+        (*ENDWITH*) 
+        END;
+    (*ENDIF*) 
+    ;
+    (* PTS 1116259 M.Ki. *)
+    b37_init_conversion_info (t, ignore_err, source_stack, src_col_cnt,
+          target_stack, trunc_pos, trunc_cnt, is_sorted, addClusterKey, FixedColLength,
+          code_tab, trunc_col, frac_col, not_null_col, check_col);
+    source_buf.recKeyLen_gg00 := 0;
+    target_id.fileBdUse_gg00  := [ ];
+    src_nptr.np_ptr           := NIL;
+    src_nptr.np_cbptr         := NIL;
+    prev_nptr.np_ptr          := NIL;
+    (* PTS 1103286 E.Z. *)
+    bd30BuildCurrent (t, source_id, source_current);
+    bd30BuildCurrent (t, target_id, target_current);
+    IF  (NOT use_index) AND (t.trError_gg00 = e_ok)
+    THEN
+        BEGIN
+        bd09InitUnload (t, source_id);
+        IF  (t.trError_gg00 = e_file_not_found) AND ignore_err
+        THEN
+            t.trError_gg00 := e_no_next_record
+        ELSE
+            BEGIN
+            bd30GetTree (t, source_id, source_current, m_select,
+                  NOT LOCK_TREE_EXCL_BD00, NOT SYNC_TREE_LOCK_BD00);
+            pno         := source_id.fileRoot_gg00;
+            curr_index  := FIRST_REC_INDEX_BD00;
+            MaxRecIndex := FIRST_REC_INDEX_BD00
+            END
+        (*ENDIF*) 
+        END
+    ELSE
+        source_ptr := @source_buf.recBuf_gg00;
+    (*ENDIF*) 
+    is_sorted := is_sorted OR use_index;
+&   ifdef TRACE
+    t01bool        (bi, 'is_sorted   ', is_sorted);
+    t01basis_error (bi, 'b37modify er', t.trError_gg00);
+&   endif
+    IF  is_sorted AND (NOT addClusterKey)
+    THEN
+        BEGIN
+        target_nptr.np_ptr := NIL;
+        IF  t.trError_gg00 = e_ok
+        THEN
+            bd09InitLoad (t, target_id, NOT c_set_read_only, rightmost_leaf);
+        (*ENDIF*) 
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            bd30GetTree (t, target_id, target_current, m_insert,
+                  LOCK_TREE_EXCL_BD00, NOT SYNC_TREE_LOCK_BD00);
+            IF  t.trError_gg00 = e_ok
+            THEN (* avoid prolonged blockade of SVP if root is already marked as changed *)
+                WITH target_current DO
+                    bd13WriteExclusiveLockedRoot (curr_trans^, curr_tree_id, currRootNptrs_bd00);
+                (*ENDWITH*) 
+            (*ENDIF*) 
+            IF  t.trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  rightmost_leaf = target_id.fileRoot_gg00
+                THEN
+                    target_nptr := target_current.currRootNptrs_bd00
+                ELSE
+                    bd13GetNode (target_current, rightmost_leaf, plmLock_ebd00,
+                          nr_for_update, target_nptr);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    WHILE t.trError_gg00 = e_ok DO
+        BEGIN
+        IF  use_index
+        THEN
+            BEGIN
+            nil_set := [ ];
+            sel.sfp_m_result_addr := @source_buf;
+            sel.sfp_m_result_size := sizeof (source_buf);
+            (* h.b. PTS 1104210 *)
+            b03select_invrec (t, source_ids, start_keys, stop_keys,
+                  start_key, nil_set, 0, NIL, sel, stack_desc,
+                  dummy_mode);
+            key_len.mapInt_sp00 := source_buf.recKeyLen_gg00;
+            END
+        ELSE
+            BEGIN
+            curr_index := curr_index + 1;
+            IF  curr_index > MaxRecIndex
+            THEN
+                BEGIN
+                IF  pno = NIL_PAGE_NO_GG00
+                THEN
+                    t.trError_gg00 := e_no_next_record
+                ELSE
+                    BEGIN
+                    bd30GetNextLeafPage (pno, src_nptr, source_current);
+                    IF  src_nptr.np_ptr = NIL
+                    THEN
+                        t.trError_gg00 := e_no_next_record
+                    ELSE
+                        IF  t.trError_gg00 = e_ok
+                        THEN
+                            IF  src_nptr.np_ptr^.nd_bottom = BODY_BEG_BD00
+                            THEN
+                                t.trError_gg00 := e_no_next_record
+                            ELSE
+                                BEGIN
+                                IF  prefetch_ctxt.pf_prefetch_start
+                                THEN
+                                    bd37prefetch_init (t, prefetch_ctxt, source_current)
+                                ELSE
+                                    bd37prefetch (t, prefetch_ctxt, source_current);
+                                (*ENDIF*) 
+                                curr_index  := FIRST_REC_INDEX_BD00;
+                                MaxRecIndex := src_nptr.np_ptr^.nd_record_cnt - 1
+                                END
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  t.trError_gg00 = e_ok
+            THEN
+                BEGIN
+                pRec := @src_nptr.np_ptr^.nd_body[
+                      src_nptr.np_ptr^.nd_pointer_list[MAX_POINTERINDEX_BD00 - curr_index]];
+                key_len.mapInt_sp00 := pRec^.recKeyLen_gg00;
+                IF  pRec^.recVarcolOffset_gg00 < 0
+                THEN
+                    pRec := bd999UnpackRow (pRec^, unpackedRow);
+                (*ENDIF*) 
+                source_ptr := @pRec^;
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  t.trRteCommPtr_gg00^.to_cancel
+        THEN
+            BEGIN
+            t.trError_gg00 := e_cancelled;
+            g01opmsg (sp3p_knldiag, sp3m_info, bd37Cancel_2_csp03,
+                  csp3_n_btree, 'Alter table canceled    ', t.trTaskId_gg00);
+            END
+        ELSE
+            IF  t.trError_gg00 = e_key_not_found
+            THEN
+                t.trError_gg00 := e_ok;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        ;
+        (* PTS 1116259 M.Ki. *)
+        IF  t.trError_gg00 = e_ok
+        THEN
+            bd37rewrite_record (t, target_buf, source_stack, source_ptr,
+                  src_col_cnt, target_stack, key_len, syskey, FixedColLength,
+                  code_tab, trunc_col, frac_col, not_null_col, check_col);
+        (*ENDIF*) 
+        IF  (t.trError_gg00 = e_ok) AND packRow
+        THEN
+            pTargetBuf := bd999PackRow (target_buf, unpackedRow)
+        ELSE
+            pTargetBuf := @target_buf;
+        (*ENDIF*) 
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            records := records + 1;
+            IF  is_sorted AND (NOT addClusterKey)
+            THEN
+                bd37append_record (prev_nptr, target_nptr, leafnodes,
+                      pTargetBuf^, target_current)
+            ELSE
+                BEGIN
+                page_pos := page_pos + pTargetBuf^.recLen_gg00;
+                IF  page_pos > page_space
+                THEN
+                    BEGIN
+                    leafnodes  := leafnodes + 1;
+                    page_pos   := 1;
+                    page_space := MAX_RECLEN_GG00
+                    END
+                ELSE
+                    page_space := page_space - 2;
+                (*ENDIF*) 
+                IF  addClusterKey
+                THEN
+                    bd02AddRecordWithSpecialKey (t, target_id, pTargetBuf^)
+                ELSE
+                    BEGIN
+                    b02add_record (t, target_id, pTargetBuf^);
+                    IF  ignore_err AND (t.trError_gg00 = e_duplicate_key)
+                    THEN
+                        b02repl_record (t, target_id, pTargetBuf^);
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  prefetch_ctxt.pf_nptr.np_ptr <> NIL
+    THEN
+        b13r_release_node (prefetch_ctxt.pf_nptr, source_current,
+              lru_normal);
+    (*ENDIF*) 
+    IF  src_nptr.np_ptr <> NIL
+    THEN
+        b13r_release_node (src_nptr, source_current, lru_normal);
+    (*ENDIF*) 
+    IF  t.trError_gg00 = e_no_next_record
+    THEN
+        t.trError_gg00 := e_ok;
+    (*ENDIF*) 
+    IF  is_sorted AND (NOT addClusterKey)
+    THEN
+        BEGIN
+        bd37finish_target (prev_nptr, target_nptr, target_current, records);
+        bd30ReleaseTree (target_current);
+        END;
+    (*ENDIF*) 
+    bd30ReleaseTree (source_current);
+    IF  (t.trError_gg00 = e_ok) AND NOT ignore_err AND (pResultSampleInfo <> NIL)
+    THEN
+        BEGIN
+        SAPDB_PascalFill ('VBD37 ',   1,    
+              sizeof (pResultSampleInfo^), @pResultSampleInfo^, 1,
+              sizeof (pResultSampleInfo^), chr(0), t.trError_gg00);
+        IF  records = 0
+        THEN
+            records := 1;
+        (*ENDIF*) 
+        IF  leafnodes = 0
+        THEN
+            leafnodes := 1;
+        (*ENDIF*) 
+        pResultSampleInfo^.records   := records;
+        pResultSampleInfo^.leafnodes := leafnodes
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37append_record (VAR prev_nptr   : tbd_node_ptrs;
+            VAR target_nptr : tbd_node_ptrs;
+            VAR leafnodes   : tsp00_Int4;
+            VAR RecBuf      : tgg00_Rec;
+            VAR current     : tbd_current_tree);
+ 
+VAR
+      RecIndex         : tsp00_Int4;
+      converterVersion : tgg00_ConverterVersion;
+ 
+BEGIN
+&ifdef trace
+t01name (bi, '====> bd37 app rec');
+t01buf  (bi, RecBuf.recBuf_gg00, 1, RecBuf.recLen_gg00);
+&endif
+WITH current, curr_trans^, curr_tree_id DO   (* PTS 1103797 AK 28-08-1999 *)
+    BEGIN
+    IF  (target_nptr.np_ptr^.nd_bottom + RecBuf.recLen_gg00) >
+        MAX_BOTTOM_BD00 - ((target_nptr.np_ptr^.nd_record_cnt+1) * POINTERSIZE_BD00)
+    THEN
+        BEGIN (* page overflow ==> new page required *)
+        leafnodes := leafnodes + 1;
+        IF  prev_nptr.np_ptr <> NIL
+        THEN
+            b30load_table (prev_nptr, target_nptr, NOT c_only_left, current)
+        ELSE
+            prev_nptr := target_nptr;
+        (*ENDIF*) 
+        b13new_node (LEAF_LEVEL_BD00, target_nptr, current);
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            converterVersion := bd20GetDestinationConverterVersion(
+                  trTaskId_gg00, target_nptr.np_cbptr);
+            bd998ModifyPageAndRecordCount (curr_trans^, converterVersion, fileTabId_gg00,
+                  currLeafPageCountDelta_bd00, currIndexPageCountDelta_bd00, 0);
+            currLeafPageCountDelta_bd00  := 0;
+            currIndexPageCountDelta_bd00 := 0;
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_ok) AND (target_nptr.np_ptr <> NIL)
+    THEN
+        WITH target_nptr.np_ptr^ DO   (* PTS 1103797 AK 28-08-1999 *)
+            BEGIN
+            SAPDB_PascalMove ('VBD37 ',   2,    
+                  sizeof (RecBuf.recBuf_gg00), sizeof (target_nptr.np_ptr^),
+                  @RecBuf.recBuf_gg00, 1, @target_nptr.np_ptr^,
+                  nd_bottom, RecBuf.recLen_gg00, trError_gg00);
+            IF  trError_gg00 = e_ok
+            THEN
+                (*  pointer list update *)
+                BEGIN
+                nd_record_cnt := nd_record_cnt + 1;
+                RecIndex      := nd_record_cnt - 1;
+                nd_pointer_list [MAX_POINTERINDEX_BD00 - RecIndex] := nd_bottom;
+                nd_bottom     := nd_bottom + gg06Align (RecBuf.recLen_gg00, REC_ALIGN_BD00)
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37finish_target (VAR lnptr   : tbd_node_ptrs;
+            VAR nptr    : tbd_node_ptrs;
+            VAR current : tbd_current_tree;
+            records     : tsp00_Int4);
+ 
+VAR
+      converterVersion : tgg00_ConverterVersion;
+ 
+BEGIN
+WITH current, curr_trans^, curr_tree_id DO
+    BEGIN
+    IF  lnptr.np_ptr <> NIL
+    THEN
+        BEGIN
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            b30load_table (lnptr, nptr, NOT c_only_left, current);
+            nptr := lnptr;
+            END
+        ELSE
+            b13w_release_node (lnptr, current);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        converterVersion := bd20GetDestinationConverterVersion(trTaskId_gg00, nptr.np_cbptr);
+        bd998ModifyPageAndRecordCount (curr_trans^, converterVersion, fileTabId_gg00,
+              currLeafPageCountDelta_bd00, currIndexPageCountDelta_bd00, records);
+        currLeafPageCountDelta_bd00  := 0;
+        currIndexPageCountDelta_bd00 := 0;
+        END;
+    (*ENDIF*) 
+    IF  nptr.np_ptr <> NIL
+    THEN
+        b13w_release_node (nptr, current);
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37pf_context_init (VAR prefetch_context : tbd37prefetch_context);
+ 
+BEGIN
+prefetch_context.pf_prefetch_start := true;
+prefetch_context.pf_prefetch_end   := false;
+prefetch_context.pf_pno            := NIL_PAGE_NO_GG00;
+prefetch_context.pf_leftmost_pno   := NIL_PAGE_NO_GG00;
+prefetch_context.pf_curr_index     := -1;
+prefetch_context.pf_max_index      := MAX_INT2_SP00;
+prefetch_context.pf_nptr.np_ptr    := NIL
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37prefetch (VAR t : tgg00_TransContext;
+            VAR prefetch_context : tbd37prefetch_context;
+            VAR current          : tbd_current_tree);
+ 
+VAR
+      exit_loop    : boolean;
+      pos          : integer;
+      prefetch_pno : tsp00_PageNo;
+      pRec         : tgg00_RecPtr;
+ 
+BEGIN
+IF  NOT prefetch_context.pf_prefetch_end
+THEN
+    BEGIN
+    exit_loop := true;
+    REPEAT
+        IF  prefetch_context.pf_curr_index > prefetch_context.pf_max_index
+        THEN
+            BEGIN
+            IF  prefetch_context.pf_pno <> NIL_PAGE_NO_GG00
+            THEN
+                BEGIN
+                prefetch_context.pf_pno :=
+                      prefetch_context.pf_nptr.np_ptr^.nd_right;
+                b13r_release_node (prefetch_context.pf_nptr,
+                      current, lru_normal);
+                IF  prefetch_context.pf_pno = NIL_PAGE_NO_GG00
+                THEN
+                    prefetch_context.pf_prefetch_end := true
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                prefetch_context.pf_pno          := current.curr_lvl_1_pno;
+                prefetch_context.pf_leftmost_pno := current.curr_lvl_1_pno
+                END;
+            (*ENDIF*) 
+            IF  prefetch_context.pf_pno <> NIL_PAGE_NO_GG00
+            THEN
+                BEGIN
+                bd13GetNode (current, prefetch_context.pf_pno, plmLock_ebd00,
+                      nr_for_read, prefetch_context.pf_nptr);
+                IF  current.curr_trans^.trError_gg00 = e_ok
+                THEN
+                    BEGIN
+                    IF  prefetch_context.pf_pno =
+                        prefetch_context.pf_leftmost_pno
+                    THEN
+                        prefetch_context.pf_curr_index :=
+                              FIRST_REC_INDEX_BD00 + 1
+                    ELSE
+                        prefetch_context.pf_curr_index := FIRST_REC_INDEX_BD00;
+                    (*ENDIF*) 
+                    prefetch_context.pf_max_index  :=
+                          prefetch_context.pf_nptr.np_ptr^.nd_record_cnt - 1;
+                    IF  (prefetch_context.pf_curr_index >
+                        prefetch_context.pf_max_index)
+                        AND
+                        (prefetch_context.pf_pno =
+                        prefetch_context.pf_leftmost_pno)
+                    THEN (* leftmost level 1 page contains only one seperator *)
+                        exit_loop := false
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    prefetch_context.pf_pno          := NIL_PAGE_NO_GG00;
+                    prefetch_context.pf_prefetch_end := true
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    UNTIL
+        exit_loop;
+    (*ENDREPEAT*) 
+    END;
+(*ENDIF*) 
+IF  prefetch_context.pf_pno <> NIL_PAGE_NO_GG00
+THEN
+    WITH prefetch_context.pf_nptr.np_ptr^ DO
+        BEGIN
+        pos  := nd_pointer_list[MAX_POINTERINDEX_BD00 - prefetch_context.pf_curr_index];
+        pRec := @nd_body[pos];
+        IF  (pos < BODY_BEG_BD00) OR (pos > nd_bottom)
+        THEN
+            BEGIN
+            t.trError_gg00 := e_data_page_corrupted;
+            b06dump_bad_page (t.trTaskId_gg00, 'd',
+                  FILE_EXT_COR_BD00, nd_id, prefetch_context.pf_nptr.np_ptr, 1)
+            END
+        ELSE
+            BEGIN
+            prefetch_pno := gg06PnoGet (pRec^.recPno_gg00);
+            prefetch_context.pf_curr_index := prefetch_context.pf_curr_index + 1;
+            kb900PrefetchLeaves (t, current.curr_tree_id, prefetch_pno)
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37prefetch_init (t : tgg00_TransContext;
+            VAR prefetch_context : tbd37prefetch_context;
+            VAR current          : tbd_current_tree);
+ 
+VAR
+      ix : integer;
+ 
+BEGIN
+prefetch_context.pf_prefetch_start := false;
+IF  current.curr_lvl_1_pno <> NIL_PAGE_NO_GG00
+THEN
+    BEGIN
+    prefetch_context.pf_pno         := NIL_PAGE_NO_GG00;
+    prefetch_context.pf_curr_index  := -1;
+    prefetch_context.pf_max_index   := MAX_INT2_SP00;
+    prefetch_context.pf_nptr.np_ptr := NIL;
+    FOR ix := 1 TO b01no_of_data_devs DO
+        bd37prefetch (t, prefetch_context, current)
+    (*ENDFOR*) 
+    END
+ELSE
+    prefetch_context.pf_prefetch_end := true
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b37_init_conversion_info (
+            VAR t              : tgg00_TransContext;
+            ignore_err         : boolean;
+            source_stack       : tgg00_StackListPtr;
+            src_col_cnt        : integer;
+            target_stack       : tgg00_StackListPtr;
+            trunc_pos          : integer;
+            trunc_cnt          : integer;
+            VAR is_sorted      : boolean;
+            VAR addClusterKey  : boolean;
+            VAR FixedColLength : integer;
+            VAR code_tab       : tgg03_colinf;
+            VAR trunc_col      : tgg03_colinf;
+            VAR frac_col       : tgg03_colinf;
+            VAR not_null_col   : tgg03_not_null;
+            VAR check_col      : tgg03_check_col);
+ 
+TYPE
+ 
+      t_char_map_datatype = RECORD
+            CASE boolean OF
+                true :
+                    (c : tsp00_C1);
+                false :
+                    (d : tsp00_DataType);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+VAR
+      col            : integer;
+      target_dtype   : t_char_map_datatype;
+      source_dtype   : t_char_map_datatype;
+      (* PTS 1116259 M.Ki. *)
+ 
+BEGIN
+FixedColLength := 0;
+addClusterKey  := false;
+FOR col := 1 TO src_col_cnt DO
+    BEGIN
+    IF  target_stack^[col].etype = st_fixcol
+    THEN
+        FixedColLength := FixedColLength + target_stack^[col].elen_var;
+    (*ENDIF*) 
+    not_null_col[col] :=
+          (target_stack^[col].etype in [st_fixkey, st_varkey])
+          OR
+          (target_stack^[col].eop = op_not_null);
+    trunc_col[col]    := c_undefined;
+    code_tab [col]    := 0;
+    check_col[col]    := check_none_egg03;
+    IF  (source_stack^[col].etype   = st_output) AND
+        (source_stack^[col].eop_out = op_o_output_cluster_key)
+    THEN
+        addClusterKey := true
+    ELSE
+        BEGIN
+        target_dtype.c[1] := target_stack^[col].ecol_tab[2];
+        source_dtype.c[1] := source_stack^[col].ecol_tab[2];
+        IF  target_dtype.d <> source_dtype.d
+        THEN
+            BEGIN
+            CASE target_dtype.d OF
+                dcha :
+                    CASE source_dtype.d OF
+                        dunicode :
+                            code_tab[col] := c_uni_to_ascii;
+                        ddate, dtime, dtimestamp :
+                            BEGIN
+                            END;
+                        OTHERWISE
+                            t.trError_gg00 := e_not_implemented;
+                        END;
+                    (*ENDCASE*) 
+                dchb :
+                    CASE source_dtype.d OF
+                        dcha, ddate, dtime, dtimestamp :
+                            BEGIN
+                            END;
+                        OTHERWISE
+                            t.trError_gg00 := e_not_implemented;
+                        END;
+                    (*ENDCASE*) 
+                dfixed :
+                    CASE source_dtype.d OF
+                        dfixed, dfloat, dinteger, dsmallint :
+                            BEGIN
+                            END;
+                        OTHERWISE
+                            t.trError_gg00 := e_not_implemented;
+                        END;
+                    (*ENDCASE*) 
+                dfloat :
+                    CASE source_dtype.d OF
+                        (* PTS 1121471 E.Z. *)
+                        dfixed, dfloat, dinteger, dsmallint :
+                            BEGIN
+                            END;
+                        OTHERWISE
+                            t.trError_gg00 := e_not_implemented;
+                        END;
+                    (*ENDCASE*) 
+                dunicode :
+                    CASE source_dtype.d OF
+                        dcha :
+                            code_tab[col] := c_ascii_to_uni;
+                        OTHERWISE
+                            t.trError_gg00 := e_not_implemented;
+                        END;
+                    (*ENDCASE*) 
+                ddate :
+                    IF  source_dtype.d <> ddate
+                    THEN
+                        check_col[col] := check_date_egg03;
+                    (*ENDIF*) 
+                dtime :
+                    IF  source_dtype.d <> dtime
+                    THEN
+                        check_col[col] := check_time_egg03;
+                    (*ENDIF*) 
+                dtimestamp :
+                    IF  source_dtype.d <> dtimestamp
+                    THEN
+                        check_col[col] := check_timestamp_egg03;
+                    (*ENDIF*) 
+                dinteger :
+                    check_col[col] := check_int_egg03;
+                dsmallint :
+                    check_col[col] := check_smallint_egg03;
+                OTHERWISE
+                    t.trError_gg00 := e_not_implemented;
+                END;
+            (*ENDCASE*) 
+            IF  ignore_err
+            THEN
+                check_col[col] := check_none_egg03;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDFOR*) 
+FOR col := trunc_pos TO trunc_pos + trunc_cnt - 1 DO
+    WITH target_stack^[col] DO
+        BEGIN
+        IF  etype in [st_fixkey, st_varkey]
+        THEN
+            is_sorted := false;
+        (*ENDIF*) 
+        trunc_col[ecol_pos] := epos;
+        frac_col [ecol_pos] := elen_var
+        END;
+    (*ENDWITH*) 
+(*ENDFOR*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd37rewrite_record(
+            VAR t              : tgg00_TransContext;
+            VAR target_buf     : tgg00_Rec;
+            source_stack       : tgg00_StackListPtr;
+            source_ptr         : tsp00_BufAddr;
+            src_col_cnt        : integer;
+            target_stack       : tgg00_StackListPtr;
+            key_len            : tsp00_IntMapC2;
+            VAR syskey         : tgg00_Surrogate;
+            FixedColLength     : integer;
+            VAR code_tab       : tgg03_colinf;
+            VAR trunc_col      : tgg03_colinf;
+            VAR frac_col       : tgg03_colinf;
+            VAR not_null_col   : tgg03_not_null;
+            VAR check_col      : tgg03_check_col);
+ 
+VAR
+      is_undef       : boolean;
+      col            : integer;
+      src_col_pos    : integer;
+      src_col_len    : tsp00_Int4;
+      clusterKey     : tsp00_C4;
+      ix             : integer;
+      tar_col_pos    : integer;
+      bytelen        : integer;
+      diglen         : integer;
+      digfrac        : integer;
+      len_pos        : integer;
+      dt_format      : tgg00_DateTimeFormat;
+      pre_dt_format  : tgg00_DateTimeFormat;
+      i2             : tsp00_IntMapC2;
+      number         : tsp00_Number;
+      initSourcePtr  : tsp00_BufAddr;
+      source_st_ptr  : tgg00_StEntryAddr;
+      target_st_ptr  : tgg00_StEntryAddr;
+      seldummy       : tgg00_SelectFieldsParam;
+      (* PTS 1116259 M.Ki. *)
+ 
+BEGIN
+col                              := 1;
+tar_col_pos                      := 1 + cgg_rec_key_offset;
+target_buf.recVarcolCnt_gg00     := 0;
+seldummy.sfp_varcol_pos.vpl_last := -1;
+dt_format     := dtf_normal;
+initSourcePtr := source_ptr;
+WHILE (col <= src_col_cnt) AND (t.trError_gg00 = e_ok) DO
+    BEGIN
+    source_ptr    := initSourcePtr;
+    source_st_ptr := @source_stack^[col];
+    target_st_ptr := @target_stack^[col];
+    IF  source_st_ptr^.etype = st_old_varkey
+    THEN (* copy key *)
+        is_undef := false
+    ELSE
+        IF  (source_st_ptr^.etype = st_output) AND
+            (source_st_ptr^.eop_out = op_o_output_cluster_key)
+        THEN
+            BEGIN (* cluster key, intialize with 0xffffffff *)
+            FOR ix := 1 TO sizeof(clusterKey) DO
+                clusterKey[ix]  := chr(255);
+            (*ENDFOR*) 
+            source_ptr  := @clusterKey;
+            src_col_pos := 1;
+            src_col_len := sizeof(clusterKey);
+            is_undef    := false
+            END
+        ELSE
+            IF  source_st_ptr^.etype <> st_rowno
+            THEN
+                BEGIN
+                g04locate_col (source_st_ptr^, @(source_ptr^),
+                      seldummy.sfp_varcol_pos, src_col_pos, src_col_len);
+                IF  src_col_len > 0
+                THEN
+                    BEGIN
+                    is_undef := source_ptr^[src_col_pos] = csp_undef_byte;
+                    (* PTS 1122856 E.Z. *)
+                    IF  is_undef
+                    THEN
+                        src_col_len := 1;
+                    (*ENDIF*) 
+                    IF  trunc_col[col] <> c_undefined
+                    THEN
+                        IF  frac_col[col] > 0
+                        THEN
+                            BEGIN
+                            IF  NOT is_undef
+                            THEN
+                                BEGIN
+                                s43lfrac (source_ptr^, src_col_pos + 1,
+                                      src_col_len-1, diglen, digfrac,
+                                      bytelen);
+&                               ifdef trace
+                                t01int4 (bi, 'diglen      ', diglen);
+                                t01int4 (bi, 'digfrac     ', digfrac);
+                                t01int4 (bi, 'trunc_col   ', trunc_col[col]);
+                                t01int4 (bi, 'frac_col    ', frac_col[col]);
+&                               endif
+                                IF  (diglen > trunc_col[col]) OR
+                                    (digfrac > frac_col[col] - 1)
+                                THEN
+                                    k71num_err_to_b_err (
+                                          num_overflow, t.trError_gg00)
+                                (*ENDIF*) 
+                                END;
+                            (* PTS 1121608 E.Z. *)
+                            (*ENDIF*) 
+                            IF  src_col_len > trunc_col[col] DIV 2 + 2
+                            THEN
+                                src_col_len := trunc_col[col] DIV 2 + 2
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            BEGIN
+                            IF  source_st_ptr^.etype in
+                                [st_fixkey, st_fixcol]
+                            THEN
+                                src_col_len :=
+                                      1 + s30lnr_defbyte (source_ptr,
+                                      source_ptr^ [src_col_pos],
+                                      src_col_pos + 1, src_col_len - 1);
+                            (*ENDIF*) 
+                            IF  src_col_len > trunc_col[col]
+                            THEN
+                                BEGIN
+                                src_col_len := trunc_col[col];
+                                IF  NOT is_undef
+                                THEN
+                                    IF  ord (source_st_ptr^.ecol_tab[2])
+                                        in [ord (dfixed), ord(dinteger),
+                                        ord (dsmallint), ord (dfloat)]
+                                    THEN
+                                        t.trError_gg00 := e_num_overflow
+                                    ELSE
+                                        t.trError_gg00 := e_column_trunc
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    is_undef := true;
+                (*ENDIF*) 
+                END
+            ELSE
+                is_undef := false;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  (is_undef AND not_null_col[col]) OR (t.trError_gg00 <> e_ok)
+    THEN
+        BEGIN
+        IF  t.trError_gg00 = e_ok
+        THEN
+            IF  target_st_ptr^.etype in [st_fixkey, st_varkey]
+            THEN
+                t.trError_gg00 := e_null_value_illegal
+            ELSE
+                t.trError_gg00 := e_null_not_allowed
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        CASE target_st_ptr^.etype OF
+            st_fixkey, st_fixcol :
+                BEGIN
+                k66move_and_map (code_tab[col],
+                      source_ptr^, src_col_pos, src_col_len,
+                      target_buf.recBuf_gg00, tar_col_pos,
+                      src_col_len, t.trError_gg00);
+                IF  (target_st_ptr^.elen_var > src_col_len)
+                    AND (t.trError_gg00 = e_ok)
+                THEN
+                    BEGIN
+                    IF  is_undef
+                    THEN
+                        SAPDB_PascalFill ('VBD37 ',   3,    
+                              sizeof (target_buf.recBuf_gg00),
+                              @target_buf.recBuf_gg00,
+                              tar_col_pos + src_col_len,
+                              target_st_ptr^.elen_var
+                              - src_col_len, csp_defined_byte,
+                              t.trError_gg00)
+                    ELSE
+                        IF  (code_tab[col] in [c_ascii_to_uni])
+                            (* PTS 1115628 E.Z. *)
+                            OR
+                            (ord (target_st_ptr^.ecol_tab[2]) = ord (dunicode))
+                        THEN
+                            SAPDB_PascalUnicodeFill ('VBD37 ',   4,    
+                                  sizeof (target_buf), @target_buf.recBuf_gg00,
+                                  tar_col_pos + src_col_len,
+                                  target_st_ptr^.elen_var - src_col_len,
+                                  csp_unicode_blank,
+                                  t.trError_gg00)
+                        ELSE
+                            SAPDB_PascalFill ('VBD37 ',   5,    
+                                  sizeof (target_buf.recBuf_gg00),
+                                  @target_buf.recBuf_gg00,
+                                  tar_col_pos + src_col_len,
+                                  target_st_ptr^.elen_var
+                                  - src_col_len,
+                                  target_buf.recBuf_gg00[tar_col_pos],
+                                  t.trError_gg00);
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    src_col_len := target_st_ptr^.elen_var
+                    END
+                (*ENDIF*) 
+                END;
+            st_varkey :
+                IF  source_st_ptr^.etype = st_rowno
+                THEN
+                    BEGIN
+                    s30surrogate_incr (syskey);
+                    target_buf.recBuf_gg00[tar_col_pos] := csp_defined_byte;
+                    SAPDB_PascalMove ('VBD37 ',   6,    
+                          sizeof(syskey), sizeof(target_buf.recBuf_gg00),
+                          @syskey, 1, @target_buf.recBuf_gg00, tar_col_pos+1,
+                          sizeof (syskey), t.trError_gg00);
+                    src_col_len := 1 + sizeof (syskey);
+                    target_buf.recKeyLen_gg00 := 1 + SURROGATE_MXGG00
+                    END
+                ELSE
+                    BEGIN
+                    IF  (source_st_ptr^.etype = st_fixkey)
+                        OR
+                        (source_st_ptr^.etype = st_fixcol)
+                    THEN
+                        src_col_len :=
+                              1 + s30lnr_defbyte (source_ptr,
+                              source_ptr^ [src_col_pos],
+                              src_col_pos + 1, src_col_len - 1);
+                    (*ENDIF*) 
+                    k66move_and_map (code_tab[col],
+                          source_ptr^, src_col_pos, src_col_len,
+                          target_buf.recBuf_gg00, tar_col_pos,
+                          src_col_len, t.trError_gg00);
+                    target_buf.recKeyLen_gg00 := tar_col_pos +
+                          src_col_len - cgg_rec_key_offset - 1
+                    END;
+                (*ENDIF*) 
+            st_varcol :
+                BEGIN
+                target_buf.recVarcolCnt_gg00 := target_buf.recVarcolCnt_gg00 + 1;
+                IF  is_undef
+                THEN
+                    BEGIN
+                    target_buf.recBuf_gg00[tar_col_pos  ]:= chr (1);
+                    target_buf.recBuf_gg00[tar_col_pos+1]:= csp_undef_byte;
+                    src_col_len := 2
+                    END
+                ELSE
+                    BEGIN
+                    IF  source_st_ptr^.etype in
+                        [st_fixkey, st_fixcol]
+                    THEN
+                        src_col_len := 1 +
+                              s30lnr_defbyte (source_ptr,
+                              source_ptr^ [src_col_pos],
+                              src_col_pos + 1, src_col_len - 1);
+                    (*ENDIF*) 
+                    k66move_and_map (code_tab[col],
+                          source_ptr^, src_col_pos, src_col_len,
+                          target_buf.recBuf_gg00, tar_col_pos + 1,
+                          src_col_len, t.trError_gg00);
+                    target_buf.recBuf_gg00[tar_col_pos] := chr(src_col_len);
+                    tar_col_pos := tar_col_pos + 1
+                    END
+                (*ENDIF*) 
+                END;
+            st_varlongchar :
+                BEGIN
+                IF  NOT is_undef AND
+                    (source_st_ptr^.etype in
+                    [st_fixkey, st_fixcol])
+                THEN
+                    src_col_len := 1 +
+                          s30lnr_defbyte (source_ptr,
+                          source_ptr^ [src_col_pos],
+                          src_col_pos + 1, src_col_len - 1);
+                (*ENDIF*) 
+                len_pos     := tar_col_pos;
+                tar_col_pos := tar_col_pos + 2;
+                IF  is_undef
+                THEN
+                    BEGIN
+                    target_buf.recBuf_gg00[tar_col_pos] := csp_undef_byte;
+                    src_col_len := 1
+                    END
+                ELSE
+                    k66move_and_map (code_tab[col],
+                          source_ptr^, src_col_pos, src_col_len,
+                          target_buf.recBuf_gg00, tar_col_pos,
+                          src_col_len, t.trError_gg00);
+                (*ENDIF*) 
+                i2.mapInt_sp00 := src_col_len;
+                target_buf.recBuf_gg00[len_pos  ] := i2.mapC2_sp00 [1];
+                target_buf.recBuf_gg00[len_pos+1] := i2.mapC2_sp00 [2];
+                END;
+            st_old_varkey :
+                BEGIN
+                src_col_len               := key_len.mapInt_sp00;
+                target_buf.recKeyLen_gg00 := src_col_len;
+                SAPDB_PascalMove ('VBD37 ',   7,    
+                      sizeof (source_ptr^), sizeof (target_buf.recBuf_gg00),
+                      @source_ptr^, cgg_rec_key_offset + 1, @target_buf.recBuf_gg00, cgg_rec_key_offset + 1,
+                      src_col_len, t.trError_gg00);
+                END
+            END;
+        (*ENDCASE*) 
+        IF  (check_col[col] <> check_none_egg03) AND
+            NOT is_undef AND (t.trError_gg00 <> e_move_error)
+        THEN
+            CASE check_col[col] OF
+                check_date_egg03, check_time_egg03, check_timestamp_egg03 :
+                    BEGIN
+                    pre_dt_format := dt_format;
+                    REPEAT
+                        CASE check_col[col] OF
+                            check_date_egg03 :
+                                g03fdcheck_date (target_buf.recBuf_gg00,
+                                      target_buf.recBuf_gg00,
+                                      tar_col_pos+1, tar_col_pos+1,
+                                      src_col_len - 1, dt_format,
+                                      t.trError_gg00);
+                            check_time_egg03 :
+                                g03ftcheck_time (target_buf.recBuf_gg00,
+                                      target_buf.recBuf_gg00,
+                                      tar_col_pos+1, tar_col_pos+1,
+                                      src_col_len - 1, dt_format,
+                                      t.trError_gg00);
+                            check_timestamp_egg03 :
+                                g03ftscheck_timestamp
+                                      (target_buf.recBuf_gg00,
+                                      target_buf.recBuf_gg00,
+                                      tar_col_pos+1, tar_col_pos+1,
+                                      src_col_len - 1, dt_format,
+                                      'ENG', t.trError_gg00);
+                            END;
+                        (*ENDCASE*) 
+                        IF  t.trError_gg00 <> e_ok
+                        THEN
+                            IF  dt_format = dtf_ts_eur
+                            THEN
+                                dt_format := dtf_normal
+                            ELSE
+                                dt_format := succ (dt_format);
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    UNTIL
+                        (dt_format = pre_dt_format)
+                        OR
+                        ((t.trError_gg00 <> e_invalid_date     ) AND
+                        ( t.trError_gg00 <> e_invalid_time     ) AND
+                        ( t.trError_gg00 <> e_invalid_timestamp))
+                    (*ENDREPEAT*) 
+                    END;
+                check_int_egg03 :
+                    BEGIN
+                    number := csp_null_number;
+                    SAPDB_PascalMove ('VBD37 ',   8,    
+                          sizeof (target_buf.recBuf_gg00),
+                          sizeof (number), @target_buf.recBuf_gg00,
+                          tar_col_pos + 1, @number, 1,
+                          src_col_len - 1, t.trError_gg00);
+                    IF  ((number < csp_minlint) OR
+                        ( number > csp_maxlint))
+                        AND
+                        (t.trError_gg00 = e_ok)
+                    THEN
+                        t.trError_gg00 := e_range_violation
+                    (*ENDIF*) 
+                    END;
+                check_smallint_egg03 :
+                    BEGIN
+                    number := csp_null_number;
+                    SAPDB_PascalMove ('VBD37 ',   9,    
+                          sizeof (target_buf.recBuf_gg00),
+                          sizeof (number), @target_buf.recBuf_gg00,
+                          tar_col_pos + 1, @number, 1,
+                          src_col_len - 1, t.trError_gg00);
+                    IF  ((number < csp_minsint) OR
+                        ( number > csp_maxsint))
+                        AND
+                        (t.trError_gg00 = e_ok)
+                    THEN
+                        t.trError_gg00 := e_range_violation
+                    (*ENDIF*) 
+                    END;
+                OTHERWISE
+                    t.trError_gg00 := e_not_implemented;
+                END;
+            (*ENDCASE*) 
+        (*ENDIF*) 
+        tar_col_pos := tar_col_pos + src_col_len
+        END;
+    (*ENDIF*) 
+    col := col + 1
+    END;
+(*ENDWHILE*) 
+target_buf.recVarcolOffset_gg00 := FixedColLength;
+target_buf.recLen_gg00          := tar_col_pos - 1;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b37_unload_rewrite_table (
+            VAR t           : tgg00_TransContext;
+            VAR treeid      : tgg00_FileId;
+            unload_info     : tgg03_unloadInfoPtr;
+            ret_buf_size    : tsp00_Int4;
+            VAR ret_buf     : tsp00_MoveObj;
+            VAR ret_buf_len : tsp00_Int4);
+ 
+VAR
+      ret_buf_full   : boolean;
+      key_len        : tsp00_IntMapC2;
+      curr_index     : integer;
+      start_recind   : integer;
+      rec_index      : integer;
+      ret_buf_pos    : tsp00_Int4;
+      MaxRecIndex    : tsp00_Int4;
+      pno            : tsp00_PageNo;
+      source_ptr     : tsp00_BufAddr;
+      src_nptr       : tbd_node_ptrs;
+      target_nptr    : tbd_node_ptrs;
+      syskey         : tgg00_Surrogate;
+      source_current : tbd_current_tree;
+      new_record     : tgg00_Rec;
+      (* PTS 1116259 M.Ki. *)
+ 
+BEGIN
+(* rewrite/clean up records during unload *)
+src_nptr.np_ptr    := NIL;
+src_nptr.np_cbptr  := NIL;
+ret_buf_pos        := 1;
+ret_buf_len        := ret_buf_pos + sizeof (tbd_node) - 1;
+target_nptr.np_ptr := @ret_buf[ 1 ];
+syskey             := cgg_zero_id; (* not used *)
+b13init_default_data_page (treeid, LEAF_LEVEL_BD00,
+      unload_info^.ui_tar_pageno, target_nptr);
+unload_info^.ui_tar_pageno := succ (unload_info^.ui_tar_pageno);
+(* last page we were working on: *)
+pno                         := unload_info^.ui_src_pageno;
+(* record on that page we have to start with: *)
+start_recind                := unload_info^.ui_src_recind;
+curr_index                  := FIRST_REC_INDEX_BD00;
+MaxRecIndex                 := FIRST_REC_INDEX_BD00;
+ret_buf_full                := false;
+bd30GetTree (t, treeid, source_current, m_select,
+      NOT LOCK_TREE_EXCL_BD00, NOT SYNC_TREE_LOCK_BD00);
+&ifdef TRACE
+t01int4 (bi, 'start_recind', start_recind);
+&endif
+WHILE NOT ret_buf_full AND (t.trError_gg00 = e_ok) DO
+    BEGIN
+    curr_index := curr_index + 1;
+    IF  curr_index > MaxRecIndex
+    THEN
+        BEGIN
+        IF  pno = NIL_PAGE_NO_GG00
+        THEN
+            t.trError_gg00 := e_no_next_record
+        ELSE
+            BEGIN
+            bd30GetNextLeafPage (pno, src_nptr, source_current);
+            IF  src_nptr.np_ptr = NIL
+            THEN
+                t.trError_gg00 := e_no_next_record
+            ELSE
+                IF  t.trError_gg00 = e_ok
+                THEN
+                    IF  src_nptr.np_ptr^.nd_bottom = BODY_BEG_BD00
+                    THEN
+                        t.trError_gg00 := e_no_next_record
+                    ELSE
+                        BEGIN
+                        curr_index  := FIRST_REC_INDEX_BD00;
+                        MaxRecIndex := src_nptr.np_ptr^.nd_record_cnt - 1;
+                        END
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        source_ptr := @src_nptr.np_ptr^.nd_body[
+              src_nptr.np_ptr^.nd_pointer_list[MAX_POINTERINDEX_BD00 - curr_index]];
+        key_len.mapC2_sp00[1] := source_ptr^[3];
+        key_len.mapC2_sp00[2] := source_ptr^[4]
+        END;
+    (*ENDIF*) 
+    IF  t.trRteCommPtr_gg00^.to_cancel
+    THEN
+        BEGIN
+        t.trError_gg00 := e_cancelled;
+        g01opmsg (sp3p_knldiag, sp3m_info, bd37Cancel_1_csp03,
+              csp3_n_btree, 'Execution canceled      ', t.trTaskId_gg00);
+        END;
+    (*ENDIF*) 
+    IF  (curr_index >= start_recind) AND (t.trError_gg00 = e_ok)
+    THEN
+        WITH unload_info^ DO
+            BEGIN
+            bd37rewrite_record (t, new_record, ui_src_st_ptr, source_ptr,
+                  ui_src_col_cnt, ui_tar_st_ptr, key_len, syskey,
+                  ui_fixedcollen, ui_code_tab, ui_trunc_col, ui_frac_col,
+                  ui_not_null, ui_check_col);
+            start_recind := FIRST_REC_INDEX_BD00;
+            IF  t.trError_gg00 = e_ok
+            THEN
+                BEGIN
+                IF  (target_nptr.np_ptr^.nd_bottom + new_record.recLen_gg00) >
+                    MAX_BOTTOM_BD00 - ((target_nptr.np_ptr^.nd_record_cnt+1)
+                    * POINTERSIZE_BD00)
+                THEN
+                    BEGIN
+                    (* record does not fit into page, check if another *)
+                    (* page will fit into return buffer                *)
+                    ret_buf_pos := ret_buf_pos + sizeof (tbd_node);
+                    IF  (ret_buf_pos + sizeof (tbd_node)) > ret_buf_size
+                    THEN
+                        BEGIN (* new page would not fit into return buffer *)
+                        ret_buf_full := true;
+                        start_recind := curr_index;
+                        END
+                    ELSE
+                        BEGIN (* page fits *)
+                        ret_buf_len := ret_buf_pos + sizeof (tbd_node) - 1;
+                        target_nptr.np_ptr := @ret_buf[ ret_buf_pos ];
+                        b13init_default_data_page (treeid,
+                              LEAF_LEVEL_BD00, unload_info^.ui_tar_pageno,
+                              target_nptr);
+                        unload_info^.ui_tar_pageno :=
+                              succ (unload_info^.ui_tar_pageno);
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  NOT ret_buf_full
+                THEN
+                    WITH target_nptr, np_ptr^ DO (* PTS 1103797 AK 28-08-1999 *)
+                        BEGIN (* add record to page *)
+                        SAPDB_PascalMove ('VBD37 ',  10,    
+                              sizeof (new_record.recBuf_gg00), sizeof (np_ptr^),
+                              @new_record.recBuf_gg00, 1, @np_ptr^,
+                              nd_bottom, new_record.recLen_gg00, t.trError_gg00);
+                        IF  t.trError_gg00 = e_ok
+                        THEN
+                            (*  pointer list update *)
+                            BEGIN
+                            nd_record_cnt := nd_record_cnt + 1;
+                            rec_index     := nd_record_cnt - 1;
+                            nd_pointer_list [MAX_POINTERINDEX_BD00 - rec_index] := nd_bottom;
+                            nd_bottom     := nd_bottom + gg06Align (new_record.recLen_gg00, REC_ALIGN_BD00)
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    ;
+    END;
+(*ENDWHILE*) 
+unload_info^.ui_src_pageno := src_nptr.np_ptr^.nd_id;
+unload_info^.ui_src_recind := start_recind;
+&ifdef TRACE
+t01int4 (bi, 'ret_buf_len ', ret_buf_len);
+&endif
+IF  src_nptr.np_ptr <> NIL
+THEN
+    b13r_release_node (src_nptr, source_current, lru_normal);
+(*ENDIF*) 
+bd30ReleaseTree (source_current);
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

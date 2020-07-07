@@ -1,0 +1,2242 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-04-11
+*****************************************************
+modname : VAK685
+changed : 2000-04-11
+module  : Join2_Select_help_routines
+ 
+Author  : ElkeZ
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : This module completes the Join messbuffers that have
+          been half-built by VAK680
+ 
+Define  :
+ 
+        PROCEDURE
+              a685next_key_length (
+                    VAR dmli   : tak_dml_info;
+                    VAR jinfos : tak68_joininfos);
+ 
+        PROCEDURE
+              a685olast_order_fields (
+                    VAR jinfos       : tak68_joininfos;
+                    VAR colcopy_inf  : tgg07_JoinColCopyInfo);
+ 
+        PROCEDURE
+              a685pack_record (
+                    VAR acv         : tak_all_command_glob;
+                    jcolpos_in_new  : tsp00_Int2;
+                    VAR dmli        : tak_dml_info;
+                    VAR jinfos      : tak68_joininfos;
+                    jcolpos_in_orig : tsp00_Int2);
+ 
+        FUNCTION
+              a685stentry_found_in_outplist (
+                    VAR jinfos      : tak68_joininfos;
+                    VAR pos_in_orig : tsp00_Int2;
+                    VAR st_en       : tgg00_StackEntry) : boolean;
+ 
+        PROCEDURE
+              a685set_output_join (
+                    VAR st : tgg00_StackEntry;
+                    outpos : tsp00_Int4);
+ 
+        PROCEDURE
+              a685output_columns_shift (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR jinfos       : tak68_joininfos;
+                    outer_join_activ : boolean);
+ 
+        FUNCTION
+              a685evaluate_new_ecol_pos (
+                    VAR dmli      : tak_dml_info;
+                    VAR jinfos    : tak68_joininfos;
+                    curr_st_entry : tsp00_Int2;
+                    len_var       : tsp00_Int4) : tsp00_Int4;
+ 
+        PROCEDURE
+              a685join_columns_last_shift (
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info;
+                    VAR jinfos : tak68_joininfos);
+ 
+        PROCEDURE
+              a685join_columns_shift (
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info;
+                    VAR jinfos : tak68_joininfos);
+ 
+        PROCEDURE
+              a685init_eq_rec(
+                    VAR acv         : tak_all_command_glob;
+                    VAR eq_rec      : tak68_eq_record );
+ 
+        PROCEDURE
+              a685expand_eq_rec(
+                    VAR acv    : tak_all_command_glob;
+                    VAR eq_rec : tak68_eq_record );
+ 
+        PROCEDURE
+              a685expand_eq_rec_ex(
+                    VAR acv      : tak_all_command_glob;
+                    VAR eq_rec   : tak68_eq_record;
+                    new_capacity : tsp00_Int4);
+ 
+        PROCEDURE
+              a685finalize_eq_rec(
+                    VAR acv         : tak_all_command_glob;
+                    VAR eq_rec      : tak68_eq_record );
+ 
+        PROCEDURE
+              a685expand_joinarr(
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info);
+ 
+        PROCEDURE
+              a685expand_joinarr_ex(
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    new_capacity : tsp00_Int4);
+ 
+        PROCEDURE
+              a685init_joinarr(
+                    VAR acv    : tak_all_command_glob;
+                    VAR dmli   : tak_dml_info);
+ 
+        PROCEDURE
+              a685init_multab_rec(
+                    VAR acv    : tak_all_command_glob;
+                    VAR multab : tak68_mult_tabs );
+ 
+        PROCEDURE
+              a685finalize_multab_rec(
+                    VAR acv    : tak_all_command_glob;
+                    VAR multab : tak68_mult_tabs );
+ 
+        PROCEDURE
+              a685expand_multab_rec(
+                    VAR acv    : tak_all_command_glob;
+                    VAR multab : tak68_mult_tabs );
+ 
+        FUNCTION
+              a685get_join_trans(
+                    VAR dmli    : tak_dml_info;
+                    jtrans      : tak68_join_transitions;
+                    dim1        : tsp00_Int2;
+                    dim2        : tsp00_Int2 ) : tak68_join_transition_ptr;
+ 
+.CM *-END-* define --------------------------------------
+Use     :
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err   : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id          : tsp00_C6;
+                    mod_intern_num  : tsp00_Int4;
+                    source_upb      : tsp00_Int4;
+                    destin_upb      : tsp00_Int4;
+                    source          : tsp00_MoveObjPtr;
+                    source_pos      : tsp00_Int4;
+                    destin          : tsp00_MoveObjPtr;
+                    destin_pos      : tsp00_Int4;
+                    length          : tsp00_Int4;
+                    VAR e           : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    destin_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    destin         : tsp00_MoveObjPtr;
+                    destin_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_allocator_interface : VGG941;
+ 
+        FUNCTION
+              gg941Allocate(
+                    VAR TransContext : tgg00_TransContext;
+                    wantedBytes      : integer) : tsp00_Addr;
+ 
+        PROCEDURE
+              gg941Deallocate(
+                    VAR TransContext : tgg00_TransContext;
+                    VAR p            : tsp00_Addr);
+ 
+        FUNCTION
+              gg941ReAllocate(
+                    VAR TransContext : tgg00_TransContext;
+                    wantedBytes      : integer;
+                    hint             : tsp00_Addr) : tsp00_Addr;
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              join_trace_routines : VAK683;
+ 
+        PROCEDURE
+              a683joinset_trace (
+                    debug        : tgg00_Debug;
+                    nam          : tsp00_Sname;
+                    VAR dmli     : tak_dml_info;
+                    VAR join_set : tak_joinset);
+ 
+        PROCEDURE
+              a683_one_join_entry(
+                    debug    : tgg00_Debug;
+                    VAR joins: tak_joinrec;
+                    index    : integer;
+                    trace_all: boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01addr (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    bufaddr  : tsp00_Addr);
+ 
+        PROCEDURE
+              t01p2int4 (
+                    debug : tgg00_Debug;
+                    nam_1 : tsp00_Sname;
+                    int_1 : tsp00_Int4;
+                    nam_2 : tsp00_Sname;
+                    int_2 : tsp00_Int4);
+ 
+        PROCEDURE
+              t01Int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Name;
+                    int4     : tsp00_Int4);
+ 
+        PROCEDURE
+              t01sname (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01name (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Name);
+ 
+        PROCEDURE
+              t01stackdesc (
+                    debug          : tgg00_Debug;
+                    nam            : tsp00_Sname;
+                    stack_addr     : tgg00_StackListPtr;
+                    VAR stack_desc : tgg00_StackDesc);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01stackentry (
+                    layer       : tgg00_Debug;
+                    VAR st      : tgg00_StackEntry;
+                    entry_index : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vdebug_break (debug_break_pos : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Pointer-Arithmetik : VSP35;
+ 
+        FUNCTION
+              s35add_moveobj_ptr_ptocm (
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4) : tsp00_MoveObjPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        PROCEDURE
+              g01abort (
+                    msg_no     : tsp00_Int4;
+                    msg_label  : tsp00_C8;
+                    msg_text   : tsp00_C24;
+                    bad_value  : tsp00_Int4);
+ 
+.CM *-END-* use -----------------------------------------
+Synonym :
+ 
+        PROCEDURE
+              t01addr;
+ 
+              tsp00_BufAddr tsp00_Addr
+ 
+        FUNCTION
+              s35add_moveobj_ptr_ptocm;
+ 
+              tsp00_Int4 tsp00_MoveObjPtr;
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+Specification:
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+Description:
+ 
+LAST_ORDER_FIELDS.
+ 
+The specification of DISTINCT means that, in each Join step, DISTINCT is
+performed for the table that is to be resorted on the right, i.e. that there
+must be space in the key for the 2 bytes necessary for this purpose (in
+addition to the usual 4 bytes counter).
+The number of output stack entries is known; an entry can be made in the
+Jump stack entry.
+The qualification that has been determined for this table in VAK68 is
+transferred to the new Mess-Buffer (GET_QUALIFICATION).
+By means of BUILD_STRAT_INFO, the Join strategies are built and are entered
+in the Mess-Buffer.
+These Join strategies and their storing in the Mess-Buffer are described in
+VKB74, Specification.
+The Mess-Buffer must now also be stored in 1-2 system information records of
+type emessbuf (or evmessbuf for Join Views). Since VAK68 has already created a
+half-filled Mess-Buffer (with the qualification), there is already a first
+buffer for each table, which just needs to be extended and replaced.
+ 
+A685OLAST_ORDER_FIELDS
+ 
+In the last Join step, fields that were specified in ORDER BY are handled as if
+they were necessary in the key for the next Join step, i.e. information on them
+is given to KB in njrec.n_j_arr.
+In A685OUTPUT_COLUMNS_SHIFT, in the original Mess-Buffer, it was entered in
+ecol_pos in the output stack entries for these ORDER-BY fields at what position
+in the info part of the result record they can be found. Information must now
+also be built as to from where (see ecol_pos) to where they are to be copied in
+the key (old epos entry minus length of the start of the record (=4)). If
+sorting is to be descending (op_output_order), the field value must be
+converted during copying. The need for conversion is indicated by a negative
+jfrom.
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685join_columns_shift (
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info;
+            VAR jinfos : tak68_joininfos);
+ 
+VAR
+      _i, _j, _k : tsp00_Int2;
+      _field_cnt : tsp00_Int2;
+&     ifdef trace
+      _shifted   : boolean;
+&     endif
+ 
+BEGIN
+(* look for columns in <i-1.th temp result> record which to be copied to    *)
+(* <i.th temp result> record                                                *)
+(* these columns are columns which have to be shifted from earlier          *)
+(* join steps to further join step                                          *)
+_field_cnt := jinfos.ji_nxtjinfo.nj_joincols_to_be_shifted;
+_i         := 0;
+&ifdef TRACE
+t01p2int4 (ak_join, 'JOIN STEP   ', jinfos.ji_act_join,
+      'i.th tab    ', jinfos.ji_acttabno);
+t01Int4 (ak_join, 'remaining jcolumns', _field_cnt);
+_shifted := false;
+&endif
+WHILE ((_i < dmli.d_joins.jrc_cnt) AND (_field_cnt > 0)) DO
+    BEGIN
+    (* loop over join array *)
+    FOR _j := 1 TO 2 DO
+        IF  (
+            (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].jop_tableno
+            in jinfos.ji_nxtjinfo.nj_left_side) OR
+            (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+            jop_tableno = jinfos.ji_acttabno)
+            (* <i-x.th tab> = <???> or <i.th tab> = <???> *)
+            )
+            AND
+            (
+            (jinfos.ji_st_addr^[ dmli.d_joins.jrc_joinarr^[ _i ].
+            jo_recs[ _j ].jop_startstack ].eop = op_join_key)
+            (* column marked by ak684one_join_column() *)
+            (* for <i.th tab> = <i+x.th tab>           *)
+            (* possible we are now in i+x.th join step *)
+            AND
+            (jinfos.ji_st_addr^[ dmli.d_joins.jrc_joinarr^[ _i ].
+            jo_recs[ _j ].jop_startstack ].etype = st_fixcol)
+            )
+        THEN
+            BEGIN
+            _field_cnt := pred (_field_cnt);
+            IF  (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+                jop_tableno = jinfos.ji_acttabno)
+            THEN
+                (* <i.th tab> = <???> *)
+                BEGIN
+                (* REMEMBER:                            *)
+                (* position of column in i.th messblock *)
+                _k := ord (jinfos.ji_st_addr^
+                      [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+                      jop_startstack ].ecol_tab[ 1 ])
+                END
+            ELSE
+                (* <i-x.th tab> = <???> *)
+                BEGIN
+&               ifdef trace
+                t01name(ak_join, 'write INVISIBLE   ');
+&               endif
+                (* write INVISIBLE COLUMNS *)
+                _k := acv.a_mblock.mb_qual^.mfirst_free;
+                acv.a_mblock.mb_st^[ _k ].etype    := st_output;
+                acv.a_mblock.mb_st^[ _k ].eop_out  := op_o_none;
+                acv.a_mblock.mb_st^[ _k ].epos     := jinfos.ji_st_addr^
+                      [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+                      jop_startstack ].epos;
+                acv.a_mblock.mb_st^[ _k ].elen_var := dmli.d_joins.
+                      jrc_joinarr^[ _i ].jo_recs[ _j ].jop_inoutlen;
+                acv.a_mblock.mb_st^[ _k ].ecol_pos := 0;
+                acv.a_mblock.mb_qual^.mfirst_free  :=
+                      succ (acv.a_mblock.mb_qual^.mfirst_free);
+                END;
+            (*ENDIF*) 
+&           ifdef trace
+            t01Int4(ak_join, 'mark on i.th mbloc', _k);
+&           endif
+            a685set_output_join (acv.a_mblock.mb_st^[ _k ],
+                  succ (jinfos.ji_nxtjinfo.nj_r_len));
+            jinfos.ji_st_addr^[ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+                  jop_startstack ].epos := acv.a_mblock.mb_st^[ _k ].ecol_pos;
+            jinfos.ji_nxtjinfo.nj_r_len := jinfos.ji_nxtjinfo.nj_r_len +
+                  dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].jop_inoutlen;
+&           ifdef trace
+            _shifted := true;
+&           endif
+            END;
+        (*ENDIF*) 
+    (*ENDFOR*) 
+    _i := succ(_i);
+    END;
+(*ENDWHILE*) 
+&ifdef TRACE
+IF  (_shifted)
+THEN
+    BEGIN
+    t01int4 (ak_join, 'field_cnt   ', _field_cnt);
+    t01stackdesc (ak_join, 'i.th mblock ', acv.a_mblock.mb_st,
+          acv.a_mblock.mb_qual^.mstack_desc);
+    END
+ELSE
+    t01name(ak_join, 'nothing to shift  ');
+(*ENDIF*) 
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685join_columns_last_shift (
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info;
+            VAR jinfos : tak68_joininfos);
+ 
+VAR
+      _i, _j, _k, _m : tsp00_Int2;
+      _l             : tsp00_Int4;
+      _is_join_value : boolean;
+&     ifdef trace
+      _shifted       : boolean;
+&     endif
+ 
+BEGIN
+(* look for columns in <i-1.th temp result> record which to be copied to    *)
+(* <i.th temp result> record                                                *)
+(* these columns are columns which have to be shifted from earlier          *)
+(* join steps to next join step                                             *)
+(* these columns are on destination and have to be key columns              *)
+(* mark this information as INVISIBLE COLUMNS beween mqual_pos + mqual_cnt  *)
+(* and mfirst_free                                                          *)
+&ifdef TRACE
+t01p2int4 (ak_join, 'JOIN STEP   ', jinfos.ji_act_join,
+      'i.th tab    ', jinfos.ji_acttabno);
+t01int4 (ak_join, 'nk_len      ', jinfos.ji_nxtjinfo.nj_nk_len);
+t01int4 (ak_join, 'notcopkeycnt', jinfos.ji_nxtjinfo.nj_joincols_to_be_shifted);
+_shifted := false;
+&endif
+_l := 1;
+_i := 0;
+(* loop over join array *)
+WHILE ((_l < jinfos.ji_nxtjinfo.nj_nk_len)
+      AND
+      (jinfos.ji_nxtjinfo.nj_joincols_to_be_shifted > 0)
+      (* break if all searched columns found *)
+      AND
+      (_i < dmli.d_joins.jrc_cnt)) DO
+    BEGIN
+    FOR _j := 1 TO 2 DO
+        IF  (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].jop_tableno =
+            jinfos.ji_nxtjinfo.nj_nxttabno)
+        THEN
+            (* <i+1.th tab> = <???> *)
+            BEGIN
+            _is_join_value :=
+                  ( _j = 1 ) AND
+                  ( dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ 2 ].jop_tableno =
+                  cak68_join_value );
+            (* <i+1.th tab> = <value> *)
+            CASE _j OF
+                1 :
+                    _k := 2;
+                2 :
+                    _k := 1;
+                END;
+            (*ENDCASE*) 
+            IF  ((dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_tableno in
+                jinfos.ji_nxtjinfo.nj_left_side)
+                (* <i+1.th tab> = <i-x.th tab> *)
+                OR
+                (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_tableno =
+                jinfos.ji_acttabno)
+                (* <i+1.th tab> = <i.th tab> *)
+                OR
+                ( dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_tableno =
+                cak68_join_value))
+                (* <i+1.th tab> = <value> *)
+            THEN
+                BEGIN
+                IF  (jinfos.ji_st_addr^[ dmli.d_joins.
+                    jrc_joinarr^[ _i ].jo_recs[ _k ].
+                    jop_startstack ].eop = op_join_key)
+                    (* column marked by ak684one_join_column() *)
+                    (* for <i.th tab> = <i+x.th tab>           *)
+                    (* possible we are now in i+x.th join step *)
+                    AND
+                    (NOT _is_join_value)
+                    (* NOT <i+1.th tab> = <value> *)
+                THEN
+                    BEGIN
+&                   ifdef trace
+                    t01name(ak_join, 'last shift for:   ');
+                    t01stackentry (ak_join, jinfos.ji_st_addr^[ dmli.d_joins.jrc_joinarr^[ _i ].
+                          jo_recs[ _k ].jop_startstack ],
+                          dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                          jop_startstack);
+                    _shifted := true;
+&                   endif
+                    (* remaining conditions from                    *)
+                    (* ak684one_join_column()with respect           *)
+                    (* of _is_join_value :                          *)
+                    (* <i.th tab> = <value>                         *)
+                    (* <i.th tab> = <i+x.th tab> for i >= 2         *)
+                    (* possible we are now in i+x.th join step      *)
+                    jinfos.ji_st_addr^[ dmli.d_joins.
+                          jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ].
+                          eop := op_none;
+                    (* OK, column has reached the destination *)
+                    (* we don't further need this column      *)
+                    jinfos.ji_nxtjinfo.nj_joincols_to_be_shifted :=
+                          pred (jinfos.ji_nxtjinfo.nj_joincols_to_be_shifted);
+                    jinfos.ji_nxtjinfo.nj_nxt_klen_filled :=
+                          jinfos.ji_nxtjinfo.nj_nxt_klen_filled +
+                          dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_inoutlen;
+                    IF  (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_tableno =
+                        jinfos.ji_acttabno)
+                    THEN
+                        (* <i+1.th tab> = <i.th tab>*)
+                        (* REMEMBER:                                    *)
+                        (* _m = position of column in i.th mblock       *)
+                        _m := ord (jinfos.ji_st_addr^[ dmli.d_joins.
+                              jrc_joinarr^[ _i ].jo_recs[ _k ].
+                              jop_startstack ].ecol_tab[ 1 ])
+                    ELSE
+                        (* <i+1.th tab> = <i-x.th tab> *)
+                        BEGIN
+&                       ifdef trace
+                        t01name(ak_join, 'write INVISIBLE   ');
+&                       endif
+                        (* write INVISIBLE COLUMNS *)
+                        _m := acv.a_mblock.mb_qual^.mfirst_free;
+                        acv.a_mblock.mb_st^[ _m ].etype    := st_output;
+                        acv.a_mblock.mb_st^[ _m ].eop      := op_none;
+                        acv.a_mblock.mb_st^[ _m ].epos     :=
+                              jinfos.ji_st_addr^[ dmli.d_joins.jrc_joinarr^[ _i ].
+                              jo_recs[ _k ].jop_startstack ].epos;
+                        acv.a_mblock.mb_st^[ _m ].elen_var :=
+                              dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].jop_inoutlen;
+                        acv.a_mblock.mb_st^[ _m ].ecol_pos := 0;
+                        acv.a_mblock.mb_qual^.mfirst_free :=
+                              succ (acv.a_mblock.mb_qual^.mfirst_free);
+                        END;
+                    (*ENDIF*) 
+&                   ifdef trace
+                    t01Int4(ak_join, 'mark on i.th mbloc', _m);
+&                   endif
+                    a685set_output_join (acv.a_mblock.mb_st^[ _m ],
+                          _l + cgg_rec_key_offset);
+                    END;
+                (*ENDIF*) 
+                _l := _l + dmli.d_joins.jrc_joinarr^[ _i ].
+                      jo_recs[ _k ].jop_inoutlen;
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDFOR*) 
+    _i := succ(_i);
+    END;
+(*ENDWHILE*) 
+&ifdef TRACE
+IF  (_shifted)
+THEN
+    t01stackdesc (ak_join, 'i.th mblock ', acv.a_mblock.mb_st,
+          acv.a_mblock.mb_qual^.mstack_desc)
+ELSE
+    t01name(ak_join, 'nothing to shift  ');
+(*ENDIF*) 
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685output_columns_shift (
+            VAR acv          : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR jinfos       : tak68_joininfos;
+            outer_join_activ : boolean);
+ 
+VAR
+      _stops                : tsp00_Int2;
+      _i                    : tsp00_Int2;
+      _j                    : tsp00_Int2;
+      _l                    : tsp00_Int4;
+      _last_tpos            : tsp00_Int4;
+      _last_fpos            : tsp00_Int4;
+      _is_outer_join_output : boolean;
+&     ifdef trace
+      _shifted              : boolean;
+&     endif
+ 
+BEGIN
+(* look for columns in <i-1.th temp result> record which to be copied to    *)
+(* <i.th temp result> record                                                *)
+(* mark this information as INVISIBLE COLUMNS beween mqual_pos + mqual_cnt  *)
+(* and mfirst_free                                                          *)
+&ifdef trace
+t01p2int4 (ak_join, 'JOIN STEP   ', jinfos.ji_act_join,
+      'i.th tab    ', jinfos.ji_acttabno);
+t01bool (ak_join, 'outerjoin   ', outer_join_activ );
+a683joinset_trace( ak_join, 'd_oj_tables ', dmli, dmli.d_oj_tables );
+_shifted := false;
+&endif
+_last_tpos:= 0;
+_last_fpos:= 0;
+(* search through output columns with 'packed' columns *)
+_i        := jinfos.ji_stack_desc.mqual_pos;
+_is_outer_join_output := false;
+IF  jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].etype = st_jump_output
+THEN
+    _stops := jinfos.ji_stack_desc.mqual_pos +
+          jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].epos - 2
+ELSE
+    _stops := _i; (* avoid looping *)
+(*ENDIF*) 
+_i := succ(_i);
+_j := acv.a_mblock.mb_qual^.mfirst_free - 1; (* remark mfirst_free *)
+WHILE (_i <= _stops) DO
+    (* loop over output columns of original stack *)
+    BEGIN
+    (* step to already processed table <i-x.th tab> *)
+    WHILE (
+          (_i <= _stops)
+          AND
+          (NOT
+          ((jinfos.ji_st_addr^[ _i ].etype in
+          [ st_fixcol, st_fixkey, st_varcol, st_varkey, st_varlongchar ]) AND
+          (((ord(jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ]))
+          in jinfos.ji_nxtjinfo.nj_left_side))))
+          ) DO
+        _i := succ(_i);
+    (*ENDWHILE*) 
+    _l := _i; (* mark colunm position *)
+    IF  (_i <= _stops)
+        (* real entry found *)
+        AND
+        acv.a_outer_join
+    THEN
+        BEGIN
+        _is_outer_join_output :=
+              outer_join_activ
+              AND
+              ((ord(jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ]))
+              in dmli.d_oj_tables);
+&       ifdef trace
+        t01int4( ak_join, 'table       ',
+              (ord(jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ])));
+        t01bool( ak_join, '_is_outer   ', _is_outer_join_output );
+&       endif
+        END;
+    (*ENDIF*) 
+    ;
+    (* step to output column *)
+    WHILE ((_i <= _stops) AND (NOT (jinfos.ji_st_addr^[ _i ].etype in
+          [ st_output, st_output_join ]))) DO
+        _i := succ(_i);
+    (*ENDWHILE*) 
+    IF  (_i <= _stops)
+        (* real stack entry found *)
+        AND
+        (
+        (jinfos.ji_st_addr^[ _i ].etype = st_output_join)
+        OR
+        ((jinfos.ji_st_addr^[ _i ].etype = st_output) AND
+        (jinfos.ji_st_addr^[ _i ].eop_out in
+        [ op_o_output, op_o_output_no_oflw, op_o_output_order ]))
+        )
+    THEN
+        BEGIN
+        IF  (jinfos.ji_act_join <> dmli.d_cntfromtab)
+        THEN
+            _l := a685evaluate_new_ecol_pos (dmli, jinfos,
+                  _l, jinfos.ji_st_addr^[ _i ].elen_var)
+        ELSE
+            _l := jinfos.ji_st_addr^[ _i ].epos;
+        (*ENDIF*) 
+        IF  ((_j >= acv.a_mblock.mb_qual^.mfirst_free)
+            (* we have INVISIBLE columns created *)
+            AND
+            (_last_tpos = _l)
+            AND
+            (_last_fpos = jinfos.ji_st_addr^[ _i ].ecol_pos)
+            AND
+            (NOT outer_join_activ))
+        THEN
+            (* sum up columns which lay one by one in <i-1.th temp result> *)
+            BEGIN
+            (* write new position in <i.th temp result> *)
+            jinfos.ji_st_addr^[ _i ].ecol_pos :=
+                  acv.a_mblock.mb_st^[ _j ].ecol_pos
+                  (* position from <i-1.th temp result> *)
+                  + acv.a_mblock.mb_st^[ _j ].elen_var;
+            acv.a_mblock.mb_st^[ _j ].elen_var :=
+                  acv.a_mblock.mb_st^[ _j ].elen_var +
+                  jinfos.ji_st_addr^[ _i ].elen_var;
+&           ifdef trace
+            t01sname( ak_join, 'sum up cols ' );
+&           endif
+            END
+        ELSE
+            BEGIN
+&           ifdef trace
+            t01name(ak_join, 'write INVISIBLE   ');
+&           endif
+            (* put INVISIBLE stack entry        *)
+            (* get columns from <i-x.th tab>    *)
+            SAPDB_PascalMove ('VAK685',   1,    
+                  (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+                  acv.a_mblock.mb_st_size,
+                  @jinfos.ji_st_addr^, (_i - 1) * STACK_ENTRY_MXGG00 + 1,
+                  @acv.a_mblock.mb_st^, _j * STACK_ENTRY_MXGG00 + 1,
+                  STACK_ENTRY_MXGG00 * 1,
+                  acv.a_returncode);
+            _j := succ(_j);
+            acv.a_mblock.mb_st^[ _j ].epos  :=
+                  (* save position from <i-1.th temp result>    *)
+                  (* info from ak684output_columns_stack()      *)
+                  acv.a_mblock.mb_st^[ _j ].ecol_pos;
+            (* write new position in <i.th temp result> *)
+&           ifdef trace
+            t01Int4(ak_join, 'mark on i.th mbloc', _j);
+&           endif
+            (* set new position in <i.th temp result> *)
+            a685set_output_join (acv.a_mblock.mb_st^[ _j ], _l);
+            (* save new position in <i.th temp result> *)
+            jinfos.ji_st_addr^[ _i ].ecol_pos  := _l;
+            acv.a_mblock.mb_st^[ _j ].eop      := op_none;
+            END;
+        (*ENDIF*) 
+        ;
+        _last_fpos := acv.a_mblock.mb_st^[ _j ].epos
+              (* pos on <i-1.th temp result>*)
+              + acv.a_mblock.mb_st^[ _j ].elen_var;
+        _last_tpos := jinfos.ji_st_addr^[ _i ].ecol_pos
+              (* pos on <i-1.th temp result>*)
+              + jinfos.ji_st_addr^[ _i ].elen_var;
+        ;
+        IF  (jinfos.ji_act_join = dmli.d_cntfromtab)
+        THEN
+            IF  (jinfos.ji_nxtjinfo.nj_r_len <
+                (acv.a_mblock.mb_st^[ _j ].ecol_pos +
+                acv.a_mblock.mb_st^[ _j ].elen_var))
+            THEN
+                jinfos.ji_nxtjinfo.nj_r_len := acv.a_mblock.mb_st^[ _j ].ecol_pos +
+                      acv.a_mblock.mb_st^[ _j ].elen_var - 1;
+&           ifdef trace
+            (*ENDIF*) 
+        (*ENDIF*) 
+        _shifted := true;
+&       endif
+        END;
+    (*ENDIF*) 
+    _i := succ(_i);
+    END;
+(*ENDWHILE*) 
+acv.a_mblock.mb_qual^.mfirst_free := succ(_j);
+&ifdef trace
+IF  (_shifted)
+THEN
+    BEGIN
+    t01stackdesc (ak_join, 'orig mblock ', jinfos.ji_st_addr, jinfos.ji_stack_desc);
+    t01stackdesc (ak_join, 'i.th mblock ', acv.a_mblock.mb_st,
+          acv.a_mblock.mb_qual^.mstack_desc);
+    END
+ELSE
+    t01name(ak_join, 'nothing to shift  ');
+(*ENDIF*) 
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a685evaluate_new_ecol_pos (
+            VAR dmli      : tak_dml_info;
+            VAR jinfos    : tak68_joininfos;
+            curr_st_entry : tsp00_Int2;
+            len_var       : tsp00_Int4) : tsp00_Int4;
+ 
+VAR
+      _i, _j, _k     : tsp00_Int2;
+      _l             : tsp00_Int4;
+      _new_ecol_pos  : tsp00_Int4;
+      _found         : boolean;
+      (* *** C.N. copied from vak680 24.10.95 *** *)
+      _cc93_comp_int: tsp00_Int4; (* cc from 1993 otherwise produces *)
+      (*                         wrong code *)
+ 
+BEGIN
+(* precondition ji_act_join < dmli.d_cntfromtab !! *)
+(* evaluate position in <i.th temp result> record *)
+&ifdef TRACE
+t01int4 (ak_join, 'len_var     ', len_var);
+t01int4 (ak_join, 'r_len       ', jinfos.ji_nxtjinfo.nj_r_len);
+t01int4 (ak_join, 'nk_len      ', jinfos.ji_nxtjinfo.nj_nk_len);
+t01int4 (ak_join, 'nxt_klen_fil', jinfos.ji_nxtjinfo.nj_nxt_klen_filled);
+t01name(ak_join, 'orig. stackentry :');
+t01stackentry (ak_join, jinfos.ji_st_addr^[ curr_st_entry ], curr_st_entry);
+&endif
+_l := 1;
+_found  := false;
+IF  (len_var < jinfos.ji_nxtjinfo.nj_nk_len)
+THEN
+    BEGIN
+    _i := 0;
+    WHILE ((NOT _found) AND (_l < jinfos.ji_nxtjinfo.nj_nk_len) AND
+          (_i < dmli.d_joins.jrc_cnt)) DO
+        (* loop over dmli.d_joins.jrc_joinarr^ *)
+        BEGIN
+        FOR _j := 1 TO 2 DO
+            BEGIN
+            IF  dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].jop_tableno =
+                jinfos.ji_nxtjinfo.nj_nxttabno
+            THEN
+                (* <i+1.th tab> found *)
+                BEGIN
+                CASE _j OF
+                    1 :
+                        _k := 2;
+                    2 :
+                        _k := 1;
+                    END;
+                (*ENDCASE*) 
+                IF  (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                    jop_tableno in jinfos.ji_nxtjinfo.nj_left_side)
+                    (* columns already in <i-1.th temp result> *)
+                    (* <i+1.th tab> = <i-x.th tab> *)
+                    OR
+                    (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                    jop_tableno = jinfos.ji_acttabno)
+                    (* <i+1.th tab> = <i.th tab> *)
+                    OR
+                    (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                    jop_tableno = cak68_join_value)
+                    (* <i+1.tab> = <value> *)
+                THEN
+                    BEGIN
+&                   ifdef trace
+                    t01name(ak_join, 'compare with:     ');
+                    t01stackentry (ak_join, jinfos.ji_st_addr^[ dmli.d_joins.
+                          jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ],
+                          dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                          jop_startstack);
+&                   endif
+                    _cc93_comp_int := ord (jinfos.ji_st_addr^
+                          [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                          jop_startstack ].ecol_tab[ 2 ]);
+                    (* is opposite part given stack entry ? *)
+                    IF  (jinfos.ji_st_addr^[ dmli.d_joins.
+                        jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ].
+                        eop <> op_join_key)(* PTS 1122746 *)
+                        AND
+                        (_cc93_comp_int =
+                        ord (jinfos.ji_st_addr^[ curr_st_entry ].
+                        ecol_tab[ 2 ]))
+                        AND
+                        ((jinfos.ji_st_addr^[ dmli.d_joins.
+                        jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ].
+                        etype =
+                        jinfos.ji_st_addr^[ curr_st_entry ].
+                        etype)
+                        AND
+                        (jinfos.ji_st_addr^[ dmli.d_joins.
+                        jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ].
+                        epos =
+                        jinfos.ji_st_addr^[ curr_st_entry ].
+                        epos)
+                        AND
+                        (jinfos.ji_st_addr^[ dmli.d_joins.
+                        jrc_joinarr^[ _i ].jo_recs[ _k ].jop_startstack ].
+                        elen_var =
+                        jinfos.ji_st_addr^[ curr_st_entry ].
+                        elen_var)
+                        AND
+                        (len_var = dmli.d_joins.jrc_joinarr^[ _i ].
+                        jo_recs[ _k ].jop_inoutlen)
+                        AND
+                        ak685_first_use (jinfos, curr_st_entry))
+                    THEN
+                        BEGIN
+                        _new_ecol_pos := cgg_rec_key_offset + _l;
+                        jinfos.ji_nxtjinfo.nj_nxt_klen_filled :=
+                              jinfos.ji_nxtjinfo.nj_nxt_klen_filled +
+                              dmli.d_joins.jrc_joinarr^[ _i ].
+                              jo_recs[ _k ].jop_inoutlen;
+                        (* jrc_joinarr^ sorted according to join transitions *)
+                        (* i.e. _l contains all columns belonging to same join*)
+                        (* transition which are located before this colunm  *)
+                        _found := true;
+                        END
+                    ELSE
+                        (* <i+1.th tab> = <i-x.th tab>          *)
+                        (* <i+1.th tab> = <i.th tab>            *)
+                        (* <i+1.tab>    = <value>               *)
+                        (* found another column of these classes*)
+                        (* calculate next key length            *)
+                        _l := _l + dmli.d_joins.jrc_joinarr^[ _i ].
+                              jo_recs[ _k ].jop_inoutlen;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDFOR*) 
+        _i := succ(_i);
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  NOT _found
+THEN
+    BEGIN
+    (* append new column to record for later usage *)
+    _new_ecol_pos := succ (jinfos.ji_nxtjinfo.nj_r_len);
+    jinfos.ji_nxtjinfo.nj_r_len := jinfos.ji_nxtjinfo.nj_r_len + len_var;
+&   ifdef TRACE
+    t01int4 (ak_join, 'r_len       ', jinfos.ji_nxtjinfo.nj_r_len);
+&   endif
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01Int4 (ak_join, 'pos i.th result   ', _new_ecol_pos);
+t01int4 (ak_join, 'nxt_klen_fil', jinfos.ji_nxtjinfo.nj_nxt_klen_filled);
+&endif
+a685evaluate_new_ecol_pos := _new_ecol_pos;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685next_key_length (
+            VAR dmli   : tak_dml_info;
+            VAR jinfos : tak68_joininfos);
+ 
+VAR
+      _i : tsp00_Int2;
+      _j : tsp00_Int2;
+      _k : tsp00_Int2;
+ 
+BEGIN
+(* precondition ji_act_join < dmli.d_cntfromtab *)
+jinfos.ji_nxtjinfo.nj_nk_len := RESCNT_MXGG04;
+&ifdef TRACE
+t01p2int4 (ak_join, 'JOIN STEP   ', jinfos.ji_act_join,
+      'i.th tab    ', jinfos.ji_acttabno);
+t01int4 (ak_join, 'i+1. th tab ', jinfos.ji_nxtjinfo.nj_nxttabno);
+&endif
+FOR _i := 0 TO (dmli.d_joins.jrc_cnt - 1) DO
+    BEGIN
+    FOR _j := 1 TO 2 DO
+        (* look on left and right side of an join *)
+        BEGIN
+        IF  dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _j ].
+            jop_tableno = jinfos.ji_nxtjinfo.nj_nxttabno
+        THEN
+            (* <i+1.tab> = <???> found *)
+            BEGIN
+&           ifdef trace
+            a683_one_join_entry( ak_join, dmli.d_joins, _i, false );
+&           endif
+            CASE _j OF
+                1 :
+                    _k := 2;
+                2 :
+                    _k := 1;
+                END;
+            (*ENDCASE*) 
+            IF  (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                jop_tableno in (jinfos.ji_nxtjinfo.nj_left_side))
+                (* corresponding table already processed *)
+                (* <i+1.th tab> = <i-x.th tab> *)
+                OR
+                ((dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                jop_tableno = jinfos.ji_acttabno)
+                (* <i+1.th tab> = <i.th tab> *)
+                OR
+                (dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                jop_tableno = cak68_join_value)  )
+                (* <i+1.th tab> = <value> *)
+            THEN
+                BEGIN
+                jinfos.ji_nxtjinfo.nj_nk_len :=
+                      jinfos.ji_nxtjinfo.nj_nk_len +
+                      dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                      jop_inoutlen;
+&               ifdef TRACE
+                t01stackentry (ak_join, jinfos.ji_st_addr^
+                      [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ _k ].
+                      jop_startstack ], dmli.d_joins.jrc_joinarr^[ _i ].
+                      jo_recs[ _k ].jop_startstack);
+&               endif
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDFOR*) 
+    END;
+(*ENDFOR*) 
+&ifdef trace
+t01p2int4 (ak_join, 'ji_outpos   ', jinfos.ji_outpos,
+      'ji_keylen   ', jinfos.ji_keylen);
+t01p2int4 (ak_join, 'nj_nk_len   ', jinfos.ji_nxtjinfo.nj_nk_len,
+      'nj_r_len    ', jinfos.ji_nxtjinfo.nj_r_len);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685olast_order_fields (
+            VAR jinfos      : tak68_joininfos;
+            VAR colcopy_inf : tgg07_JoinColCopyInfo);
+ 
+VAR
+      _stops : tsp00_Int2;
+      _i     : tsp00_Int2;
+ 
+BEGIN
+(* search through output columns with 'packed' columns *)
+_i := jinfos.ji_stack_desc.mqual_pos;
+IF  jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].etype = st_jump_output
+THEN
+    _stops := jinfos.ji_stack_desc.mqual_pos +
+          jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].epos - 2
+ELSE
+    _stops := _i + 2; (* avoid looping *)
+(*ENDIF*) 
+WHILE _i <= _stops DO
+    (* loop over original output stack *)
+    BEGIN
+    (* step to order column, this column describes  *)
+    (* key (sorting from ORDER BY) column of result *)
+    (* overstep op_o_output_hold columns, which     *)
+    (* describe columns also in select list         *)
+    WHILE ((_i <= _stops)
+          AND
+          (
+          (NOT (jinfos.ji_st_addr^[ _i ].etype in
+          [ st_output, st_output_join ]))
+          OR
+          (NOT (jinfos.ji_st_addr^[ _i ].eop_out
+          in [ op_o_output, op_o_output_order,
+          op_o_output_no_oflw, op_o_output_oflw ]))
+          OR
+          ((jinfos.ji_st_addr^[ _i ].eop_out = op_o_output_oflw) AND
+          (NOT (jinfos.ji_st_addr^[ _i - 1 ].etype in
+          [ st_output, st_output_join ])))
+          )
+          ) DO
+        _i := succ(_i);
+    (*ENDWHILE*) 
+    IF  (_i <= _stops)
+    THEN
+        (* real entry found *)
+        BEGIN
+        colcopy_inf.n_j_cnt := succ(colcopy_inf.n_j_cnt);
+        IF  ((jinfos.ji_st_addr^[ _i ].ecol_pos = 0)
+            OR
+            (jinfos.ji_st_addr^[ _i ].etype = st_output))
+        THEN
+            BEGIN
+&           ifdef trace
+            t01name(ak_join, 'ecol=0 OR st_outpu');
+&           endif
+            (* thus jfrom = jto --> storno ??? *)
+            jinfos.ji_st_addr^[ _i ].ecol_pos :=
+                  jinfos.ji_st_addr^[ _i ].epos;
+            END;
+        (*ENDIF*) 
+        IF  ((jinfos.ji_st_addr^[ _i ].eop_out = op_o_output_order)
+            AND
+            (jinfos.ji_st_addr^[ _i - 1 ].etype in [ st_output, st_output_join ]))
+        THEN
+            (* descending order *)
+            colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jfrom :=
+                  (* pos in i.th result, markt by ak684output_columns_stack() *)
+                  -jinfos.ji_st_addr^[ _i ].ecol_pos
+        ELSE
+            colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jfrom :=
+                  (* pos in i.th result, markt by ak684output_columns_stack() *)
+                  jinfos.ji_st_addr^[ _i ].ecol_pos;
+        (*ENDIF*) 
+        colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jto  := jinfos.ji_st_addr^[ _i ].epos;
+        colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jlen := jinfos.ji_st_addr^[ _i ].elen_var;
+&       ifdef TRACE
+        t01int4 (ak_join, 'last_o njcnt', colcopy_inf.n_j_cnt);
+        t01p2int4 (ak_join, 'last_o jfrom', colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jfrom,
+              'last_o jlen ', colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jlen);
+        t01int4 (ak_join, 'last_o jto  ', colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jto);
+&       endif
+        IF  (colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jfrom =
+            abs(colcopy_inf.n_j_arr[ colcopy_inf.n_j_cnt ].jto))
+        THEN
+            BEGIN
+&           ifdef trace
+            t01sname( ak_join, 'cancel entry' );
+&           endif
+            colcopy_inf.n_j_cnt := pred (colcopy_inf.n_j_cnt);
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    _i := succ(_i)
+    END
+(*ENDWHILE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685pack_record (
+            VAR acv         : tak_all_command_glob;
+            jcolpos_in_new  : tsp00_Int2;
+            VAR dmli        : tak_dml_info;
+            VAR jinfos      : tak68_joininfos;
+            jcolpos_in_orig : tsp00_Int2 (* output column *));
+ 
+VAR
+      _j      : tsp00_Int2;
+      _starts : tsp00_Int2;
+&     ifdef trace
+      _i      : integer;
+&     endif
+ 
+BEGIN
+(* column is join column and output column              *)
+(* mark columns in original mblock with st_output_join  *)
+(* hide columns from ak684output_columns_stack()        *)
+(**)
+(* optimize write performace and avoid double writing   *)
+(* of join and output column                            *)
+&ifdef TRACE
+t01Int4 (ak_join, 'pos in new mblock ', jcolpos_in_new);
+t01stackentry (ak_join, acv.a_mblock.mb_st^[ jcolpos_in_new ], jcolpos_in_new);
+t01Int4 (ak_join, 'pos in orig mblock', jcolpos_in_orig);
+t01stackentry (ak_join, jinfos.ji_st_addr^[ jcolpos_in_orig ], jcolpos_in_orig);
+&endif
+_starts := jinfos.ji_stack_desc.mmult_pos + 1;
+_j      := 1;
+IF  ((jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].etype in
+    [ st_output, st_output_join ])
+    AND
+    ((jinfos.ji_stack_desc.mfirst_free + _j + 1) <=
+    jinfos.ji_stack_desc.mst_max))
+THEN
+    BEGIN
+    IF  ((jinfos.ji_act_join > 1) OR
+        NOT ( jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].eop_out =
+        op_o_output_order))
+    THEN
+        acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].eop :=
+              jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].eop;
+    (*ENDIF*) 
+    IF  acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].etype in
+        [ st_output, st_output_join ]
+    THEN
+        BEGIN
+        IF  (jinfos.ji_act_join = 1)
+        THEN
+            BEGIN
+&           ifdef trace
+            t01Int4(ak_join, 'mark on orig mbloc', jcolpos_in_orig + _j);
+&           endif
+            a685set_output_join (jinfos.ji_st_addr^[ jcolpos_in_orig + _j ],
+                  acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].epos);
+            END
+        ELSE
+            BEGIN
+            IF  (jinfos.ji_act_join <> dmli.d_cntfromtab)
+            THEN
+                BEGIN
+                (* other join steps *)
+                IF  (NOT (jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].eop_out in
+                    [ op_o_output_order, op_o_output ]))
+                THEN
+                    BEGIN
+&                   ifdef trace
+                    t01Int4(ak_join, 'mark on orig mbloc', jcolpos_in_orig + _j);
+&                   endif
+                    a685set_output_join (jinfos.ji_st_addr^[ jcolpos_in_orig + _j ],
+                          a685evaluate_new_ecol_pos (dmli, jinfos,
+                          jcolpos_in_orig,
+                          jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].elen_var));
+&                   ifdef trace
+                    t01Int4(ak_join, 'mark on i.th mbloc', jcolpos_in_new + _j);
+&                   endif
+                    a685set_output_join (acv.a_mblock.mb_st^[ jcolpos_in_new + _j ],
+                          jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].ecol_pos);
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                (* last join step *)
+                BEGIN
+&               ifdef trace
+                t01Int4(ak_join, 'mark on orig mbloc', jcolpos_in_orig + _j);
+&               endif
+                a685set_output_join (jinfos.ji_st_addr^[ jcolpos_in_orig + _j ],
+                      acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].epos);
+&               ifdef trace
+                t01Int4(ak_join, 'mark on i.th mbloc', jcolpos_in_new + _j);
+&               endif
+                a685set_output_join (acv.a_mblock.mb_st^[ jcolpos_in_new + _j ],
+                      jinfos.ji_st_addr^[ jcolpos_in_orig + _j ].epos);
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (jinfos.ji_act_join = dmli.d_cntfromtab)
+    THEN
+        BEGIN
+        IF  (jinfos.ji_nxtjinfo.nj_r_len <
+            (acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].ecol_pos +
+            acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].elen_var))
+        THEN
+            jinfos.ji_nxtjinfo.nj_r_len :=
+                  acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].ecol_pos +
+                  acv.a_mblock.mb_st^[ jcolpos_in_new + _j ].elen_var - 1;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    ;
+    (* move output column on top of output columns                            *)
+    (* 1 .reserve space for j + 1 stack entries on start of output stack entries *)
+    SAPDB_PascalOverlappingMove ('VAK685',   2,    
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          @jinfos.ji_st_addr^, (_starts - 1) * STACK_ENTRY_MXGG00 + 1,
+          @jinfos.ji_st_addr^, ((_starts - 1) + _j + 1) * STACK_ENTRY_MXGG00 + 1,
+          (jinfos.ji_stack_desc.mfirst_free - _starts + 1) * STACK_ENTRY_MXGG00,
+          acv.a_returncode);
+    (* 2. copy j + 1 stack entries on start of output stack entries *)
+&   ifdef trace
+    t01name(ak_join, 'inserted 2 stacks ');
+    t01name(ak_join, 'on top            ');
+    t01p2int4 (ak_join, 'move from   ', jcolpos_in_orig + _j + 1,
+          'move cnt    ', _j + 1 );
+    t01int4 (ak_join, 'move to     ', _starts );
+    FOR _i := jcolpos_in_orig + _j + 1 TO _starts DO
+        BEGIN
+        t01stackentry (ak_join, jinfos.ji_st_addr^[ _i ], _i);
+        END;
+    (*ENDFOR*) 
+&   endif
+    SAPDB_PascalMove ('VAK685',   3,    
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          @jinfos.ji_st_addr^, (jcolpos_in_orig + _j) * STACK_ENTRY_MXGG00 + 1,
+          @jinfos.ji_st_addr^, (_starts - 1) * STACK_ENTRY_MXGG00 + 1,
+          (_j + 1) * STACK_ENTRY_MXGG00,
+          acv.a_returncode);
+&   ifdef trace
+    t01p2int4 (ak_join, 'move from   ', jcolpos_in_orig + 2 * _j,
+          'move cnt    ',
+          (jinfos.ji_stack_desc.mfirst_free - _j - jcolpos_in_orig - 1));
+    t01int4 (ak_join, 'move to     ', jcolpos_in_orig + _j - 1 );
+    FOR _i := jcolpos_in_orig + 2 * _j TO jcolpos_in_orig + _j - 1 DO
+        BEGIN
+        t01stackentry (ak_join, jinfos.ji_st_addr^[ _i ], _i);
+        END;
+    (*ENDFOR*) 
+&   endif
+    (* 3. push following stack entries together *)
+    SAPDB_PascalOverlappingMove ('VAK685',   4,    
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          (jinfos.ji_stack_desc.mst_max * STACK_ENTRY_MXGG00),
+          @jinfos.ji_st_addr^,
+          (jcolpos_in_orig + (2 * _j) + 1) * STACK_ENTRY_MXGG00 + 1,
+          @jinfos.ji_st_addr^,
+          (jcolpos_in_orig + _j) * STACK_ENTRY_MXGG00 + 1,
+          (jinfos.ji_stack_desc.mfirst_free - _j - jcolpos_in_orig - 1) * STACK_ENTRY_MXGG00,
+          (*same as (jinfos.ji_stack_desc.mfirst_free-(_j+1)+1-(jcolpos_in_orig+1))*STACK_ENTRY_MXGG00*)
+          acv.a_returncode);
+    jinfos.ji_stack_desc.mmult_pos := _starts + _j;
+    END
+ELSE
+    BEGIN
+    IF  a685stentry_found_in_outplist (jinfos, jcolpos_in_orig,
+        acv.a_mblock.mb_st^[ jcolpos_in_new ])
+    THEN
+        a685pack_record (acv, jcolpos_in_new, dmli, jinfos, jcolpos_in_orig);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&ifdef TRACE
+t01stackdesc (ak_join, 'ji_stack_des', jinfos.ji_st_addr, jinfos.ji_stack_desc);
+t01stackdesc (ak_join, 'i.th mblock ', acv.a_mblock.mb_st,
+      acv.a_mblock.mb_qual^.mstack_desc);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685set_output_join (
+            VAR st : tgg00_StackEntry;
+            outpos : tsp00_Int4);
+ 
+BEGIN
+(* these colunms will be processed by  *)
+(* a685output_columns_shift()          *)
+st.etype := st_output_join;
+IF  outpos > 0
+THEN
+    (* set position in <i.th temp result> record*)
+    st.ecol_pos := outpos;
+&ifdef trace
+(*ENDIF*) 
+t01Int4 (ak_join, 'pos on i.th result', outpos);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a685stentry_found_in_outplist (
+            VAR jinfos      : tak68_joininfos;
+            VAR pos_in_orig : tsp00_Int2;
+            VAR st_en       : tgg00_StackEntry) : boolean;
+ 
+VAR
+      _starts : tsp00_Int2;
+      _stops  : tsp00_Int2;
+      _i      : tsp00_Int2;
+      _found  : boolean;
+      _b_err  : tgg00_BasisError;
+      _cc93_comp_int : tsp00_Int4;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_join, 'pos_in_orig ', pos_in_orig );
+&endif
+IF  (pos_in_orig = 0)
+THEN
+    (* search through output columns without 'packed' columns *)
+    _starts := jinfos.ji_stack_desc.mmult_pos
+ELSE
+    _starts := pos_in_orig;
+(*ENDIF*) 
+IF  jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].etype = st_jump_output
+THEN
+    _stops := jinfos.ji_stack_desc.mqual_pos +
+          jinfos.ji_st_addr^[ jinfos.ji_stack_desc.mqual_pos ].epos - 2
+ELSE
+    (* avoid looping *)
+    _stops := _starts;
+(*ENDIF*) 
+pos_in_orig := 0;
+_starts := succ (_starts);
+_b_err  := e_ok;
+_found  := false;
+_i      := _starts;
+&ifdef trace
+t01sname( ak_join, 'look for   :' );
+t01stackentry (ak_join, st_en, 1);
+t01name( ak_join, 'from i.th mblock  ' );
+&endif
+_cc93_comp_int := (ord(st_en.ecol_tab[ 2 ]) MOD 100);
+WHILE ((_i <= _stops) AND NOT _found) DO
+    BEGIN
+    (* step to join column and look if it's an output column *)
+    WHILE ((_i <= _stops)
+          AND
+          (NOT (
+          (_cc93_comp_int =
+          (ord(jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ]) MOD 100))
+          AND
+          (st_en.etype         = jinfos.ji_st_addr^[ _i ].etype)
+          AND
+          (st_en.eop           = jinfos.ji_st_addr^[ _i ].eop)
+          AND
+          (st_en.epos          = jinfos.ji_st_addr^[ _i ].epos)
+          AND
+          (st_en.elen_var      = jinfos.ji_st_addr^[ _i ].elen_var)
+          AND
+          (jinfos.ji_st_addr^[ _i + 1 ].etype = st_output)))) DO
+        _i := succ(_i);
+    (*ENDWHILE*) 
+    IF  (_i < _stops)
+    THEN
+        BEGIN
+&       ifdef trace
+        t01name( ak_join, 'join out found    ' );
+        t01int4( ak_join, '_i          ', _i);
+        t01int4( ak_join, '_stops      ', _stops);
+        t01int4( ak_join, 'st_en.ecol_t', (ord(st_en.ecol_tab[ 2 ]) MOD 100));
+        t01int4( ak_join, 'ji_st.ecol_t', (ord(jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ]) MOD 100));
+&       endif
+        IF  NOT (jinfos.ji_st_addr^[ _i + 1 ].eop_out in
+            [ op_o_output_hold, op_o_output, op_o_output_order])
+        THEN
+            BEGIN
+&           ifdef trace
+            t01sname( ak_join, 'same col fou' );
+            t01stackentry (ak_join, jinfos.ji_st_addr^[ _i ], _i );
+            t01stackentry (ak_join, jinfos.ji_st_addr^[ _i + 1 ], _i + 1);
+&           endif
+            _found      := true;
+            pos_in_orig := _i;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    _i := succ(_i);
+    END;
+(*ENDWHILE*) 
+a685stentry_found_in_outplist := _found;
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak685_first_use (
+            VAR jinfos    : tak68_joininfos;
+            curr_st_entry : integer) : boolean;
+ 
+VAR
+      _first_use     : boolean;
+      _i             : tsp00_Int2;
+      (* *** C.N. copied form vak680 24.10.95 *** *)
+      _cc93_comp_int: tsp00_Int4; (* cc from 1993 otherwise produces *)
+      (*                         wrong code *)
+ 
+BEGIN
+_first_use     := true;
+IF  jinfos.ji_st_addr^[ curr_st_entry ].etype <> st_value
+THEN
+    BEGIN
+    (* search through output columns with 'packed' columns *)
+    _i := succ (jinfos.ji_stack_desc.mqual_pos);
+    WHILE (_i < curr_st_entry) DO
+        BEGIN
+        _cc93_comp_int :=
+              ord (jinfos.ji_st_addr^[ _i ].ecol_tab[ 2 ]);
+        IF  
+            (_cc93_comp_int =
+            ord (jinfos.ji_st_addr^[ curr_st_entry ].ecol_tab[ 2 ]))
+            AND
+            (jinfos.ji_st_addr^[ _i ].etype =
+            jinfos.ji_st_addr^[ curr_st_entry ].etype)
+            AND
+            (jinfos.ji_st_addr^[ _i ].epos  =
+            jinfos.ji_st_addr^[ curr_st_entry ].epos)
+            AND
+            (jinfos.ji_st_addr^[ _i ].elen_var =
+            jinfos.ji_st_addr^[ curr_st_entry ].elen_var)
+        THEN
+            (* stackentry in output found *)
+            BEGIN
+            _first_use := NOT (jinfos.ji_st_addr^[ _i + 1 ].etype = st_output_join );
+            IF  NOT _first_use
+            THEN
+                (* *** exit while *** *)
+                _i := curr_st_entry;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        _i := succ(_i);
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+;
+&ifdef TRACE
+t01bool (ak_join, 'first use   ', _first_use);
+&endif
+ak685_first_use := _first_use;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685init_eq_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR eq_rec : tak68_eq_record );
+ 
+CONST
+      c_initial_chunksize = 32;
+ 
+VAR
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_eq_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef diagnose
+eq_rec.eqr_capacity := 1;
+&else
+eq_rec.eqr_capacity := c_initial_chunksize;
+&endif
+eq_rec.eqr_arr := NIL;
+eq_rec.eqr_cnt := 0;
+_cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+      eq_rec.eqr_capacity * sizeof(tak68_eqfield) );
+eq_rec.eqr_arr := _cast.ptr;
+&ifdef trace
+t01int4( ak_join, 'eq_rec capac', eq_rec.eqr_capacity );
+t01int4( ak_join, 'eq_rec size ', eq_rec.eqr_capacity * sizeof(tak68_eqfield) );
+t01addr( ak_join, 'eq_arr      ', _cast.addr );
+&endif
+IF  ( eq_rec.eqr_arr = NIL )
+THEN
+    a07_b_put_error( acv, e_no_more_memory, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685expand_eq_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR eq_rec : tak68_eq_record );
+ 
+CONST
+      c_chunksize = 32;
+ 
+VAR
+      _old_capacity : tsp00_Int2;
+      _do_realloc   : boolean;
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_eq_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01name( ak_join, 'expand eq_rec     ' );
+&endif
+_old_capacity := eq_rec.eqr_capacity;
+_do_realloc   := true;
+&ifdef diagnose
+IF  ( eq_rec.eqr_capacity < cak68_max_eqarr_elems )
+THEN
+    eq_rec.eqr_capacity := eq_rec.eqr_capacity + 1
+ELSE
+    _do_realloc := false;
+(*ENDIF*) 
+&else
+IF  ( eq_rec.eqr_capacity * 2 <= cak68_max_eqarr_elems )
+THEN
+    eq_rec.eqr_capacity := eq_rec.eqr_capacity * 2
+ELSE
+    BEGIN
+    IF  ( cak68_max_eqarr_elems - c_chunksize >= eq_rec.eqr_capacity )
+    THEN
+        eq_rec.eqr_capacity := eq_rec.eqr_capacity + c_chunksize
+    ELSE
+        BEGIN
+        IF  ( eq_rec.eqr_capacity = cak68_max_eqarr_elems )
+        THEN
+            _do_realloc := false
+        ELSE
+            eq_rec.eqr_capacity := cak68_max_eqarr_elems;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&endif
+IF  ( _do_realloc )
+THEN
+    BEGIN
+    _cast.ptr  := eq_rec.eqr_arr;
+&   ifdef trace
+    t01int4( ak_join, 'old capacity', _old_capacity );
+    t01int4( ak_join, 'new capacity', eq_rec.eqr_capacity );
+    t01addr( ak_join, 'old ptr     ', _cast.addr );
+&   endif
+    _cast.addr := gg941ReAllocate( acv.a_transinf.tri_trans,
+          eq_rec.eqr_capacity * sizeof(tak68_eqfield), _cast.addr );
+    eq_rec.eqr_arr := _cast.ptr;
+&   ifdef trace
+    t01addr( ak_join, 'new ptr     ', _cast.addr );
+&   endif
+    IF  ( eq_rec.eqr_arr = NIL )
+    THEN
+        BEGIN
+        eq_rec.eqr_capacity := _old_capacity;
+        a07_b_put_error( acv, e_no_more_memory, 1 );
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685expand_eq_rec_ex(
+            VAR acv      : tak_all_command_glob;
+            VAR eq_rec   : tak68_eq_record;
+            new_capacity : tsp00_Int4);
+ 
+VAR
+      _old_capacity : tsp00_Int2;
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_eq_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01name( ak_join, 'expand eq_rec ex  ' );
+&endif
+IF  ( new_capacity > cak68_max_eqarr_elems )
+THEN
+    a07_b_put_error( acv, e_too_many_joins, 1 )
+ELSE
+    BEGIN
+    _old_capacity := eq_rec.eqr_capacity;
+    eq_rec.eqr_capacity := new_capacity;
+    _cast.ptr           := eq_rec.eqr_arr;
+&   ifdef trace
+    t01int4( ak_join, 'old capacity', _old_capacity );
+    t01int4( ak_join, 'new capacity', new_capacity );
+    t01addr( ak_join, 'old ptr     ', _cast.addr );
+&   endif
+    _cast.addr := gg941ReAllocate( acv.a_transinf.tri_trans,
+          eq_rec.eqr_capacity * sizeof(tak68_eqfield), _cast.addr );
+    eq_rec.eqr_arr := _cast.ptr;
+&   ifdef trace
+    t01addr( ak_join, 'new ptr     ', _cast.addr );
+&   endif
+    IF  ( eq_rec.eqr_arr = NIL )
+    THEN
+        BEGIN
+        eq_rec.eqr_capacity := _old_capacity;
+        a07_b_put_error( acv, e_no_more_memory, 1 );
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685finalize_eq_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR eq_rec : tak68_eq_record );
+ 
+VAR
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_eq_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+IF  ( eq_rec.eqr_arr <> NIL )
+THEN
+    BEGIN
+    _cast.ptr := eq_rec.eqr_arr;
+&   ifdef trace
+    t01addr( ak_join, 'eq_rec ptr 1', _cast.addr );
+&   endif
+    gg941Deallocate( acv.a_transinf.tri_trans, _cast.addr );
+    eq_rec.eqr_arr := NIL;
+    END;
+(*ENDIF*) 
+eq_rec.eqr_cnt      := 0;
+eq_rec.eqr_capacity := 0;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak685init_joinarr(
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info);
+ 
+CONST
+      c_initial_chunksize = 32;
+ 
+VAR
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak_joinarr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef diagnose
+dmli.d_joins.jrc_capacity := 1;
+&else
+dmli.d_joins.jrc_capacity := c_initial_chunksize;
+&endif
+_cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+      dmli.d_joins.jrc_capacity * sizeof(tak_one_join) );
+dmli.d_joins.jrc_joinarr  := _cast.ptr;
+&ifdef trace
+t01int4( ak_join, 'join capac  ', dmli.d_joins.jrc_capacity );
+t01int4( ak_join, 'joinarr size', dmli.d_joins.jrc_capacity * sizeof(tak_one_join) );
+t01addr( ak_join, 'jrc_joinarr ', _cast.addr );
+&endif
+IF  ( dmli.d_joins.jrc_joinarr <> NIL )
+THEN
+    BEGIN
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_op                       := op_none;
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_no_join                  := false;
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 1 ].jop_tableno    := 0;
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 2 ].jop_tableno    := 0;
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 1 ].jop_outer_join := false;
+    dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 2 ].jop_outer_join := false;
+    END
+ELSE
+    BEGIN
+    a07_b_put_error( acv, e_no_more_memory, 1 );
+    dmli.d_joins.jrc_capacity := 0;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685init_joinarr(
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info);
+ 
+BEGIN
+dmli.d_joins.jrc_capacity := 1;
+dmli.d_joins.jrc_cnt      := 0;
+dmli.d_joins.jrc_filler   := '   ';
+dmli.d_joins.jrc_col_upd  := false;
+dmli.d_joins.jrc_joinarr  := @dmli.d_jrc_initial_arr;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_op                       := op_none;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_no_join                  := false;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 1 ].jop_tableno    := 0;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 2 ].jop_tableno    := 0;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 1 ].jop_outer_join := false;
+dmli.d_joins.jrc_joinarr^[ 0 ].jo_recs[ 2 ].jop_outer_join := false;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685expand_joinarr(
+            VAR acv    : tak_all_command_glob;
+            VAR dmli   : tak_dml_info);
+ 
+CONST
+      c_chunksize = 32;
+ 
+VAR
+      _old_capacity : integer;
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak_joinarr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01name( ak_join, 'expand joinarr    ' );
+&endif
+_old_capacity := dmli.d_joins.jrc_capacity;
+&ifdef diagnose
+IF  ( dmli.d_joins.jrc_capacity < MAX_JOINARR_ELEMS_AK00 )
+THEN
+    dmli.d_joins.jrc_capacity := dmli.d_joins.jrc_capacity + 1
+ELSE
+    a07_b_put_error( acv, e_too_many_joins, 1 );
+(*ENDIF*) 
+&else
+IF  ( MAX_JOINARR_ELEMS_AK00 DIV 4 <= dmli.d_joins.jrc_capacity )
+THEN
+    dmli.d_joins.jrc_capacity := dmli.d_joins.jrc_capacity * 2
+ELSE
+    BEGIN
+    IF  ( MAX_JOINARR_ELEMS_AK00 - c_chunksize >= dmli.d_joins.jrc_capacity )
+    THEN
+        dmli.d_joins.jrc_capacity := dmli.d_joins.jrc_capacity + c_chunksize
+    ELSE
+        BEGIN
+        IF  ( dmli.d_joins.jrc_capacity = MAX_JOINARR_ELEMS_AK00 )
+        THEN
+            a07_b_put_error( acv, e_too_many_joins, 1 )
+        ELSE
+            dmli.d_joins.jrc_capacity := MAX_JOINARR_ELEMS_AK00;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&endif
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4 (ak_sem, 'old_capacity', _old_capacity);
+    t01int4 (ak_sem, 'new_capacity', dmli.d_joins.jrc_capacity);
+&   endif
+    IF  _old_capacity = 1
+    THEN
+        BEGIN
+        _cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+              dmli.d_joins.jrc_capacity * sizeof(tak_one_join) );
+        IF  _cast.ptr <> NIL
+        THEN
+            _cast.ptr^[0] := dmli.d_joins.jrc_joinarr^[0];
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        _cast.ptr  := dmli.d_joins.jrc_joinarr;
+        _cast.addr := gg941ReAllocate( acv.a_transinf.tri_trans,
+              dmli.d_joins.jrc_capacity * sizeof(tak_one_join), _cast.addr );
+        END;
+    (*ENDIF*) 
+    IF  ( _cast.ptr = NIL )
+    THEN
+        BEGIN
+        dmli.d_joins.jrc_capacity := _old_capacity;
+        a07_b_put_error( acv, e_no_more_memory, 1 );
+        END
+    ELSE
+        dmli.d_joins.jrc_joinarr := _cast.ptr;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685expand_joinarr_ex(
+            VAR acv      : tak_all_command_glob;
+            VAR dmli     : tak_dml_info;
+            new_capacity : tsp00_Int4);
+ 
+VAR
+      _old_capacity : tsp00_Int2;
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak_joinarr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01name( ak_join, 'expand joinarr ex ' );
+&endif
+IF  ( new_capacity > MAX_JOINARR_ELEMS_AK00 )
+THEN
+    a07_b_put_error( acv, e_too_many_joins, 1 )
+ELSE
+    IF  new_capacity > 1
+    THEN
+        BEGIN
+        _old_capacity := dmli.d_joins.jrc_capacity;
+        dmli.d_joins.jrc_capacity := new_capacity;
+        IF  _old_capacity = 1
+        THEN
+            BEGIN
+            _cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+                  dmli.d_joins.jrc_capacity * sizeof(tak_one_join) );
+            IF  _cast.ptr <> NIL
+            THEN
+                _cast.ptr^[0] := dmli.d_joins.jrc_joinarr^[0];
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            _cast.ptr  := dmli.d_joins.jrc_joinarr;
+            _cast.addr := gg941ReAllocate( acv.a_transinf.tri_trans,
+                  dmli.d_joins.jrc_capacity * sizeof(tak_one_join), _cast.addr );
+            END;
+        (*ENDIF*) 
+        IF  ( _cast.ptr = NIL )
+        THEN
+            BEGIN
+            dmli.d_joins.jrc_capacity := _old_capacity;
+            a07_b_put_error( acv, e_no_more_memory, 1 );
+            END
+        ELSE
+            dmli.d_joins.jrc_joinarr := _cast.ptr;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685init_multab_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR multab : tak68_mult_tabs );
+ 
+CONST
+      c_initial_chunksize = 32;
+ 
+VAR
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_mult_tab_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef diagnose
+multab.mt_capacity := 1;
+&else
+multab.mt_capacity := c_initial_chunksize;
+&endif
+multab.mt_arr := NIL;
+multab.mt_cnt := 0;
+_cast.addr := gg941Allocate( acv.a_transinf.tri_trans,
+      multab.mt_capacity * sizeof(tak68_mul_tab_rec) );
+multab.mt_arr := _cast.ptr;
+&ifdef trace
+t01int4( ak_join, 'multab capac', multab.mt_capacity );
+t01int4( ak_join, 'multab size ', multab.mt_capacity * sizeof(tak68_mul_tab_rec) );
+t01addr( ak_join, 'multab ptr  ', _cast.addr );
+&endif
+IF  ( multab.mt_arr = NIL )
+THEN
+    a07_b_put_error( acv, e_no_more_memory, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685finalize_multab_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR multab : tak68_mult_tabs );
+ 
+VAR
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_mult_tab_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+IF  ( multab.mt_arr <> NIL )
+THEN
+    BEGIN
+    _cast.ptr := multab.mt_arr;
+&   ifdef trace
+    t01addr( ak_join, 'multab ptr  ', _cast.addr );
+&   endif
+    gg941Deallocate( acv.a_transinf.tri_trans, _cast.addr );
+    END;
+(*ENDIF*) 
+multab.mt_arr      := NIL;
+multab.mt_cnt      := 0;
+multab.mt_capacity := 0;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a685expand_multab_rec(
+            VAR acv    : tak_all_command_glob;
+            VAR multab : tak68_mult_tabs );
+ 
+CONST
+      c_chunksize = 32;
+ 
+VAR
+      _old_capacity : tsp00_Int2;
+      _do_realloc   : boolean;
+ 
+      _cast         : RECORD
+            CASE boolean OF
+                true :
+                    (addr: tsp00_Addr);
+                false :
+                    (ptr : tak68_mult_tab_arr_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+t01name( ak_join, 'expand multab     ' );
+&endif
+_old_capacity := multab.mt_capacity;
+_do_realloc   := true;
+&ifdef diagnose
+IF  ( multab.mt_capacity < cak68_max_multab_elems )
+THEN
+    multab.mt_capacity := multab.mt_capacity + 1
+ELSE
+    _do_realloc := false;
+(*ENDIF*) 
+&else
+IF  ( cak68_max_multab_elems DIV 3 <= multab.mt_capacity )
+THEN
+    multab.mt_capacity := multab.mt_capacity * 2
+ELSE
+    BEGIN
+    IF  ( cak68_max_multab_elems - c_chunksize >= multab.mt_capacity )
+    THEN
+        multab.mt_capacity := multab.mt_capacity + c_chunksize
+    ELSE
+        BEGIN
+        IF  ( multab.mt_capacity = cak68_max_multab_elems )
+        THEN
+            _do_realloc := false
+        ELSE
+            multab.mt_capacity := cak68_max_multab_elems;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&endif
+IF  ( _do_realloc )
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4( ak_join, 'old capacity', _old_capacity );
+    t01int4( ak_join, 'new capacity', multab.mt_capacity );
+&   endif
+    _cast.ptr  := multab.mt_arr;
+    _cast.addr := gg941ReAllocate( acv.a_transinf.tri_trans,
+          multab.mt_capacity * sizeof(tak68_mul_tab_rec), _cast.addr );
+    multab.mt_arr := _cast.ptr;
+    ;
+    IF  ( multab.mt_arr = NIL )
+    THEN
+        BEGIN
+        multab.mt_capacity := _old_capacity;
+        a07_b_put_error( acv, e_no_more_memory, 1 );
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a685get_join_trans(
+            VAR dmli    : tak_dml_info;
+            jtrans      : tak68_join_transitions;
+            dim1        : tsp00_Int2;
+            dim2        : tsp00_Int2 ) : tak68_join_transition_ptr;
+ 
+VAR
+ 
+      _cast                : RECORD
+            CASE integer OF
+                1 :
+                    (addr: tsp00_MoveObjPtr);
+                2 :
+                    (ptr : tak68_join_transition_ptr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef diagnose
+IF  (( dim1 > dmli.d_cntfromtab ) OR
+    ( dim2 > dmli.d_cntfromtab ))
+THEN
+    BEGIN
+    IF  ( dim1 > dmli.d_cntfromtab )
+    THEN
+        g01abort( ord(e_move_error), csp3_n_join,
+              'TABLE CNT RANGE CHECK   ', dim1)
+    ELSE
+        g01abort( ord(e_move_error), csp3_n_join,
+              'TABLE CNT RANGE CHECK   ', dim2);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+&endif
+&ifdef trace
+t01int4( ak_join, 'dim1        ', dim1 );
+t01int4( ak_join, 'dim2        ', dim2 );
+&endif
+_cast.addr := s35add_moveobj_ptr_ptocm( @(jtrans^),
+      ((dim1 - 1) * dmli.d_cntfromtab * sizeof( tak68_join_transition ) +
+      (dim2 - 1) * sizeof( tak68_join_transition )));
+a685get_join_trans := _cast.ptr;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

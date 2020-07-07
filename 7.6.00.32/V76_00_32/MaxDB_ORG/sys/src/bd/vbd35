@@ -1,0 +1,427 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VBD35$
+.tt 2 $$$
+.tt 3 $JuergenP$entryhandling$1999-03-29$
+***********************************************************
+.nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+.nf
+.sp
+Module  : entryhandling
+=========
+.sp
+Purpose : operations on records within leaves
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              b35add_space (VAR nptr : tbd_nodeptr;
+                    pos  : tsp00_Int4;
+                    plus : tsp00_Int4;
+                    t    : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b35del_space (VAR nptr : tbd_nodeptr;
+                    pos   : tsp00_Int4;
+                    minus : tsp00_Int4;
+                    t     : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b35get_entrykey (VAR nptr : tbd_nodeptr;
+                    index   : integer;
+                    VAR sep : tgg00_Lkey;
+                    t       : tgg00_TransContextPtr);
+ 
+        PROCEDURE
+              b35next_entry (VAR nptr : tbd_nodeptr;
+                    VAR index : integer;
+                    VAR last  : boolean);
+ 
+        PROCEDURE
+              b35lkey_assign (
+                    VAR source_key : tgg00_Lkey;
+                    VAR target_key : tgg00_Lkey;
+                    VAR e          : tgg00_BasisError);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4;
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tbd_nodeptr;
+                    curr_buf_cnt   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              Data_GetKeyLen(pRecord : tgg00_RecPtr) : integer;
+ 
+        FUNCTION
+              Data_GetRecLen(pRecord : tgg00_RecPtr) : integer;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              b06dump_bad_page;
+ 
+              tbd_univ_ptr tbd_nodeptr
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenP
+.sp
+.cp 3
+Created : 1985-03-01
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 1999-03-29
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+The routines described below are used to process leaf entries of
+the current B* tree (see treehandling).
+It is assumed that this tree maintains a primary file and, thus,
+record entries are accomodated in the leaves.
+.sp
+Each record entry of the tree contains a record length field,
+a length field for the record key, a key field with an
+unambiguous record key and other components that are
+irrelevant at this point.
+.sp
+Within the tree, a record entry is addressed by the leaf and an
+index_entry within this leaf that points to the beginning position
+of the record within the leaf.  The first byte of the record
+length field is located in this position.
+.sp 2
+   b35get_entrykey(nptr,index,sep)
+.sp
+This routine requires that a record entry begin in the leaf indicated
+by the pointer nptr, in the position indexed by 'index'.  It
+sends the key for this entry in 'sep'.
+.sp 2
+   b35next_entry(nptr,index,last)
+.sp
+This routine requires that a record entry begin in the leaf indicated
+by the pointer nptr, in the position indexed by 'index'.  If this is
+the last entry that begins in the leaf, 'last' is set to TRUE;
+otherwise 'index' returns the index_entry for the next record entry
+and 'last' is set to FALSE.
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b35add_space (VAR nptr : tbd_nodeptr;
+            pos  : tsp00_Int4;
+            plus : tsp00_Int4;
+            t    : tgg00_TransContextPtr);
+ 
+VAR
+      len : integer;
+      b   : tbd_node;
+ 
+BEGIN
+WITH t^ DO
+    IF  trError_gg00 <> e_data_page_corrupted
+    THEN
+        BEGIN
+        len := nptr^.nd_bottom - pos;
+&       ifdef TRACE
+        t01int4 (bd, 'pos         ', pos);
+        t01int4 (bd, 'plus        ', plus);
+        t01int4 (bd, 'len         ', len);
+        t01int4 (bd, 'bottom      ', nptr^.nd_bottom);
+        t01int4 (bd, 'list top    ', MAX_BOTTOM_BD00 - ((nptr^.nd_record_cnt)*POINTERSIZE_BD00));
+&       endif
+        IF  plus < len
+        THEN
+            BEGIN
+            SAPDB_PascalMove ('VBD35 ',   1,    
+                  sizeof (nptr^), sizeof (b),
+                  @nptr^, pos, @b, 1, len, trError_gg00);
+            SAPDB_PascalMove ('VBD35 ',   2,    
+                  sizeof (b), sizeof (nptr^),
+                  @b, 1, @nptr^, pos+plus, len, trError_gg00);
+            IF  trError_gg00 = e_move_error
+            THEN
+                BEGIN
+                trError_gg00 := e_data_page_corrupted;
+                b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                      nptr^.nd_id, nptr, 1)
+                END
+            (*ENDIF*) 
+            END
+        ELSE (* plus >= len *)
+            IF  len > 0
+            THEN
+                BEGIN
+                SAPDB_PascalOverlappingMove ('VBD35 ',   3,    
+                      sizeof (nptr^), sizeof (nptr^),
+                      @nptr^, pos, @nptr^, pos+plus, len, trError_gg00);
+                IF  trError_gg00 = e_move_error
+                THEN
+                    BEGIN
+                    trError_gg00 := e_data_page_corrupted;
+                    b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                          nptr^.nd_id, nptr, 1)
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            nptr^.nd_bottom := nptr^.nd_bottom + plus
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b35del_space (VAR nptr : tbd_nodeptr;
+            pos   : tsp00_Int4;
+            minus : tsp00_Int4;
+            t     : tgg00_TransContextPtr);
+ 
+BEGIN
+WITH t^ DO
+    IF  trError_gg00 <> e_data_page_corrupted
+    THEN
+        BEGIN
+        SAPDB_PascalOverlappingMove ('VBD35 ',   4,    
+              sizeof (nptr^), sizeof (nptr^),
+              @nptr^, pos+minus,
+              @nptr^, pos, nptr^.nd_bottom-pos-minus, trError_gg00);
+        IF  trError_gg00 = e_move_error
+        THEN
+            BEGIN
+            trError_gg00 := e_data_page_corrupted;
+            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                  nptr^.nd_id, nptr, 1)
+            END
+        ELSE
+            nptr^.nd_bottom := nptr^.nd_bottom - minus
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b35get_entrykey (VAR nptr : tbd_nodeptr;
+            index   : integer;
+            VAR sep : tgg00_Lkey;
+            t       : tgg00_TransContextPtr);
+ 
+VAR
+      epos  : tsp00_Int4;
+      entry : tgg00_RecPtr;
+ 
+BEGIN
+WITH t^ DO
+    IF  trError_gg00 <> e_data_page_corrupted
+    THEN
+        BEGIN
+        epos := nptr^.nd_pointer_list [MAX_POINTERINDEX_BD00 - index];
+        IF  (epos < BODY_BEG_BD00)
+            OR
+            (epos + cgg_rec_key_offset > nptr^.nd_bottom)
+            OR
+            (nptr^.nd_bottom-1 > BODY_END_BD00)
+        THEN
+            trError_gg00 := e_move_error
+        ELSE
+            BEGIN
+            entry := @nptr^.nd_body [epos];
+            IF  epos + Data_GetRecLen(entry) > nptr^.nd_bottom
+            THEN
+                trError_gg00 := e_move_error
+            ELSE
+                b35lkey_assign (entry^.recKey_gg00, sep, trError_gg00)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  trError_gg00 = e_move_error
+        THEN
+            BEGIN
+            trError_gg00 := e_data_page_corrupted;
+            b06dump_bad_page (trTaskId_gg00, 'd', FILE_EXT_COR_BD00,
+                  nptr^.nd_id, nptr, 1)
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b35lkey_assign (
+            VAR source_key : tgg00_Lkey;
+            VAR target_key : tgg00_Lkey;
+            VAR e          : tgg00_BasisError);
+ 
+BEGIN
+WITH target_key DO
+    BEGIN
+    keyLen_gg00 := Data_GetKeyLen(@source_key);
+    IF  keyLen_gg00 <> 0
+    THEN
+        (* (keyLen <= 0) OR (keyLen > sizeof (keyVal))   ==> move error *)
+        SAPDB_PascalMove ('VBD35 ',   5,    
+              sizeof (source_key.keyVal_gg00), sizeof (keyVal_gg00),
+              @source_key.keyVal_gg00, 1, @keyVal_gg00, 1, keyLen_gg00, e)
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      b35next_entry (VAR nptr : tbd_nodeptr;
+            VAR index : integer;
+            VAR last  : boolean);
+ 
+BEGIN
+IF  index = nptr^.nd_record_cnt - 1
+THEN
+    last := true
+ELSE
+    BEGIN
+    index := index + 1;
+    last  := false
+    END
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

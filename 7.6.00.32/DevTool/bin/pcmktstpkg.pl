@@ -1,0 +1,124 @@
+#!/usr/bin/perl
+# pcmktest
+#
+# @(#)pcmktstpkg
+#
+# Generate car archive for the given intrerfacetest
+#
+# Burkhard Diesing
+#
+#
+#    ========== licence begin LGPL
+#    Copyright (C) 2002 SAP AG
+#
+#    This library is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU Lesser General Public
+#    License as published by the Free Software Foundation; either
+#    version 2.1 of the License, or (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#    Lesser General Public License for more details.
+#
+#    You should have received a copy of the GNU Lesser General Public
+#    License along with this library; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#    ========== licence end
+#
+
+package pcmktest;
+use Env;
+use PCTest;
+sub AddFilesFromParfile;
+sub CreateStd;
+sub DropCar;
+
+$USAGE ="USAGE: pcmktstpkg <arcivename> <sourcedir> <paramfile>\n";
+if (@ARGV < 3 ) {
+  print <DATA>;
+  exit;
+}
+
+my ($ARCHIVE, $SOURCEDIR, $PARFILE, $PARFILE2) = @ARGV;
+$pref=PCTest::GetPrefix($SOURCEDIR);
+die "Sourcelayer not found." if ($pref eq "");
+
+my ( $TEST_ROOT ) = PCTest::GetOWN;
+
+$TEST_ROOT="$TEST_ROOT/test";
+
+chdir $TEST_ROOT;
+
+my ( $CARFILE ) = "./tr_$ARCHIVE.sar";
+my ( $CMD_CREATECAR ) = "SAPCAR -cvf $CARFILE";
+my ( $CMD_ADDCAR )    = "SAPCAR -avf $CARFILE";
+my ( $error ) = 0;
+$error = CreateStd;
+if (!$error) {
+    $error = AddFilesFromParfile ($PARFILE);
+}
+if (!$error) {
+    if (@ARGV > 3) {
+        $error = AddFilesFromParfile ($PARFILE2);
+    }
+}
+if ($error) {
+    DropCar;
+    exit -1;
+}
+
+sub CreateStd
+{
+    system ("$CMD_CREATECAR ./pc/bin/*");
+    return -1 if ($?);
+    system ("$CMD_ADDCAR $PARFILE");
+    return -1 if ($?);
+    system ("$CMD_ADDCAR ./pc/incl/*.*");
+    return -1 if ($?);
+    system ("$CMD_ADDCAR ./pc/lib/cpct.lib");
+    return -1 if ($?);
+    return 0;
+}
+
+
+sub AddFilesFromParfile
+{
+    local($FILE) = $_[0];
+    my @ext = ("c", "C", "cpp", "cpc", "CPC", "h", "hpp");
+
+    if (!open (PARF, $FILE)) {
+        print STDERR "ERROR: No paramfile '$FILE' found.";
+        return -1;
+    }
+    while (<PARF>) {
+#       ignore comments
+        s/\/\/.*|\#.*//g;
+        if (/$SOURCEDIR\/(\w+)/) {
+            my $found = 0;
+            foreach my $ext (@ext) {
+                if ( -f "./pc/$SOURCEDIR/$1.$ext") {
+                    $found = 1;
+                    system ("$CMD_ADDCAR ./pc/$SOURCEDIR/$1.*");
+                    return -1 if ($?);
+                    last;
+                }
+            }
+            if (!$found) {
+                print STDERR "ERROR: Testsource ./pc/$SOURCEDIR/$1.* not found.";
+                return -1;
+            }
+            if ( -f "./pc/old/$pref.$1.cpo" ) {
+                system ("$CMD_ADDCAR ./pc/old/$pref.$1.cpo");
+                return -1 if ($?);
+            }
+        }
+    }
+    close (PARF);
+    return 0;
+}
+
+sub DropCar
+{
+    unlink "$CARFILE";
+}

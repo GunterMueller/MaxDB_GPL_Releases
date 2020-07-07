@@ -1,0 +1,1304 @@
+#SAY --- Installing SQL catalog views ...
+#/
+#/ Alle Tabellen, die mit # beginnen loeschen
+#/ Die #-Tabellen sind Basis-Tabellen und wurden von Tools mit Hilfe
+#/ Stored Procedures gefuellt (SQL-PL). Ab 7.2 wird die Funktionalitaet
+#/ fallengelassen. 
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+#/ #FOREIGNKEY: vorher SELECT ... DISTINCT in zwei Schritten auf SYSDD.FOREIGN_KEYS jetzt in einem Schritt
+#/ #LITERAL
+#/ #MODULE
+#/ #MOD_CALL_DBP
+#/ #MOD_CALL_MOD
+#/ #MOD_USES_COL
+#/ #MOD_USES_DOM
+#/ #MOD_USES_QCM
+#/ #MOD_USES_TAB
+#/ #PROGRAM
+#/ #PRO_CONT_MOD
+#/ #QCM_USES_COL
+#/ #QCM_USES_TAB
+#/ #QPCOMMAND
+#/ #QPC_USES_COL
+#/ #QPC_USES_TAB
+#/ #QPEXCELLINK
+#/ #QPE_USES_QPC
+#/ #QPE_USES_QPQ
+#/ #QPQUERY
+#/ #QPQ_USES_COL
+#/ #QPQ_USES_TAB
+#/ #QPWORDLINK
+#/ #QPW_USES_QPC
+#/ #QPW_USES_QPQ
+#/ #QUERYCOMMAND
+#/ #USR_USES_PRO
+#/ #USR_USES_QCM
+#/ #USR_USES_QPC
+#/ #USR_USES_QPE
+#/ #USR_USES_QPQ
+#/ #USR_USES_QPW
+
+#/ Alle Tabellen, die mit $ beginnen loeschen
+#/ 
+#/ $COLUMN
+#/ $DBFUNCTION
+#/ $DBPROCEDURE
+#/ $DOMAIN
+#/ $FOREIGNKEY
+#/ $INDEX
+#/ $LITERAL
+#/ $MODULE
+#/ $PROGRAM
+#/ $QPCOMMAND
+#/ $QPEXCELLINK
+#/ $QPQUERY
+#/ $QPWORDLINK
+#/ $QUERYCOMMAND
+#/ $SEQUENCE
+#/ $SYNONYM
+#/ $TABLE
+#/ $TRIGGER
+#/ $USER
+#/ 
+#/ Zu loeschen sind:
+#/ Objekt MODULE und Beziehungen
+#/ Objekt DBFUNCTION und Beziehungen
+#/ Objekt DESIGN und Beziehungen
+#/ Objekt LITERAL und Beziehungen
+#/ Objekt PROGRAM und Beziehungen
+#/ Objekt QPCOMMANDS und Beziehungen
+#/ Objekt QP* und Beziehungen
+#/
+#/ Wir trennen uns von den Beziehungsviews. Es werden in den Tools nur noch Beziehungen
+#/ dargestellt, die im Tool explizit ausprogrammiert sind. Ein allgemeiner Ansatz, wie
+#/ beim frueheren DOMAIN besteht nicht mehr. 
+#/ Demnach entfallen die Views:
+#/ COL_REFS_DOM
+#/ COL_USES_COL  1)
+#/ DBP_CONT_PRM
+#/ FKC_REFS_COL  2)
+#/ FOK_REFS_TAB  2)
+#/ FOK_USES_COL  2)
+#/ IND_USES_COL  3)
+#/ SYN_REFS_TAB
+#/ SYN_REFS_VIE 
+#/ TAB_CONT_COL
+#/ TAB_CONT_FOK
+#/ TAB_CONT_IND
+#/ TAB_CONT_TRG
+#/ TAB_USES_CON
+#/ TRG_CONT_PRM
+#/ USR_OWNS_DOM
+#/ USR_OWNS_USR
+#/ USR_USES_COL
+#/ USR_USES_DBP
+#/ USR_USES_TAB
+#/ USR_USES_VIE
+#/ VIE_CONT_COL
+#/ VIE_USES_SYN
+#/ VIE_USES_TAB
+#/ VIE_USES_VIE
+#/
+#/ Die mit 1), 2), 3) bezeichneten Beziehungsviews enthalten Informationen, die bislang
+#/ in keiner anderen DOMAIN-Tabelle zur Verfuegung standen. Diese Informationen werden
+#/ nun in den folgenden neu hinzugekommenen DOMAIN-Tabellen angeboten:
+#/ 1) DOMAIN.VIEWCOLUMNS       -> SYSDD.REFERENCED_COLUMNS
+#/ 2) DOMAIN.FOREIGNKEYCOLUMNS -> SYSDD.FOREIGN_KEYS
+#/ 3) DOMAIN.INDEXCOLUMNS      -> SYSDD.INDEXES
+#/ 
+#/
+#/ Die Selbstbeschreibbarkeit der Objekte und Beziehungen entfaellt 
+#/ mit dem nicht mehr vorhandenen Anspruch ein allgemeines Tool fuer 
+#/ die Darstellung von Objekten und Beziehungen bereitstellen zu wollen.
+#/
+#/ Daher werden folgende Views geloescht:
+#/
+#/ OBJECT_DESC 
+#/ RELSHIP_DESC
+#/ OBJECT_TYPE
+#/ RELSHIP_TYPE
+#/ RELATION_TYPE
+#/
+#/ Spaltenprivilegien wollen wir im Vorgriff auf 7.3 Tool-seitig nicht 
+#/ mehr unterstuetzen daher entfaellt die View:
+#/ COLUMNPRIVILEGES
+#/ und die Spalte
+#/ DOMAIN.COLUMNS.COLUMNPRIVILEGES
+#/
+#/ Alles, was mit Verteilung zu tun hat, kann weg:
+#/ DOMAIN.SERVERDBS
+#/ =====================================================
+#/ @(#) XDD.py                     7.2.01.02   1999-10-05
+#/ =====================================================
+#/
+
+from string import upper
+from installib import * 
+
+def createPubSynonym (session, synonym):
+    synonym = upper (synonym)
+    rc = sqlRC (session, """
+            SELECT tablename FROM sysdd.synonyms
+            WHERE synonymowner = USER
+            AND synonymname  = '%s'""" % synonym) 
+#   print rc, synonym
+    if rc == 100:
+        stopIfSqlNotOK (session, 'create public synonym "%s" for domain."%s"'
+            % (synonym, synonym))
+
+def install (session,options):
+    """Installing DOMAIN tables
+    """
+
+    switchToSchema (session, 'DOMAIN')
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.OMS_VERSIONS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_OWNS_DBL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DATABASELINKS')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNAPSHOTS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNAPSHOTDEFS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.MOD_USES_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.QCM_USES_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.QPC_USES_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.QPQ_USES_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNP_CONT_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNP_USES_SYN')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNP_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SNP_USES_VIE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SYN_REFS_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_USES_SNP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.VIE_USES_SNP')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBFUNCPARAMS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBFUNCTIONS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBF_CONT_PRM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBF_REFS_MOD')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBF_USES_MOD')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBF_USES_MOD')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#FOREIGNKEY')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#LITERAL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MODULE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_CALL_DBP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_CALL_MOD')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_USES_DOM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_USES_QCM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#MOD_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#PROGRAM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#PRO_CONT_MOD')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QCM_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QCM_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPCOMMAND')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPC_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPC_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPEXCELLINK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPE_USES_QPC')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPE_USES_QPQ')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPQUERY')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPQ_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPQ_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPWORDLINK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPW_USES_QPC')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QPW_USES_QPQ')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#QUERYCOMMAND')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_PRO')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_QCM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_QPC')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_QPE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_QPQ')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.#USR_USES_QPW')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$COLUMN')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$DBFUNCTION')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$DBPROCEDURE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$DOMAIN')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$FOREIGNKEY')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$INDEX')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$LITERAL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$MODULE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$PROGRAM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$QPCOMMAND')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$QPEXCELLINK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$QPQUERY')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$QPWORDLINK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$QUERYCOMMAND')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$SEQUENCE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$SYNONYM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$TABLE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$TRIGGER')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.$USER')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.COL_REFS_DOM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.COL_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.DBP_CONT_PRM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.FKC_REFS_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.FOK_REFS_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.FOK_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.IND_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SYN_REFS_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.SYN_REFS_VIE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TAB_CONT_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TAB_CONT_FOK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TAB_CONT_IND')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TAB_CONT_TRG')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TAB_USES_CON')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.TRG_CONT_PRM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_OWNS_DOM')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_OWNS_USR')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_USES_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_USES_DBP')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.USR_USES_VIE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.VIE_CONT_COL')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.VIE_USES_SYN')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.VIE_USES_TAB')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.VIE_USES_VIE')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.OBJECT_DESC')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.RELSHIP_DESC')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.OBJECT_TYPE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.RELSHIP_TYPE')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW DOMAIN.RELATION_TYPE')
+
+    createReplaceView (session, 'DOMAIN.PARAMETERS',
+        """AS SELECT *
+           FROM SYSDD.PARAMETERS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.PARAMETERS TO PUBLIC')
+
+    createReplaceView (session, 'DOMAIN.CLASSCONTAINERS',
+        """(GUID, CLASS_NAME, SCHEMANAME, CONTAINERNO, CLASS_ID, SIZE,
+            PAGECOUNT, FREE_PAGES, EMPTY_PAGES, KEY_LEAF_PAGES, 
+            OBJECTS_PER_PAGE, GARBAGEOBJCHECKED, GARBAGEOBJRELEASED,
+           "OCCUPANCY (%)", FREE_EOT_PAGES)
+        AS SELECT 
+          C.GUID, C.CLASSNAME, A.NAME, C.CONTAINERNO, C.FILENO, C.SIZE,
+          S.PAGECOUNT, S.FREEPAGECOUNT, FIXED(NULL, 10), S.KEYLEAFPAGECOUNT, 
+          FIXED(NULL,10), FIXED(NULL,10), FIXED(NULL,10),
+          S.OCCUPANCY, FIXED(NULL, 10)
+        FROM SYSCATALOG.CLASSCONTAINERS C, SYSDD.CLASSCONTAINERSTATISTICS S,
+             SYSCATALOG.AUTHORIZATION A
+        WHERE C.SCHEMAID = A.AUTHORIZATIONID AND C.FILENO = S.FILEID
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CLASSCONTAINERS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.CLASSCONTAINER_ROOTS',
+        """(CLASS_ID, 
+            SEQUELCONTAINER, 
+            ROOT, 
+            KEY_PARTITIONCOUNT,
+            VAROBJ_CONTAINER, 
+            DELETED, 
+            MAX_OBJBODYSIZE, 
+            MAX_OBJPERPAGE, 
+            MAX_CHAINS,
+            UNUSED_BYTEPERPAGE)
+        AS SELECT 
+            CLASS_ID, 
+            SEQUELCONTAINER, 
+            ROOT, 
+            KEY_PARTITIONCOUNT,
+            VAROBJ_CONTAINER, 
+            DELETED, 
+            MAX_OBJBODYSIZE, 
+            MAX_OBJPERPAGE, 
+            MAX_CHAINS,
+            UNUSED_BYTEPERPAGE
+        FROM SYSDD.CONTAINER_ROOTS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CLASSCONTAINER_ROOTS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.CLASSCONTAINER_CHAINS',
+        """(CLASS_ID, 
+            SEQUELCONTAINER, 
+            CHAIN_ID, 
+            SUBROOT, 
+            OBJECTCOUNT,
+            PAGECOUNT, 
+            ACTIVE_GC_TASKID, 
+            RELEASEEMPTYPAGES)
+        AS SELECT 
+            CLASS_ID, 
+            SEQUELCONTAINER, 
+            CHAIN_ID, 
+            SUBROOT, 
+            OBJECTCOUNT,
+            PAGECOUNT, 
+            ACTIVE_GC_TASKID, 
+            RELEASEEMPTYPAGES
+        FROM SYSDD.CONTAINER_CHAINS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CLASSCONTAINER_CHAINS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.CLASSCONTAINER_KEYS',
+        """(CLASS_ID, KEY_PARTITION, KEY_ROOT)
+        AS SELECT 
+         CLASS_ID, KEY_PARTITION, KEY_ROOT
+        FROM SYSDD.CONTAINER_KEYS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CLASSCONTAINER_KEYS TO PUBLIC WITH GRANT OPTION')
+
+
+    createReplaceView (session, 'DOMAIN.OMS_VERSIONS',
+        """(OMS_VERSION_ID, 
+           CREATE_DATE, 
+           CREATE_TIME,
+           TRANSVERSION,
+           MARKED,
+           AGE_IN_HOURS,
+           UNLOADED,
+           HEAP_USAGE,
+           PAGECOUNT,
+           VERSION_DESC
+          )
+        AS SELECT 
+           OMS_VERSION_ID,
+           "DATE", 
+           "TIME",
+           TRANSVERSION, 
+           DECODE (MARKED, 'YES', 'X', ' '), 
+           FIXED (NUM (SUBSTR (TIMEDIFF (TIMESTAMP("DATE", "TIME"), TIMESTAMP),1,4)), 4),
+           UNLOADED, 
+           "HEAPSIZE (BYTES)",
+           PAGECOUNT,
+           VERSION_DESC
+        FROM SYSDD.OMS_VERSIONS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.OMS_VERSIONS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.COLUMNS',
+        """(SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,MODE,DATATYPE,CODETYPE,LEN,"DEC",NULLABLE,
+           COLUMNPRIVILEGES,"DEFAULT","DEFAULTFUNCTION",DOMAINOWNER,DOMAINNAME,POS,KEYPOS,PHYSICALPOS,
+           CREATEDATE,CREATETIME,ALTERDATE,ALTERTIME,TABLETYPE,COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,MOD,DATATYPE,CODE,LEN,"DEC",NULLABLE,
+             COLUMNPRIVILEGES,"DEFAULT","DEFAULTFUNCTION",DOMAINOWNER,DOMAINNAME,COLUMNNO,KEYCOLUMNNO,
+             PHYSICAL_COLUMNNO,"DATE","TIME",ALTERDATE,ALTERTIME,TYPE,COMMENT
+           FROM SYSDD.COLUMNS
+           WHERE type IN('TABLE','RESULT','SYNONYM','VIEW','SYSTEM')
+             AND (SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.COLUMNS TO PUBLIC WITH GRANT OPTION')
+
+#/ PTS 1105303
+#/ PTS 1116602 
+
+    createReplaceView (session, 'DOMAIN.CONNECTPARAMETERS',
+        """(SQLMODE,ISOLEVEL,TIMEOUT,SESSION)
+        AS SELECT
+             SQLMODE,ISOLEVEL,TIMEOUT,SESSION
+           FROM SYSDD.CONNECTPARAMETERS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CONNECTPARAMETERS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.CONSTRAINTCOLUMNS',
+        """(SCHEMANAME,OWNER,TABLENAME,CONSTRAINTNAME,CONSTRAINTTYPE,COLUMNNAME,COLUMNNO)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,CONSTRAINTNAME,TYPE,COLUMNNAME,COLUMNNO
+           FROM SYSDD.CONSTCOLUMNS
+          WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CONSTRAINTCOLUMNS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.CONSTRAINTS',
+        """(SCHEMANAME,OWNER,TABLENAME,CONSTRAINTNAME,DEFINITION)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,CONSTRAINTNAME,DEFINITION
+           FROM SYSDD.CONSTRAINTS
+          WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CONSTRAINTS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.DBPROCEDURES',
+        """(SCHEMANAME,DBPROCNAME,OWNER,PACKAGE,PARAMETER,
+           CREATEDATE,CREATETIME,EXECUTION_KIND,"LANGUAGE",SQL_SUPPORT,CURSOR_SUPPORT,WAIT_FOR_CHCKPT,
+           REMOTE_LOCATION,DEFINITION,COMMENT)
+        AS SELECT
+             SCHEMANAME,DBPROCEDURE,OWNER,PACKAGE,PARAMETER,
+             "DATE","TIME","EXECUTION_KIND","LANGUAGE",SQL_SUPPORT,CURSOR,WAIT_FOR_CHKPT,
+             REMOTE_LOCATION,DEFINITION,COMMENT
+           FROM  SYSDD.DBPROCEDURES
+           WHERE "TYPE" = 'DBPROC'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.DBPROCEDURES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.FUNCTIONS',
+        """(SCHEMANAME,FUNCTIONNAME,OWNER,PARAMETER,
+           CREATEDATE,CREATETIME,SQL_SUPPORT,DETERMINISTIC,
+           DEFINITION,COMMENT)
+        AS SELECT
+             SCHEMANAME,DBPROCEDURE,OWNER,PARAMETER,
+             "DATE","TIME",SQL_SUPPORT,DETERMINISTIC,
+             DEFINITION,COMMENT
+           FROM  SYSDD.DBPROCEDURES
+           WHERE "TYPE" = 'DBFUNC'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.FUNCTIONS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.DBPROCPARAMS',
+        """(SCHEMANAME,DBPROCNAME,OWNER,PARAMETERNAME,POS,"IN/OUT-TYPE",
+           DATATYPE,CODETYPE,LEN,"DEC",CREATEDATE,CREATETIME)
+        AS SELECT
+             SCHEMANAME,DBPROCEDURE,OWNER,PARAMETERNAME,PARAM_NO,"IN/OUT-TYPE",
+             DATATYPE,CODE,LEN,"DEC","DATE","TIME"
+           FROM SYSDD.DBPROCPARAMETERS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.DBPROCPARAMS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.DBPROCPARAMINFO',
+        """AS SELECT *
+        FROM SYSDD.DBPROCPARAMETERS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.DBPROCPARAMINFO TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.PACKAGES',
+        """(OWNER,PACKAGE,
+           CREATEDATE,CREATETIME,EXECUTION_KIND,SQL_SUPPORT,REMOTE_LOCATION,FILE,COMMENT)
+        AS SELECT
+             OWNER,PACKAGE,
+             "DATE","TIME",EXECUTION_KIND,SQL_SUPPORT,REMOTE_LOCATION,FILE,COMMENT
+           FROM  SYSDD.DBPROCEDURES
+           WHERE PACKAGE IS NOT NULL AND DBPROCEDURE = PACKAGE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.PACKAGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.DOMAINS',
+        """(OWNER,DOMAINNAME,DATATYPE,CODETYPE,LEN,"DEC",
+           "DEFAULT","DEFAULTFUNCTION",DEFINITION,CREATEDATE,CREATETIME,COMMENT)
+        AS SELECT
+             OWNER,DOMAINNAME,DATATYPE,CODE,LEN,"DEC",
+             "DEFAULT","DEFAULTFUNCTION",DEFINITION,"DATE","TIME",COMMENT
+           FROM SYSDD.DOMAINS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.DOMAINS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.DOMAINCONSTRAINTS',
+        """(OWNER,DOMAINNAME,CONSTRAINTNAME,DEFINITION)
+        AS SELECT
+             OWNER,DOMAINNAME,CONSTRAINTNAME,DEFINITION
+           FROM SYSDD.DOMAIN_CONSTRAINTS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.DOMAINCONSTRAINTS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.FOREIGNKEYS',
+        """(SCHEMANAME,OWNER,TABLENAME,FKEYNAME,RULE,CREATEDATE,CREATETIME,COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,REFNAME,RULE,"DATE","TIME",COMMENT
+             FROM SYSDD.FOREIGN_KEYS
+            WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+              AND (SCHEMANAME,OWNER,TABLENAME,REFNAME,REFCOLUMNNAME) = ANY
+                (SELECT SCHEMANAME,OWNER,TABLENAME,REFNAME,MIN(REFCOLUMNNAME) REFCOLUMNNAME
+                  FROM SYSDD.FOREIGN_KEYS
+                WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+                GROUP BY SCHEMANAME,OWNER,TABLENAME,REFNAME) 
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.FOREIGNKEYS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.FOREIGNKEYCOLUMNS',
+        """(SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,FKEYNAME,
+           REFSCHEMANAME,REFOWNER,REFTABLENAME,REFCOLUMNNAME, 
+           RULE,CREATEDATE,CREATETIME,COMMENT)
+        AS SELECT 
+             SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,REFNAME,
+             REFSCHEMANAME,REFOWNER,REFTABLENAME,REFCOLUMNNAME, 
+             RULE,"DATE","TIME",COMMENT
+           FROM SYSDD.FOREIGN_KEYS
+          WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.FOREIGNKEYCOLUMNS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.INDEXES',
+        """(SCHEMANAME,OWNER,TABLENAME,INDEXNAME,FILEID,
+           TYPE,CREATEDATE,CREATETIME,INDEX_USED,INDEXUSEDRESETDATE,INDEXUSEDRESETTIME, FILESTATE, DISABLED, COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,INDEXNAME,FILEID,
+             TYPE,"DATE","TIME",INDEX_USED, INIT_USAGE_DATE, INIT_USAGE_TIME, FILESTATE, DISABLED, COMMENT
+           FROM SYSDD.INDEXES
+           WHERE columnno = 1
+             AND (SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.INDEXES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.INDEXCOLUMNS',
+        """(SCHEMANAME,OWNER,TABLENAME,INDEXNAME,FILEID,TYPE,
+           COLUMNNAME,SORT,COLUMNNO,DATATYPE,LEN,
+           CREATEDATE,CREATETIME,INDEX_USED, FILESTATE, DISABLED, COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,INDEXNAME,FILEID,TYPE,
+             COLUMNNAME,SORT,COLUMNNO,DATATYPE,LEN,
+             "DATE","TIME",INDEX_USED, FILESTATE, DISABLED, COMMENT
+           FROM SYSDD.INDEXES
+          WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.INDEXCOLUMNS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.MAPCHARSETS',
+        """(MAPCHARSETNAME,CODE,INTERN,MAP_CODE,MAP_CHARACTER)
+        AS SELECT
+             MAPCHARSETNAME,CODE,INTERN,"MAP CODE","MAP CHARACTER"
+           FROM SYSDD.MAPCHARSETS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.MAPCHARSETS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SESSION_ROLES',
+        """("ROLE")
+        AS SELECT SESSION_ROLES
+        FROM SYSDD.SESSION_ROLES
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SESSION_ROLES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.ROLES',
+        """(OWNER, ROLE, PASSWORD_REQUIRED, GRANTED, DEFAULTROLE, CREATEDATE, CREATETIME)
+        AS SELECT O.NAME, A.NAME, 
+        DECODE(A.ISEXCLUSIVE, TRUE, 'YES', 'NO'),
+        DECODE(R.ROLEID, NULL, 'NO', 'YES'),
+        DECODE(R.DEFAULTROLE, NULL, 'NO', R.DEFAULTROLE), 
+        DATE(A.CREATEDATE),TIME(A.CREATEDATE)  
+        FROM SYSCATALOG.AUTHORIZATION O INNER JOIN SYSCATALOG.AUTHORIZATION A ON A.OWNERID = O.AUTHORIZATIONID
+             LEFT OUTER JOIN SYSDD.USER_ROLES R ON R.ROLEID = A.AUTHORIZATIONID
+        WHERE A.ISROLE 
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.ROLES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.ROLEPRIVILEGES',
+        """(SCHEMANAME,OWNER,TABLENAME,ROLE,GRANTEE,PRIVILEGES,GRANTOR,
+        CREATEDATE,CREATETIME)
+        AS SELECT SCHEMANAME,OWNER, DECODE(TYPE,'ROLE',NULL,NAME1), DECODE(TYPE,'ROLE',NAME1,NULL)
+        ,GRANTEE, PRIVILEGES, GRANTOR, "DATE","TIME"
+        FROM SYSDD.PRIVILEGES
+        WHERE TYPE = 'ROLE' OR GRANTEE IN (SELECT ROLE FROM DOMAIN.ROLES)
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.ROLEPRIVILEGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session,'DOMAIN.SCHEMAS', 
+         """(OWNER,SCHEMANAME,SCHEMAHANDLE,CREATEDATE,CREATETIME)
+         AS SELECT DECODE (A.ISSCHEMA, TRUE, B.NAME, A.NAME),
+              A.NAME, DECODE(A.SCHEMAID, 2147483647, NULL, A.SCHEMAID), DATE(A.CREATEDATE),TIME(A.CREATEDATE)
+         FROM SYSCATALOG.AUTHORIZATION A, SYSCATALOG.AUTHORIZATION B
+              WHERE (A.ISSCHEMA OR A.ISUSERGROUP) AND A.OWNERID = B.AUTHORIZATIONID 
+                AND (A.NAME = 'SYSINFO' OR A.NAME NOT LIKE 'SYS%')
+         INTERNAL""");
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SCHEMAS TO PUBLIC WITH GRANT OPTION')
+    
+    createReplaceView (session,'DOMAIN.SCHEMAPRIVILEGES', 
+         """(SCHEMANAME, GRANTEE, GRANTOR, CREATEIN, DROPIN, ALTERIN, GRANTOPTION, GRANTDATE, GRANTTIME) 
+         AS SELECT S.NAME, TEE.NAME, TOR.NAME,
+            DECODE (P.CREATEIN, TRUE, 'YES', 'NO'),
+            DECODE (P.DROPIN, TRUE, 'YES', 'NO'),
+            DECODE (P.ALTERIN, TRUE, 'YES', 'NO'),
+            DECODE (P.GRANTOPTION, TRUE, 'YES', 'NO'),
+            DATE(P.GRANTDATE),
+            TIME(P.GRANTDATE)
+         FROM SYSCATALOG.SCHEMAPRIVILEGES P,
+              SYSCATALOG.AUTHORIZATION S, 
+              SYSCATALOG.AUTHORIZATION TEE,
+              SYSCATALOG.AUTHORIZATION TOR
+         WHERE P.SCHEMAID = S.AUTHORIZATIONID AND
+               P.GRANTEE  = TEE.AUTHORIZATIONID AND
+               P.GRANTOR  = TOR.AUTHORIZATIONID
+         UNION ALL
+         SELECT S.NAME, 'PUBLIC', TOR.NAME,
+                DECODE (P.CREATEIN, TRUE, 'YES', 'NO'),
+                DECODE (P.DROPIN, TRUE, 'YES', 'NO'),
+                DECODE (P.ALTERIN, TRUE, 'YES', 'NO'),
+                DECODE (P.GRANTOPTION, TRUE, 'YES', 'NO'),
+                DATE(P.GRANTDATE),
+                TIME(P.GRANTDATE)
+         FROM SYSCATALOG.SCHEMAPRIVILEGES P,
+              SYSCATALOG.AUTHORIZATION S, 
+              SYSCATALOG.AUTHORIZATION TOR
+         WHERE P.GRANTEE  = X'0000000000000002' AND 
+               P.SCHEMAID = S.AUTHORIZATIONID AND
+               P.GRANTOR  = TOR.AUTHORIZATIONID
+         UNION ALL
+         SELECT S.NAME, 
+                DECODE (S.ISSCHEMA, TRUE, O.NAME, S.NAME), 
+                DECODE (S.ISSCHEMA, TRUE, O.NAME, S.NAME), 
+                'YES', 'YES', 'YES', 'YES',
+                DATE(S.CREATEDATE), TIME(S.CREATEDATE) 
+         FROM SYSCATALOG.AUTHORIZATION S,
+              SYSCATALOG.AUTHORIZATION O
+         WHERE
+         ((S.ISUSER AND S.ISUSERGROUP) OR (S.ISSCHEMA)) 
+         AND 
+         S.OWNERID = O.AUTHORIZATIONID 
+         INTERNAL""");
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SCHEMAPRIVILEGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SEQUENCES',
+        """(SCHEMANAME,OWNER,SEQUENCE_NAME,MIN_VALUE,MAX_VALUE,INCREMENT_BY,CYCLE_FLAG,
+           ORDER_FLAG,CACHE_SIZE,LAST_NUMBER,CREATEDATE,CREATETIME,COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,SEQUENCE_NAME,MIN_VALUE,MAX_VALUE,INCREMENT_BY,CYCLE_FLAG,
+             ORDER_FLAG,CACHE_SIZE,LAST_NUMBER,"DATE","TIME",COMMENT
+             FROM SYSDD.SEQUENCES
+            WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SEQUENCES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYNONYMS',
+        """(OWNER,SYNONYMNAME,PUBLIC,TABLESCHEMANAME,TABLEOWNER,TABLENAME,
+           CREATEDATE,CREATETIME,COMMENT)
+        AS SELECT
+             SYNONYMOWNER,SYNONYMNAME,PUBLIC,SCHEMANAME,OWNER,TABLENAME,
+             "DATE","TIME",COMMENT
+           FROM SYSDD.SYNONYMS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYNONYMS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSTEMTRIGGERS',
+        """(SCHEMANAME,TRIGGERNAME,OWNER,
+           CREATEDATE,CREATETIME,DEFINITION,COMMENT)
+        AS SELECT
+             SCHEMANAME,DBPROCEDURE,OWNER,
+             "DATE","TIME",DEFINITION,COMMENT
+           FROM  SYSDD.DBPROCEDURES
+           WHERE "TYPE" = 'SYSTEM'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSTEMTRIGGERS TO PUBLIC WITH GRANT OPTION')
+    
+    createReplaceView (session, 'DOMAIN.TABLES',
+        """(SCHEMANAME,OWNER,TABLENAME,PRIVILEGES,TYPE,TABLETYPE,CREATEDATE,CREATETIME,
+           UPDSTATDATE,UPDSTATTIME,ALTERDATE,ALTERTIME,UNLOADED,
+           SAMPLE_PERCENT,SAMPLE_ROWS,COMMENT,TABLEID,DYNAMIC,ARCHIVE,VARIABLE_COLUMNS,VIRTUALKEY)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,PRIVILEGES,TYPE,TABLETYPE,"DATE","TIME",
+             UPDSTATDATE,UPDSTATTIME,ALTERDATE,ALTERTIME,
+             UNLOADED,SAMPLE_PERCENT,SAMPLE_ROWS,
+             COMMENT,OBJECTID,DYNAMIC,ARCHIVE,VARIABLE_COLUMNS,VIRTUALKEY
+            FROM SYSDD.TABLES
+           WHERE type IN('TABLE','RESULT','SYNONYM','VIEW','SYSTEM')
+             AND (SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.TABLES TO PUBLIC WITH GRANT OPTION')
+
+    # PTS 1116602
+
+    createReplaceView (session, 'DOMAIN.TRIGGERS',
+        """(SCHEMANAME,OWNER,TABLENAME,TRIGGERNAME,"INSERT","UPDATE","DELETE",
+           CREATEDATE,CREATETIME,DEFINITION,COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,TRIGGERNAME,INSERT,UPDATE,DELETE,
+             "DATE","TIME",DEFINITION,COMMENT
+            FROM SYSDD.TRIGGERS
+           WHERE SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%'
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.TRIGGERS TO PUBLIC WITH GRANT OPTION')
+
+#/ PTS 1114385
+
+    createReplaceView (session, 'DOMAIN.USERS',
+        """(OWNER,GROUPNAME,USERNAME,USERMODE,CONNECTMODE,
+           MAXTIMEOUT,COSTWARNING,COSTLIMIT,DEFAULTCODE,CREATEDATE,CREATETIME,ALTERDATE,
+           ALTERTIME,PWCREADATE,PWCREATIME,SERVERDB,SERVERNODE,USER_ID,ISREPLICATIONUSER,COMMENT)
+       AS SELECT A.NAME, 
+                CASE WHEN NOT B.ISUSER AND B.ISUSERGROUP = TRUE THEN B.NAME ELSE DECODE (G.NAME, NULL, ' ', G.NAME) END,
+                CASE WHEN NOT B.ISUSER AND B.ISUSERGROUP = TRUE THEN '  ' ELSE B.NAME END,
+                DECODE(B.ISSYSDBA, true, 'SYSDBA', DECODE (B.USERKIND, x'01', 'DBA', x'02', 'RESOURCE', x'03', 'STANDARD', x'04', 'SYSDBA', x'05', 'ADMIN', 'UNKNOWN')),
+                DECODE(B.CONNECTENABLED, TRUE, DECODE(B.ISEXCLUSIVE, TRUE, 'SINGLE', 'MULTIPLE'), 'DISABLED'),
+                DECODE(B.TIMEOUT,2147483647,NULL,B.TIMEOUT),
+                DECODE(B.COSTWARNING,2147483647,NULL,B.COSTWARNING),
+                DECODE(B.COSTLIMIT,2147483647,NULL,B.COSTLIMIT),
+                DECODE(B.DEFAULTCODE, x'00', 'ASCII', x'01', 'EBCDIC', x'14', 'UNICODE', 'DEFAULT'),
+                DATE(B.CREATEDATE),TIME(B.CREATEDATE),
+                DATE(B.ALTERDATE), TIME(B.ALTERDATE),
+                DATE(B.PASSWORDCHANGEDATE),TIME(B.PASSWORDCHANGEDATE),
+                SERVERDB, SERVERNODE,
+                B.USERID,
+                DECODE(B.ISREPLICATION, TRUE, 'YES', 'NO'),
+                NULL
+        FROM SYSCATALOG.AUTHORIZATION A,  SYSCATALOG.AUTHORIZATION B, SYSCATALOG.AUTHORIZATION G,
+             SYSDD.SERVERDBS
+        WHERE A.AUTHORIZATIONID = B.OWNERID 
+        AND (G.AUTHORIZATIONID (+) = B.GROUPID)
+        AND (B.ISUSER OR B.ISUSERGROUP)
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, """GRANT SELECT ON DOMAIN.USERS TO PUBLIC WITH GRANT OPTION""")
+
+    createReplaceView (session, 'DOMAIN.CONNECTEDUSERS',
+        """AS SELECT
+             USERNAME,TERMID,SESSION,CATALOG_CACHE_SIZE
+           FROM SYSDD.CONNECTED_USERS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.CONNECTEDUSERS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.VERSIONS',
+        """AS SELECT *
+           FROM SYSDD.VERSION
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.VERSIONS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.VIEWS',
+        """(SCHEMANAME,OWNER,VIEWNAME,PRIVILEGES,TYPE,CREATEDATE,CREATETIME,
+           UPDSTATDATE,UPDSTATTIME,ALTERDATE,ALTERTIME,
+           UNLOADED,WITHCHECKOPTION,COMPLEX,COMMENT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,PRIVILEGES,TYPE,"DATE","TIME",
+             UPDSTATDATE,UPDSTATTIME,ALTERDATE,ALTERTIME,
+             UNLOADED,WITH_CHECK_OPTION,COMPLEX,COMMENT
+           FROM SYSDD.TABLES
+           WHERE tabletype = 'VIEW'
+             AND (SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.VIEWS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.VIEWDEFS',
+        """(SCHEMANAME,OWNER,VIEWNAME,LEN,DEFINITION)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,LEN,DEFINITION
+           FROM SYSDD.VIEWS
+           WHERE owner = USERGROUP
+             AND (SCHEMANAME = 'SYSINFO' OR SCHEMANAME NOT LIKE 'SYS%')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.VIEWDEFS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.VIEWCOLUMNS',
+        """(SCHEMANAME,OWNER,VIEWNAME,VIEWCOLUMNNAME,
+           TABLESCHEMANAME,TABLEOWNER,TABLENAME,COLUMNNAME,CREATEDATE,CREATETIME)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,COLUMNNAME,
+             DECODE (substr(REFSCHEMANAME,1,3), 
+                     'SYS', DECODE (REFSCHEMANAME, 
+                                    'SYSINFO', 'SYSINFO',
+                                    '<INTERNAL>'),
+                     REFSCHEMANAME),
+             DECODE (substr(REFOWNER,1,3), 
+                     'SYS', DECODE (REFOWNER, 
+                                    'SYSINFO', 'SYSINFO',
+                                    '<INTERNAL>'),
+                     REFOWNER),
+             DECODE (substr(REFSCHEMANAME,1,3), 
+                     'SYS', DECODE (REFSCHEMANAME, 
+                                    'SYSINFO', REFTABLENAME,
+                                    '<INTERNAL>'),
+                     REFTABLENAME),
+             REFCOLUMNNAME,DATE,TIME
+            FROM SYSDD.REFERENCED_COLUMNS
+           WHERE SCHEMANAME       =   'SYSINFO'   OR 
+                 ((SCHEMANAME NOT LIKE 'SYS%') AND 
+                 ( REFSCHEMANAME = 'SYSINFO' OR REFSCHEMANAME NOT LIKE 'SYS%'))
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.VIEWCOLUMNS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.VIEWTABLES',
+        """(SCHEMANAME,OWNER,VIEWNAME,TABLESCHEMANAME,TABLENAME)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,
+             DECODE (substr(REFNAME,1,3), 
+                     'SYS', DECODE (REFNAME, 
+                                    'SYSINFO', 'SYSINFO',
+                                    '<INTERNAL>'),
+                     REFNAME),
+             DECODE (substr(REFNAME,1,3), 
+                     'SYS', DECODE (REFNAME, 
+                                    'SYSINFO', REFTABLENAME,
+                                    '<INTERNAL>'),
+                     REFTABLENAME)
+            FROM SYSDD.VIEW_USES_TABLE
+           WHERE SCHEMANAME       =   'SYSINFO'   OR 
+                 ((SCHEMANAME NOT LIKE 'SYS%') AND 
+                 ( REFNAME = 'SYSINFO' OR REFNAME NOT LIKE 'SYS%'))
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.VIEWTABLES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.TABLEPRIVILEGES',
+        """(SCHEMANAME,OWNER,TABLENAME,
+           GRANTOR,GRANTEE,PRIVILEGE,IS_GRANTABLE)
+        AS SELECT
+             SCHEMANAME,OWNER,NAME1,
+             GRANTOR,GRANTEE,
+             DECODE(SUBSTR(PRIVILEGES,LENGTH(PRIVILEGES),1),'+',
+                    SUBSTR(PRIVILEGES,1,LENGTH(PRIVILEGES) - 1),PRIVILEGES),
+             DECODE(SUBSTR(PRIVILEGES,LENGTH(PRIVILEGES),1),'+','YES','NO')
+           FROM SYSDD.NEW_PRIVILEGES
+           WHERE NAME2 IS NULL
+           AND TYPE NOT IN('SEQUENCE','DBPROC','ROLE')
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.TABLEPRIVILEGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.LOCKS',
+        """AS SELECT 
+            SESSION,
+            TRANSCOUNT,
+            PROCESS,
+            USERNAME,
+            "DATE",
+            "TIME",
+            TERMID,
+            LASTWRITE,
+            LOCKMODE,
+            LOCKSTATE,
+            APPLPROCESS,
+            APPLNODE,
+            SCHEMANAME,
+            OWNER,
+            TABLENAME,
+            TABLEID,
+            ROWIDLENGTH,
+            ROWIDHEX,
+            ROWID
+           FROM SYSDBA.LOCKSTATISTICS
+           WHERE REQMODE IS NULL AND LOCKMODE IS NOT NULL
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.LOCKS TO PUBLIC')
+
+    createReplaceView (session, 'DOMAIN.LOCK_HOLDER',
+        """AS SELECT
+            SESSION,
+            TRANSCOUNT,
+            PROCESS,
+            USERNAME,
+            "DATE",
+            "TIME",
+            TERMID,
+            LASTWRITE,
+            LOCKMODE,
+            LOCKSTATE,
+            APPLPROCESS,
+            APPLNODE,
+            SCHEMANAME,
+            OWNER,
+            TABLENAME,
+            TABLEID,
+            ROWIDLENGTH,
+            ROWIDHEX,
+            ROWID
+           FROM SYSDBA.LOCKSTATISTICS
+           WHERE REQMODE IS NULL AND LOCKMODE IS NOT NULL
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.LOCK_HOLDER TO PUBLIC')
+
+    createReplaceView (session, 'DOMAIN.LOCK_REQUESTOR',
+        """AS SELECT
+            SESSION,
+            TRANSCOUNT,
+            PROCESS,
+            USERNAME,
+            "DATE",
+            "TIME",
+            TERMID,
+            REQTIMEOUT,
+            LASTWRITE,
+            REQMODE,
+            REQSTATE,
+            APPLPROCESS,
+            APPLNODE,
+            SCHEMANAME,
+            OWNER,
+            TABLENAME,
+            TABLEID,
+            ROWIDLENGTH,
+            ROWIDHEX,
+            ROWID
+           FROM SYSDBA.LOCKSTATISTICS
+           WHERE REQMODE IS NOT NULL 
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.LOCK_REQUESTOR TO PUBLIC')
+
+    createReplaceView (session, 'DOMAIN.LOCK_WAITS',
+        """AS SELECT 
+             H.TABLENAME   TABLENAME,
+             H.TABLEID     TABLEID,
+             H.TERMID      H_TERMID,
+             H.PROCESS     H_PROCESS,
+             H.APPLPROCESS H_APPLPROCESS,
+             H.APPLNODE    H_APPLNODE,
+             H.ROWIDHEX    H_ROWIDHEX,
+             H.ROWID       H_ROWID,
+             H.LOCKMODE    H_LOCKMODE,
+             H."DATE"      H_DATE,
+             H."TIME"      H_TIME,
+             EXPAND (NULL, 10) H_LOCKTIMEOUT, 
+             R.TERMID      R_TERMID,
+             R.PROCESS     R_PROCESS,
+             R.APPLPROCESS R_APPLPROCESS,
+             R.APPLNODE    R_APPLNODE,
+             R.ROWIDHEX    R_ROWIDHEX,
+             R.ROWID       R_ROWID,
+             R.REQMODE     R_REQMODE,
+             R."DATE"      R_DATE,
+             R."TIME"      R_TIME,
+             R.REQTIMEOUT  R_REQTIMEOUT
+           FROM DOMAIN.LOCK_REQUESTOR R, DOMAIN.LOCK_HOLDER H
+           WHERE H.TABLEID = R.TABLEID 
+             AND H.TRANSCOUNT <> R.TRANSCOUNT    
+             AND (
+                  H.ROWID = R.ROWID AND 
+                     (H.LOCKMODE = 'row_exclusive' OR R.REQMODE = 'row_exclusive')
+                  OR
+                  (H.LOCKMODE = 'row_exclusive' AND R.REQMODE = 'tab_share')
+                  OR
+                  (H.LOCKMODE = 'tab_share' AND R.REQMODE = 'row_exclusive')
+                  OR
+                  H.LOCKMODE = 'sys_exclusive'
+                  OR
+                  R.REQMODE = 'sys_exclusive'
+                  OR
+                  H.LOCKMODE = 'tab_exclusive'
+                  OR
+                  R.REQMODE = 'tab_exclusive'
+                 )
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.LOCK_WAITS TO PUBLIC')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_BACKUPIOACCESS',
+        """AS SELECT
+           DEVICEID, DEVICENAME, BACKUPREADS, BACKUPWRITES,
+           BACKUPPAGES, QUEUELEN, QUEUEMAX  
+           FROM SYSDD.SYSMON_BACKUPIOACC
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_BACKUPIOACCESS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_CONNECTION',
+        """AS SELECT
+           TASKINDEX, UKTID, APPLPID, PEERPID, TASKNAME, 
+           CONNECTSTATE, CONNECTTIME, REMOTEAPPLNODE
+           FROM SYSDD.SYSMON_CONNECTION
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_CONNECTION TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_SPECIAL_THREAD',
+        """AS SELECT
+           OSPID, THREADNAME 
+           FROM SYSDD.SYSMON_SPECTHREAD
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_SPECIAL_THREAD TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_IOTHREAD',
+        """AS SELECT
+           OSPID, THREADNAME, VOLUMEID, VOLUMENAME, READS, WRITES,
+           QUEUELEN, QUEUEMAX  
+           FROM SYSDD.SYSMON_IOTHREAD
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_IOTHREAD TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_IOACCESS',
+        """AS SELECT
+           DEVICEID, DEVICENAME, READS, READPAGES, WRITES, WRITEPAGES  
+           FROM SYSDD.SYSMON_IOACCESS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_IOACCESS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_REGION',
+        """AS SELECT
+           REGID, REGIONNAME, OWNERDBPID, REQSTDBPID,
+           ACCESSES, TEST_AND_SET, WAITS, COLLISIONS, 
+           COLLISION_RATE, LOCKED  
+           FROM SYSDD.SYSMON_REGION
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_REGION TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_STORAGE',
+        """AS SELECT
+           DESC, VAL, VDESC  
+           FROM SYSDD.SYSMON_STORAGE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_STORAGE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_UKTHREAD',
+        """AS SELECT *
+           FROM SYSDD.SYSMON_UKTHREAD
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_UKTHREAD TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_TASK',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, OMSCALLACTIVE, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_TASK
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_TASK TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_ACTIVE_TASK',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_ACTIVE_TASK
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_ACTIVE_TASK TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_RUNNABLE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_RUNNABLE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_RUNNABLE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_US',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_US
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_US TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_US_ACTIVE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_US_ACTIVE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_US_ACTIVE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_US_RUNNABLE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_US_RUNNABLE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_US_RUNNABLE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_SV',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_SV
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_SV TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_SV_ACTIVE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_SV_ACTIVE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_SV_ACTIVE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_SV_RUNNABLE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_SV_RUNNABLE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_SV_RUNNABLE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_DW',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_DW
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_DW TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_DW_ACTIVE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_DW_ACTIVE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_DW_ACTIVE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_DW_RUNNABLE',
+        """AS SELECT
+           DBPID, OSPID, TASKTYPE, APPID, STATEDESC,
+           CANCEL_FLAG, SPECIAL_FLAG, TIMEOUT, REGID,
+           WAITING4TASK, WAITING4ROOT, EXTENDEDTASKSTATE  
+           FROM SYSDD.SYSMON_DW_RUNNABLE
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_DW_RUNNABLE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_TASK_DETAIL',
+        """AS SELECT *
+           FROM SYSDD.SYSMON_TASK_DETAIL
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_TASK_DETAIL TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.SYSMON_TOTALCOUNT',
+        """AS SELECT
+           DISPATCHCNT, COMMANDCNT, 
+           VWAITCNT, VSUSPENDCNT, VSLEEPCNT, 
+           PRIOCNT, USERTASKREADCNT, USERTASKWRITECNT, 
+           TASKIOCNT, IOCNT, 
+           REGIONACCESSCNT, REGIONCOLLCNT, REGIONWAITCNT, 
+           VBEGEXCLTASCOLLCNT, VENDEXCLTASCOLLCNT, 
+           TASKSELFSUSPCNT, SYMBOLRESOLVECNT
+           FROM SYSDD.SYSMON_TOTALCOUNT
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.SYSMON_TOTALCOUNT TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DOMAIN.PARSINFOS',
+        """AS SELECT
+           SYSINFOKEY, KEY_SEQ, NAME1, NUMERIC_VALUE,
+           TABLETYPE, SIZE 
+           FROM SYSDD.PARSINFOS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DOMAIN.PARSINFOS TO PUBLIC WITH GRANT OPTION')
+
+    createPubSynonym (session, 'CLASSCONTAINERS')
+    createPubSynonym (session, 'CLASSCONTAINER_ROOTS')
+    createPubSynonym (session, 'CLASSCONTAINER_CHAINS')
+    createPubSynonym (session, 'CLASSCONTAINER_KEYS')
+    createPubSynonym (session, 'OMS_VERSIONS')
+    createPubSynonym (session, 'PARAMETERS')    
+    createPubSynonym (session, 'COLUMNS')
+    createPubSynonym (session, 'CONNECTPARAMETERS')
+    createPubSynonym (session, 'CONSTRAINTCOLUMNS')
+    createPubSynonym (session, 'CONSTRAINTS')
+    createPubSynonym (session, 'DBPROCEDURES')
+    createPubSynonym (session, 'SYSTEMTRIGGERS')
+    createPubSynonym (session, 'FUNCTIONS')
+    createPubSynonym (session, 'DBPROCPARAMS')
+    createPubSynonym (session, 'DBPROCPARAMINFO')
+    createPubSynonym (session, 'PACKAGES')
+    createPubSynonym (session, 'DOMAINS')
+    createPubSynonym (session, 'DOMAINCONSTRAINTS')
+    createPubSynonym (session, 'FOREIGNKEYS')
+    createPubSynonym (session, 'FOREIGNKEYCOLUMNS')
+    createPubSynonym (session, 'INDEXES')
+    createPubSynonym (session, 'INDEXCOLUMNS')
+    createPubSynonym (session, 'MAPCHARSETS')
+    createPubSynonym (session, 'SESSION_ROLES')
+    createPubSynonym (session, 'ROLES')
+    createPubSynonym (session, 'ROLEPRIVILEGES')
+    createPubSynonym (session, 'SCHEMAS')
+    createPubSynonym (session, 'SCHEMAPRIVILEGES')
+    createPubSynonym (session, 'SEQUENCES')
+    createPubSynonym (session, 'SYNONYMS')
+    createPubSynonym (session, 'TABLES')
+    createPubSynonym (session, 'TRIGGERS')
+    createPubSynonym (session, 'USERS')
+    createPubSynonym (session, 'CONNECTEDUSERS')
+    createPubSynonym (session, 'VERSIONS')
+    createPubSynonym (session, 'VIEWS')
+    createPubSynonym (session, 'VIEWDEFS')
+    createPubSynonym (session, 'VIEWCOLUMNS')
+    createPubSynonym (session, 'VIEWTABLES')
+    createPubSynonym (session, 'TABLEPRIVILEGES')
+    createPubSynonym (session, 'LOCKS')
+    createPubSynonym (session, 'LOCK_HOLDER')
+    createPubSynonym (session, 'LOCK_REQUESTOR')
+    createPubSynonym (session, 'LOCK_WAITS')
+    createPubSynonym (session, 'SYSMON_BACKUPIOACCESS')
+    createPubSynonym (session, 'SYSMON_CONNECTION')
+    createPubSynonym (session, 'SYSMON_SPECIAL_THREAD')
+    createPubSynonym (session, 'SYSMON_IOTHREAD')
+    createPubSynonym (session, 'SYSMON_IOACCESS')
+    createPubSynonym (session, 'SYSMON_REGION')
+    createPubSynonym (session, 'SYSMON_STORAGE')
+    createPubSynonym (session, 'SYSMON_UKTHREAD')
+    createPubSynonym (session, 'SYSMON_TASK')
+    createPubSynonym (session, 'SYSMON_ACTIVE_TASK')
+    createPubSynonym (session, 'SYSMON_RUNNABLE')
+    createPubSynonym (session, 'SYSMON_US')
+    createPubSynonym (session, 'SYSMON_US_ACTIVE')
+    createPubSynonym (session, 'SYSMON_US_RUNNABLE')
+    createPubSynonym (session, 'SYSMON_SV')
+    createPubSynonym (session, 'SYSMON_SV_ACTIVE')
+    createPubSynonym (session, 'SYSMON_SV_RUNNABLE')
+    createPubSynonym (session, 'SYSMON_DW')
+    createPubSynonym (session, 'SYSMON_DW_ACTIVE')
+    createPubSynonym (session, 'SYSMON_DW_RUNNABLE')
+    createPubSynonym (session, 'SYSMON_TASK_DETAIL')
+    createPubSynonym (session, 'SYSMON_TOTALCOUNT')
+    createPubSynonym (session, 'PARSINFOS')
+
+    rc = sqlRC (session, 'COMMIT WORK')
+    loaderCmd (session, 'INSTALLATION OFF')
+
+
+
+

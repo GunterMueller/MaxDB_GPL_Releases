@@ -1,0 +1,254 @@
+#!/usr/bin/perl
+#
+# $Header: //sapdb/V76/c_00/b_32/sys/src/install/perl/packages/web/instweb#1 $
+# $DateTime: 2006/07/06 16:50:32 $
+# $Change: 130190 $
+#
+# Desc:
+
+import SAPDB::Install::StdIO;
+import SAPDB::Install::System;
+import SAPDB::Install::Registry;
+import SAPDB::Install::Tools;
+import SAPDB::Install::SetUser;
+import SAPDB::Install::Cwd;
+import SAPDB::Install::Values;
+import SAPDB::Install::Misc;
+
+$path{'name'} = 'webtools path';
+
+$path{'opt'}='webpath=s';
+$path{'list'} = 'web.lst';
+$path{'update'}=0;
+
+
+$web_ini = '/usr/spool/sql/ini/WebAgent76.ini';
+
+	
+$usage= " [-webpath <instpath>]";
+$usage_desc = "\t-webpath <instpath>\tweb tools installation directory\n";
+                  
+
+
+@paths = (\%path);
+$main_path=\%path;
+$skip=0;
+@opts=();
+
+local ($data,$prog);
+
+
+sub preinstall{
+	($data,$prog)=readIndepPath();
+	$prog =~ /\S/ or $prog = $SAPDB::Install::Values::indep_prog_path;
+	$data =~ /\S/ or $data = $SAPDB::Install::Values::indep_data_path;
+	$prog =~ /\S/ or print2stderr("independent program path not found\n") and diesoft($SAPDB::Install::Values::diemsg);
+	$path{'default'} = $prog.'/web';
+	$path{'value'}=$prog.'/web' unless ($SAPDB::Install::StartInstall::opt_relocate);  
+	return 1;
+}
+ 
+
+sub postprepare{
+	return 1;
+}
+
+
+sub postinstall{
+	unless ($^O =~ /mswin/i){
+		eval{
+			checkIniLock ($web_ini.'_lock');
+		};
+	}
+	return 1;    
+}
+
+
+
+sub registerWin{
+	my $path=$path{'value'};
+	my $regpath=$path;
+	$regpath=~s/\/$//;
+	
+	my @tmp;
+	my $log_path=getAppDataPath().'/sapdb/wa';
+	$log_path =~ s/\\/\//g;
+
+	unless(-d $log_path){
+		makedir($log_path,0775) or print2sterr("cannot create log directory $log_path\n");
+	}
+	
+	$log_path=~s/\//\\\\/g;
+	$regpath=~s/\//\\\\/g;
+	my @statbuf = stat($path.'/config/wa.reg');
+	open(REG,$path.'/config/wa.reg') or print2stderr("cannot open \"$path/config/wa.reg\"\n") and diesoft($diemsg);
+	while(chomp($_=<REG>)){
+		$_=~s/\$WEBINSTROOT\$*/$regpath/g;
+		$_=~s/\$LOG\$*/$log_path/g;
+		push(@tmp,$_);
+	}
+	close(REG);
+	open(REG,'>'.$path.'/config/wa.reg') or print2stderr("cannot open \"$path/config/wa.reg\" to write\n") and diesoft($SAPDB::Install::diemsg);
+	foreach my $line (@tmp){
+		print REG $line."\n";
+	}
+	close(REG);
+	utime($statbuf[9],$statbuf[9],$path.'/config/wa.reg');
+	$packobj->RegData->updateMd5Sum('config/wa.reg');
+	
+	$path =~ s/\//\\/g;
+
+	$prog =~ s/\//\\/g;
+
+	if($packobj->Update){
+		callsystem("\"$prog\\pgm\\regupd\" \"".$path."\\config\\wa.reg\" \"SOFTWARE\\SAP\\SAP DBTech\\WebAgent76\"");
+	}
+	else{
+		callsystem("regedit -s \"".$path."\\config\\wa.reg\"");
+	}
+	
+	my $service_test = sub {
+								my ($text)=@_;
+								$text =~ /service\s+installed\s+successfully/ and return 1;  
+								if($text =~ /service\s+already\s+exists/){
+									callsystem ('wahttp -u',sub {return 1;},1);
+									callsystem ('wahttp -i',sub {my ($text)=@_;$text =~ /service\s+installed\s+successfully/ and return 1; return 0;});
+									return 1;
+								} 
+								return 0;
+						};
+	my $cwd = getcwd();
+	chdir($path."\\pgm");
+	callsystem ('wahttp -i',$service_test);
+	chdir($cwd);
+	return 1;
+}
+	
+
+sub registerUX{
+	my $path=$path{'value'};
+	my $regpath=$path;
+	$regpath=~s/\/$//;
+	my $log_path = '/var/log/sapdb/wa';
+	if(-d $log_path){
+		chmod(0775,$log_path);
+		chown($packobj->UID,$packobj->GID,$log_path);
+	}
+	else{
+		makedir($log_path,0775,$packobj->UID,$packobj->GID) or print2stderr("cannot create log directory \"$log_path\"\n");
+	} 
+	
+	my @statbuf = stat($path.'/config/WebAgent76.ini');
+
+	open(REG,$path.'/config/WebAgent76.ini') or print2stderr("cannot open \"$path/config/WebAgent76.ini\": $!\n") and diesoft($SAPDB::Install::diemsg);
+	
+	
+	open(REGDEST,'>'.$path.'/config/WebAgent76.ini.tmp')  or print2stderr("cannot create file \"$path/config/WebAgent76.ini.tmp\": $!\n") and diesoft($SAPDB::Install::diemsg);	
+		
+	while(<REG>){
+		chomp;
+		s/\$LOG\$/$log_path/;
+		s/\$OWN(32|64)\$/$regpath/;
+		print REGDEST $_."\n";
+	}
+	close(REG);
+	close(REGDEST);
+	unlink($path.'/config/WebAgent76.ini');
+	rename($path.'/config/WebAgent76.ini.tmp',$path.'/config/WebAgent76.ini');
+	utime ($statbuf[8],$statbuf[9],$path.'/config/WebAgent76.ini');
+	chmod($statbuf[2],$path.'/config/WebAgent76.ini');
+	chown($statbuf[4],$statbuf[5],$path.'/config/WebAgent76.ini');
+	$packobj->RegData->updateMd5Sum('config/WebAgent76.ini');	
+	if($packobj->Update){
+		callsystem("$prog/pgm/regupd $path/config/WebAgent76.ini $web_ini");
+	}
+	else{
+		copy($path.'/config/WebAgent76.ini',$web_ini);
+	}
+	return 1;
+}
+
+
+*register =           $^O =~ /^MsWin/i ? \&registerWin :
+        \&registerUX;
+
+
+
+
+sub unregisterWin{
+	my $path = $regpackobj->Path;
+	setPathInEnv("$path/pgm");
+	$path =~ s/\//\\/g;		
+	
+	my $service_test = sub {
+								my ($text)=@_;
+								$text =~ /SAP\s+DB\s+WWW\s+removed/ and return 1;  
+								return 0;
+						};
+	callsystem ('wahttp -u',$service_test,1);
+	return 1;
+}
+
+sub unregisterUX{
+	rename($web_ini,$web_ini.'.last');
+	return 1;
+}
+
+
+*unregister =           $^O =~ /^MsWin/i ? \&unregisterWin :
+        \&unregisterUX;
+
+if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+	*register = sub {return 1};
+	*unregister = \&register;
+}
+
+
+sub preuninstall{
+	my $path = $regpackobj->Path;
+	my $pid_file = $path.'/pgm/wahttp.pid';
+	if(-f $pid_file){
+			unlink($pid_file) or print2stderr("cannot remove file \"$pid_file\": $!\n");
+	}
+	unless($^O =~ /mswin/i){
+		$pid_file = '/usr/spool/sql/pid/wahttp.pid';
+		if(-f $pid_file){
+			unlink($pid_file) or print2stderr("cannot remove file \"$pid_file\": $!\n");
+		}
+	}
+	return 1;
+}
+
+sub postuninstall{
+	if($^O !~ /mswin/i){
+		foreach my $file ($web_ini,$web_ini.'.last',$web_ini.'_lock'){
+			if(-e $file){
+				unlink($file) or print2stderr("cannot remove $file: $!\n");
+			}
+			$file =~ s/^\/usr\//\/var\//;
+			if(-e $file){
+				unlink($file) or print2stderr("cannot remove $file: $!\n");
+			}
+		}
+		my $logpath = ($^O =~ /mswin/i) ? getAppDataPath().'/sapdb/wa' : '/var/log/sapdb/wa';
+		if (-d $logpath){
+			foreach (grep {/\.log$/} find($logpath,'f')){
+				unlink || print2stderr("cannot remove file \"$_\"\n");
+			}		
+			my ($rc,$deleted,$undeleted) = removeEmptyDirs($logpath);
+			if(defined $undeleted and ref($undeleted) eq 'ARRAY'){
+				foreach (@$undeleted){
+					print2stderr("cannot remove directory $_\n");
+				}
+			}
+		}
+	}
+	else{
+		removeKey({'name' => 'HKEY_LOCAL_MACHINE'},'Software\SAP\SAP DBTech\WebAgent76',2)
+			or print2stderr("cannot remove registry key \"HKEY_LOCAL_MACHINE\\Software\\SAP\\SAP DBTech\\WebAgent76\"\n");
+	}
+	return 1;	
+}
+
+1;
+                                                                                                         

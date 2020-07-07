@@ -1,0 +1,877 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA09AC$
+.tt 2 $$$
+.TT 3 $BurkhardD$ASYNC PROCESSING$2001-05-10$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+#ifndef DEBUG
+#line 20 "vpa09ac"
+#endif
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 10-28-1996
+.sp
+.cp 3
+Version : 1996-10-28
+.sp
+.cp 3
+Release :  7.3    Date : 2001-05-10
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 65 "vpa09ac"
+#endif
+#ifdef ASYNCENABLED
+#define PA09ENTERSECTION(p) sqlbeginmutex(p)
+#define PA09TRYENTERSECTION(p) sqltrybeginmutex(p)
+#define PA09LEAVESECTION(p)  sqlendmutex(p)
+#define PA09GETTHREADID  sqlgetthreadid()
+extern teo07_Mutex pa07CriticalSection;
+#else
+#define PA09ENTERSECTION(p) 
+#define PA09TRYENTERSECTION(p) 
+#define PA09LEAVESECTION(p) 
+#endif
+
+#include "heo07.h"
+
+#include "vpa00global.h"
+#include "vpa40DBC.h"
+#include "vpa60Stmt.h"
+#include "vpa09.h"
+
+#ifdef ASYNCENABLED
+DWORD pa09IsRecursive();
+DWORD pa09IsRecursive()
+{
+    API_TRACE( API_TR_DWORD,
+               "pa09IsRecursive",
+               &((pa09AsyncLocals FAR *)pa09GetTLS(PA09TLS_ASYNC))->recursive);
+    return(((pa09AsyncLocals FAR *)pa09GetTLS(PA09TLS_ASYNC))->recursive);
+}
+#else
+extern pa09AsyncLocals  pa09AsyncValues;
+#endif
+
+#ifdef ASYNCENABLED
+/* critcal means, that it is not the thread itself, that enters PTS 1121095 */
+#define PA09CRITICALTHREAD() (!(p->stmt_block_ptr && \
+                                p->stmt_block_ptr->async.ThreadId == sqlgetthreadid()))
+#else
+#define PA09CRITICALTHREAD() (TRUE)
+#endif
+
+
+/* used by SQLDisconnect and pa40FreeConnect to set the actual dbc and stmt
+ * in the TLS. For other functions this is done by pa09EnterAsyncFunction */
+VOID pa09SetAsyncLocals( tpa40DBC  *dbc_block_ptr,
+                         tpa60Stmt *stmt_block_ptr ) {
+    pa09AsyncLocals *p = (pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC);
+    p->stmt_block_ptr = stmt_block_ptr;
+    p->dbc_block_ptr  = dbc_block_ptr;
+} /* pa09SetAsyncLocals */
+
+VOID pa09EnterAsyncFunction( tpa40DBC  *dbc_block_ptr,
+                             tpa60Stmt *stmt_block_ptr )
+{
+    static int first = TRUE;
+    pa09AsyncLocals FAR *p = (pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC);
+    p->stmt_block_ptr = stmt_block_ptr;
+    p->dbc_block_ptr = dbc_block_ptr;
+
+    if (PA09CRITICALTHREAD()) {
+#ifdef ASYNCENABLED
+        sqlyieldthread();
+#endif
+        PA09ENTERSECTION(&dbc_block_ptr->thread.cs);
+    }
+    p->recursive++;
+    API_TRACE(API_TR_DWORD, "pa09EnterAsyncFunction", &p->recursive);
+} /* pa09EnterAsyncFunction */
+
+
+VOID pa09LeaveAsyncFunction(VOID)
+{
+    pa09AsyncLocals FAR *p = (pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC);
+    p->recursive--;
+    API_TRACE(API_TR_DWORD, "pa09LeaveAsyncFunction", &p->recursive);
+
+    if (PA09CRITICALTHREAD()) {
+        if (!p->recursive)
+            p->stmt_block_ptr = NULL;
+        PA09LEAVESECTION(&p->dbc_block_ptr->thread.cs);
+#ifdef ASYNCENABLED
+        sqlyieldthread();
+#endif
+    }
+    else
+        if (!p->recursive)
+            p->stmt_block_ptr = NULL;
+
+} /* pa09LeaveAsyncFunction */
+
+
+BOOL pa09IsConnectionBusy( tpa60Stmt *stmt_block_ptr,
+                           tpa40DBC  *dbc_block_ptr )
+{
+    BOOL ret=FALSE;
+#ifdef ASYNCENABLED   
+#ifndef SAPDB_FAST
+    if (api_trace_status == 1) {
+        DWORD ThreadId=sqlgetthreadid();
+        API_TRACE(API_TR_ENTRY, "pa09IsConnectionBusy", 0);
+        API_TRACE(API_TR_DWORD, "ThreadId", &ThreadId);
+        API_TRACE(API_TR_DWORD,
+                  "dbcThreadId",
+                  &dbc_block_ptr->thread.ThreadId);
+        API_TRACE(API_TR_DWORD,
+                  "stmtThreadId",
+                  &stmt_block_ptr->async.ThreadId);
+    }
+#endif
+    if (dbc_block_ptr->thread.ThreadId != stmt_block_ptr->async.ThreadId &&
+        dbc_block_ptr->thread.ThreadId != 0) {
+        ret = TRUE;
+    }
+    API_TRACE(API_TR_EXIT, "pa09IsConnectionBusy", 0);
+#endif   
+    UNREFERENCED_PARAMETER(stmt_block_ptr);
+    UNREFERENCED_PARAMETER(dbc_block_ptr);
+    return(ret);
+} /* pa09IsConnectionBusy */
+
+
+/* Checks if a statement has to execute asyncron and manages the different
+async states. Call the function at first time with retcode as null pointer, 
+in case of initialise the statement 'state'. Call the function every time 
+to check the 'state' of the statement. It will return TRUE and retcode is
+set to  SQL_STILL_EXECUTING if the statement is busy. 
+If the statement has finished the function will return TRUE and 'retcode' 
+is set to the returncode from the background operation. If the function
+is called from the background operation it will return FALSE */
+DWORD pa09IsAsync( tpa60Stmt *stmt_block_ptr,
+                   tpa40DBC  *dbc_block_ptr,
+                   RETCODE   *retcode )
+{
+    DWORD ret=FALSE;
+    API_TRACE(API_TR_ENTRY, "pa09IsAsync", 0);
+    API_TRACE(API_TR_UWORD, "asyncstate", &stmt_block_ptr->async.asyncstate);
+    if (stmt_block_ptr->stmtopt.async_enable == SQL_ASYNC_ENABLE_OFF) {
+        if (!retcode)
+            ret = TRUE;
+    }
+#ifdef ASYNCENABLED   
+    else {
+        if (!retcode) {
+            if(stmt_block_ptr->async.asyncstate == API_ASYNC_INIT) {
+                ret = TRUE;
+            }
+            if (pa09IsRecursive() > 1) {
+                ret = TRUE;
+            }
+        } else {
+            /* the statement is busy the window/thread procedure works */    
+            PA09ENTERSECTION(&dbc_block_ptr->thread.cs);
+            switch (stmt_block_ptr->async.asyncstate) {
+            case API_ASYNC_INFLIGHT:
+                if (dbc_block_ptr->thread.ThreadId == sqlgetthreadid()) {
+                    /* recursiv call */
+                    ret = FALSE;
+                }
+                else {
+                    if (pa09IsRecursive() <= 1) {
+                        *retcode = SQL_STILL_EXECUTING;
+                        ret = TRUE;
+                    }
+                }
+                break;            
+            case API_ASYNC_START: /* async call has started */
+                if (stmt_block_ptr->async.ThreadId == sqlgetthreadid()) {
+                    ret = FALSE;
+                } else {
+                    *retcode = SQL_STILL_EXECUTING;
+                    ret = TRUE;
+                }; /* else */
+                /* PA09LEAVESECTION(&dbc_block_ptr->thread.cs); HBI */
+                break;    
+            case API_ASYNC_READY:
+                /* async call has finish, the statement is processed */   
+                *retcode = stmt_block_ptr->async.retcode;
+                stmt_block_ptr->async.asyncstate = API_ASYNC_INIT;
+                dbc_block_ptr->thread.ThreadId = 0;
+                ret = TRUE;
+                break;
+                /* execution terminated now and return the retcode */
+            default:
+                /* this is before async call */
+                if (pa09IsRecursive() <= 1) {
+                    if (stmt_block_ptr->async.asyncstate == API_ASYNC_INIT) {
+                        dbc_block_ptr->thread.ThreadId =
+                            stmt_block_ptr->async.ThreadId;
+                        ret = TRUE;
+                    }
+                }
+                break;
+            }; /* switch */
+            PA09LEAVESECTION(&dbc_block_ptr->thread.cs);
+        }
+    }
+#endif   
+    API_TRACE(API_TR_EXIT, "pa09IsAsync", 0);
+    API_TRACE(API_TR_DWORD, "ret", &ret);   
+    API_TRACE(API_TR_RETCODE, "retcode", retcode);   
+    UNREFERENCED_PARAMETER(dbc_block_ptr);
+    return(ret);
+} /* pa09IsAsync */
+
+
+VOID pa09PrepareAsyncCall( SQLHSTMT hstmt, UWORD function_code) 
+{
+#ifdef ASYNCENABLED   
+    BOOL async;
+    tpa60Stmt FAR * stmt_block_ptr;
+    API_TRACE(API_TR_ENTRY, "pa09PrepareAsyncCall", 0);
+    stmt_block_ptr = (tpa60Stmt FAR *) apdlock (hstmt);
+    stmt_block_ptr->async.asyncstate = API_ASYNC_INFLIGHT;
+    stmt_block_ptr->async.function_code = function_code;
+    async = (stmt_block_ptr->async.hThread) ? TRUE : FALSE;      
+    apdunlk (hstmt);   
+    if (!async) {
+        API_TRACE(API_TR_MSG, "Call syncron", 0);
+        pa09ThreadProc(hstmt);
+    }
+    API_TRACE(API_TR_EXIT, "pa09PrepareAsyncCall", 0);
+#else
+    UNREFERENCED_PARAMETER(hstmt);
+    UNREFERENCED_PARAMETER(function_code);
+#endif   
+} /* pa09PrepareAsyncCall */
+
+
+VOID pa09ExecuteAsyncCall( SQLHSTMT hstmt) 
+{
+#ifdef ASYNCENABLED   
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok = THR_OK_EO07;
+    pa09AsyncLocals *p = (pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC);
+    
+    API_TRACE(API_TR_ENTRY, "pa09ExecuteAsyncCall", 0);
+    
+    if (p->stmt_block_ptr->async.asyncstate == API_ASYNC_INFLIGHT) {
+        teo07_Thread hThread = p->stmt_block_ptr->async.hThread;
+        API_TRACE(API_TR_DWORD, "Async hThread", &hThread);
+        p->stmt_block_ptr->async.asyncstate = API_ASYNC_START;
+        sqlresumethread( hThread, errtext, &notok );
+        if (notok) {           
+            API_TRACE(API_TR_STRING, "sqlresumethread", errtext);
+            /* general error PTS 1105582 */
+            pa60PutError( hstmt, API_ODBC_S1000, NULL );
+            pa09AsyncRetcode( hstmt, SQL_ERROR );
+            /* pa09ThreadProc(hstmt); */
+        }
+    }
+    sqlyieldthread();
+    
+    API_TRACE(API_TR_EXIT, "pa09ExecuteAsyncCall", 0);
+#else
+    UNREFERENCED_PARAMETER(hstmt);
+#endif   
+} /* pa09ExecuteAsyncCall */
+
+
+SWORD pa09CreateThread( SQLHSTMT hstmt)
+{
+#ifdef ASYNCENABLED   
+    teo07_Thread    hThread = 0;
+    SWORD           ret=TRUE;
+    tpa60Stmt      *stmt_block_ptr = NULL;
+    tsp00_ErrTextc  errtext;
+    teo07_ThreadErr notok;
+    
+    API_TRACE(API_TR_ENTRY, "pa09CreateThread", 0);
+    
+    if (hstmt != SQL_NULL_HSTMT) {
+        stmt_block_ptr = (tpa60Stmt FAR *) apdlock(hstmt);
+        hThread = stmt_block_ptr->async.hThread;
+    }
+    if (hThread == 0) {
+        sqlbeginthread( 0,
+                        (void *(*)(void *)) pa09ThreadProc,
+                        (void*) hstmt,
+                        THR_CREATE_SUSPENDED,
+                        &hThread,
+                        errtext,
+                        &notok );
+        if (notok) {
+            API_TRACE(API_TR_STRING, "sqlbeginthread", errtext);
+            ret = FALSE;
+        }
+        else {
+            if (hstmt != SQL_NULL_HSTMT) {
+                stmt_block_ptr->async.hThread = hThread;
+            }
+            else
+                sqlkillthread(hThread, errtext, &notok);
+        }
+    }
+    if (hstmt != SQL_NULL_HSTMT)
+        apdunlk(hstmt);
+    API_TRACE(API_TR_DWORD, "hThread", &hThread);
+    API_TRACE(API_TR_EXIT, "pa09CreateThread", 0);
+    API_TRACE(API_TR_WORD, "ret", &ret);
+    return(ret);
+#else
+    UNREFERENCED_PARAMETER(hstmt);
+    return(FALSE);
+#endif   
+} /* pa09CreateThread */
+
+
+SWORD pa09TerminateThread( SQLHSTMT hstmt)
+{
+#ifdef ASYNCENABLED   
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok;
+    
+    API_TRACE(API_TR_ENTRY, "pa09TerminateThread", 0);
+    
+    if (hstmt != SQL_NULL_HSTMT) {
+        tpa60Stmt FAR * stmt_block_ptr;
+        stmt_block_ptr = (tpa60Stmt FAR *) apdlock(hstmt);
+        if (stmt_block_ptr->async.hThread != 0) {
+            /* ADIS 1001245 */
+            stmt_block_ptr->async.asyncstate = API_ASYNC_END;
+            sqlresumethread(stmt_block_ptr->async.hThread, errtext, &notok);
+            if (notok) {           
+                API_TRACE(API_TR_STRING, "sqlresumethread", errtext);
+            }
+        }
+        apdunlk(hstmt);
+    }
+    API_TRACE(API_TR_EXIT, "pa09TerminateThread", 0);
+    return(TRUE);
+#else
+    UNREFERENCED_PARAMETER(hstmt);
+    return(FALSE);
+#endif
+} /* pa09TerminateThread */
+
+
+SWORD pa09WaitEndOfThread( SQLHSTMT hstmt )
+{
+#ifdef ASYNCENABLED   
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok;
+    
+    API_TRACE(API_TR_ENTRY, "pa09WaitEndOfThread", 0);
+    
+    if (hstmt != SQL_NULL_HSTMT) {
+        tpa60Stmt *stmt_block_ptr;
+        
+        stmt_block_ptr = (tpa60Stmt FAR *) apdlock(hstmt);
+        if (stmt_block_ptr->async.hThread != 0) {
+            tsp00_Int4 status;
+            sqljointhread( stmt_block_ptr->async.hThread,
+                           &status,
+                           errtext,
+                           &notok );
+            stmt_block_ptr->async.hThread = 0;
+            stmt_block_ptr->async.ThreadId = 0;
+            if (notok) {           
+                API_TRACE(API_TR_STRING, "sqljointhread", errtext);
+            }
+        }
+        apdunlk(hstmt);
+    }
+    API_TRACE(API_TR_EXIT, "pa09WaitEndOfThread", 0);
+    return(TRUE);
+#else
+    UNREFERENCED_PARAMETER(hstmt);
+    return(FALSE);
+#endif
+} /* pa09WaitEndOfThread */
+
+
+VOID pa09SuspendThread(teo07_Thread hThread)
+{
+#ifdef ASYNCENABLED   
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok;
+    
+    API_TRACE(API_TR_ENTRY, "pa09SuspendThread", 0);
+    API_TRACE(API_TR_DWORD, "hThread", &hThread);
+    
+#ifndef SAPDB_FAST
+    if (pa07CriticalSection) {
+        /* wait until traceoutput has stoped */
+        sqlbeginmutex(&pa07CriticalSection);
+    }
+#endif
+    if (hThread) {
+        sqlsuspendthread(hThread, errtext, &notok);
+        if (notok) {
+            API_TRACE(API_TR_STRING, "sqlsuspendthread", errtext);
+        }
+    }
+#ifndef SAPDB_FAST
+    if (pa07CriticalSection) {
+        sqlendmutex(&pa07CriticalSection);
+    }
+#endif
+    API_TRACE(API_TR_EXIT, "pa09SuspendThread", 0);
+#else
+    UNREFERENCED_PARAMETER(hThread);
+#endif
+} /* pa09SuspendThread */
+
+
+VOID pa09ResumeThread(teo07_Thread hThread)
+{
+#ifdef ASYNCENABLED   
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok;
+    
+    API_TRACE(API_TR_ENTRY, "pa09ResumeThread", 0);
+    API_TRACE(API_TR_DWORD, "hThread", &hThread);
+    
+    if (hThread) {
+        sqlresumethread(hThread, errtext, &notok);
+        if (notok) {
+            API_TRACE(API_TR_STRING, "sqlresumethread", errtext);
+        }
+    }
+    
+    API_TRACE(API_TR_EXIT, "pa09ResumeThread", 0);
+#else
+    UNREFERENCED_PARAMETER(hThread);
+#endif
+} /* pa09ResumeThread */
+
+
+VOID pa09SaveStack(API_HANDLE *hand, PTR lpValues, DWORD cbSize)
+{
+    UCHAR  *lp;
+    
+    API_TRACE(API_TR_ENTRY, "pa09SaveStack", 0);
+    
+    if (cbSize && lpValues) {
+        API_TRACE(API_TR_DWORD, "cbSize", &cbSize);
+        *hand = apdallo(cbSize+sizeof(cbSize));
+        lp = apdlock(*hand);
+        API_MEMCPY(lp, &cbSize, sizeof(cbSize));
+        API_MEMCPY(lp+sizeof(cbSize), lpValues, cbSize);
+        apdunlk(*hand);
+    }
+    
+    API_TRACE(API_TR_EXIT, "pa09SaveStack", 0);
+} /* pa09SaveStack */
+
+
+VOID pa09RestoreStack(API_HANDLE hand, PTR lpValues)
+{
+    DWORD  cbSize;
+    UCHAR *lp;
+    
+    API_TRACE(API_TR_ENTRY, "pa09RestoreStack", 0);
+    
+    if (lpValues) {
+        lp = apdlock(hand);
+        API_MEMCPY(&cbSize, lp, sizeof(cbSize));
+        API_MEMCPY(lpValues, lp+sizeof(cbSize), cbSize);
+        API_TRACE(API_TR_DWORD, "cbSize", &cbSize);
+        apdunlk(hand);
+    }
+    API_TRACE(API_TR_EXIT, "pa09RestoreStack", 0);
+} /* pa09RestoreStack */
+
+
+DWORD pa09IsCanceled(DWORD reference)
+{
+    DWORD ret = FALSE;
+    tpa60Stmt *stmt_block_ptr = ((pa09AsyncLocals*)pa09GetTLS(PA09TLS_ASYNC))
+        ->stmt_block_ptr;
+    if (stmt_block_ptr) {
+      /* no more in use
+        if (stmt_block_ptr->stmtopt.lpCancelProc) {
+            API_TRACE(API_TR_PTR, "CancelProc",
+                      &stmt_block_ptr->stmtopt.lpCancelProc);
+            ret = stmt_block_ptr->stmtopt.lpCancelProc(reference);
+        }
+      */
+#ifdef ASYNCENABLED   
+      /*        else */
+            if ( stmt_block_ptr->async.canceled
+                 && stmt_block_ptr->async.ThreadId == sqlgetthreadid()) {
+                ret = TRUE;
+            }
+#endif
+    }
+    API_TRACE(API_TR_DWORD, "pa09IsCanceled", &ret);
+    return(ret);
+} /* pa09IsCanceled */
+
+/* PTS 1120833 */
+/* waits for or releases semaphores for SQLCancel and trace writing
+   (cmp. request/receive; vpr03c and write trace file; vpr01e,vpr03c,vpr08trace) */
+void pa09Semaphore (int sema, int action)
+{
+#ifdef ASYNCENABLED
+    static teo07_ThreadSemaphore  SQLCancel, WriteTrace, MTHandler, Add;
+    static int                    init = FALSE;
+    teo07_ThreadSemaphore        *semaphore = NULL;
+
+    if (init == FALSE) {
+        tsp00_ErrTextc VAR_ARRAY_REF errText;
+        teo07_ThreadErr err;
+        
+        sqlcreatesem (&SQLCancel, 1, errText, &err);
+        sqlcreatesem (&WriteTrace, 1, errText, &err);
+        sqlcreatesem (&MTHandler, 1, errText, &err);
+        sqlcreatesem (&Add, 1, errText, &err);
+        init = TRUE;
+    }
+
+    switch (sema) {
+    case PA09_SEMAPHORE_SQLCANCEL:  {
+        semaphore = &SQLCancel;
+        break;
+        }
+    case PA09_SEMAPHORE_WRITETRACE:  {
+        semaphore = &WriteTrace;
+        break;
+        }
+    case PA09_SEMAPHORE_MTHANDLER:  {
+        semaphore = &MTHandler;
+        break;
+        }
+    case PA09_SEMAPHORE_ADD:  {
+        semaphore = &Add;
+        break;
+        }
+    default: {}
+    }
+    
+    switch (action) {
+    case PA09_WAIT_FOR_SEMAPHORE: {
+       sqlwaitsem (*semaphore);
+        break;
+        }
+    case PA09_RELEASE_SEMAPHORE: {
+        sqlsignalsem (*semaphore);
+        break;
+        }
+    default: {}
+    }
+    
+#endif
+}  /* pa09CancelSemaphore */
+
+/* multi thread handler for connect, release, request, receive
+   following conditions are handled:
+     - request, receive, release can be arbitrarily mixed between connections
+       (i.e. if each thread has its own connection, they can run completely parallel)
+     - a connect can only be performed, if no request/receive pair is pending
+       and no release is active
+   
+   pa09MTHandler does 5 threadsafe actions (protected by a semaphore):
+   - PA09_MT_ADD: increments a counter (before request and release)
+   - PA09_MT_SUB: decrements a counter (after receive and release
+   - PA09_MT_CONNECT_BEGIN:  sets a semaphore for waiting that all request/receive
+   	                     pairs are done, therefore all requests are blocked afterwards
+   - PA09_MT_WAIT_FOR_BEGIN: returns TRUE, if counter == 0. In this case other
+                             actions than CONNECT_END are blocked. Otherwise FALSE is returned.
+   - PA09_MT_CONNECT_END:    Enables other actions again.
+   
+   The usual order of this actions is, that requests/receives are performed calling ADD/SUB.
+   If a connect is initiated, CONNECT_BEGIN is called. Afterwards only SUB calls will be admitted
+   resulting in a decreasing counter. ADDs will be blocked. WAIT_FOR_BEGIN returns as long FALSE
+   as still receives are pending (counter > 0). Once WAIT_FOR_BEGIN returns TRUE, a semaphore
+   is set and no other action can be performed than CONNECT_END. When CONNECT_END is called,
+   the semaphore is released and ADDs are allowed again.
+
+   There was an error in the implementation, see
+   http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1128402
+   Problem was if more that one CONNECT_BEGIN was running. Then the driver stalled due
+   to holding the ADD and the MTHANDLE semaphore in different threads.
+*/
+int pa09MTHandler (int action)
+{
+  static int stop = FALSE;
+  static int counter = 0;
+  
+  int retcode = FALSE;
+  
+  /* MTHandler has its own semaphore. For ADD it is called only, if ADDs can be performed */
+   if (action != PA09_ADD  &&  action != PA09_CONNECT_BEGIN
+                           &&  action != PA09_CONNECT_END)
+    pa09Semaphore (PA09_SEMAPHORE_MTHANDLER, PA09_WAIT_FOR_SEMAPHORE);
+
+  switch (action) {
+  case PA09_ADD:  /* ADDs are blocked by an own semaphore */
+                  if (stop)                
+                    {
+         /*printf("MTH(%ld) %d %d: ADD & Stop\n", id, counter, stop); */
+                    pa09Semaphore (PA09_SEMAPHORE_ADD, PA09_WAIT_FOR_SEMAPHORE);
+                    pa09Semaphore (PA09_SEMAPHORE_ADD, PA09_RELEASE_SEMAPHORE);
+                    }
+                  pa09Semaphore (PA09_SEMAPHORE_MTHANDLER, PA09_WAIT_FOR_SEMAPHORE);
+                  counter++;  break;
+  case PA09_SUB:  counter--;  break;
+  case PA09_WAIT_FOR_BEGIN:  if (counter == 0) {
+                               /* Each connect is guarded by an own semaphore */
+    /* pa09Semaphore (PA09_SEMAPHORE_CONNECT, PA09_WAIT_FOR_SEMAPHORE); */
+                               retcode = TRUE;
+                               }
+    /* Don't block on Windows, but allow a connect immediately
+       http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1138398 */
+#ifdef WIN32
+                             retcode = TRUE;
+#endif
+                             break;
+  case PA09_CONNECT_BEGIN:   /* block subsequent ADDs */
+                             pa09Semaphore (PA09_SEMAPHORE_ADD, PA09_WAIT_FOR_SEMAPHORE);
+                             pa09Semaphore (PA09_SEMAPHORE_MTHANDLER, PA09_WAIT_FOR_SEMAPHORE);
+                             stop = TRUE;  break;
+  case PA09_CONNECT_END:     if (stop)  {
+                               stop = FALSE;
+             /*pa09Semaphore (PA09_SEMAPHORE_CONNECT, PA09_RELEASE_SEMAPHORE); */
+                               pa09Semaphore (PA09_SEMAPHORE_ADD, PA09_RELEASE_SEMAPHORE);
+                               }
+                             break;
+  default: {}
+  }
+  if (action != PA09_CONNECT_END)
+    pa09Semaphore (PA09_SEMAPHORE_MTHANDLER, PA09_RELEASE_SEMAPHORE);
+
+  return retcode;
+}
+
+#ifdef ASYNCENABLED
+void pa09AsyncRetcode( SQLHSTMT hstmt, RETCODE retcode)
+{
+    tpa60Stmt *stmt_block_ptr;
+    
+    API_TRACE(API_TR_ENTRY, "pa09AsyncRetcode", 0);
+    
+    stmt_block_ptr = (tpa60Stmt FAR *) apdlock (hstmt);
+    
+    API_TRACE(API_TR_RETCODE, "retcode", &retcode);   
+    API_TRACE(API_TR_UWORD, "asyncstate", &stmt_block_ptr->async.asyncstate);
+    
+    if (stmt_block_ptr->async.asyncstate == API_ASYNC_START) {
+        stmt_block_ptr->async.retcode = retcode;
+        stmt_block_ptr->async.asyncstate = API_ASYNC_READY;
+        if (pa09IsCanceled(0)) {
+            stmt_block_ptr->async.canceled = FALSE;
+        }
+    }
+    apdunlk (hstmt);
+    API_TRACE(API_TR_EXIT, "pa09AsyncRetcode", 0);
+} /* pa09AsyncRetcode */
+
+
+RETCODE SQL_API pa09ThreadProc( SQLHSTMT hstmt)
+{
+    tpa60Stmt       *stmt_block_ptr;  
+    SQLHDBC          hdbc;
+    tpa40DBC        *dbc_block_ptr;
+    UWORD            function_code;
+    RETCODE          retcode;
+    teo07_Thread     hThread;
+    tsp00_ErrTextc   errtext;
+    teo07_ThreadErr  notok;
+    
+    for(;;) {
+        API_TRACE(API_TR_ENTRY, "pa09ThreadProc", 0);
+        stmt_block_ptr = (tpa60Stmt FAR *) apdlock (hstmt);
+        hdbc = stmt_block_ptr->parent_hdbc;
+        dbc_block_ptr = (tpa40DBC FAR *) apdlock (hdbc);
+        /*
+        while (sqltrybeginmutex(&dbc_block_ptr->thread.cs))
+            sqlyieldthread();
+        */
+        sqlbeginmutex(&dbc_block_ptr->thread.cs); /* HBI */
+        if (stmt_block_ptr->async.asyncstate == API_ASYNC_END) {
+            stmt_block_ptr->async.asyncstate = API_ASYNC_INIT;
+            sqlendmutex(&dbc_block_ptr->thread.cs);
+            sqlendthread(0);
+        }
+        stmt_block_ptr->async.asyncstate = API_ASYNC_START;
+        stmt_block_ptr->async.canceled = FALSE;
+        hThread = stmt_block_ptr->async.hThread;            
+        dbc_block_ptr->thread.ThreadId = stmt_block_ptr->async.ThreadId
+            = sqlgetthreadid();
+        function_code = stmt_block_ptr->async.function_code;
+        API_TRACE(API_TR_UWORD, "function_code", &function_code);
+        sqlendmutex(&dbc_block_ptr->thread.cs); /* HBI */
+        apdunlk(hdbc);
+        apdunlk(hstmt);
+        switch(function_code) {
+        case SQL_API_SQLEXECDIRECT: {
+            retcode = CALL_ODBC(SQLExecDirect, (hstmt, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLEXECUTE: {
+            retcode = CALL_ODBC(SQLExecute, (hstmt));
+            break;
+        }
+        case SQL_API_SQLPREPARE: {
+            retcode = CALL_ODBC(SQLPrepare, (hstmt, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLCOLUMNS: {
+            retcode = CALL_ODBC( SQLColumns, (hstmt, NULL, 0, NULL,
+                                              0, NULL, 0, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLTABLES: {
+            retcode = CALL_ODBC(SQLTables, (hstmt, NULL, 0, NULL,
+                                            0, NULL, 0, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLSPECIALCOLUMNS: {
+            retcode = CALL_ODBC(SQLSpecialColumns, (hstmt, 0, NULL, 0,
+                                                    NULL, 0, NULL, 0, 0, 0));
+            break;
+        }
+        case SQL_API_SQLGETTYPEINFO: {
+            retcode = CALL_ODBC(SQLGetTypeInfo, (hstmt, 0));
+            break;
+        }
+        case SQL_API_SQLSTATISTICS: {
+            retcode = CALL_ODBC(SQLStatistics, (hstmt, NULL, 0, NULL,
+                                                0, NULL, 0, 0, 0));
+            break;
+        }
+        case SQL_API_SQLCOLUMNPRIVILEGES: {
+            retcode = CALL_ODBC(SQLColumnPrivileges, (hstmt, NULL, 0, NULL,
+                                                      0, NULL, 0, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLFOREIGNKEYS: {
+            retcode = CALL_ODBC(SQLForeignKeys, (hstmt, NULL, 0, NULL, 0,
+                                                 NULL, 0, NULL, 0, NULL,
+                                                 0, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLPRIMARYKEYS: {
+            retcode = CALL_ODBC(SQLPrimaryKeys, (hstmt, NULL, 0, NULL, 0,
+                                                 NULL, 0));
+            break;
+        }
+        case SQL_API_SQLPROCEDURECOLUMNS: {
+            retcode = CALL_ODBC(SQLProcedureColumns, (hstmt, NULL, 0, NULL,
+                                                      0, NULL, 0, NULL, 0));
+            break;
+        }
+        case SQL_API_SQLPROCEDURES: {
+            retcode = CALL_ODBC(SQLProcedures, (hstmt, NULL, 0, NULL, 0,
+                                                NULL, 0));
+            break;
+        }
+        case SQL_API_SQLTABLEPRIVILEGES: {
+            retcode = CALL_ODBC(SQLTablePrivileges, (hstmt, NULL, 0, NULL,
+                                                     0, NULL, 0));
+            break;
+        }
+        default: {
+            UCHAR szLocal[256];
+            retcode = SQL_ERROR;
+            API_SPRINTF( (char*) szLocal,
+                         "Unknown async call (%d)", function_code);
+            API_TRACE(API_TR_MSG, szLocal, 0);
+            API_EXIT_MSG(szLocal);
+            break;
+        }
+        }
+        pa09AsyncRetcode(hstmt, retcode);
+        API_TRACE(API_TR_EXIT, "pa09ThreadProc", 0);
+        API_TRACE(API_TR_RETCODE, "retcode", &retcode);
+        if (hThread) {
+            sqlsuspendthread(hThread, errtext, &notok);
+            if (notok) {
+                API_TRACE(API_TR_STRING, "sqlsuspendthread", errtext);
+                return(SQL_ERROR);
+            }
+        }
+        else
+            return(retcode);
+    } /* for */
+} /* pa09ThreadProc */
+
+#endif
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

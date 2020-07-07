@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+#
+# @(#)diffsutref    2000-08-01
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Cwd;
+use Getopt::Std;
+
+if (!getopts('hd:o:') || $opt_h || (@ARGV > 0)) {
+    print <DATA>;
+    exit 1;
+}
+
+my ($Dir, @FileList, $File, $i, $j, $Msg);
+
+$Dir = $opt_d ? $opt_d : cwd();
+
+if ($opt_o) {
+    open(OUTFILE, ">$opt_o") or die "Cant't open file $opt_o: $!\n";
+}
+
+opendir(DIR_IN, $Dir) or die "Can't open directory $Dir: $!\n";
+@Files = grep /^.*\.punix/i, readdir(DIR_IN);
+closedir(DIR_IN);
+
+if ( $opt_o ) {
+    printf OUTFILE ("checking %d files:\n\n",scalar(@Files));
+} else {
+    printf ("checking %d files:\n\n",scalar(@Files));
+}
+
+foreach $File (@Files) {
+    @ExtList = ('punix');
+    $File =~ s/\.punix//i;
+    push @ExtList, 'tpunx' if ( -f "$File.tpunx" );
+    push @ExtList, 'cunix' if ( -f "$File.cunix" );
+    push @ExtList, 'cpnix' if ( -f "$File.cpnix" );
+    push @ExtList, 'upnix' if ( -f "$File.upnix" );
+    push @ExtList, 'uunix' if ( -f "$File.uunix" );
+
+    if (@ExtList > 1) {
+        for ($j = 0; $j < @ExtList - 1; $j++) {
+            for ($i = $j+1; $i < @ExtList; $i++) {
+                $cmd = "diff -qs $File.$ExtList[$j] $File.$ExtList[$i] > NUL";
+                $rc = system($cmd);
+                if ($rc == 0) {
+                    if ( $opt_o ) {
+                        printf OUTFILE ("%-14s: %5s == %5s\n",
+                                $File, $ExtList[$j],$ExtList[$i]);
+                    } else {
+                        printf ("%-14s: %5s == %5s\n",
+                                $File, $ExtList[$j],$ExtList[$i]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+__DATA__
+
+ USAGE: diffsutref [-h] [-d <directory>]
+
+        differs all sut reference files and shows identical files
+
+ OPTIONS:
+       -h             :: provides this help information
+       -d <directory> :: directory to work in (default: current dir)
+       -o <file>      :: writes output to file

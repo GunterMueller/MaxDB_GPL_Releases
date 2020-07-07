@@ -1,0 +1,743 @@
+#!/usr/bin/perl
+#
+# $Header: //sapdb/V76/c_00/b_32/sys/src/install/perl/packages/base/instbase#1 $
+# $DateTime: 2006/07/06 16:50:32 $
+# $Change: 130190 $
+#
+# Desc:
+
+import SAPDB::Install::StdIO;
+import SAPDB::Install::System;
+import SAPDB::Install::System::Unix;
+import SAPDB::Install::System::Unix::Dir;
+import SAPDB::Install::Misc;
+import SAPDB::Install::Registry;
+import SAPDB::Install::Tools;
+import SAPDB::Install::SetUser;
+import SAPDB::Install::Cwd;
+import SAPDB::Install::Trace;
+
+$datapath{'name'} = 'independent data path';
+$datapath{'mode'}=0775;
+$datapath{'opt'}='indep_data=s';
+$progpath{'name'} = 'independent program path';
+$progpath{'opt'} = 'indep_prog=s';
+#$progpath{'mode'}=0775; => use default now (0555)
+$progpath{'update'}=0;
+
+if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+	require SAPDB::Install::Portable::Helper;
+	import SAPDB::Install::Portable::Helper;
+	$datapath{'default'} = getAbsPath ('data',1);
+	$progpath{'default'} = getAbsPath ('programs');
+}
+else{
+	$progpath{'default'} = getSysProgPath().'/sdb/programs';
+	$datapath{'default'} = getAppDataPath().'/sdb/data';
+}
+
+
+unless($SAPDB::Install::StartInstall::opt_INSTANCE){ # these options makes only sense if it is the first sapdb installation
+
+	$usage= " [-indep_data <Independent Data Path>] [-indep_prog <Independent Program Path>]";
+	$usage_desc = "\t-indep_data <Independent Data Path>\tdirectory for release independent data (only for first installation)\n".
+                  "\t-indep_prog <Independent Program Path>\tdirectory for release independent programs (only for first installation)\n";
+}
+
+
+@paths = (\%datapath,\%progpath);
+$main_path=\%progpath;
+$skip=0;
+@opts=();
+
+
+$DEBUG = 0;
+
+our %startmenu_entries = (
+				'MaxDB/Command Line Tools/DBM Command Line Interface (dbmcli)' => {
+								'source' => '$PROGPATH/pgm/dbmcli.exe',
+								'args' => '-key -n -d -u'
+					},
+				'MaxDB/Command Line Tools/SQL Command Line Interface (sqlcli)' => {
+								'source' => '$PROGPATH/bin/sqlcli.exe',
+								'icon' => '%SystemRoot%\system32\cmd.exe'
+					},
+				'MaxDB/Installation Manager' => {
+								'source' => '$PROGPATH/bin/SDBSETUP.exe'
+					}
+				);
+
+sub preinstall{
+       	local (*registry) = @_;
+        checkServices();
+		my ($indep_data,$indep_prog) = readIndepPath();
+
+        if($indep_data){
+                        $datapath{'value'}=$indep_data;
+						#$SAPDB::Install::Values::log->LogPath=("$indep_data/wrk");
+						$path_instreg = $indep_data.'/config/install';
+
+
+        }
+        if($indep_prog){
+                $progpath{'value'}=$indep_prog;
+        }
+
+		#
+		# check for existing files in fifo dir
+		#
+		if($^O !~ /mswin/i and defined $registry){
+			my ($base_path,$base_version) = $registry->getInstallPathes('Base');
+			if(release2num($base_version) < release2num('7.5.00.00')){
+
+				my @fifos = ();
+				my $fifodir = '/usr/spool/sql/fifo';
+				if (-d $fifodir) {
+					opendir (DIR, $fifodir) or
+					print2stderr("cannot read $fifodir\n") and
+					diesoft($SAPDB::Install::Values::diemsg);
+
+					while (my $fifo = readdir (DIR)) {
+						next if ($fifo eq '.');
+						next if ($fifo eq '..');
+
+						push @fifos, $fifo;
+					}
+
+					closedir (DIR);
+				}
+
+                if($#fifos == 0){
+					print2stderr("file ".$fifos[0]." exists in $fifodir\n");
+					print2stderr("please stop x_server and all db instances and restart installation\n");
+					diesoft($SAPDB::Install::Values::diemsg);
+                } elsif ($#fifos > 0){
+					print2stderr("files ".join (', ', @fifos)." exist in $fifodir\n");
+					print2stderr("please stop x_server and all db instances and restart installation\n");
+					diesoft($SAPDB::Install::Values::diemsg);
+				}
+			}
+		}
+
+
+		#
+		#	02.09.2002
+		#	xuser + xuserUnicode have changed from package Server Utilities to Base
+		#	workaround to remove affected files in a already installed Server Utilities package
+		#	needed to avoid interference check failure
+		#
+		#
+
+		my @unix_xuser_files = ('bin/xuser','bin/x_ping');
+		my @win_xuser_files = ('bin/xuser.exe',
+								'bin/x_ping.exe');
+
+		if(defined $registry && $registry->existPackage('Server Utilities',$indep_prog)){
+			my $utils = $registry->getPackage('Server Utilities',$indep_prog);
+			defined $utils or TraceMsg("cant get Server Utilities package\n",4,\$DEBUG) and return undef;
+			local *files = $utils->FileList;
+			my $changed = 0;
+			foreach my $file (keys(%files)){
+				my $found = 0;
+				if($^O =~ /mswin/i){
+					foreach my $xuser_file (@win_xuser_files){
+						normalizePath($file) eq normalizePath($xuser_file) and $found = 1 and last;
+					}
+				}
+				else{
+					foreach my $xuser_file (@unix_xuser_files){
+						$file eq $xuser_file and $found = 1 and last;
+					}
+				}
+				if($found){
+					TraceMsg("delete file $file from Server Utilities list\n",4,\$DEBUG);
+					delete $files{$file};
+					$changed = 1;
+				}
+			}
+			if($changed){
+				TraceMsg("Server Utilities package file list was changed\n",4,\$DEBUG);
+				$utils->setValues;
+				$registry->RefreshAllFilesList;
+			}
+			$SAPDB::Install::InstallRegistry::Package::SELFOBJ[$utils->ID] = undef;
+		}
+		else{
+			if(defined $registry){
+				TraceMsg("no Server Utilities package found\n",4,\$DEBUG);
+			}
+			else{
+				TraceMsg("install registry not defined\n",4,\$DEBUG);
+			}
+		}
+}
+
+
+sub postprepare{
+
+	# set globals for first installation
+	$SAPDB::Install::Values::indep_data_path = $datapath{'value'};
+	$SAPDB::Install::Values::indep_prog_path = $progpath{'value'};
+
+	unless ($^O =~ /mswin/i) {
+		# set user and mode of root directories if they are already existing
+		foreach my $dir ($progpath{'value'}, $datapath{'value'}) {
+			next unless (-d $dir);
+
+			chown ($packobj->UID, $packobj->GID, $dir) == 1 or
+			print2stderr ("cannot change owner and group of $dir\n") and
+			print2stderr ("set owner and group of $dir to ".$packobj->User.":".$packobj->Group."\n") and
+			print2stderr ("and restart installation\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+
+			my $mode = ($dir eq $datapath{'value'}) ? 0775 : 0555;
+
+			chmod ($mode, $dir) == 1 or
+			print2stderr ("cannot set mode of $dir\n") and
+			print2stderr ("set mode of $dir to ".sprintf ("%4o", $mode)."\n") and
+			print2stderr ("and restart installation\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+
+		# check access of data dir, program dir and /usr/spool/sql
+		foreach my $dir ($progpath{'value'}, $datapath{'value'}, '/usr/spool/sql') {
+			next unless (-d $dir);
+
+			next if (uaccess ($packobj->User, $dir) == 0);
+
+			$SAPDB::Install::Values::log->SetMsg ("user ".$packobj->User." cannot access directory $dir\n");
+			$SAPDB::Install::Values::log->SetMsg ("modify permissions of parent directories\n");
+
+			my @ancestors =	SAPDB::Install::System::Unix::Dir::getancestors ($dir);
+			foreach my $dir (@ancestors) {
+				next if (-l $dir);
+
+				my ($dev, $ino, $mode) = stat ($dir);
+				$SAPDB::Install::Values::log->SetMsg ("mode of $dir is ".sprintmode ($mode)."\n");
+				next if (($mode & 0111) == 0111);
+
+				$SAPDB::Install::Values::log->SetMsg ("chmod $dir ugo+x\n");
+				chmod (($mode & 07777) | 00111, $dir);
+			}
+
+			uaccess ($packobj->User, $dir) == 0 or
+			print2stderr ("user ".$packobj->User." cannot access directory $dir\n") and
+			print2stderr ("please check permissions of all parent directories of $dir\n") and
+			print2stderr ("and restart installation\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+	}
+}
+
+
+sub postinstall{
+	$SAPDB::Install::Values::log->LogPath("$datapath{'value'}/wrk");
+	if($packobj->Update){
+		# delete some old files in update case
+		foreach my $file ('bin/niserver','pgm/sqlrun.dll'){
+			my $longfile="$progpath{'value'}/$file";
+			if(-f $longfile){
+				if(unlink($longfile)){
+					$SAPDB::Install::Values::log->SetMsg("MSG: delete unsupported file \"$longfile\"\n");
+				}
+                else{
+					print2stdout("cannot delete unsupported file \"$longfile\" - please remove it manually\n");}
+			}
+		}
+	}
+
+
+
+	my $dir = "$datapath{'value'}/config";
+	unless(-d $dir){
+		makedir($dir,0770,$packobj->UID,$packobj->GID) or
+		print2stderr("cannot create directory \"$dir\"\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	unless(-d "$datapath{'value'}/config/install"){
+		makedir("$datapath{'value'}/config/install",0770) or
+		print2stderr("cannot create directory \"$datapath{'value'}/config/install\"\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	if(-d "$datapath{'value'}/wrk"){
+		unless($^O=~/mswin/i){
+			chmod(0770,"$datapath{'value'}/wrk") or
+			print2stderr("cannot change mode of directory \"$datapath{'value'}/wrk\" to 770 - please do it manually\n");
+
+			chown($packobj->UID,$packobj->GID,"$datapath{'value'}/wrk") or
+			print2stderr("cannot change group id of directory \"$datapath{'value'}/wrk\"to ".$packobj->GID." - please do it manually\n");
+		}
+	}
+	else{
+		makedir("$datapath{'value'}/wrk",0770,$packobj->UID,$packobj->GID) or print2stderr("cannot create directory \"$progpath{'value'}\"\n") and diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	# install sdbstarter
+	unless ($^O =~ /mswin/i){
+		chmod (0500, $progpath{'value'}.'/bin/starter');
+		chown (0, $packobj->GID, $progpath{'value'}.'/bin/starter/sdbstarter');
+		chmod (04510, $progpath{'value'}.'/bin/starter/sdbstarter');
+	}
+
+	unless($^O=~/mswin/i){
+		# create directory tree <data>/...
+		foreach my $dir ('config','ipc','fifo','diag','dbspeed','pipe','pid','ppid','pid/serverpids'){
+			my $mode =
+			$dir eq 'config' ? 0775 :
+			$dir eq 'ipc'    ? 0775 :
+			$dir eq 'fifo'   ? 0775 :
+			$dir eq 'pid'    ? 0775 :
+			$dir eq 'ppid'   ? 0775 :
+			0770;
+
+			my $longdir = "$datapath{'value'}/$dir";
+			if(-d $longdir){
+				defined $SAPDB::Install::Values::log &&
+				$SAPDB::Install::Values::log->SetMsg
+				("MSG: change mode of directory $longdir to ".sprintf ("%04o", $mode)."\n");
+
+				chmod($mode,$longdir) or
+				print2stderr("cannot change mode of directory \"$longdir\" to ".sprintf ("%04o", $mode)."\n");
+				chown($packobj->UID,$packobj->GID,$longdir) or
+				print2stderr("cannot change owner/group of directory \"$longdir\"\n");
+			}
+			else{
+				makedir($longdir,$mode,$packobj->UID,$packobj->GID) or
+				print2stderr("cannot create directory \"$dir\"\n") and
+				diesoft($SAPDB::Install::Values::diemsg);
+			}
+		}
+
+		# create /usr/spool/sql
+		my $longdir = "/usr/spool/sql";
+		if (-d $longdir) {
+			chmod(0775,$longdir) or
+			print2stderr("cannot change mode of directory \"$longdir\" to 775\n");
+			chown($packobj->UID,$packobj->GID,$longdir) or
+			print2stderr("cannot change owner of directory \"$longdir\"\n");
+		} else {
+			makedir ($longdir,0775,$packobj->UID,$packobj->GID) or
+			print2stderr("cannot create directory \"$longdir\"\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+
+		#
+		# create Databases.ini, set permissions
+		#
+		my $db_ini = $datapath{'value'}.'/config/Databases.ini';
+		unless(-f $db_ini){
+			open(DBR,'>'.$db_ini) or print2stderr("cannot create $db_ini\n");
+			close(DBR);
+		}
+		chmod(0660,$db_ini);
+		chown($packobj->UID,$packobj->GID,$db_ini);
+
+		#
+		# create symlinks from '/usr/spool/sql' to <datadir>/config
+		#
+		foreach my $dir ('ipc','fifo','diag','dbspeed','pid','ppid','pipe'){
+			my $fullname = "/usr/spool/sql/".$dir;
+			if (-l $fullname) {
+				unlink($fullname);
+			} else {
+				deltree($fullname);
+			}
+
+			symlink ("$datapath{'value'}/".$dir, $fullname) or
+			print2stderr("cannot create symlink ".$fullname."\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+
+			lchown ($packobj->UID,$packobj->GID,$fullname) or
+			print2stderr("cannot change owner of symlink ".$fullname."\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+
+		#
+		# create SAP_DBTech.ini for backward compatibility
+		#
+		$longdir = "/usr/spool/sql/ini";
+		if (-d $longdir) {
+			chmod(0777,$longdir) or
+			print2stderr("cannot change mode of directory \"$longdir\"\n");
+			chown($packobj->UID,$packobj->GID,$longdir) or
+			print2stderr("cannot change owner of directory \"$longdir\"\n");
+		} else {
+			makedir ($longdir,0777,$packobj->UID,$packobj->GID) or
+			print2stderr("cannot create directory \"$longdir\"\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+
+		my $inifile = "/usr/spool/sql/ini/SAP_DBTech.ini";
+		unless (-f $inifile) {
+			open (INI, ">$inifile") or print2stderr("cannot create SAP_DBTech.ini\n");
+			print INI "[Globals]\n";
+			print INI "IndepData=$datapath{'value'}\n";
+			print INI "IndepPrograms=$progpath{'value'}\n";
+			close INI;
+		}
+
+		chown($packobj->UID,$packobj->GID,$inifile) or
+		print2stderr("cannot change owner of \"$inifile\"\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+
+		chmod(0666,$inifile) or
+		print2stderr("cannot change permissions of \"$inifile\"\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+
+		if ($packobj->Update and
+			release2num ($packobj->{RegData}->Version) < release2num ('7.5.00.00')) {
+			setServerRootPermissions ($packobj->User) or
+			print2stderr("cannot change permissions of server software root directories\n") and
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+	}
+}
+
+sub registerWin{
+        my $path = $progpath{'value'};
+        my $data_path = $datapath{'value'};
+        setPathInEnv("$path/bin");
+		setPathInEnv("$path/pgm");
+		$path=~s/\//\\/g;
+		$data_path=~s/\//\\/g;
+
+        my $rc = callsystem("\"$path\\bin\\sdbconfig.exe\" \"IndepPrograms=$path\"",undef,1);
+
+        if ($rc != 0){
+			print2stderr ("cannot register independent program path\n");
+			diesoft($diemsg);
+        }
+
+
+        $rc = callsystem("\"$path\\bin\\sdbconfig.exe\" \"IndepData=$data_path\"",undef,1);
+
+        if ($rc != 0){
+			print2stderr ("cannot register independent data path\n");
+			diesoft($diemsg);
+        }
+
+
+        (setSysPath("$path\\bin;$path\\pgm") == 1) and $syspath_changed = 1;
+
+		if(-f $path.'\bin\SDBSETUP.exe'){
+			createUninstallEntry('MaxDB','"'.$path.'\bin\SDBSETUP"');
+		}
+		else{
+			createUninstallEntry('MaxDB (all)','cmd /C "'.$path.'\bin\sdbuninst" -all || pause || exit');
+		}
+
+		return 1 unless defined &AddProgsToStartMenu;
+
+		foreach my $key (keys (%startmenu_entries)){
+			$startmenu_entries{$key}->{'source'} =~ s/\$PROGPATH/$path/g
+		}
+
+		my $rc = AddProgsToStartMenu(\%startmenu_entries);
+		if(defined $rc){
+			$SAPDB::Install::Values::log->SetMsg("MSG: start menu shortcuts created\n");
+		}
+		else{
+			$SAPDB::Install::Values::log->SetMsg("WRN: Error during creation of start menu shortcuts\n");
+		}
+
+		return 1;
+
+}
+
+sub registerUX{
+		my $file = '/etc/opt/sdb';
+		my $conf = {};
+		if (-f $file && open (CONFIG, $file)) {
+			while (my $line = <CONFIG>) {
+				chomp $line;
+
+				foreach my $key
+				('IndepData', 'IndepPrograms', 'SdbOwner', 'SdbGroup') {
+					if ($line =~ /^$key=/) {
+						$line =~ s/^$key=//;
+						$conf->{$key} = $line;
+					}
+				}
+			}
+			close (CONFIG);
+		}
+
+		unless (
+		exists $conf->{IndepData} && $conf->{IndepData} eq $datapath{'value'} &&
+		exists $conf->{IndepPrograms} && $conf->{IndepPrograms} eq $progpath{'value'} &&
+		exists $conf->{SdbOwner} && $conf->{SdbOwner} eq $packobj->User &&
+		exists $conf->{SdbGroup} && $conf->{SdbGroup} eq $packobj->Group) {
+
+			my ($path) = ($SAPDB::Install::Values::glob_path =~ /(^.+)\/[^\/]+$/);
+			makedir($path,0555) unless -d $path;
+			unless(callsystem("$progpath{'value'}/bin/sdbconfig IndepData=$datapath{'value'}") == 0){
+				diesoft($diemsg);
+			}
+			unless(callsystem("$progpath{'value'}/bin/sdbconfig IndepPrograms=$progpath{'value'}") == 0){
+				diesoft($diemsg);
+			}
+			unless(callsystem("$progpath{'value'}/bin/sdbconfig SdbOwner=".$packobj->User) == 0){
+				diesoft($diemsg);
+			}
+			unless(callsystem("$progpath{'value'}/bin/sdbconfig SdbGroup=".$packobj->Group) == 0){
+				diesoft($diemsg);
+			}
+		}
+}
+
+
+*register = $^O =~ /^MsWin/i ? \&registerWin : \&registerUX;
+
+
+if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+
+	eval{
+		require SAPDB::Install::Portable::RegCommands;
+		import  SAPDB::Install::Portable::RegCommands;
+	};
+
+	if (not $@ and %SAPDB::Install::Portable::RegCommands::){
+		*register = sub {
+				my $path = $progpath{'value'};
+				my $data_path = $datapath{'value'};
+				setPathInEnv("$path/bin");
+				setPathInEnv("$path/pgm");
+				if ($^O =~ /mswin/i){
+					$path=~s/\//\\/g;
+					$data_path=~s/\//\\/g;
+				}
+				my $rc = SdbConfig("IndepPrograms=$path");
+
+				if ($rc != 1){
+					print2stderr ("cannot register independent program path\n");
+					diesoft($diemsg);
+				}
+
+
+				$rc = SdbConfig("IndepData=$data_path");
+
+				if ($rc != 1){
+					print2stderr ("cannot register independent data path\n");
+					diesoft($diemsg);
+				}
+				return 1;
+			}
+	}
+	else{
+		print2stderr ("Installer not compatible with portable mode:\n$@\n");
+		diesoft($diemsg);
+	}
+}
+
+
+
+sub unregisterWin{
+	return 1 unless defined &RemoveProgsFromStartMenu;
+	my $rc = RemoveProgsFromStartMenu ([keys(%startmenu_entries)]);
+	if(defined $rc){
+		$SAPDB::Install::Values::log->SetMsg("MSG: start menu shortcuts removed\n");
+	}
+	else{
+		$SAPDB::Install::Values::log->SetMsg("WRN: Error removing start menu shortcuts\n");
+	}
+	return 1;
+}
+
+sub unregisterUX{
+	return 1;
+}
+
+sub verify{
+	my ($data,$prog) = readIndepPath(1);
+	my $rc = 1;
+
+	unless(-d $data){
+		$SAPDB::Install::Values::log->SetMsg("independent data path not found\n");
+		$rc = 0;
+	};
+
+	unless(-d $prog){
+		$SAPDB::Install::Values::log->SetMsg("independent program path not found\n");
+		$rc = 0;
+	};
+	return 0 unless($rc);
+
+	foreach my $path (@{$regpackobj->Pathes}){
+		if($path->{'name'} =~ /data/i){
+			if(	normalizePath($data) ne
+				normalizePath($path->{'value'})){
+					$SAPDB::Install::Values::log->SetMsg("independent data path differs\n");
+					$rc = 0;
+			}
+		}
+		elsif($path->{'name'} =~ /prog/i){
+			if(	normalizePath($prog) ne
+				normalizePath($path->{'value'})){
+					$SAPDB::Install::Values::log->SetMsg("independent program path differs\n");
+					$rc = 0;
+			}
+		}
+	}
+
+	return $rc;
+}
+
+
+
+*unregister = $^O =~ /^MsWin/i ? \&unregisterWin : \&unregisterUX;
+
+
+sub preuninstall{
+
+}
+
+sub postuninstall{
+	my $data;
+	my $prog;
+
+
+	my @undeleted_files;
+	foreach my $rhPath (@{$regpackobj->Pathes}){
+		my %hPath=%$rhPath;
+		if($hPath{'name'} eq 'independent data path'){
+			$data=$hPath{'value'};
+			next;
+		}
+		if($hPath{'name'} eq 'independent program path'){
+			$prog=$hPath{'value'};
+		}
+	}
+
+
+	#
+	#	there will stay any pcr files from old 7.2 / 7.3 installations
+	#	try to delete it now
+	#
+
+	my @old_pcrs = grep { /libpcr\.[^\.]+$|sapdbcbin|sapdbc\.jar|sqlod|sqlsp32|odcompr|odbc|dbana|pcr71|sqluser\./  } find($prog,'f');
+	foreach my $file (@old_pcrs){
+		if(unlink($file)){
+			defined $SAPDB::Install::Values::log &&
+				$SAPDB::Install::Values::log->SetMsg("file $file deleted\n");
+		}
+		else{
+			defined $SAPDB::Install::Values::log &&
+				$SAPDB::Install::Values::log->SetMsg("cannot delete $file: $!\n");
+		}
+	}
+
+
+
+	#unlock and close install registry
+	$regpackobj->Registry->Lock->Unlock();
+	close($regpackobj->Registry->refFD);
+	$regpackobj->Registry->Killed(1);
+	close($regpackobj->Registry->InstRegLog->FD);
+	$regpackobj->Registry->InstRegLog->Closed(1);
+
+
+	# remove sapdb installer registry files
+	-d $data or print2stderr("data path \"$data\" not found\n") and return;
+	opendir(DH,"$data/config/install") or print2stderr("cannot open dir \"$data/config/install\"\n");
+	foreach (readdir(DH)){
+		if(/INSTREG/i or /SAPDB_history/i or /^LIST/i or /^SCRIPT/i){
+			 if(-f "$data/config/install/$_"){
+				unless(unlink("$data/config/install/$_")){
+					push @undeleted_files,"$data/config/install/$_";
+					print2stderr("cannot delete file \"$data/config/install/$_\": $!\n") unless $^O =~ /mswin/i;
+				}
+			}
+		}
+	}
+	closedir(DH);
+
+	# remove logs and traces
+	opendir(DH,"$data/wrk") or print2stderr("cannot open dir \"$data/wrk\"\n");
+	foreach (readdir(DH)){
+		if(	/\.prot$/ or /\.log$/i or /NI_TRACEFILE/ or /\.old$/ or
+			/irtrace.shm/ or /\.prt$/i or /\.mdf$/i or /\.trc$/i or
+			/_installer_trace/ or /\.nitrace$/ or /\.trace$/){
+			-f "$data/wrk/$_" and (unlink("$data/wrk/$_") or print2stderr("cannot delete file \"$data/wrk/$_\": $!\n"));
+		}
+	}
+	closedir(DH);
+
+	#remove appldiag files
+	foreach (grep {/appldiag$/} find("$data/wrk",'f')){
+		unlink or print2stderr("cannot remove file \"$_\"\n");
+	}
+
+
+	# remove uninstall logfiles
+	opendir(DH,"$prog/install") or print2stdout("cannot open dir \"$prog/install\"\n");
+	foreach (readdir(DH)){
+		if(/\.log/){
+			-f "$prog/install/$_" and unlink("$prog/install/$_") or print2stderr("cannot remove file \"$prog/install/$_\"\n");
+		}
+	}
+	closedir(DH);
+
+	unless($^O =~ /mswin/i){
+
+		#
+		# remove registry files
+		#
+
+		foreach my $regfile ('Databases.ini','Runtimes.ini','Installations.ini'){
+			my $file = "$data/config/$regfile";
+			if(-f $file){
+				unlink($file);
+			}
+			$file .= '_lock';
+			if(-f $file){
+				unlink($file);
+			}
+		}
+
+		#
+		#	remove links in /usr/spool/sql
+		#
+
+		foreach my $link ('dbspeed','diag','fifo','ipc','pid','pipe','ppid'){
+			unlink('/usr/spool/sql/'.$link);
+		}
+	}
+
+
+
+
+	defined $SAPDB::Install::Values::log &&
+	$SAPDB::Install::Values::log->LogPath($SAPDB::Install::Config{'CallerDir'});
+
+	deleteSAPDBTech();
+	removeFromSysPath("$prog/bin;$prog/pgm") if $^O =~ /mswin/i;
+
+
+	unless($^O =~ /mswin/i){
+		my $dcom_ini = '/usr/spool/sql/ini/Registry_dcom.ini';
+		-f $dcom_ini and (unlink($dcom_ini) or print2stderr("cannot remove file \"$decom_ini\"\n"));
+		my ($rc,$removed,$unremoved) = removeEmptyDirs('/usr/spool/sql');
+		foreach $dir (@$unremoved){
+			print2stderr("cannot remove directory \"$dir\"\n");
+		}
+	}
+
+
+
+	removeUninstallEntry();
+
+	return @undeleted_files;
+}
+
+sub framestop{
+	if ($^O =~ /mswin/i ){
+		$syspath_changed and print2stdout("Rebooting ensures that the MaxDB software can be started from any command line window!\n");
+	}
+
+}
+
+
+1;
+

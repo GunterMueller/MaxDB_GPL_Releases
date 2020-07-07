@@ -1,0 +1,513 @@
+#!/devtool/local/bin/perl
+# pcvt
+#
+# @(#)pcvt  7.1  1998-12-15
+#
+# Prints the employee data.
+#
+# Burkhard Diesing
+#
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+#
+# Daten nicht per Hand in dieses File einfügen!!!!!
+# tel.pl.tt wird aus \\pwww\InetPub\scripts\Python\people.conf
+# generiert.
+#
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Getopt::Std;
+use FileHandle;
+
+select(STDOUT); $| = 1;
+my %number=();
+my %computer = ();
+my %address = ();
+my $search_string = undef;
+my @hits = ();
+my $message_string = undef;
+my $info_count = 0;
+
+
+sub start_call
+{
+	my $connect_string = "http://pwdfdial1.wdf.sap.corp:1080/cgi_bin/webdialer/DialGo?phone=";
+	my $localpath = "$ENV{'TEMP'}\\tel.html" ;
+
+	unless ($^O=~/win32/i)
+	{
+		print "ERROR: direct dial function only for windows supported\n";
+		exit 1;
+	}
+
+	if ((scalar(@hits)>1) || ($info_count > 1) )
+	{
+		open(FILE, ">$localpath");
+		print FILE "<html>";
+		print FILE "<head>";
+		print FILE "<title>LC/LCAPPS phone book</title>";
+		print FILE "<meta name='author' content='Gerald'>";
+		print FILE "</head>";
+		print FILE "<body>";
+		print FILE "<h1>LC/LCAPPS phone book</h1>";
+		print FILE "<h3>found following entries";
+		print FILE " matched by &quot$search_string&quot";
+		print FILE ":</h3><br>";
+		print FILE  "<table border=\"1\" cellpadding=\"10\">";
+		foreach $name (@hits)
+		{
+			print FILE "<tr><td><p>$name</p></td>";
+			if ($number{$name})
+			{
+				print FILE "<td><a href=\"$connect_string$number{$name}\">Dial</a>";
+			}
+			if ($address{$name})
+			{
+				print FILE "<td><a href=\"mailto:$address{$name}\">Mail</a></td>";
+			}
+			if ($computer{$name})
+			{
+				print FILE "<td><a href=\"file://$computer{$name}\">Host</a></td>";
+			}
+			print FILE "</tr>";
+		}
+		print FILE "</table>";
+		print FILE "<br><hr>";
+		print FILE "<br><p>Problems and questions: <a href=\"${connect_string}49622775134\">Gerald</a>";
+		print FILE "</body>";
+		print FILE "</html>";
+		close FILE;
+		#$localpath =~ tr/\\/\//;
+		open_IE("$localpath", 1);
+	}
+	elsif (scalar(@hits)==1)
+	{
+		my $name = $hits[0];
+		if ($opt_d)
+		{
+			print ("Call $name ($number{$name})...\n");
+			# no_IE('pwdfdial1.wdf.sap.corp','/cgi_bin/webdialer/DialGo?phone='."$number{$name}");
+			open_IE('http://pwdfdial1.wdf.sap.corp:1080/cgi_bin/webdialer/DialGo?phone='."$number{$name}", $opt_s ? 1: 0);
+		}
+		elsif ($opt_c)
+		{
+			system ("explorer \\\\$computer{$name}");
+			# open_IE('http://pwdfdial1.wdf.sap.corp:1080/cgi_bin/webdialer/DialGo?phone='."${$number}{$name}", 0);
+		}
+		elsif ($opt_m)
+		{
+			open_IE("mailto:$address{$name}", 0);
+			#open_IE('http://pwdfdial1.wdf.sap.corp:1080/cgi_bin/webdialer/DialGo?phone='."${$number}{$name}", 0);
+		}
+	}
+	else
+	{
+		print ("No entries in phone book matched with '$search_string'\n");
+	}
+
+}
+
+sub no_IE
+{
+	require Net::Telnet;
+	import Net::Telnet;
+	my $host = shift;
+	my $call = shift;
+	my $webobj = new Net::Telnet (Telnetmode => 0);
+	$webobj->open(Host => "$host",
+#	$webobj->open(Host => "us8803",
+	Timeout => 100,
+    Port => 1080);
+    print("$call");
+    #$webobj->print("GET $call");
+    $webobj->print("GET $call HTTP/1.0");
+    $webobj->print("");
+
+	$line="";
+	while ( $line !~ /Remcall was started/i)
+	{
+		$line = $webobj->getline(Timeout => 100000);
+		print "$line\n";
+	}
+	$line = $webobj->getline (Timeout => 100000);
+	while ($line !~ /Remcall was finished/i)
+	{
+		print ("$line");
+		$line = $webobj->getline (Timeout => 100000);
+	}
+	sleep 1;
+	$webobj->close();
+}
+
+sub open_IE
+{
+	require OLE;
+	import OLE;
+	my $address = shift;
+	my $visible = shift;
+	my $explorer = CreateObject OLE 'InternetExplorer.Application'
+			or die "Couldn't create new instance of Explorer App!!";
+	#$explorer->{'AddressBar'}  = 0;
+	#$explorer->{'LocationURL'}  = 0;
+	#$explorer->{'MenuBar'}  = 0;
+	$explorer->Navigate($address);
+	if ($visible)
+	{
+		$explorer->{'Active'}  = 1;
+		# theatermode to switch to foreground
+	    $explorer->{'TheaterMode'}  = 1;
+	    $explorer->{'TheaterMode'}  = 0;
+	    $explorer->{'Visible'} = 1;
+	}
+	else
+	{
+		sleep 5;
+		$explorer->quit();
+	}
+
+	# theatermode to switch to foreground
+	# $explorer->{'TheaterMode'}  = 1;
+	#$explorer->{'TheaterMode'}  = 0;
+
+}
+
+if (!getopts ('hdwcmsnaSx') || $opt_h || ( @ARGV != 1 && ! $opt_a) ) {
+	print "USAGE: tel [-h] [-cdmwsS] <regexpr name>\n";
+    print "\n";
+    print "       Prints the employee data.\n";
+    print "\n";
+    print "OPTIONS:    -h        (prints this help)\n";
+    print "            -d        (dial directly via webdailer)\n";
+    print "            -m        (send mail)\n";
+    print "            -c        (show host)\n";
+    print "            -w        (all info in explorer)\n";
+    print "            -s        (show internet explorer)\n";
+    print "            -a        (ask for search_string)\n";
+    print "            -S        (create a shortcut in %TEL_LINKS% directory)\n";
+    print "\n";
+    print " <regexpr name>:\n";
+    print "             Posible expressions are the name, number, D-user\n";
+    print "             or E-Mail address.\n";
+    exit;
+}
+if ($opt_a)
+{
+	print "Look for :";
+	$search_string = <STDIN>;
+	chomp $search_string;
+}
+else
+{
+	$search_string=$ARGV[0];
+}
+
+if ($opt_w)
+{
+	$info_count = 3;
+}
+else
+{
+	foreach (($opt_d, $opt_c, $opt_m, $opt_x))
+	{
+		$info_count++ if (defined $_);
+	}
+}
+
+if ($search_string =~ /^dilbert$/i)
+{
+	open_IE('http://www.dilbert.com/', 1);
+	exit;
+}
+
+
+my @list = ();
+while(<DATA>) {
+    if (/$search_string/i)
+    {
+    	push @list, $_;
+    }
+}
+
+my $privatedata="$ENV{'HOME'}\\private.tel";
+open(PRIVATE, "<$privatedata");
+while(<PRIVATE>) {
+    if (/$search_string/i)
+    {
+    	push @list, $_;
+    }
+}
+close PRIVATE;
+
+foreach my $line (@list)
+{
+	#    name,     phone,   dnumber,   computer, mail,   shortname
+	if ($line =~ /"([^,]*)",\s([^,]*),\s([^,]*),\s\\\\([^,]*),\s([^,]*),\s/i)
+	{
+		my $name = $1;
+		my $number = $2;
+		if ($opt_w || $opt_c || $opt_x )
+		{
+    		$computer{$name} = $4;
+    	}
+    	if ($opt_w || $opt_m )
+		{
+    		$address{$name} = $5;
+    	}
+    	if ($opt_w || $opt_d )
+		{
+    		# I hate spaces
+    		$number =~ s/ //g;
+    		if ( $number =~ /\//)
+    		{
+    			$number =~ s/\///;
+    			$number =~ s/^0+//;
+    			$number ="49$number";
+    		}
+    		else
+    		{	$number ="4962277$number"; 	}
+    		$number{$name} = $number;
+    	}
+		push @hits, $name;
+	}
+	unless ($info_count)
+	{
+		print $line;
+	}
+}
+if ($opt_x && scalar(@hits))
+{
+	print ("Send to ". (join ", ", @hits) . "\nmessage: ");
+	$message_string = <STDIN>;
+	chomp $message_string;
+	foreach (@hits)
+	{
+		system ("net send $computer{$_} \"$message_string\"");
+	}
+}
+else
+{
+	if ($info_count)
+	{
+		start_call($REGEXPR);
+	}
+
+	if ($opt_S && scalar(@hits)==1)
+	{
+		print "Creating a new link for call ...";
+		if (defined $ENV{'TEL_LINKS'})
+		{
+			if (-d $ENV{'TEL_LINKS'})
+			{
+				my $history = (defined $ENV{'TEL_HISTORY'}) ?  int($ENV{'TEL_HISTORY'}) : 10;
+
+				my $name = $hits[0];
+
+				if (-e 	"$ENV{'TEL_LINKS'}\\$name.lnk")
+				{
+					unlink "$ENV{'TEL_LINKS'}\\$name.lnk";
+				}
+				# collect all existing Shortcuts
+				opendir(DIR_IN, "$ENV{'TEL_LINKS'}");
+				my @SC_Files = grep /\.lnk$/i, readdir(DIR_IN);
+				closedir DIR_IN;
+				my $SC_File_Count = scalar (@SC_Files);
+				my %time_hash = ();
+				if ($SC_File_Count > $history - 1 )
+				{
+					# read access times of all files
+					foreach (@SC_Files)
+					{
+						my @stats = stat ("$ENV{'TEL_LINKS'}\\$_");
+						$time_hash{$stats[8] > $stats[9] ? $stats[8] : $stats[9] }  =  "$_";
+					}
+					foreach (sort keys %time_hash)
+					{
+						unlink "$ENV{'TEL_LINKS'}\\$time_hash{$_}";
+						last if (--$SC_File_Count <= $history-1 );
+					}
+				}
+
+				require Win32::Shortcut;
+				my $Shortcut = new Win32::Shortcut();
+				if (defined($Shortcut))
+			    {
+			        $Shortcut->Path("$ENV{'TOOL'}\\Perl\\bin\\perl.exe");
+			        $Shortcut->Arguments("$0 -d -S \"$name\"");
+			        $Shortcut->WorkingDirectory("$ENV{'TOOL'}\\bin");
+			        $Shortcut->ShowCmd(0);
+			        $Shortcut->Description("Call $name ...");
+			        $Shortcut->IconLocation("$ENV{SystemRoot}\\system32\\progman.exe");
+			        $Shortcut->IconNumber(26);
+			        $Shortcut->Save("$ENV{'TEL_LINKS'}\\$name.lnk");
+			        $Shortcut->Resolve();
+			        $Shortcut->Close();
+			        print "OK\n"
+			    }
+			}
+			else
+			{
+				print "Error\n  (directoy %TEL_LINKS% does not exists)\n";
+				sleep (3);
+			}
+		}
+		else
+		{
+			print "Error\n (missing environment variable %TEL_LINKS% for directoy of links)\n";
+			sleep (3);
+		}
+	}
+}
+
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+#
+# Daten nicht per Hand in dieses File einfügen!!!!!
+# tel.pl.tt wird aus \\pwww\InetPub\scripts\Python\people.conf
+# generiert.
+#
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+# ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG ACHTUNG
+
+__END__
+
+__DATA__
+"Jürgen Primsch", 51335, D024846, \\berd00155970a, j.primsch@sap.com, JuergenP
+"Kathleen Koeppen", 51299, D025318, \\berd00111906, kathleen.koeppen@sap.com, KathleenK
+"Jürgen Primsch", 51335, D024846, \\berd00155970a, j.primsch@sap.com, JuergenP
+"Torsten Strahl", 51337, D025087, \\berd00164471a, torsten.strahl@sap.com, TorstenS
+"Henrik Hempelmann", 51331, D038008, \\P136120, henrik.hempelmann@sap.com, HenrikH
+"Uwe Hahn", 51330, D025084, \\BERD00145759A, uwe.hahn@sap.com, UweH
+"Martin Brunzema", 51327, D035952, \\berd00145728a , martin.brunzema@sap.com, MartinB
+"Ferdi Flohe", 0221/9349 402, D024849, \\P116658, ferdinand.flohe@sap.com, FerdiF
+"Daniel Dittmar", 51328, D024856, \\P123523, daniel.dittmar@sap.com, DanielD
+"Martin Kittel", 51332, D039137, \\P129819, martin.kittel@sap.com, MartinKi
+"Elke Zabach", 51344, D024855, \\berd00164484a, elke.zabach@sap.com, ElkeZ
+"Thomas Anhaus", 0221/9349 430, D024850, \\P116657, thomas.anhaus@sap.com, ThomasA
+"Gert Großmann", 51329, D024852, \\BERD00145758A, gert.grossmann@sap.com, GertG
+"Holger Becker", 51325, D025082, \\BERD00164483A, holger.becker@sap.com, HolgerB
+"Dirk Thomsen", 51338, D031437, \\berd00146377a, dirk.thomsen@sap.com, Thomsend
+"Jörg Mensing", 51333, D027923, \\P123522, joerg.mensing@sap.com, JoergM
+"Raymond Rödling", 51336, D024857, \\P123524, raymond.roedling@sap.com, RaymondR
+"Stefan Paeck", 51334, D032964, \\berd00164437a, stefan.paeck@sap.com, StefanP
+"Robin Wissbrock", 51340, D038805, \\berd3000136121a, robin.wissbrock@sap.com, Wissbrock
+"Christoph Bautz", 51347, D025253, \\P123525, christoph.bautz@sap.com, ChristophB
+"Burkhard Diesing", 51371, D025086, \\P129814, burkhard.diesing@sap.com, BurkhardD
+"Thomas Simenec", 51375, D030044, \\berd00146980a, thomas.simenec@sap.com, ThomasS
+"Marco Paskamp", 51373, D031096, \\P122556, marco.paskamp@sap.com, MarcoP
+"Alexander Schröder", 51374, D039759, \\berd00145765a, alexander.schroeder@sap.com, AlexanderS
+"Thomas Kötter", 51372, D024584, \\P136123, thomas.theodor.koetter@sap.com, ThomasK
+"Jürgen Aurisch", 51370, D024851, \\P129815, juergen.aurisch@sap.com, JuergenA
+"Barbara Jakubowski", 51315, D024844, \\berd00145756a, b.jakubowski@sap.com, BarbaraJ
+"Stefan Baier", 51311, D026415, \\P124205, stefan.baier@sap.com, StefanB
+"Martin Reinecke", 51319, D024853, \\P123526, martin.reinecke@sap.com, MartinR
+"Ute Fuchs", 51349, D025249, \\P136119, ute.fuchs@sap.com, UteF
+"Uta Völkel", 51368, D026940, \\berd00145760a, uta.voelkel@sap.com, UtaV
+"Adrian Dorn", 51442, D002441, \\PUNKOWN, adrian.dorn@sap.com, AdrianD
+"Steffen Schildberg", 51318, D019882, \\P129817, steffen.schildberg@sap.com, SteffenS
+"Hans-Georg Bumes", 51312, D033893, \\P76209, hans-georg.bumes@sap.com, HansGeorgB
+"Wolfgang Auer", 51310, D025911, \\P78997, wolfgang.auer@sap.com, WolfgangA
+"Markus Stausberg", 51321, D036768, \\P130042, markus.stausberg@sap.com, MarkusS
+"Markus Özgen", 51317, D025085, \\P129818, markus.oezgen@sap.com, MarkusO
+"Daniel Kirmse", 51316, D027470, \\P116654, daniel.kirmse@sap.com, DanielK
+"Jörg Hoffmeister", 51356, D024845, \\berd00145757a, joerg.hoffmeister@sap.com, JoergH
+"Christiane Hienger", 51353, D024848, \\berd00144137a, christiane.hienger@sap.com, ChristianeH
+"Martin Körner", 51358, D026206, \\P130908, martin.koerner@sap.com, MartinK
+"Frank Hoffmann", 51355, D024858, \\BERD00145767A, fr.hoffmann@sap.com, FrankH
+"Thorsten Zielke", 51369, D038010, \\P65470, thorsten.zielke@sap.com, ThorstenZ
+"Bettina Laidler", 51360, D028136, \\berd3000137814a, bettina.laidler@sap.com, BettinaL
+"Melanie Handreck", 51352, D028036, \\berd00145761a, melanie.handreck@sap.com, MelanieH
+"Roland Mallmann", 51362, D038098, \\BERD3000137612A, roland.mallmann@sap.com, RolandM
+"Oksana Alekseious", 51345, D037028, \\berd00145763a, oksana.alekseious@sap.com, OksanaA
+"Heike Gursch", 51351, D024843, \\berd00145755a, heike.gursch@sap.com, HeikeG
+"Robert Völkel", 51339, D022860, \\berd00145769a, robert.voelkel@sap.com, RobertV
+"Mechthild Boré", 51326, D021991, \\P132995, mechthild.bore-wuesthof@sap.com, MeckiB
+"Dennis Adler", 51324, D035667, \\P123528, dennis.adler@sap.com, DennisA
+"Axel Mosle", 51364, D024980, \\berd00145727, axel.mosle@sap.com, AxelM
+"Frank Straßenburg", 51367, D026026, \\berd3000136118a, frank.strassenburg@sap.com, FrankS
+"Helge Gose", 51350, D023463, \\berd00145835, helge.gose@sap.com, HelgeG
+"Olaf Märker", 51342, D040905, \\P77218, olaf.maerker@sap.com, MaerkerO
+"Marius Wittstadt", 51343, D040818, \\berd3000140738a, marius.wittstadt@sap.com, Wittstadt
+"Nikolai Eipel", 51313, D043486, \\berd0080071224a, nikolai.eipel@sap.com, NikolaiE
+"Alexander Kuechler", 51320, D044327, \\berd3000140737a, alexander.kuechler@sap.com, Kuechler
+"Marco Baar", 51196, D045568, \\berd00147546a, marco.baar@sap.com, Baar
+"Michael Kihl", 51317, D044123, \\berd00156847a, michaeal.kihl@sap.com, Kihl
+"Ileana Somesan", 51640, D046383, \\berd00146184a, ileana.somesan@sap.com, Somesan
+"Rocco Himmer", 51354, D024847, \\P136124, rocco.himmer@sap.com, RoccoH
+"Gerald Arnold", 51346, D025276, \\P129813, gerald.arnold@sap.com, GeraldA
+"Daniel Schmoger", 51366, D034092, \\P129816, daniel.schmoger@sap.com, DanielS
+"Falko Flessner", 51348, D038447, \\berd3000136122a, falko.flessner@sap.com, FalkoF
+"Ulrich Jansen", 51357, D040173, \\berd00145766a, ulrich.jansen@sap.com, UlrichJ
+"Alexander Weinmann", 51425, D022195, \\berd00145682, alexander.weinmann@sap.com, AlexanderW
+"Bernd Vorsprach", 51322, D025588, \\berd00164481a, bernd.vorsprach@sap.com, BerndV
+"Marc-Philip Werner", 51323, D026948, \\berd00146837a, marc-philip.werner@sap.com, WernerMa
+"Tilo Heinrich", 51314, D025561, \\berd00164486a, tilo.heinrich@sap.com, HeinrichT
+"Birgit Malik", 51361, D019124, \\berd00146826a, birgit.malik@sap.com, BirgitM
+"Marina Montag", 51363, D001938, \\Pberd00146827a, marina.montag@sap.com, MarinaM
+"Andrea Kristen", 51359, D041273, \\berd00146828a, andrea.kristen@sap.com, AndreaK
+"Knut Hansen", 48265, D022879, \\PUNKOWN, knut.hansen@sap.com, Hansen
+"Martin Härtig", 43791, D021956, \\PUNKOWN, martin.haertig@sap.com, MartinH
+"Dirk Hofer", 45106, D024975, \\PUNKOWN, dirk.hofer@sap.com, DirkH
+"Alexander Ringhof", 61805, D038248, \\PUNKOWN, alexander.ringhof@sap.com, AlexanderR
+"Alexander Kaiser", 43184, D036661, \\PUNKOWN, alexander.kaiser@sap.com, AlexanderKa
+"Andrea Herschel", 48352, D022376, \\PUNKOWN, andrea.herschel@sap.com, AndreaH
+"Thomas Elvers", 46303, D024907, \\PUNKOWN, thomas.elvers@sap.com, ThomasE
+"Torsten Pfeiffer", 43491, D020263, \\PUNKOWN, torsten.pfeiffer@sap.com, TorstenP
+"Iliyana Bozhikova", 67449, D037364, \\PUNKOWN, iliyana.bozhikova@sap.com, Bozhikova
+"Klaus Kuehnle", 62126, D027368, \\PUNKOWN, klaus.kuehnle@sap.com, Kuehnle
+"Reiner Singer", 68296, D043367, \\PUNKOWN, reiner.singer@sap.com, SingerR
+"Peter Goertz", 62852, D022826, \\PUNKOWN, peter.goertz@sap.com, GoertzP
+"Markus Sinnwell", 61294, D026762, \\PUNKOWN, markus.sinnwell@sap.com, MarkusSi
+"Christoph Roterring", 45241, D040999 , \\PUNKOWN, christoph.roterring@sap.com, Roterring
+"Werner Thesing", 48594, D025448, \\PUNKOWN, werner.thesing@sap.com, APO: 42062, WernerT
+"Stefan Seemann", 65889, D028265 , \\PUNKOWN, stefan.seemann@sap.com, StefanS
+"Olaf Alder", 64769, D038760 , \\PUNKOWN, olaf.alder@sap.com, AlderO
+"Sinisa Loinjak", 61494, D026305 , \\PUNKOWN, sinisa.loinjak@sap.com, Loinjak
+"Wolfgang Wolesak", 64603, D038311 , \\PUNKOWN, wolfgang.wolesak@sap.com, Wolesak
+"Erika Wolff", 67674, D038766 , \\PUNKOWN, erika.wolff@sap.com, WolffE
+"Sonja Zscherpel", 65397, D035224 , \\PUNKOWN, sonja.zscherpel@sap.com, Zscherpel
+"Volkmar Soehner", 46947, D022094, \\PUNKOWN, volkmar.soehner@sap.com, Soehner
+"Daniel Booss", 67211, D035299, \\PUNKOWN, daniel.booss@sap.com, Booss
+"Jochen Bergmann", 43318, D020876, \\PUNKOWN, jochen.bergmann@sap.com, BergmannJ
+"Thorsten Duda", 68830, D038702, \\PUNKOWN, thorsten.duda@sap.com, DudaTho
+"Andreas Wiethoff", 65108, D026804, \\PUNKOWN, andreas.wiethoff@sap.com, Wiethoff
+"Axel Schroeder", 60982, D042341, \\PUNKOWN, axel.schroeder@sap.com, SchroederAx
+"Christian Embacher", 61490, D026174, \\PUNKOWN, christian.embacher@sap.com, Embacher
+"Thorsten Glebe", 42469, D038759, \\PUNKOWN, thorsten.glebe@sap.com, Glebe
+"Stephan Weber", 61493, D025876, \\PUNKOWN, stephan.weber@sap.com, WeberSte
+"Oliver Anhuth", 49479, D043462, \\PUNKOWN, oliver.anhuth@sap.com, Anhuth
+"Harry Tijsmans", 32/2/6746-768, I804580, \\PUNKOWN, harry.tijsmans@sap.com, Tijsmans
+"Steffen Hoffmann", 61432, D028926, \\PUNKOWN, steffen.hoffmann@sap.com, HoffmannSte
+"Olaf Mueller", 68343, D037670, \\PUNKOWN, ol.mueller@sap.com, MuellerOla
+"Michael Seel", 67921, D038758, \\PUNKOWN, michael.seel@sap.com, SeelM
+"Michael Brückner", 64586, D039763, \\PUNKOWN, michael.brueckner@sap.com, BruecknerM
+"Hans-Georg Reusch", 48020, D024668, \\PUNKOWN, hans-georg.reusch@sap.com, Reusch
+"Tobias Scheuer", 47153, D024910, \\PUNKOWN, tobias.scheuer@sap.com, ScheuerT
+"Stefan Wedner", 67212, D035854, \\PUNKOWN, stefan.wedner@sap.com, Wedner
+"Martin Spoden", 60983, D041704, \\PUNKOWN, martin.spoden@sap.com, Spoden
+"Carl Seghers", 32/2/6746 528, I006081, \\PUNKOWN, carl.seghers@sap.com, Seghers
+"Andrei Suvernev", 1/650/849 2819, I804580, \\PUNKOWN, a.suvernev@sap.com, SuvernevA
+"Jan Wedel", 61492, D032450, \\PUNKOWN, jan.wedel@sap.com, WedelJ
+"Mathias Kyrian", 68790, D042455, \\PUNKOWN, mathias.kyrian@sap.com,
+"Jana Schreterova", 68745, D040286, \\PUNKOWN, jana.schreterova@sap.com,
+"Mithun Sridharan", 43240, C5075346, \\PUNKOWN, mithun.sridharan@sap.com,

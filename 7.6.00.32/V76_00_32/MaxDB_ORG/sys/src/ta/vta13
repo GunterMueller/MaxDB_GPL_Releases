@@ -1,0 +1,1628 @@
+/* @lastChanged: "1998-02-16 12:00"
+ 
+ * @filename:   vta13
+ * @purpose:    "TA_file_read"
+ * @release:    7.1.0.0
+ * @see:        "-.-"
+ *
+ * @Copyright (c) 1998-2005 SAP AG"
+ */
+ 
+.tt 1 $SAP$LiveCache$VTA13$
+.tt 3 $$TA_file_read$1999-01-29$
+ 
+.nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 1998-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+***********************************************************
+ 
+Module  : TA_file_read
+ 
+Define  :
+ 
+        PROCEDURE
+              t13close_file (VAR term : tut_terminal);
+ 
+        PROCEDURE
+              t13openfile (VAR term : tut_terminal;
+                    VAR batch_fn    : tsp00_VFilename;
+                    VAR param_line  : tut_param_ln;
+                    VAR errtext     : tsp00_ErrText;
+                    VAR is_ok       : boolean);
+ 
+        PROCEDURE
+              t13readfile (VAR term : tut_terminal;
+                    VAR pfkey : tut_pfkey);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              TA_RTE_functions : VTA05;
+ 
+        PROCEDURE
+              t05build_command_fn (VAR source_fn : tsp00_VFilename;
+                    VAR cmd_fn      : tsp00_VFilename;
+                    VAR default_fn  : tsp00_VFilename);
+ 
+        PROCEDURE
+              t05sqlexec (VAR term : tut_terminal;
+                    VAR cmd_ln     : tsp00_Line;
+                    VAR errtext    : tsp00_ErrText;
+                    VAR retcode    : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              TA_terminal_IO: VTA09;
+ 
+        PROCEDURE
+              t09putmsg (VAR term     : tut_terminal;
+                    VAR msg           : tsp00_Line;
+                    is_warning        : boolean;
+                    immediate_display : boolean);
+ 
+        PROCEDURE
+              t09returncode_set (VAR term : tut_terminal;
+                    retcode : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_driver : VEN102;
+ 
+        PROCEDURE
+              sqlfopenp (
+                    VAR fname   : tsp00_VFilename;
+                    datakind    : tsp05_RteDataKind;
+                    filemode    : tsp05_RteFileMode;
+                    buffering   : tsp05_RteBufferingKind;
+                    VAR fhandle : tsp00_Int4;
+                    VAR err     : tsp05_RteFileError);
+ 
+        PROCEDURE
+              sqlfreadp (
+                    fhandle    : tsp00_Int4;
+                    VAR buf    : tsp00_Line;
+                    bufsize    : tsp00_Longint;
+                    VAR outlen : tsp00_Longint;
+                    VAR err    : tsp05_RteFileError);
+ 
+        PROCEDURE
+              sqlfclosep (
+                    fhandle : tsp00_Int4;
+                    option  : tsp05_RteCloseOption;
+                    VAR err : tsp05_RteFileError);
+ 
+        PROCEDURE
+              sqlgetenv
+                    (VAR envname   : tsp00_VFilename;
+                    VAR envvalue   : tsp00_VFilename;
+                    VAR envfound   : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedFill (
+                    size        : tsp00_Int4;
+                    m           : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4;
+                    len         : tsp00_Int4;
+                    fillchar    : char);
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              sqlfreadp;
+ 
+              tsp00_MoveObj tsp00_Line
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : JuergenA
+.sp
+.cp 3
+Created : 1986-11-18
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 1999-01-29
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+.CM *-END-* specification -------------------------------
+.cp 7
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      commentsign      = '*';
+      param_sign       = '&';
+      env_var_sign     = '$';
+      prompting_sign   = '>';
+      string_delimiter = '''';
+      mx_screen_line   =  79;
+      stmt_begin       = 'BEGIN       ';
+      stmt_display     = '&DISPLAY    ';
+      stmt_else        = 'ELSE        ';
+      stmt_end         = 'END         ';
+      stmt_goto        = '&GOTO       ';
+      stmt_init        = 'INIT        ';
+      stmt_if          = 'IF          ';
+      stmt_noscript    = 'NOSCRIPT    ';
+      stmt_label       = '&LABEL      ';
+      stmt_nodisplay   = '&NODISPLAY  ';
+      stmt_os          = '&OS         ';
+      stmt_retcode     = 'RETURNCODE  ';
+      stmt_return      = 'RETURN      ';
+      stmt_script      = 'SCRIPT      ';
+      stmt_stop        = 'STOP        ';
+      stmt_then        = 'THEN        ';
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      t13close_file (VAR term : tut_terminal);
+ 
+VAR
+      close_err : tsp05_RteFileError;
+ 
+BEGIN
+IF  term.curr_inputfile > 0
+THEN
+    BEGIN
+    sqlfclosep (term.inputfile [term.curr_inputfile].utvf_handle,
+          sp5vf_close_normal, close_err);
+    term.curr_inputfile := term.curr_inputfile - 1
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      t13openfile (VAR term : tut_terminal;
+            VAR batch_fn    : tsp00_VFilename;
+            VAR param_line  : tut_param_ln;
+            VAR errtext     : tsp00_ErrText;
+            VAR is_ok       : boolean);
+ 
+VAR
+      open_err   : tsp05_RteFileError;
+      line_end   : boolean;
+      c          : char;
+      rec_len    : tsp00_Int4;
+      i          : integer;
+      last_pos   : integer;
+      param      : integer;
+      pos        : integer;
+      fn         : tsp00_VFilename;
+      cmd_fn     : tsp00_VFilename;
+      default_fn : tsp00_VFilename;
+      format     : tsp00_VfFormat;
+      ln         : tsp00_Line;
+ 
+BEGIN
+&ifdef TEST
+writeln ('TA13 batch_fn <', batch_fn, '>');
+writeln ('TA13 param_ln <', param_line:50);
+&endif
+rec_len  := 0;
+format   := vf_plaintext;
+is_ok    := true;
+pos      := 1;
+last_pos := 0;
+errtext  := bsp_errtext;
+IF  batch_fn = term.blankfilename
+THEN
+    BEGIN
+    ta13p_skip_blanks (param_line, pos);
+    IF  pos > sizeof (param_line)
+    THEN
+        BEGIN
+        is_ok   := false;
+        ln      := term.blankline;
+        errtext := 'NO FILE NAME SPECIFIED                  '
+        END
+    ELSE
+        IF  param_line [pos] = string_delimiter
+        THEN
+            BEGIN
+            pos      := pos + 1;
+            last_pos := pos;
+            ta13p_search_char (param_line, string_delimiter, last_pos);
+            IF  last_pos > sizeof (param_line)
+            THEN
+                last_pos := sizeof (param_line);
+            (*ENDIF*) 
+            fn := term.blankfilename;
+            i  := 1;
+            WHILE (i <= VFILENAME_MXSP00) AND (pos + i - 1 < last_pos) DO
+                BEGIN
+                fn [i] := param_line [pos + i - 1];
+                i      := i + 1
+                END;
+            (*ENDWHILE*) 
+            cmd_fn     := fn;
+            default_fn := term.blankfilename
+            END
+        ELSE
+            BEGIN
+            last_pos := pos;
+            ta13p_search_char (param_line, '(', last_pos);
+            IF  last_pos > sizeof (param_line)
+            THEN
+                last_pos := sizeof (param_line);
+            (*ENDIF*) 
+            IF  param_line [pos] = string_delimiter
+            THEN
+                pos := pos + 1;
+            (*ENDIF*) 
+            fn     := term.blankfilename;
+            i      := 1;
+            WHILE (i <= VFILENAME_MXSP00) AND (pos + i - 1 < last_pos) DO
+                BEGIN
+                c := param_line [pos + i - 1];
+                IF  c in ['a'..'i', 'j'..'r',  's'..'z']
+                THEN
+                    fn [i] := chr (ord(c) + ord('A') - ord('a'))
+                ELSE
+                    fn [i] := c;
+                (*ENDIF*) 
+                i := i + 1
+                END;
+            (*ENDWHILE*) 
+            t05build_command_fn (fn, cmd_fn, default_fn)
+            END
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    fn         := batch_fn;
+    last_pos   := 0;
+    cmd_fn     := fn;
+    default_fn := term.blankfilename
+    END;
+(*ENDIF*) 
+IF  is_ok
+THEN
+    BEGIN
+&   ifdef TEST
+    writeln ('TA13 cmd_fn     <', cmd_fn);
+    writeln ('TA13 default_fn <', default_fn);
+&   endif
+    open_err.sp5fe_result := vf_notok;
+    IF  default_fn <> term.blankfilename
+    THEN
+        BEGIN
+        sqlfopenp (default_fn, sp5vf_text, sp5vf_read, sp5bk_buffered,
+              term.inputfile [term.curr_inputfile+1].utvf_handle,
+              open_err);
+        IF  open_err.sp5fe_result = vf_ok
+        THEN
+            term.inputfn [term.curr_inputfile+1] := default_fn
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  open_err.sp5fe_result <> vf_ok
+    THEN
+        BEGIN
+        sqlfopenp (cmd_fn, sp5vf_text, sp5vf_read, sp5bk_buffered,
+              term.inputfile [term.curr_inputfile+1].utvf_handle,
+              open_err);
+&       ifdef TEST
+        writeln ('errtext <', open_err.sp5fe_text, '>');
+        writeln ('open_err',
+              chr (ord('0') +  ord(open_err.sp5fe_result) MOD 10),
+              chr (ord('0') + (ord(open_err.sp5fe_result) DIV 10)
+              MOD 10),
+              chr (ord('0') +  ord(open_err.sp5fe_result) MOD 100));
+&       endif
+        IF  open_err.sp5fe_result = vf_ok
+        THEN
+            term.inputfn [term.curr_inputfile+1] := cmd_fn
+        ELSE
+            errtext := open_err.sp5fe_text
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  open_err.sp5fe_result <> vf_ok
+    THEN
+        is_ok := false
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  is_ok
+THEN
+    BEGIN
+    term.inputfilpos [term.curr_inputfile+1] := 0;
+    term.is_inputfile   := true;
+    term.curr_inputfile := term.curr_inputfile + 1;
+    term.param_line [term.curr_inputfile] := param_line;
+    param := 1;
+    WHILE param <= cut_max_param_term - 1 DO
+        BEGIN
+        term.param_lwb [term.curr_inputfile] [param] := 0;
+        param := succ(param)
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  is_ok AND (last_pos < sizeof (param_line))
+THEN
+    BEGIN
+    pos      := last_pos + 1;
+    line_end := false;
+    param    := 1;
+    REPEAT
+        ta13p_skip_blanks (param_line, pos);
+        IF  pos > sizeof (param_line)
+        THEN
+            line_end := true
+        ELSE
+            BEGIN
+            IF  param_line [pos] = string_delimiter
+            THEN
+                BEGIN
+                pos := pos + 1;
+                term.param_lwb [term.curr_inputfile] [param] := pos;
+                ta13p_search_char (param_line, string_delimiter, pos)
+                END
+            ELSE
+                BEGIN
+                term.param_lwb [term.curr_inputfile] [param] := pos;
+                ta13p_search_char (param_line, ' ', pos)
+                END;
+            (*ENDIF*) 
+            IF  pos > sizeof (param_line)
+            THEN
+                line_end := true;
+            (*ENDIF*) 
+            term.param_upb [term.curr_inputfile] [param] := pos - 1;
+            pos := pos + 1
+            END;
+        (*ENDIF*) 
+        IF  NOT line_end AND (param < cut_max_param_term - 1)
+        THEN
+            param := param + 1
+        ELSE
+            line_end := true
+        (*ENDIF*) 
+    UNTIL
+        line_end
+    (*ENDREPEAT*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      t13readfile (VAR term : tut_terminal;
+            VAR pfkey : tut_pfkey);
+ 
+VAR
+      get_next      : boolean;
+      keyword_found : boolean;
+      is_param      : boolean;
+      is_env_var    : boolean;
+      tab_char      : char;
+      ln_len        : tsp00_Int4;
+      retcode       : tsp00_Int2;
+      ln_pos        : integer;
+      pos           : integer;
+      i             : integer;
+      label_search  : integer;
+      param         : integer;
+      label_token   : tsp00_Sname;
+      token         : tsp00_Sname;
+      errtext       : tsp00_ErrText;
+      err_ln        : tsp00_Line;
+      ln            : tsp00_Line;
+      envname       : tsp00_VFilename;
+      envvalue      : tsp00_VFilename;
+      envfound      : boolean;
+ 
+BEGIN
+pfkey := pf_none;
+IF  ord(bsp_c1) = 32
+THEN
+    tab_char := chr(9)
+ELSE
+    tab_char := chr(5);
+(*ENDIF*) 
+pfkey := pf_none;
+term.lines [term.currline]     := term.blank_window_line;
+term.lines [term.currline] [1] := prompting_sign;
+WITH term.ln_desc [term.currline] DO
+    BEGIN
+    ld_attr1 [1] := cut_unprotected;
+    ld_attr1 [2] := cut_unprotected;
+    ld_type      := lt_normal
+    END;
+(*ENDWITH*) 
+label_search := 0;
+REPEAT
+    get_next      := false;
+    keyword_found := true;
+    ta13next_line (term, ln, ln_len, label_search, pfkey);
+    WHILE term.is_inputfile AND (pfkey = pf_none) AND keyword_found
+          AND NOT get_next DO
+        BEGIN
+        pos := 1;
+        ta13token (ln, ln_len, pos, token);
+        IF  token = stmt_script
+        THEN
+            BEGIN
+            term.use_script := true;
+            get_next        := true
+            END
+        ELSE
+            IF  NOT term.use_script
+            THEN
+                keyword_found := false
+            ELSE
+                IF  token = stmt_noscript
+                THEN
+                    BEGIN
+                    term.use_script := false;
+                    get_next        := true
+                    END
+                ELSE
+                    IF  token = stmt_goto
+                    THEN
+                        BEGIN
+                        ta13token (ln, ln_len, pos, label_token);
+                        i := 1;
+                        WHILE (i < SNAME_MXSP00) AND (label_token [i] <> ' ') DO
+                            i := i + 1;
+                        (*ENDWHILE*) 
+                        IF  label_token [i] = ' '
+                        THEN
+                            label_token [i] := ':';
+                        (*ENDIF*) 
+                        IF  token = stmt_goto
+                        THEN
+                            label_search := 2;
+                        (*ENDIF*) 
+                        REPEAT
+                            ta13next_line (term, ln, ln_len, label_search, pfkey);
+                            IF  term.is_inputfile AND (pfkey = pf_none)
+                            THEN
+                                BEGIN
+                                pos := 1;
+                                ta13token (ln, ln_len, pos, token);
+                                IF  token = stmt_label
+                                THEN
+                                    BEGIN
+                                    ta13token(ln, ln_len, pos, token);
+                                    IF  token = label_token
+                                    THEN
+                                        BEGIN
+                                        label_search := 0;
+                                        i := 1;
+                                        WHILE i <= pos-1 DO
+                                            BEGIN
+                                            ln [i] := ' ';
+                                            i := succ(i)
+                                            END;
+                                        (*ENDWHILE*) 
+                                        IF  ln = term.blankline
+                                        THEN
+                                            get_next := true
+                                        (*ENDIF*) 
+                                        END
+                                    (*ENDIF*) 
+                                    END
+                                (*ENDIF*) 
+                                END
+                            (*ENDIF*) 
+                        UNTIL
+                            NOT term.is_inputfile OR (pfkey <> pf_none)
+                            OR (label_search = 0)
+                        (*ENDREPEAT*) 
+                        END
+                    ELSE
+                        IF  (token = stmt_if) OR (token = stmt_else)
+                            OR (token = stmt_os)
+                        THEN
+                            BEGIN
+                            IF  token = stmt_if
+                            THEN
+                                ta13if_clause (term, ln, ln_len, pos, get_next,
+                                      pfkey)
+                            ELSE
+                                IF  token = stmt_else
+                                THEN
+                                    ta13else_skip (term, ln, ln_len, pos,
+                                          get_next, pfkey)
+                                ELSE
+                                    IF  token = stmt_os
+                                    THEN
+                                        BEGIN
+                                        t05sqlexec(term, ln, errtext, retcode);
+                                        t09returncode_set (term, retcode);
+                                        get_next := true;
+                                        IF  retcode <> 0
+                                        THEN
+                                            BEGIN
+                                            err_ln     := term.blankline;
+                                            err_ln [1] := '*';
+                                            err_ln [2] := '*';
+                                            err_ln [3] := '*';
+                                            SAPDB_PascalForcedMove (sizeof (errtext), sizeof(err_ln),
+                                                  @errtext, 1,
+                                                  @err_ln, 5, sizeof (errtext));
+                                            t09putmsg (term, err_ln, true, true);
+                                            (* avoid flushing message *)
+                                            t09putmsg (term, err_ln, true, false)
+                                            END
+                                        (*ENDIF*) 
+                                        END
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            IF  (token = stmt_display  ) OR
+                                (token = stmt_label    ) OR
+                                (token = stmt_nodisplay) OR
+                                (token = stmt_retcode  )
+                            THEN
+                                BEGIN
+                                IF  token = stmt_label
+                                THEN
+                                    ta13token (ln, ln_len, pos, token)
+                                ELSE
+                                    IF  token = stmt_retcode
+                                    THEN
+                                        ta13stop_handling (term, ln, ln_len, pos)
+                                    ELSE
+                                        IF  token = stmt_nodisplay
+                                        THEN
+                                            term.is_display := false
+                                        ELSE
+                                            IF  token = stmt_display
+                                            THEN
+                                                term.is_display :=
+                                                      term.screen_available;
+                                            (*ENDIF*) 
+                                        (*ENDIF*) 
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                                i := 1;
+                                WHILE i <= pos-1 DO
+                                    BEGIN
+                                    ln [i] := ' ';
+                                    i := succ(i)
+                                    END;
+                                (*ENDWHILE*) 
+                                IF  ln = term.blankline
+                                THEN
+                                    get_next := true
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                IF  token = stmt_end
+                                THEN
+                                    BEGIN
+                                    ta13token (ln, ln_len, pos, token);
+                                    IF  token = stmt_init
+                                    THEN
+                                        keyword_found := false
+                                    ELSE
+                                        BEGIN
+                                        i := 1;
+                                        WHILE i <= pos-1 DO
+                                            BEGIN
+                                            ln [i] := ' ';
+                                            i := succ(i)
+                                            END;
+                                        (*ENDWHILE*) 
+                                        IF  ln = term.blankline
+                                        THEN
+                                            get_next := true
+                                        (*ENDIF*) 
+                                        END
+                                    (*ENDIF*) 
+                                    END
+                                ELSE
+                                    BEGIN
+                                    keyword_found := false;
+                                    IF  token = stmt_return
+                                    THEN
+                                        ta13eof_handling (term, label_search, get_next,
+                                              pfkey)
+                                    ELSE
+                                        IF  token = stmt_stop
+                                        THEN
+                                            BEGIN
+                                            ta13stop_handling (term, ln, ln_len, pos);
+                                            pfkey := pf_cancel
+                                            END
+                                        (*ENDIF*) 
+                                    (*ENDIF*) 
+                                    END
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    (*ENDWHILE*) 
+UNTIL
+    NOT get_next OR NOT term.is_inputfile OR (pfkey <> pf_none);
+(*ENDREPEAT*) 
+IF  (pfkey = pf_none) AND term.is_inputfile
+THEN
+    BEGIN
+    pos    := 1;
+    ln_pos := 2;
+    WHILE (pos <= ln_len) AND (ln_pos <= mx_screen_line) DO
+        BEGIN
+        is_param := false;
+        is_env_var := false;
+        IF  pos < ln_len
+        THEN
+            BEGIN
+            IF  (ln [pos  ] = param_sign) AND
+                (ln [pos+1] in ['1'..'9'])
+            THEN
+                is_param := true;
+            (*ENDIF*) 
+            IF  (ln [pos  ] = param_sign) AND
+                (ln [pos+1] = env_var_sign)
+            THEN
+                is_env_var := true
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  NOT is_param
+        THEN
+            BEGIN
+            IF  NOT is_env_var
+            THEN
+                BEGIN
+                IF  ln [pos] = tab_char
+                THEN
+                    term.lines [term.currline] [ln_pos] := ' '
+                ELSE
+                    term.lines [term.currline] [ln_pos] := ln [pos];
+                (*ENDIF*) 
+                pos    := pos + 1;
+                ln_pos := ln_pos + 1;
+                END
+            ELSE
+                BEGIN
+                envname  := term.blankfilename;
+                envvalue := term.blankfilename;
+                envfound := false;
+                pos   := pos + 2;
+                i := 1;
+                WHILE (pos < ln_len) AND
+                      ( NOT ( ln [pos] IN [ string_delimiter, ' ' ] )) DO
+                    BEGIN
+                    envname[i] := ln[pos];
+                    i          := i + 1;
+                    pos        := pos + 1;
+                    END;
+                (*ENDWHILE*) 
+                sqlgetenv (envname, envvalue, envfound);
+                IF  ( envfound )
+                THEN
+                    BEGIN
+                    i := 1;
+                    WHILE ((i < sizeof(envvalue)) AND
+                          (envvalue[i] <> ' ') AND
+                          (ln_pos <= mx_screen_line )) DO
+                        BEGIN
+                        term.lines [term.currline] [ln_pos] := envvalue[i];
+                        i      := i + 1;
+                        ln_pos := ln_pos + 1;
+                        END;
+                    (*ENDWHILE*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            param := 0;
+            pos   := pos + 1;
+            IF  pos <= ln_len
+            THEN
+                BEGIN
+                param := ord (ln [pos]) - ord('0');
+                pos   := pos + 1
+                END;
+            (*ENDIF*) 
+            IF  (param > 0) AND (param <= cut_max_param_term - 1)
+            THEN
+                BEGIN
+                i := term.param_lwb [term.curr_inputfile] [param];
+                WHILE (i > 0) AND (i <=
+                      term.param_upb [term.curr_inputfile] [param])
+                      AND (ln_pos <= mx_screen_line) DO
+                    BEGIN
+                    term.lines [term.currline] [ln_pos] :=
+                          term.param_line [term.curr_inputfile] [i];
+                    i      := i + 1;
+                    ln_pos := ln_pos + 1
+                    END
+                (*ENDWHILE*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDWHILE*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13block_skip (VAR term : tut_terminal;
+            VAR ln             : tsp00_Line;
+            VAR ln_len         : tsp00_Int4;
+            VAR pos            : integer;
+            VAR begin_count    : integer;
+            VAR pfkey          : tut_pfkey);
+ 
+VAR
+      dummy_label : integer;
+      i           : integer;
+      token       : tsp00_Sname;
+ 
+BEGIN
+token := bsp_sname;
+WHILE (begin_count > 0) AND term.is_inputfile AND (pfkey = pf_none) DO
+    BEGIN
+    ta13get_token (term, ln, ln_len, pos, token, pfkey);
+    IF  term.is_inputfile AND (pfkey = pf_none)
+    THEN
+        BEGIN
+        IF  token = stmt_begin
+        THEN
+            begin_count := begin_count + 1
+        ELSE
+            IF  token = stmt_end
+            THEN
+                begin_count := begin_count - 1
+            ELSE
+                IF  NOT ta13keyword_token (ln, ln_len, pos, token)
+                THEN
+                    BEGIN
+                    dummy_label := 0;
+                    pos         := 1;
+                    ta13next_line (term, ln, ln_len, dummy_label, pfkey)
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+IF  term.is_inputfile AND (pfkey = pf_none) AND (token = stmt_end)
+THEN
+    BEGIN
+    i := 1;
+    WHILE i <= pos-1 DO
+        BEGIN
+        ln [i] := ' ';
+        i := succ(i)
+        END
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13else_skip (VAR term : tut_terminal;
+            VAR ln       : tsp00_Line;
+            VAR ln_len   : tsp00_Int4;
+            VAR pos      : integer;
+            VAR get_next : boolean;
+            VAR pfkey    : tut_pfkey);
+ 
+VAR
+      begin_count : integer;
+      i           : integer;
+      token       : tsp00_Sname;
+ 
+BEGIN
+get_next := false;
+i := 1;
+WHILE i <= pos-1 DO
+    BEGIN
+    ln [i] := ' ';
+    i := succ(i)
+    END;
+(*ENDWHILE*) 
+begin_count := 0;
+ta13find_first_then_else_cmd (term, ln, ln_len, pos,
+      begin_count, pfkey);
+IF  term.is_inputfile AND (pfkey = pf_none)
+THEN
+    BEGIN
+    IF  begin_count > 0
+    THEN
+        BEGIN
+        ta13block_skip (term, ln, ln_len, pos, begin_count, pfkey);
+        IF  ln = term.blankline
+        THEN
+            get_next := true
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        IF  ln = term.blankline
+        THEN
+            BEGIN
+            i := 0;
+            ta13next_line (term, ln, ln_len, i, pfkey)
+            END;
+        (*ENDIF*) 
+        IF  term.is_inputfile AND (pfkey = pf_none)
+        THEN
+            BEGIN
+            pos := 1;
+            ta13token (ln, ln_len, pos, token);
+            IF  ta13keyword_token (ln, ln_len, pos, token)
+            THEN
+                BEGIN
+                i := 1;
+                WHILE i <= pos-1 DO
+                    BEGIN
+                    ln [i] := ' ';
+                    i := succ(i)
+                    END;
+                (*ENDWHILE*) 
+                IF  ln = term.blankline
+                THEN
+                    get_next := true
+                (*ENDIF*) 
+                END
+            ELSE
+                get_next := true
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13eof_handling (VAR term : tut_terminal;
+            VAR label_search     : integer;
+            VAR get_next         : boolean;
+            VAR pfkey            : tut_pfkey);
+ 
+VAR
+      io_err   : tsp05_RteFileError;
+      format   : tsp00_VfFormat;
+      read_len : tsp00_Int4;
+      ln       : tsp00_Line;
+ 
+BEGIN
+sqlfclosep (term.inputfile [term.curr_inputfile].utvf_handle,
+      sp5vf_close_normal, io_err);
+label_search        := label_search - 1;
+io_err.sp5fe_result := vf_ok;
+IF  label_search > 0
+THEN
+    BEGIN
+    read_len := 0;
+    format   := vf_plaintext;
+    sqlfopenp (term.inputfn [term.curr_inputfile],
+          sp5vf_text, sp5vf_read, sp5bk_buffered,
+          term.inputfile [term.curr_inputfile+1].utvf_handle, io_err);
+    IF  io_err.sp5fe_result <> vf_ok
+    THEN
+        BEGIN
+        ln     := term.blankline;
+        ln [1] := '*';
+        ln [2] := '*';
+        ln [3] := '*';
+        SAPDB_PascalForcedMove (sizeof (io_err.sp5fe_text), sizeof (ln),
+              @io_err.sp5fe_text, 1,
+              @ln, 5, sizeof (io_err.sp5fe_text));
+        t09putmsg (term, ln, true, true);
+        (* avoid flushing message *)
+        t09putmsg (term, ln, true, false)
+        END;
+    (*ENDIF*) 
+    get_next := true
+    END
+ELSE
+    BEGIN
+    term.curr_inputfile := term.curr_inputfile - 1;
+    IF  term.curr_inputfile > 0
+    THEN
+        get_next := true
+    ELSE
+        BEGIN
+        IF  NOT term.is_display
+        THEN
+            term.is_display := term.screen_available;
+        (*ENDIF*) 
+        IF  term.is_batch
+        THEN
+            pfkey := pf_cancel
+        ELSE
+            term.is_inputfile := false
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13find_first_then_else_cmd (VAR term : tut_terminal;
+            VAR ln          : tsp00_Line;
+            VAR ln_len      : tsp00_Int4;
+            VAR pos         : integer;
+            VAR begin_count : integer;
+            VAR pfkey       : tut_pfkey);
+ 
+VAR
+      i     : integer;
+      token : tsp00_Sname;
+ 
+BEGIN
+begin_count := 0;
+i := 1;
+WHILE i <= pos-1 DO
+    BEGIN
+    ln [i] := ' ';
+    i := succ(i)
+    END;
+(*ENDWHILE*) 
+ta13get_token (term, ln, ln_len, pos, token, pfkey);
+IF  term.is_inputfile AND (pfkey = pf_none)
+THEN
+    BEGIN
+    IF  token = stmt_begin
+    THEN
+        BEGIN
+        begin_count := begin_count + 1;
+        i := 1;
+        WHILE i <= pos-1 DO
+            BEGIN
+            ln [i] := ' ';
+            i := succ(i)
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    IF  ln = term.blankline
+    THEN
+        BEGIN
+        i   := 0;
+        pos := 1;
+        ta13next_line (term, ln, ln_len, i, pfkey)
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13get_retcode (VAR token : tsp00_Sname; VAR retcode : integer);
+ 
+VAR
+      i       : integer;
+      offset  : integer;
+      factor  : integer;
+      int_len : integer;
+ 
+BEGIN
+retcode := 0;
+IF  token [1] in ['+', '-']
+THEN
+    offset := 1
+ELSE
+    offset := 0;
+(*ENDIF*) 
+int_len := 1;
+WHILE (int_len <= offset+4)
+      AND (token [offset + int_len] >= '0')
+      AND (token [offset + int_len] <= '9') DO
+    BEGIN
+    int_len := int_len + 1
+    END;
+(*ENDWHILE*) 
+int_len := int_len - 1;
+IF  int_len > 0
+THEN
+    BEGIN
+    factor := 1;
+    i := offset + int_len;
+    WHILE i >= offset + 1 DO
+        BEGIN
+        retcode := retcode + factor * (ord (token[i]) - ord('0'));
+        factor  := factor * 10;
+        i := pred(i)
+        END
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  token [1] = '-'
+THEN
+    retcode := - retcode
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13get_token (VAR term : tut_terminal;
+            VAR ln     : tsp00_Line;
+            VAR ln_len : tsp00_Int4;
+            VAR pos    : integer;
+            VAR token  : tsp00_Sname;
+            VAR pfkey  : tut_pfkey);
+ 
+VAR
+      dummy_label : integer;
+ 
+BEGIN
+pfkey := pf_none;
+dummy_label := 0;
+ta13token (ln, ln_len, pos, token);
+IF  token = bsp_sname
+THEN
+    BEGIN
+    ta13next_line (term, ln, ln_len, dummy_label, pfkey);
+    IF  term.is_inputfile AND (pfkey = pf_none)
+    THEN
+        BEGIN
+        pos := 1;
+        ta13token (ln, ln_len, pos, token)
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13if_clause (VAR term : tut_terminal;
+            VAR ln       : tsp00_Line;
+            VAR ln_len   : tsp00_Int4;
+            VAR pos      : integer;
+            VAR get_next : boolean;
+            VAR pfkey    : tut_pfkey);
+ 
+VAR
+      begin_count : integer;
+      i           : integer;
+      operand     : integer;
+      token       : tsp00_Sname;
+      op          : tsp00_Sname;
+ 
+BEGIN
+get_next := false;
+ta13token (ln, ln_len, pos, token);
+ta13token (ln, ln_len, pos, op);
+ta13token (ln, ln_len, pos, token);
+ta13get_retcode (token, operand);
+begin_count := 0;
+ta13get_token (term, ln, ln_len, pos, token, pfkey);
+IF  term.is_inputfile AND (pfkey = pf_none)
+THEN
+    BEGIN
+    IF  token = stmt_then
+    THEN
+        ta13find_first_then_else_cmd (term, ln, ln_len, pos,
+              begin_count, pfkey)
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  term.is_inputfile AND (pfkey = pf_none)
+THEN
+    BEGIN
+    IF  NOT (
+        ((op = '=           ') AND (term.retcode =  operand))
+        OR
+        ((op = '<>          ') AND (term.retcode <> operand))
+        OR
+        ((op = '>           ') AND (term.retcode >  operand))
+        OR
+        ((op = '<           ') AND (term.retcode <  operand))
+        OR
+        ((op = '>=          ') AND (term.retcode >= operand))
+        OR
+        ((op = '<=          ') AND (term.retcode <= operand)))
+    THEN
+        BEGIN (* SKIP THEN-PART *)
+        IF  begin_count = 0
+        THEN
+            BEGIN
+            pos := 1;
+            ta13token (ln, ln_len, pos, token);
+            WHILE ta13keyword_token (ln, ln_len, pos, token) AND
+                  (token <> stmt_else) DO
+                ta13token (ln, ln_len, pos, token);
+            (*ENDWHILE*) 
+            IF  token <> stmt_else
+            THEN
+                BEGIN
+                i := 0;
+                pos := 1;
+                ta13next_line (term, ln, ln_len, i, pfkey);
+                IF  term.is_inputfile AND (pfkey = pf_none)
+                THEN
+                    ta13token (ln, ln_len, pos, token)
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            ta13block_skip (term, ln, ln_len, pos, begin_count, pfkey);
+            IF  term.is_inputfile AND (pfkey = pf_none)
+            THEN
+                ta13get_token (term, ln, ln_len, pos, token, pfkey)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  term.is_inputfile AND (pfkey = pf_none)
+        THEN
+            BEGIN
+            IF  token = stmt_else
+            THEN
+                ta13find_first_then_else_cmd (term, ln, ln_len, pos,
+                      begin_count, pfkey)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ta13keyword_token (VAR ln : tsp00_Line;
+            max_len   : tsp00_Int4;
+            VAR pos   : integer;
+            VAR token : tsp00_Sname): boolean;
+ 
+VAR
+      is_keyword  : boolean;
+      i           : integer;
+      dummy_token : tsp00_Sname;
+ 
+BEGIN
+is_keyword := false;
+IF  (token = stmt_begin  )  OR  (token = stmt_nodisplay)  OR
+    (token = stmt_display)  OR  (token = stmt_return   )  OR
+    (token = stmt_else   )  OR  (token = stmt_then     )  OR
+    (token = stmt_end    )
+THEN
+    is_keyword := true
+ELSE
+    IF  token = stmt_if
+    THEN
+        BEGIN
+        ta13token (ln, max_len, pos, dummy_token);
+        ta13token (ln, max_len, pos, dummy_token);
+        ta13token (ln, max_len, pos, dummy_token);
+        is_keyword := true
+        END
+    ELSE
+        IF  (token = stmt_goto) OR (token = stmt_label)
+        THEN
+            BEGIN
+            ta13token (ln, max_len, pos, dummy_token);
+            is_keyword := true
+            END
+        ELSE
+            IF  (token = stmt_stop) OR (token = stmt_retcode)
+            THEN
+                BEGIN
+                i := pos;
+                ta13skip_blanks (ln, max_len, i);
+                IF  i < max_len
+                THEN
+                    BEGIN
+                    IF  ln [i] = '('
+                    THEN
+                        ta13token (ln, max_len, pos, dummy_token)
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                is_keyword := true
+                END
+            ELSE
+                IF  token = stmt_retcode
+                THEN
+                    BEGIN
+                    i := pos;
+                    ta13skip_blanks (ln, max_len, i);
+                    IF  i < max_len
+                    THEN
+                        BEGIN
+                        IF  ln [i] = '('
+                        THEN
+                            ta13token (ln, max_len, pos, dummy_token)
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    is_keyword := true
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+ta13keyword_token := is_keyword
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13next_line (VAR term : tut_terminal;
+            VAR ln            : tsp00_Line;
+            VAR read_len      : tsp00_Int4;
+            VAR label_search  : integer;
+            VAR pfkey         : tut_pfkey);
+ 
+VAR
+      io_err   : tsp05_RteFileError;
+      io_len   : tsp00_Longint;
+      get_next : boolean;
+ 
+BEGIN
+pfkey := pf_none;
+REPEAT
+    get_next := false;
+    io_err.sp5fe_result := vf_ok;
+    IF  term.is_reset_called
+    THEN
+        BEGIN
+        IF  term.is_batch
+        THEN
+            io_err.sp5fe_result := vf_notok
+        ELSE
+            io_err.sp5fe_result := vf_eof
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  io_err.sp5fe_result = vf_ok
+    THEN
+        BEGIN
+        sqlfreadp (term.inputfile [term.curr_inputfile].utvf_handle,
+              ln, sizeof (ln), io_len, io_err);
+        term.inputfilpos [term.curr_inputfile] :=
+              succ(term.inputfilpos [term.curr_inputfile]);
+        END;
+    (*ENDIF*) 
+    IF  io_err.sp5fe_result <> vf_ok
+    THEN
+        BEGIN
+        read_len := 0;
+        ln       := term.blankline;
+        IF  io_err.sp5fe_result = vf_eof
+        THEN
+            BEGIN
+            term.is_reset_called := false;
+            ta13eof_handling (term, label_search, get_next, pfkey)
+            END
+        ELSE
+            BEGIN
+            sqlfclosep (term.inputfile[term.curr_inputfile].utvf_handle,
+                  sp5vf_close_normal, io_err);
+            pfkey := pf_cancel
+            END
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        read_len := io_len;
+        IF  read_len < sizeof (ln)
+        THEN
+            SAPDB_PascalForcedFill (sizeof (ln), @ln, read_len+1,
+                  sizeof (ln) - read_len, ' ');
+        (*ENDIF*) 
+        IF  ln [1] = commentsign
+        THEN
+            get_next := true
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+UNTIL
+    NOT get_next OR NOT term.is_inputfile OR (pfkey <> pf_none)
+(*ENDREPEAT*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13p_search_char (VAR ln : tut_param_ln;
+            c       : char;
+            VAR pos : integer);
+ 
+BEGIN
+IF  pos <= sizeof (ln)
+THEN
+    BEGIN
+    WHILE (pos < sizeof (ln)) AND (ln [pos] <> c) DO
+        pos := pos + 1;
+    (*ENDWHILE*) 
+    IF  (pos = sizeof (ln)) AND (ln [pos] <> c)
+    THEN
+        pos := pos + 1
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13search_char (VAR ln : tsp00_Line;
+            c       : char;
+            max_len : tsp00_Int4;
+            VAR pos : integer);
+ 
+BEGIN
+IF  pos <= LINE_MXSP00
+THEN
+    BEGIN
+    WHILE (pos < max_len) AND (ln [pos] <> c) DO
+        pos := pos + 1;
+    (*ENDWHILE*) 
+    IF  (pos = max_len) AND (ln [max_len] <> c)
+    THEN
+        pos := pos + 1
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13skip_blanks (VAR ln : tsp00_Line;
+            max_len : tsp00_Int4;
+            VAR pos : integer);
+ 
+BEGIN
+IF  pos <= max_len
+THEN
+    BEGIN
+    WHILE (pos < max_len) AND (ln [pos] = ' ') DO
+        pos := pos + 1;
+    (*ENDWHILE*) 
+    IF  (pos = max_len) AND (ln [max_len] = ' ')
+    THEN
+        pos := pos + 1
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13p_skip_blanks (VAR ln : tut_param_ln;
+            VAR pos : integer);
+ 
+BEGIN
+IF  pos <= sizeof (ln)
+THEN
+    BEGIN
+    WHILE (pos < sizeof (ln)) AND (ln [pos] = ' ') DO
+        pos := pos + 1;
+    (*ENDWHILE*) 
+    IF  (pos = sizeof (ln)) AND (ln [pos] = ' ')
+    THEN
+        pos := pos + 1
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13stop_handling (VAR term : tut_terminal;
+            VAR ln  : tsp00_Line;
+            ln_len  : tsp00_Int4;
+            VAR pos : integer);
+ 
+VAR
+      i     : integer;
+      len   : integer;
+      fac   : integer;
+      rcode : integer;
+      token : tsp00_Sname;
+ 
+BEGIN
+ta13token (ln, ln_len, pos, token);
+IF  token [1] = '('
+THEN
+    BEGIN
+    i := 2;
+    len := 0;
+    WHILE (token [i] >= '0') AND (token [i] <= '9')
+          AND (i < SNAME_MXSP00) DO
+        BEGIN
+        i   := i + 1;
+        len := len + 1
+        END;
+    (*ENDWHILE*) 
+    IF  (len > 0) AND (len <= 3) AND (token [i] = ')')
+    THEN
+        BEGIN
+        fac   := 1;
+        rcode := 0;
+        i := 1 + len;
+        WHILE i >= 2 DO
+            BEGIN
+            rcode := rcode + fac * (ord (token [i]) - ord('0'));
+            fac   := fac * 10;
+            i := pred(i)
+            END;
+        (*ENDWHILE*) 
+        IF  rcode < 127
+        THEN
+            term.retcode_external := rcode
+        ELSE
+            term.retcode_external := 127
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ta13token (VAR ln : tsp00_Line;
+            max_len     : tsp00_Int4;
+            VAR pos     : integer;
+            VAR token   : tsp00_Sname);
+ 
+VAR
+      end_of_token : boolean;
+      i            : integer;
+ 
+BEGIN
+token := bsp_sname;
+IF  pos <= max_len
+THEN
+    ta13skip_blanks (ln, max_len, pos);
+(*ENDIF*) 
+IF  pos <= max_len
+THEN
+    BEGIN
+    i := 1;
+    end_of_token := false;
+    WHILE (i <= SNAME_MXSP00) AND (pos <= max_len) AND NOT end_of_token DO
+        IF  ln [pos] = ' '
+        THEN
+            end_of_token := true
+        ELSE
+            BEGIN
+            IF  ln [pos] in ['a'..'i', 'j'..'r', 's'..'z']
+            THEN
+                token [i ] := chr (ord (ln [pos]) + ord('A') - ord('a'))
+            ELSE
+                token [i] := ln [pos];
+            (*ENDIF*) 
+            i   := i   + 1;
+            pos := pos + 1
+            END;
+        (*ENDIF*) 
+    (*ENDWHILE*) 
+    IF  pos <= max_len
+    THEN
+        BEGIN
+        IF  ln [pos] <> ' '
+        THEN
+            ta13search_char (ln, ' ', max_len, pos)
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

@@ -1,0 +1,426 @@
+
+      tgg07_ColPosArr     = ARRAY [0..MAX_COLPOSARR_IDX_GG07] OF tsp00_Int2;
+      (**)
+      tgg07_SubqKind = ( no_subquery, query_in_subq, normal_subquery);
+      (**)
+      tgg07_StrRaw = ARRAY[1..MAX_STRATETGY_LEN_GG07] OF tsp00_C1;
+      (**)
+      tgg07_CatRecColPosArr = ARRAY[1..MAX_SHOW_COLUMNS_GG04] of boolean;
+      (**)
+      tgg07_InvColSet = PACKED SET OF 1..MAX_COL_SEQUENCE_GG00;
+      (**)
+      tgg07_KeyStratProp = (
+            ksp_exact_match,
+            ksp_exact_IN_SUBQ_match,
+            ksp_order_support,
+            ksp_order_support_reverse,
+            ksp_aggr_MIN_opt,
+            ksp_aggr_MAX_opt,
+            ksp_auto_distinct,
+            ksp_first_row_start,(* forced semantics compared to sp_first_row_start *)
+            ksp_first_row_stop, (* forced semantics compared to sp_first_row_stop  *)
+            ksp_unused11,
+            ksp_unused12,
+            ksp_unused13,
+            ksp_unused14,
+            ksp_unused15,
+            ksp_unused16,
+            ksp_unused17,
+            ksp_unused20,
+            ksp_unused21,
+            ksp_unused22,
+            ksp_unused23,
+            ksp_unused24,
+            ksp_unused25,
+            ksp_unused26,
+            ksp_unused27,
+            ksp_unused30,
+            ksp_unused31,
+            ksp_unused32,
+            ksp_unused33,
+            ksp_unused34,
+            ksp_unused35,
+            ksp_unused36,
+            ksp_unused37);
+ 
+      tgg07_KeyStratProps = SET OF tgg07_KeyStratProp;
+ 
+      tgg07_StrKeyInRange = RECORD
+            skir_keystart      : tgg07_ColPosArr;
+            skir_keystop       : tgg07_ColPosArr;
+            skir_IN_SUBQ_stpos : tsp00_Int2;
+            skir_inelemcnt     : tsp00_Int2;
+            skir_strat_props   : tgg07_KeyStratProps;
+      END;
+ 
+      tgg07_InvStratProp = (
+            isp_exact_match,
+            isp_exact_IN_SUBQ_match,
+            isp_unique_idx,
+            isp_inv_only,
+            isp_order_support,
+            isp_order_support_reverse,
+            isp_listmerge_allowed,
+            isp_aggr_MIN_opt,
+            isp_aggr_MIN_opt_reverse,
+            isp_aggr_MAX_opt,
+            isp_aggr_MAX_opt_reverse,
+            isp_auto_distinct,
+            isp_aggr_optim,
+            isp_pure_inv_output,
+            isp_aggr_key_MIN_opt,
+            isp_aggr_key_MAX_opt,
+            isp_first_row_start,(* forced semantics compared to sp_first_row_stop  *)
+            isp_first_row_stop, (* forced semantics compared to sp_first_row_stop  *)
+            isp_keysubset,
+            isp_unused23,
+            isp_unused24,
+            isp_unused25,
+            isp_unused26,
+            isp_unused27,
+            isp_unused30,
+            isp_unused31,
+            isp_unused32,
+            isp_unused33,
+            isp_unused34,
+            isp_unused35,
+            isp_unused36,
+            isp_unused37);
+ 
+      tgg07_InvStratProps = SET OF tgg07_InvStratProp;
+ 
+      tgg07_StrInvInRange = RECORD
+            siir_keystart      : tgg07_ColPosArr;
+            siir_keystop       : tgg07_ColPosArr;
+            siir_invstart      : tgg07_ColPosArr;
+            siir_invstop       : tgg07_ColPosArr;
+            siir_startcnt      : tsp00_Int2;
+            siir_stopcnt       : tsp00_Int2;
+            siir_invroot       : tsp00_PageNo;
+            siir_indexno       : tsp00_Int2;
+            siir_icount        : tsp00_Int2;
+            siir_invcoldesc    : tgg07_InvColSet;
+            siir_invlen        : tsp00_Int2;
+            siir_inelemcnt     : tsp00_Int2;
+            siir_subq_idx      : tsp00_Int2;
+            siir_out_invseqlen : tsp00_Int2;
+            siir_IN_SUBQ_stpos : tsp00_Int2;
+            siir_MIN_recpos    : tsp00_Int2;
+            siir_MAX_recpos    : tsp00_Int2;
+            siir_ExpIdxPages   : tsp00_Int4;
+            siir_strat_props   : tgg07_InvStratProps;
+      END;
+ 
+ 
+      tgg07_StrJoinMultFields = RECORD
+            sjmf_keystart  : tgg07_ColPosArr;
+            sjmf_keystop   : tgg07_ColPosArr;
+            sjmf_invroot   : tsp00_PageNo;
+            sjmf_invlen    : tsp00_Int4;
+            sjmf_index_no  : tsp00_Int2;
+            sjmf_cntfields : tsp00_Int2;
+            sjmf_filler    : tsp00_Int4;
+      END;
+ 
+ 
+      tgg07_StrCatalog = RECORD
+            scat_show_kind  : tgg00_ShowKind;
+            scat_upd_strat  : boolean;
+            scat_authname   : tsp00_Int2;
+            scat_tablename  : tsp00_Int2;
+            scat_username   : tsp00_Int2;
+            scat_columnname : tsp00_Int2;
+            scat_fill2      : tsp00_Int2;
+            scat_col_needed : tgg07_CatRecColPosArr;
+            scat_qual_cols  : tgg07_CatRecColPosArr;
+            scat_dblink     : tsp00_KnlIdentifier;
+            scat_filler     : tsp00_Int4;
+      END;
+ 
+      tgg07_StratEnum = (
+            strat_viewkey,
+            strat_key_equal,
+            strat_key_in,
+            strat_key_subq,
+            (***)
+            strat_key_range,
+            (***)
+            strat_inv_range,
+            strat_inv_in,
+            strat_inv_subq,
+            (***)
+            strat_undecided,
+            (***)
+            strat_key_equal_fetch,
+            strat_key_range_fetch,
+            strat_inv_range_fetch,
+            strat_inv_range_merge_fetch,
+            (***)
+            strat_join_key_equal,
+            strat_join_key_next,
+            strat_join_all_keys_equal,
+            strat_join_key_range,
+            strat_join_viewkey,
+            strat_join_inv,
+            strat_join_all_inv_equal,
+            strat_join_inv_range,
+            (***)
+            strat_more_than_one,
+            (***)
+            strat_no_result,
+            (***)
+            strat_catalog);
+      (**)
+      tgg07_StratEnumSet = SET OF tgg07_StratEnum;
+      tgg07_StratAccessModEnum = (
+            strmod_hash,
+            strmod_parallel,
+            strmod_sorted,
+            strmod_synchronized,
+            strmod_unused04,
+            strmod_unused05,
+            strmod_unused06,
+            strmod_unused07);
+      tgg07_StratAccessModSet = SET OF tgg07_StratAccessModEnum;
+
+      tgg07_KeyOrderSupport = (
+            kos_no_support,
+            kos_asc,
+            kos_desc );
+ 
+      tgg07_StrategyInfo = RECORD
+            str_result_id          : tgg00_FileId;
+            str_strategy           : tgg07_StratEnum;
+            str_build_result       : boolean;
+            str_distinc            : tgg04_Distinct;
+            str_ordering           : boolean;
+            str_use_rowno          : boolean;
+            str_use_clusterIO      : boolean;
+            str_corr_single        : boolean;
+            str_union_kind         : tsp00_Uint1;
+            str_res_possible       : boolean;
+            str_use_order          : boolean;
+            str_out_keyseqlen      : tsp00_Int2;
+            str_cnt_strat          : tsp00_Int2;
+            str_filler             : tsp00_C2;             (* unused *)
+            str_rowno              : tsp00_Int4;
+            str_foundresults       : tsp00_Int4;
+            str_key_len            : tsp00_Int2;
+            str_rec_len            : tsp00_Int2;
+            str_union_key_cnt_offs : tsp00_Int4;
+            str_stack_output_offs  : tsp00_Int2;
+            str_search_first       : boolean;
+            str_all_files          : boolean;
+            str_key_order_support  : tgg07_KeyOrderSupport;
+            str_selinto            : boolean;
+            str_access_mod         : tgg07_StratAccessModSet; (* PTS 1127791 M.Ki. *)
+            str_qual_kind          : tgg00_QualKind;
+            (* end of length STRATEGY_START_MXGG07 *)
+            CASE tgg07_StratEnum OF
+            (* every structure length has to multiple of 8 *)
+            (* length MOD 8 = 0                            *)
+                strat_key_equal,
+                strat_key_in,
+                strat_key_subq,
+                strat_key_range_fetch,
+                strat_key_range:
+                    (str_key_in_range    : tgg07_StrKeyInRange)
+                          ;
+                strat_inv_range,
+                strat_inv_in,
+                strat_inv_subq,
+                strat_inv_range_fetch,
+                strat_inv_range_merge_fetch:
+                    (str_inv_in_range    : tgg07_StrInvInRange)
+                          ;
+                strat_join_inv,
+                strat_join_all_keys_equal,
+                strat_join_key_range,
+                strat_join_all_inv_equal,
+                strat_join_inv_range:
+                    (str_join_multfields : tgg07_StrJoinMultFields)
+                          ;
+                strat_catalog:
+                    (str_catalog         : tgg07_StrCatalog);
+                strat_viewkey,
+                strat_join_viewkey,
+                strat_undecided:
+                    (str_raw             : tgg07_StrRaw);
+                END;
+            (*ENDCASE*) 
+      tgg07_StrategyInfoPtr = ^tgg07_StrategyInfo;
+ 
+      tgg07_KbOneJoinInfo = PACKED RECORD
+            kboj_recpos           : tsp00_Int2;
+            kboj_len              : tsp00_Int2;
+            kboj_op               : tgg00_StackOpType;
+            kboj_reverse_operands : boolean;
+            kboj_fill2            : tsp00_Int2;
+      END;
+ 
+ 
+      tgg07_KbJoinInfo = RECORD
+            kbji_parts : ARRAY [1..2] OF tgg07_KbOneJoinInfo;
+      END;
+ 
+ 
+      tgg07_KbJoinRec = RECORD
+            kbjr_jointrans_cnt  : tsp00_Int2;
+            kbjr_left_oj        : boolean;
+            kbjr_right_oj       : boolean;
+            kbjr_jpath          : tsp00_Int2;
+            kbjr_filler         : tsp00_Int2;
+            kbjr_jarr           : ARRAY [1..MAX_JOINS_GG04] OF tgg07_KbJoinInfo;
+      END;
+ 
+ 
+      tgg07_JoinColCopy = PACKED RECORD
+            jfrom  : tsp00_Int2;
+            jto    : tsp00_Int2;
+            jlen   : tsp00_Int2;
+            jfill1 : tsp00_Int2;
+      END;
+ 
+      tgg07_JoinColCopyArr = ARRAY [1..MAX_JOINS_GG04] OF tgg07_JoinColCopy;
+ 
+      tgg07_JoinColCopyInfo = RECORD
+            n_j_cnt  : tsp00_Int2;
+            n_j_fill : tsp00_Int2;
+            n_j_arr  : tgg07_JoinColCopyArr
+      END;
+ 
+ 
+      tgg07_JoinResInfo = RECORD
+            o_tree        : tgg00_FileId;
+            n_rec_len     : tsp00_Int2;
+            n_key_len     : tsp00_Int2;
+            n_res_rec_len : tsp00_Int2;
+            n_filler1     : tsp00_Int2;
+      END;
+ 
+      tgg07_one_new_pos = RECORD
+            onfrom  : tsp00_Int2;
+            onto    : tsp00_Int2;
+            onlen   : tsp00_Int2;
+            on_fill : tsp00_Int2;
+      END;
+ 
+ 
+      tgg07_new_positions = RECORD
+            posarr  : ARRAY [ 1..cgg07_maxnewpos ] OF tgg07_one_new_pos;
+            lposcnt : tsp00_Int2;
+            rposcnt : tsp00_Int2;
+      END;
+ 
+      tgg07_get_param = RECORD
+            gi_n_pos_s       : tgg07_new_positions;
+            gi_linkrec       : tgg07_KbJoinRec;
+            gi_copy_info     : tgg07_JoinColCopyInfo;
+            gi_result_info   : tgg07_JoinResInfo;
+      END;
+
+      tgg07_get_param_ptr = ^tgg07_get_param;
+ 
+      tgg07_distinct_file_info = RECORD
+            dfi_root       : tsp00_PageNo;
+            dfi_root_check : tsp00_Int4;
+      END;
+ 
+      tgg07_distinct_roots = ARRAY [ 1..cgg07_maxdistinctfiles ]
+            OF tgg07_distinct_file_info;
+ 
+      tgg07_setfunc_handling = (
+            sfh_none,
+            sfh_stddev_variance,
+            sfh_all);
+
+      tgg07_set_operators = (
+            so_UNION,
+            so_EXCEPT,
+            so_INTERSECT,
+            so_ALL_mod);
+      tgg07_set_operator = set of tgg07_set_operators;
+
+      tgg07_key_properties = (
+            kp_key,
+            kp_nokey,
+            kp_clusterKey);
+ 
+      tgg07_select_context = RECORD
+            selr_resf_id            : tgg00_FileId;
+            selr_inv_id             : tgg00_FileId;
+            selr_distinct_id        : tgg00_FileId;
+            selr_intersect_id       : tgg00_FileId;
+            selr_tree_pos           : tgg00_FilePos;
+            selr_id_outer_join      : tgg00_FileId;
+            selr_tree               : tgg00_FileId;
+            selr_disrootarr         : tgg07_distinct_roots;
+            selr_startkey           : tgg00_Lkey;
+            selr_stopkey            : tgg00_Lkey;
+            selr_invkey             : tgg00_Lkey;
+            selr_rowno              : tsp00_Int4;
+            selr_key_cnt_offs       : tsp00_Int4;
+            selr_countresult        : tsp00_Int4;
+            selr_act_cntresult      : tsp00_Int4;
+            selr_resrec_maxlen      : tsp00_Int4;
+            selr_maxresult          : tsp00_Int4;
+            selr_group_count        : tsp00_Int4;
+            selr_recl               : tsp00_Int2;
+            selr_dis_file_cnt       : tsp00_Int2;
+            selr_res_keyl           : tsp00_Int2;
+            selr_l_currpos          : tsp00_Int2;
+            selr_l_endpos           : tsp00_Int2;
+            selr_first_jlen         : tsp00_Int2;
+            selr_l_defbyte_pos      : tsp00_Int2;
+            selr_keyl               : tsp00_Int2;
+            selr_mbtype             : tgg00_MessType;
+            selr_distinct_bytes     : boolean;
+            selr_distinct           : tgg04_Distinct;
+            selr_union              : boolean;
+            selr_one_result         : boolean;
+            selr_subquery           : boolean;
+            selr_intern_dist        : boolean;
+            selr_key_props          : tgg07_key_properties; (* PTS 1139184 *) 
+            selr_count_all          : boolean;
+            selr_count_bd           : boolean;
+            selr_dupl               : tsp00_C1;
+            selr_write_rownum       : boolean;
+            selr_UNION_ALL_append   : boolean;
+            selr_set_operator       : tgg07_set_operator;
+            selr_call_avg           : tgg07_setfunc_handling;
+            selr_call_later_out     : boolean;
+            selr_trunc_part2        : boolean;
+            selr_file_to_drop       : boolean;
+            selr_no_warn8_sort      : boolean;
+            selr_oracle_selinto     : boolean;
+            selr_join_with_func     : boolean;
+            selr_all_recursive      : boolean;
+            selr_last_join          : boolean;
+            selr_finding_poss       : boolean;
+            selr_reverse_fetch      : boolean;
+      END;
+      
+      tgg07_select_context_ptr = ^tgg07_select_context;
+
+      tgg07_select_param = RECORD
+            CASE boolean OF
+                true:
+                    (selr_selectbuffer   : tgg00_SelectBuffer;
+                     selr                : tgg07_select_context);
+                false:
+                    (selr_ptrallignment : tsp00_MoveObjPtr);
+                END;
+            (*ENDCASE*) 
+ 
+      tgg07_SelectParamPtr = ^tgg07_select_param;
+
+      tgg07_stack_backup_info = RECORD
+            bi_stackdesc : tgg00_StackDesc;
+            CASE boolean OF
+                true:
+                    (bi_backup_addr : tsp00_Addr);
+                false:
+                    (bi_backup_ptr  : tsp00_MoveObjPtr);
+                END;
+            (*ENDCASE*) 
+ 

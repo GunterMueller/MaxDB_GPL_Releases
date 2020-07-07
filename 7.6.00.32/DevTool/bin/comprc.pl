@@ -1,0 +1,130 @@
+#!/usr/bin/perl
+# comprc        *** internal script
+#
+# @(#)comprc      1997-11-18
+#
+# Compile resource file
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package comprc;
+use Env;
+use File::Basename;
+use File::Copy;
+use ICopy;
+use ToolLib;
+use comprc;
+
+
+
+if ( !caller() ) {
+	# all comprc routines for vmake now in comprc.pm
+	exit (comprc(@ARGV))
+}
+else {
+
+   warn "INFORMATION: Obsolete usage of comprc! Adapt description.\n";
+
+   $USAGE = "usage: comprc name resource [includes]\n";
+
+   if ( $MACHINE eq "" ) {
+     print "Error: MACHINE environment variable not set, MACHINE=xxxx\n";
+     exit 1;
+   }
+
+   if ( @ARGV < 2 ) { print "$USAGE"; exit 1; }
+
+   $BASE   = shift;
+   $RCBASE = "$BASE.rc";
+   $RCFILE = shift;
+   $RCFILE .= ".rc";
+
+   @OLDARGV = @ARGV;
+   @ARGV = ( "-d", "$SRC/wx", "$RCFILE" );
+   do "$TOOL/bin/imkcp$TOOLEXT";
+   if ( $@ ) { warn "Error while executing imkcp:\n", "$@"; exit }
+
+   if ( $RCFILE ne $RCBASE ) { unlink $RCBASE; rename($RCFILE, $RCBASE) }
+
+   @RCLIST = $RCBASE;
+
+   while ($_ = @OLDARGV[0], /^-/) {
+      shift @OLDARGV;
+      last if /^--$/;
+
+      if(/^-ico=(.*)/ ) {
+         $RCFILE = "$1.ico";
+
+         @ARGV = ( "-d", "$SRC/wx", $RCFILE );
+         do "$TOOL/bin/imkcp$TOOLEXT";
+         if ( $@ ) { warn "Error while executing imkcp:\n", "$@"; exit }
+
+         push @RCLIST, $RCFILE;
+      }
+
+      if(/^-dlg=(.*)/ ) {
+         $RCFILE = "$1.dlg";
+
+         @ARGV = ( "-d", "$SRC/wx", $RCFILE );
+         do "$TOOL/bin/imkcp$TOOLEXT";
+         if ( $@ ) { warn "Error while executing imkcp:\n", "$@"; exit }
+
+         push @RCLIST, $RCFILE;
+      }
+
+      if(/^-rcinc=(.*)/ ) {
+         $RCFILE = "$1.rc";
+
+         @ARGV = ( "-d", "$SRC/wx", $RCFILE );
+         do "$TOOL/bin/imkcp$TOOLEXT";
+         if ( $@ ) { warn "Error while executing imkcp:\n", "$@"; exit }
+
+         push @RCLIST, $RCFILE;
+      }
+
+
+      if(/^-inc=(.*)/ ) {
+         $RCFILE = "$1.h";
+
+         @ARGV = ( "-d", "$WRK/incl", $RCFILE );
+         do "$TOOL/bin/imkcp$TOOLEXT";
+         if ( $@ ) { warn "Error while executing imkcp:\n", "$@"; exit }
+
+         push @RCLIST, $RCFILE;
+      }
+
+   } #while
+
+   @RCFLAGS;
+   system("$RC -r @RCFLAGS $RCBASE") == 0
+      or die "Error while executing \"rc -r @RCFLAGS $RCBASE\"\n".
+      "message: $!\n";
+   print "$CVTRES -nologo -MACHINE:$MACHINE -out:$BASE.rbj $BASE.res\n" if ($ENV{NOQUIET});
+   system("$CVTRES -nologo -MACHINE:$MACHINE -out:$BASE.rbj $BASE.res") == 0
+      or die "Error while executing \"$CVTRES -MACHINE:$MACHINE -o $BASE.rbj  $BASE.res>$NULL\"\n".
+      "message: $!\n";
+   ToolTrace("comprc: GUI resource object for '$BASE' created.\n");
+
+   copy "$BASE.rbj", "$WRK/$VMAKE_VERSION/obj/$BASE.rbj";
+
+   unlink @RCLIST;
+}
+

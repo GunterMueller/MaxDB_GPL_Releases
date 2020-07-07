@@ -1,0 +1,1739 @@
+/****************************************************************************
+  module      : vkb61
+  author      : JuergenA
+  responsible : UweH
+  special area: Logging
+  see also    :
+  description : insert delete and update of records
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+*****************************************************************************/
+ 
+.tt 1 $SAP$LiveCache$VKB61$
+.tt 3 $UweH$KB_ins_del_upd$2000-01-10$
+ 
+Module  : KB_ins_del_upd
+ 
+Define  :
+ 
+        PROCEDURE
+              k61add_upd_record (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k61bd_del (
+                    VAR m                : tgg00_MessBlock;
+                    pDeleteCmd           : tsp00_Addr;
+                    VAR old_rec          : tgg00_Rec;
+                    VAR transHistoryInfo : tgg00_ObjTransInfo;
+                    granted_lock         : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k61bd_ins (
+                    VAR m                : tgg00_MessBlock;
+                    pInsertCmd           : tsp00_Addr;
+                    VAR rec              : tgg00_Rec;
+                    granted_lock         : tgg00_LockReqMode;
+                    VAR TransHistoryInfo : tgg00_ObjTransInfo);
+ 
+        PROCEDURE
+              k61del_select (
+                    VAR m          : tgg00_MessBlock;
+                    VAR old_k      : tgg00_Lkey;
+                    VAR old_rec    : tgg00_Rec);
+ 
+        PROCEDURE
+              k61del_upd_qual (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k61ins_del_upd (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k61ins_select (
+                    VAR m          : tgg00_MessBlock;
+                    VAR new_rec    : tgg00_Rec;
+                    key_prop       : tgg07_key_properties;
+                    upd_dupl       : boolean;
+                    rec_count      : tsp00_Int4);
+ 
+        PROCEDURE
+              k61string_delete (
+                    VAR m   : tgg00_MessBlock;
+                    VAR rec : tgg00_Rec);
+ 
+        PROCEDURE
+              k61table_ins_del_upd (VAR m : tgg00_MessBlock);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              KB_locklist : VKB51;
+ 
+        FUNCTION
+              k51max_locks_per_table : tsp00_Int4;
+ 
+        PROCEDURE
+              k51row_excl_check (
+                    VAR t     : tgg00_TransContext;
+                    VAR tabid : tgg00_Surrogate;
+                    VAR k     : tgg00_Lkey);
+ 
+        PROCEDURE
+              k51tab_eot_excl_check (
+                    VAR t     : tgg00_TransContext;
+                    VAR TabId : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_transaction : VKB53;
+ 
+        PROCEDURE
+              k53eot_excl_lock (
+                    VAR t             : tgg00_TransContext;
+                    VAR TreeId        : tgg00_FileId;
+                    VAR k             : tgg00_Lkey;
+                    forInsert         : boolean;
+                    WantedMode        : tgg00_LockReqMode;
+                    VAR GrantedMode   : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k53lock (
+                    VAR t            : tgg00_TransContext;
+                    VAR lock_tabid   : tgg00_Surrogate;
+                    VAR k            : tgg00_Lkey;
+                    wanted_mode      : tgg00_LockReqMode;
+                    wanted_state     : tgg00_LockReqState;
+                    nowait           : boolean;
+                    collision_test   : boolean;
+                    VAR granted_mode : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k53lock_syskey (VAR trans  : tgg00_TransContext;
+                    VAR tabid            : tgg00_Surrogate;
+                    VAR key              : tgg00_Lkey;
+                    VAR grantedlock      : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k53row_lock (
+                    VAR t            : tgg00_TransContext;
+                    VAR file_id      : tgg00_FileId;
+                    VAR k            : tgg00_Lkey;
+                    VAR rec_buf      : tsp00_Buf;
+                    rec_pos          : integer;
+                    mess_type        : tgg00_MessType;
+                    result_count     : tsp00_Int4;
+                    VAR granted_mode : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k53temp_unlock (
+                    VAR t           : tgg00_TransContext;
+                    VAR lock_tabid  : tgg00_Surrogate;
+                    VAR k           : tgg00_Lkey;
+                    lock_mode       : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k53wait (
+                    VAR t     : tgg00_TransContext;
+                    MessType  : tgg00_MessType;
+                    MessType2 : tgg00_MessType2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_temp_logging : VKB54;
+ 
+        PROCEDURE
+              k54del_ins_templog (
+                    VAR t               : tgg00_TransContext;
+                    ins_del_type        : tgg00_MessType;
+                    VAR temp_file       : tgg00_FileId;
+                    VAR rec             : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_InsDelUpd_interface : VKB611;
+ 
+        PROCEDURE
+              kb611del_AllocateClass (
+                    VAR pDeleteCmd   : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext;
+                    VAR StackDesc    : tgg00_StackDesc);
+ 
+        PROCEDURE
+              kb611del_Init (
+                    pDeleteCmd       : tsp00_Addr;
+                    VAR PrimFileId   : tgg00_FileId;
+                    VAR OldRec       : tgg00_Rec;
+                    MarkDeleted      : boolean);
+ 
+        PROCEDURE
+              kb611del_PostponedExecution (
+                    pDeleteCmd       : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext;
+                    VAR PrimFileId   : tgg00_FileId);
+ 
+        PROCEDURE
+              kb611del_ReleaseClass (
+                    VAR pDeleteCmd   : tsp00_Addr;
+                    pAllocator       : tgg00_VoidPtr);
+ 
+        PROCEDURE
+              kb611del_WriteAfterImage (
+                    pDeleteCmd       : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb611del_WriteBeforeImage (
+                    pDeleteCmd       : tsp00_Addr;
+                    VAR TransInfo    : tgg00_ObjTransInfo;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb611delete_all_records (
+                    VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              kb611ins_AllocateClass (
+                    VAR pInsertCmd   : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext;
+                    VAR StackDesc    : tgg00_StackDesc);
+ 
+        PROCEDURE
+              kb611ins_Init (
+                    pInsertCmd       : tsp00_Addr;
+                    VAR PrimFileId   : tgg00_FileId;
+                    VAR NewRec       : tgg00_Rec);
+ 
+        PROCEDURE
+              kb611ins_ReleaseClass (
+                    VAR pInsertCmd   : tsp00_Addr;
+                    pAllocator       : tgg00_VoidPtr);
+ 
+        PROCEDURE
+              kb611ins_WriteAfterImage (
+                    pInsertCmd       : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb611ins_WriteBeforeImage (
+                    pInsertCmd           : tsp00_Addr;
+                    VAR TransHistoryInfo : tgg00_ObjTransInfo;
+                    VAR TransContext     : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb611inv_AddInv (
+                    pInvHandling     : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              kb611inv_DelInv (
+                    pInvHandling     : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        FUNCTION
+              kb611inv_ExecuteOutsideBd (pInvHandling : tsp00_Addr): boolean;
+ 
+        FUNCTION
+              kb611inv_IsExecutionPostponed (pInvHandling : tsp00_Addr): boolean;
+ 
+        PROCEDURE
+              kb611inv_LockAndCheckUniqueIndex (
+                    pInvHandling     : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext;
+                    forInsert        : boolean;
+                    VAR GrantedMode  : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              kb611inv_LockUniqueIndex (
+                    pInvHandling     : tsp00_Addr;
+                    VAR TransContext : tgg00_TransContext;
+                    VAR GrantedMode  : tgg00_LockReqMode);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_inv_link_trigger_handling : VKB62;
+ 
+        PROCEDURE
+              k62link_handling (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+        PROCEDURE
+              k62linkfile_create (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62return_trigger (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k62trigger_handling (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+        PROCEDURE
+              k62CallCatalogCacheTrigger (
+                    VAR m       : tgg00_MessBlock;
+                    VAR old_rec : tgg00_Rec;
+                    VAR new_rec : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_update : VKB63;
+ 
+        PROCEDURE
+              k63rec_upd (
+                    VAR m        : tgg00_MessBlock;
+                    VAR k        : tgg00_Lkey;
+                    VAR new_rec  : tgg00_Rec;
+                    granted_lock : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              k63single_upd (
+                    VAR m          : tgg00_MessBlock;
+                    VAR k          : tgg00_Lkey;
+                    granted_lock   : tgg00_LockReqMode);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_file_table_handling : VKB64;
+ 
+        PROCEDURE
+              k64drop_lob_tree (
+                    VAR t          : tgg00_TransContext;
+                    VAR tableid   : tgg00_Surrogate (*ptocSynonym const tgg00_Surrogate&*);
+                    VAR file_id    : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_get : VKB71;
+ 
+        PROCEDURE
+              k71qualification_test (
+                    VAR m           : tgg00_MessBlock;
+                    first_qual      : boolean;
+                    result_wanted   : boolean;
+                    check_new_rec   : boolean;
+                    VAR rec         : tgg00_Rec;
+                    result_ptr      : tsp00_MoveObjPtr;
+                    result_size     : tsp00_Int4;
+                    VAR result_len  : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select : VKB720;
+ 
+        PROCEDURE
+              k720_single_select (VAR m : tgg00_MessBlock);
+ 
+        PROCEDURE
+              k720_test_subquery (
+                    VAR trans   : tgg00_TransContext;
+                    VAR datapart: tgg00_DataPart;
+                    datapartsize: tsp00_Int4;
+                    VAR mdesc   : tgg00_StackDesc;
+                    VAR rec     : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+        PROCEDURE
+              b01filestate (
+                    VAR t         : tgg00_TransContext;
+                    VAR file_id   : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_2 : VBD02;
+ 
+        PROCEDURE
+              b02add_record (
+                    VAR t          : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    VAR b          : tgg00_Rec);
+ 
+        PROCEDURE
+              b02del_record (
+                    VAR t          : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    VAR rk         : tgg00_Lkey);
+ 
+        PROCEDURE
+              b02MarkRecordDeleted (
+                    VAR t          : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    isDelete       : boolean;
+                    VAR beforeRef  : tgg91_PageRef;
+                    VAR updTrans   : tgg91_TransNo;
+                    VAR rk         : tgg00_Lkey;
+                    pRec           : tgg00_RecPtr);
+ 
+        PROCEDURE
+              b02kb_del_rec (
+                    VAR m           : tgg00_MessBlock;
+                    pDeleteCmd      : tsp00_Addr;
+                    VAR rk          : tgg00_Lkey;
+                    VAR old_recbuf  : tgg00_Rec;
+                    granted_lock    : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              b02kb_ins_record (
+                    VAR m             : tgg00_MessBlock;
+                    pInsertCmd        : tsp00_Addr;
+                    VAR b             : tgg00_Rec;
+                    granted_lock      : tgg00_LockReqMode);
+ 
+        PROCEDURE
+              b02repl_record (
+                    VAR t           : tgg00_TransContext;
+                    VAR file_id     : tgg00_FileId;
+                    VAR b           : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01ConsistentReadEnabled : boolean;
+              g01glob                  : tgg00_KernelGlobals;
+ 
+        PROCEDURE
+              g01key_assign (
+                    VAR source_key : tgg00_Lkey;
+                    VAR target_key : tgg00_Lkey;
+                    VAR e          : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04locate_col (
+                    VAR st         : tgg00_StackEntry;
+                    rec_buf        : tgg00_RecPtr;
+                    VAR varcol_pos : tgg00_VarColPosList;
+                    VAR col_pos    : integer;
+                    VAR col_len    : integer);
+ 
+        PROCEDURE
+              g04short_col_tree_build (
+                    VAR table_surrogate : tgg00_Surrogate (*ptocConst*);
+                    VAR short_col_tree  : tgg00_FileId;
+                    VAR b_err           : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR err     : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        PROCEDURE
+              s30surrogate_incr (VAR surrogate : tgg00_Surrogate);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01qual (
+                    debug     : tgg00_Debug;
+                    VAR part1 : tgg00_QualBuf);
+ 
+        PROCEDURE
+              t01stdesc (
+                    debug          : tgg00_Debug;
+                    nam            : tsp00_Sname;
+                    VAR stack_desc : tgg00_StackDesc);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              s30surrogate_incr;
+ 
+              tsp00_C8 tgg00_Surrogate
+ 
+.CM *-END-* synonym -------------------------------------
+ 
+***********************************************************
+ 
+Specification:
+ 
+Processing of INSERT, UPDATE and DELETE
+ 
+Procedure K61ADD_UPD_RECORD
+ 
+Part2 from the message buffer is inserted or replaced in the
+file specified by the tree id contained in part1.
+ 
+ 
+Procedure K61BD_DEL
+ 
+This procedure is called from the BD layer in the case of a
+single-record delete. It checks the qualification of the old record and,
+if appropriate, generates a log entry. The last position of the
+generated log is assigned to LAST_LOGPOS, which is passed to BD to
+determine logpages to be forced before a page flush.
+ 
+                                      K61DEL_UPD_QUAL
+K61INS_DEL_UPD              +----------------+-----------+
+      |                K61TABLE_INS_DEL_UPD        KB61DEL_RANGE
+      |                K720_SELECT                       |
+      |                K721STRAT_DISTRIBUTION            |
+      |                VKB721                            |
+      |                KB721SELECT_GETS                  |
+      |                     |{DELETE}                    |
+KB61GET_AND_DEL        K61DEL_SELECT                     |
+      |                     |                            |
+      +---------------------+                        +---+-----+
+          |                                          |         |
+    B02KB_DELREC                                 B02KB_RANG B02RANGE_D
+    B30KB_DEL_FROM_TREE                          B30KB_RANG B30RANGE_D
+          +-----------------------+------------------+
+                             K61BD_DEL
+ 
+ 
+Procedure K61BD_INS
+ 
+From the message buffer M, an insert log entry is built and written to
+the log. The LAST_LOGPOS specifies the end of the generated log entry.
+A typical calling sequence is:
+ 
+{INSERT}                                                   {INSERT}
+{DELETE}        {DELETE}        {SELECT}                   {DELETE}
+{UPDATE}        {UPDATE}                                   {UPDATE}
+|             K61DEL_UPD_QUAL   |   |  |                       |
+|                      |        |   | K74_JOIN_SELECT          |
+|              K61TABLE_INS_DEL_UPD |  |                       |
+K61INS_DEL_UPD                |     |  |                  K61INS_DEL_UPD
+|{UPDATE}                     +----++  |                       |{INSERT}
+|                                  |   |                       |
+|                             K720_SELECT                      |
+|                                  |                           |
+|                 +----------------+---+                       |
+|                 |                    |                       |
+|           K721STRAT_DISTRIBUTION   VKB73                     |
+|                |                     |                       |
+|                | +-------------------+                       |
+|               VKB721                 |                       |
+|                 |                    |                       |
+|                 +--------------------+                       |
+|                 |                    |                       |
+|               KB721SELECT_GETS    K721INV_GETS               |
+|              |                |         |{UPDATE}            |
+|      {UPDATE}| {INSERT_SELECT}|         |{DELETE}            |
+K63SINGLE_UPD K63UPD_SELECT K61INS_SELECT |{INSERT_SELECT}     |
+      +--------+               +----------+--------------------+
+      |                                   |
+KB63KEY_UPDATE                      KB61INSERT_REC
+      |                                   |
+      +---------------+-------------------+
+                      |
+                B02KB_INS_RECORD
+                B30KB_INS_TO_TREE
+                K61BD_INS
+ 
+ 
+Procedure K61DEL_SELECT
+ 
+This procedure is called as described under K61BD_DEL:
+ 
+Procedure K61DEL_UPD_QUAL
+ 
+This procedure is called by K05FUNCTIONS only and executes the commands
+M_UPDATE and M_DELETE with MM_QUAL, MM_QUAL_NO_OPT, MM_EMPTY.
+ 
+ 
+Procedure K61INS_DEL_UPD
+ 
+ 
+This procedure executes the M_INSERT command when called by K05FUNCTION.
+ 
+It executes the M_DELETE, M_UPDATE or M_UPDATE_REC command when called by K05FUNCTIONS
+without MM_QUAL, MM_QUAL_NO_OPT, MM_EMPTY.
+ 
+It executes any command with MM_NIL by K44INS_DEL_UPD_SHORT_COL_REC on a long tree.
+KB44DELETE_COLUMN or KB44OPEN_COLUMN with MM_NIL on a long tree.
+ 
+ 
+Procedure K61INS_SELECT
+ 
+For INSERT-SELECT, this procedure inserts a record in the table and
+sets a write lock on the record key.
+ 
+ 
+Procedure K61TABLE_INS_DEL_UPD
+ 
+This procedure is called from outside only by K05FUNCTIONS in case of
+M_INSERT_SELECT.
+ 
+ 
+Procedure KB61CHECK_NEW_REC
+ 
+Checks the key length, record length and the qualification of a
+new record.
+ 
+ 
+Procedure KB61DELETE_ALL_RECORDS
+ 
+The file is implicitly write-locked.  Afterwards, all records and
+their inversions are deleted in that the file and, if applicable,
+the index files are unloaded and reloaded without the insertion
+of records.
+ 
+ 
+Procedure KB61GET_AND_DEL
+ 
+The old record is read and deleted via the BD layer.  After
+successful processing, the index and the string files
+for the old record are also deleted.
+ 
+ 
+Procedure KB61INSERT_REC
+ 
+After a successful unique test, the new record is inserted and the
+inversions are maintained.
+ 
+ 
+Procedure KB61TEMP_DEL_INS_INIT
+ 
+This procedure is called by K61BD_DEL, K61BD_INS, K61DEL_SELECT.
+.CM *-END-* specification -------------------------------
+ 
+***********************************************************
+ 
+Description:
+ 
+This module implements the local processing of the data manipulation
+commands INSERT, UPDATE and DELETE between AK layer and BD layer.
+ 
+ 
+Message Buffer
+ 
+part1.buf
+------------------------------------------------------------ - -
+| tree id | counter / pos    | column description |
+|         | of stack entries | stack entries      | ...
+------------------------------------------------------------ - -
+ mx_treeid                       mcol_cnt * 8
+<------------- mx_messpart1head ----------------->
+ 
+   part1 continued:
+  ----------------------------------------------------
+   | multiple index | qualification | qualification2 |
+   | stack entries  | stack entries | stack entries  |
+  ----------------------------------------------------
+     mmult_cnt * 8    mqual_cnt * 8    mupd_cnt * 8
+ 
+stack entries for 'update' and index handling
+ 
+fixkey key column with a fixed length
+ 
+etype: st_fixkey
+----------------
+ 
+eop:      OP_NONE, OP_UNIQUE (for unique index),
+          OP_UNIQUE_DESC (for multiple unique index sorted in
+          descending order) or OP_ORDER_DESC (for multiple index
+          sorted in descending order)
+ 
+epos:     position in the key
+ 
+elen_var: column length (with undef byte)
+ 
+ 
+etype: st_varkey
+----------------
+ 
+eop:      OP_NONE, OP_UNIQUE (for unique index),
+          OP_UNIQUE_DESC (for multiple unique index sorted in
+          descending order) or OP_ORDER_DESC (for multiple index
+          sorted in descending order)
+ 
+epos:     position in the key
+ 
+elen_var: unused
+ 
+ 
+etype: st_fixcol
+----------------
+ 
+eop:      next single operator or op_none
+ 
+epos:     position of the fixed column in the record; position 1
+          identifies the first byte after the key
+ 
+elen_var: column length (with undef byte)
+ 
+etype: st_varcol
+----------------
+ 
+eop:      next single operator or op_none
+ 
+epos:     position of the first variable column in the record; position 1
+          identifies the first byte after the key
+ 
+elen_var: number of variable column
+ 
+ 
+Part2
+ 
+part2 for insert: record in the rec_buffer layout
+ 
+part2 for delete:
++-------------------------------------------------+
+| len     | keylen  | key  | qualification values |
++-------------------------------------------------+
+   2           2     keylen
+ <- reckey_offset ->
+ <-------- len ----------->
+ <---------------- part2_len -------------------->
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+**********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_check_new_rec  = true;
+      c_collision_test = true;
+      c_first_qual     = true;
+      c_result_wanted  = true;
+      c_nowait         = true;
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61add_upd_record (VAR m : tgg00_MessBlock);
+ 
+BEGIN
+m.mb_trns^.trError_gg00         := e_ok;
+m.mb_qual^.mtree.fileBdUse_gg00 := [ ];
+(* prevent from checking treeleafnodes *)
+m.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+IF  m.mb_type = m_insert
+THEN
+    b02add_record (m.mb_trns^, m.mb_qual^.mtree, m.mb_data^.mbp_rec)
+ELSE
+    b02repl_record (m.mb_trns^, m.mb_qual^.mtree, m.mb_data^.mbp_rec);
+(*ENDIF*) 
+m.mb_type     := m_return_error;
+m.mb_type2    := mm_nil;
+m.mb_qual_len := 0;
+m.mb_data_len := 0
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61bd_del (
+            VAR m                : tgg00_MessBlock;
+            pDeleteCmd           : tsp00_Addr;
+            VAR old_rec          : tgg00_Rec;
+            VAR transHistoryInfo : tgg00_ObjTransInfo;
+            granted_lock         : tgg00_LockReqMode);
+ 
+VAR
+      curr_granted2 : tgg00_LockReqMode;
+      dummy_len     : integer;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+curr_granted2           := lckFree_egg00;
+IF  (m.mb_qual^.mqual_cnt > 0) AND (m.mb_type = m_delete)
+THEN
+    k71qualification_test (m, c_first_qual, NOT c_result_wanted,
+          NOT c_check_new_rec, old_rec, NIL, 0, dummy_len);
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    IF  ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00
+    THEN
+        kb61temp_del_ins_init (m.mb_trns^, m_delete, m.mb_qual^.mtree, old_rec)
+    ELSE
+        BEGIN
+        kb611del_Init (pDeleteCmd, m.mb_qual^.mtree, old_rec, g01ConsistentReadEnabled);
+        IF  (granted_lock <> lckSysExcl_egg00) AND
+            (granted_lock <> lckTabExcl_egg00)
+        THEN
+            kb611inv_LockUniqueIndex (pDeleteCmd, m.mb_trns^, curr_granted2);
+        (*ENDIF*) 
+        IF  m.mb_trns^.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            END;
+        (*ENDIF*) 
+        IF  kb611inv_ExecuteOutsideBd (pDeleteCmd)
+        THEN
+            (* postpone delete record: DelInv after data page is released, than delete record *)
+            m.mb_trns^.trError_gg00 := e_skip_upd;
+        (*ENDIF*) 
+        IF  m.mb_trns^.trError_gg00 = e_ok
+        THEN
+            kb611del_WriteBeforeImage (pDeleteCmd, transHistoryInfo, m.mb_trns^);
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61bd_ins (
+            VAR m                : tgg00_MessBlock;
+            pInsertCmd           : tsp00_Addr;
+            VAR rec              : tgg00_Rec;
+            granted_lock         : tgg00_LockReqMode;
+            VAR TransHistoryInfo : tgg00_ObjTransInfo);
+ 
+VAR
+      curr_granted : tgg00_LockReqMode;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+curr_granted            := granted_lock;
+IF  ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00
+THEN
+    kb61temp_del_ins_init (m.mb_trns^, m_insert, m.mb_qual^.mtree, rec)
+ELSE
+    BEGIN
+    IF  (m.mb_type2 = mm_nokey) OR (m.mb_type2 = mm_specialkey)
+    THEN
+        BEGIN
+        kb611ins_Init (pInsertCmd, m.mb_qual^.mtree, rec);
+        (* *)
+        (* Precondition *)
+        (* Leaf is locked exclusive! Given syskey is unique and therefore not *)
+        (* be used by another syskey insert. If table is locked by a table    *)
+        (* lock e_wait_for_lock_release is set and the task will wait in the  *)
+        (* sql manager until the lock will be released.                       *)
+        (* *)
+        k53lock_syskey (m.mb_trns^, m.mb_qual^.mtree.fileTabId_gg00,
+              rec.recKey_gg00, curr_granted);
+        IF  (m.mb_trns^.trError_gg00 = e_ok)
+            AND
+            (granted_lock = lckSysExcl_egg00) OR
+            (granted_lock = lckTabExcl_egg00)
+        THEN
+            curr_granted := granted_lock;
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  (granted_lock = lckFree_egg00) AND
+            (m.mb_qual^.mtree.fileTfn_gg00 <> tfnShortScol_egg00)
+        THEN
+            k53row_lock (m.mb_trns^, m.mb_qual^.mtree, rec.recKey_gg00,
+                  rec.recBuf_gg00, 1, m_insert, 1, curr_granted);
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611ins_WriteBeforeImage (pInsertCmd, TransHistoryInfo, m.mb_trns^);
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61del_select (
+            VAR m          : tgg00_MessBlock;
+            VAR old_k      : tgg00_Lkey;
+            VAR old_rec    : tgg00_Rec);
+ 
+VAR
+      granted_lock : tgg00_LockReqMode;
+      pDeleteCmd   : tsp00_Addr;
+      pOldRec         : ^tgg00_Rec;
+      pTransInfo   : ^tgg00_ObjTransInfo;
+ 
+BEGIN
+m.mb_trns^.trError_gg00         := e_ok;
+m.mb_qual^.mst_addr             := m.mb_st;
+m.mb_qual^.mst_max              := m.mb_st_max;
+pDeleteCmd                      := NIL;
+granted_lock                    := lckFree_egg00;
+m.mb_qual^.mtree.fileBdUse_gg00 := [];
+pOldRec                         := @old_rec;
+IF  ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00
+THEN
+    kb61temp_del_ins_init (m.mb_trns^, m_delete, m.mb_qual^.mtree, old_rec)
+ELSE
+    BEGIN
+    kb611del_AllocateClass (pDeleteCmd, m.mb_trns^, m.mb_qual^.mstack_desc);
+    pOldRec    := @old_rec.recBuf_gg00[sizeof(tgg00_ObjTransInfo) + 1];
+    pTransInfo := @old_rec;
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        kb611del_Init (pDeleteCmd, m.mb_qual^.mtree, pOldRec^, g01ConsistentReadEnabled);
+        kb611inv_LockUniqueIndex (pDeleteCmd, m.mb_trns^, granted_lock)
+        END;
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611del_WriteBeforeImage (pDeleteCmd, pTransInfo^, m.mb_trns^);
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611inv_DelInv (pDeleteCmd, m.mb_trns^);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    IF  g01ConsistentReadEnabled AND
+        NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+    THEN
+        b02MarkRecordDeleted (m.mb_trns^, m.mb_qual^.mtree, true,
+              pTransInfo^.otrBeforeRef_gg00, m.mb_trns^.trWriteTransId_gg00, old_k, NIL)
+    ELSE
+        b02del_record (m.mb_trns^, m.mb_qual^.mtree, old_k);
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+THEN
+    BEGIN
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611del_WriteAfterImage (pDeleteCmd, m.mb_trns^);
+    (*ENDIF*) 
+    ;
+    kb611del_ReleaseClass (pDeleteCmd, m.mb_trns^.trAllocator_gg00);
+    END;
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mstring_cnt > 0)
+THEN
+    k61string_delete (m, pOldRec^);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mlink_cnt > 0)
+THEN
+    k62link_handling (m, pOldRec^, pOldRec^);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mtrigger_cnt > 0)
+THEN
+    k62trigger_handling (m, pOldRec^, pOldRec^);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mcachetrigger > 0)
+THEN
+    k62CallCatalogCacheTrigger(m, pOldRec^, pOldRec^);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61del_upd_qual (VAR m : tgg00_MessBlock);
+ 
+VAR
+      wanted_lock_state  : tgg00_LockReqState;
+      dummy_granted      : tgg00_LockReqMode;
+      delete_all_certain : boolean;
+      granted_lock       : tgg00_LockReqMode;
+      aux_error          : tgg00_BasisError;
+      dummyKey           : tgg00_Lkey;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+m.mb_qual^.mst_addr     := m.mb_st;
+m.mb_qual^.mst_max      := m.mb_st_max;
+granted_lock            := lckFree_egg00;
+&ifdef TRACE
+t01int4 (test_kb, 'mqual_cnt:01', m.mb_qual^.mqual_cnt);
+&ENDIF
+b01filestate (m.mb_trns^, m.mb_qual^.mtree);
+(* prevent from checking treeleafnodes *)
+(* during mass-changing command        *)
+m.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+delete_all_certain :=
+      (m_delete = m.mb_type ) AND
+      ((mm_empty = m.mb_type2) OR (mm_trunc = m.mb_type2)) AND
+      NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00);
+IF  (m.mb_trns^.trError_gg00 = e_ok)
+    AND NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00    )
+    AND
+    delete_all_certain
+THEN
+    REPEAT
+        (* optimistic lock case delete all perhaps *)
+        k53eot_excl_lock (m.mb_trns^, m.mb_qual^.mtree,
+              dummyKey, false, lckTabExcl_egg00, granted_lock);
+        IF  m.mb_trns^.trError_gg00 = e_wait_for_lock_release
+        THEN
+            k53wait (m.mb_trns^, m.mb_type, m.mb_type2)
+        (*ENDIF*) 
+    UNTIL
+        m.mb_trns^.trError_gg00 <> e_wait_for_lock_release;
+    (*ENDREPEAT*) 
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    IF  delete_all_certain
+    THEN
+        kb611delete_all_records (m)
+    ELSE
+        BEGIN
+        IF  ((hsTempLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00) OR
+            ( hsPermLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00))
+            AND
+            NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+        THEN
+            BEGIN
+            IF  hsTempLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00
+            THEN
+                wanted_lock_state := [lrsTemp_egg00]
+            ELSE
+                wanted_lock_state := [ ];
+            (*ENDIF*) 
+            k53lock (m.mb_trns^, m.mb_qual^.mtree.fileTabId_gg00,
+                  dummyKey, lckTabShare_egg00,
+                  wanted_lock_state,
+                  (hsNoWait_egg00 in m.mb_qual^.mtree.fileHandling_gg00),
+                  NOT c_collision_test, dummy_granted);
+            IF  m.mb_trns^.trError_gg00 = e_wait_for_lock_release
+            THEN
+                k53wait (m.mb_trns^, m.mb_type, m.mb_type2)
+            (*ENDIF*) 
+            END;
+&       ifdef TRACE
+        (*ENDIF*) 
+        t01int4 (test_kb, 'mqual_cnt:02', m.mb_qual^.mqual_cnt);
+&       ENDIF
+        IF  m.mb_trns^.trError_gg00 = e_ok
+        THEN
+            k61table_ins_del_upd (m);
+&       ifdef TRACE
+        (*ENDIF*) 
+        t01int4 (test_kb, 'mqual_cnt:03', m.mb_qual^.mqual_cnt);
+&       ENDIF
+        IF  (hsTempLock_egg00 in m.mb_qual^.mtree.fileHandling_gg00)
+            AND NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+        THEN
+            BEGIN
+            aux_error               := m.mb_trns^.trError_gg00;
+            m.mb_trns^.trError_gg00 := e_ok;
+            k53temp_unlock (m.mb_trns^, m.mb_qual^.mtree.fileTabId_gg00,
+                  dummyKey, lckTabShare_egg00);
+            IF  aux_error <> e_ok
+            THEN
+                m.mb_trns^.trError_gg00 := aux_error
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01int4 (test_kb, 'mqual_cnt:04', m.mb_qual^.mqual_cnt);
+&ENDIF
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61ins_del_upd (VAR m : tgg00_MessBlock);
+ 
+VAR
+      granted_lock : tgg00_LockReqMode;
+      k            : tgg00_Lkey;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+m.mb_qual^.mst_addr     := m.mb_st;
+m.mb_qual^.mst_max      := m.mb_st_max;
+granted_lock            := lckFree_egg00;
+m.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+IF  (m.mb_type2 <> mm_nokey) AND (m.mb_type2 <> mm_specialkey)
+THEN
+    BEGIN
+    g01key_assign ( m.mb_data^.mbp_key, k, m.mb_trns^.trError_gg00);
+    IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_type2 = mm_test)
+    THEN
+        k51row_excl_check (m.mb_trns^, m.mb_qual^.mtree.fileTabId_gg00, k);
+    (*ENDIF*) 
+    IF  (m.mb_trns^.trError_gg00 = e_ok)
+        AND (m.mb_qual^.mtree.fileTfn_gg00 = tfnShortScol_egg00)
+    THEN
+        BEGIN
+        IF  m.mb_trns^.trIndex_gg00 = cgg_nil_transindex
+        THEN
+            m.mb_trns^.trError_gg00 := e_nil_transindex;
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  (m.mb_trns^.trError_gg00 = e_ok)
+            AND NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+        THEN
+            k53row_lock (m.mb_trns^, m.mb_qual^.mtree, k,
+                  m.mb_data^.mbp_4kbuf, 1, m.mb_type, 1, granted_lock)
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ((m.mb_type = m_insert) OR (m.mb_type = m_update_rec))
+    AND
+    (m.mb_trns^.trError_gg00 = e_ok)
+THEN
+    kb61check_new_rec (m, m.mb_data^.mbp_rec, c_first_qual);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mlink_cnt > 0)
+THEN
+    k62linkfile_create (m);
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    CASE m.mb_type OF
+        m_insert:
+            BEGIN
+            kb61insert_rec (m, k, m.mb_data^.mbp_rec, granted_lock);
+            IF  m.mb_trns^.trError_gg00 = e_duplicate_key
+            THEN
+                BEGIN
+                IF  m.mb_type2 = mm_ignore_duplicates
+                THEN
+                    m.mb_trns^.trError_gg00 := e_ok
+                ELSE
+                    IF  m.mb_type2 = mm_update_duplicates
+                    THEN
+                        BEGIN
+                        m.mb_type  := m_update_rec;
+                        m.mb_type2 := mm_nil;
+                        k63rec_upd (m, k, m.mb_data^.mbp_rec, granted_lock);
+                        m.mb_type  := m_insert;
+                        m.mb_type2 := mm_update_duplicates
+                        END
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END;
+        m_delete:
+            kb61get_and_del (m, k, granted_lock);
+        m_update:
+            k63single_upd (m, k, granted_lock);
+        m_update_rec:
+            k63rec_upd (m, k, m.mb_data^.mbp_rec, granted_lock);
+        OTHERWISE
+            m.mb_trns^.trError_gg00 := e_not_implemented
+        END;
+    (*ENDCASE*) 
+(*ENDIF*) 
+IF  m.mb_qual^.mtrigger_cnt > 0
+THEN (* must be called even if trError_gg00 <> e_ok *)
+    k62return_trigger (m);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND
+    (m.mb_type = m_return_result)
+THEN
+    m.mb_qual^.mr_resnum := g01glob.rescnt_1;
+(*ENDIF*) 
+IF  m.mb_type <> m_return_result
+THEN
+    BEGIN
+    m.mb_type  := m_return_error;
+    m.mb_type2 := mm_nil;
+    IF  m.mb_trns^.trError_gg00 <> e_wait_for_lock_release
+    THEN
+        BEGIN
+        m.mb_qual_len  := 0;
+        m.mb_data_len  := 0
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61ins_select (
+            VAR m          : tgg00_MessBlock;
+            VAR new_rec    : tgg00_Rec;
+            key_prop       : tgg07_key_properties;
+            upd_dupl       : boolean;
+            rec_count      : tsp00_Int4);
+ 
+VAR
+      mess2_type   : tgg00_MessType2;
+      wanted_lmode : tgg00_LockReqMode;
+      granted_lock : tgg00_LockReqMode;
+      qual_count   : integer;
+      k            : tgg00_Lkey;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+m.mb_qual^.mst_addr     := m.mb_st;
+m.mb_qual^.mst_max      := m.mb_st_max;
+granted_lock            := lckFree_egg00;
+mess2_type              := m.mb_type2;
+m.mb_type2              := mm_nil;
+&ifdef TRACE
+t01qual (kb, m.mb_qual^);
+&endif
+CASE key_prop OF
+    kp_nokey :
+        IF  m.mb_data^.mbp_info.recIntoTemp_gg00
+        THEN
+            (* insert into temp table *)
+            BEGIN
+            (* use temp_tablekey *)
+            s30surrogate_incr (m.mb_data^.mbp_info.recTempKey_gg00);
+            new_rec.recKey_gg00.keyVal_gg00 [1] := csp_defined_byte;
+            SAPDB_PascalMove ('VKB61 ',   1,    
+                  sizeof (m.mb_data^.mbp_info.recTempKey_gg00), sizeof (new_rec.recKey_gg00.keyVal_gg00),
+                  @m.mb_data^.mbp_info.recTempKey_gg00, 1,
+                  @new_rec.recKey_gg00.keyVal_gg00, 2,
+                  sizeof (m.mb_data^.mbp_info.recTempKey_gg00), m.mb_trns^.trError_gg00);
+            END
+        ELSE
+            m.mb_type2 := mm_nokey;
+        (*ENDIF*) 
+    kp_clusterKey : (* PTS 1139184 *)
+        m.mb_type2 := mm_specialkey;
+    OTHERWISE ;
+    END;
+(*ENDCASE*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    IF  m.mb_type2 <> mm_nokey
+    THEN
+        g01key_assign (new_rec.recKey_gg00, k, m.mb_trns^.trError_gg00);
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+        THEN
+            BEGIN
+            IF  rec_count > k51max_locks_per_table
+            THEN
+                wanted_lmode := lckTabExcl_egg00
+            ELSE
+                wanted_lmode := lckRowExcl_egg00;
+            (*ENDIF*) 
+            IF  (wanted_lmode = lckTabExcl_egg00) OR (m.mb_type2 <> mm_nokey)
+            THEN
+                k53eot_excl_lock (m.mb_trns^, m.mb_qual^.mtree, k,
+                      true, wanted_lmode, granted_lock)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    kb61check_new_rec (m, new_rec, NOT c_first_qual);
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    m.mb_type := m_insert;
+    kb61insert_rec (m, k, new_rec, granted_lock);
+    m.mb_type := m_insert_select
+    END;
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_duplicate_key) AND upd_dupl
+THEN
+    BEGIN
+    m.mb_type            := m_update_rec;
+    m.mb_type2           := mm_nil;
+    qual_count           := m.mb_qual^.mqual_cnt;
+    m.mb_qual^.mqual_cnt := 0;
+    k63rec_upd (m, k, new_rec, granted_lock);
+    m.mb_qual^.mqual_cnt := qual_count;
+    m.mb_type            := m_insert_select
+    END;
+(*ENDIF*) 
+m.mb_type2 := mess2_type
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61string_delete (
+            VAR m   : tgg00_MessBlock;
+            VAR rec : tgg00_Rec);
+ 
+VAR
+      aux_mtype         : tgg00_MessType;    (* JA 1996-10-17 *)
+      aux_mtype2        : tgg00_MessType2;   (* JA 1996-10-17 *)
+      old_mcol_cnt      : tsp00_Int2;
+      old_mmult_cnt     : tsp00_Int2;
+      old_mqual_cnt     : tsp00_Int2;
+      old_mstring_cnt   : tsp00_Int2;
+      col               : integer;
+      col_pos           : integer;
+      col_len           : integer;
+      str_surr          : tgg00_Surrogate;
+      tab_surr          : tgg00_Surrogate;
+      wanted_lock_state : tgg00_LockReqState;
+      dummy_granted     : tgg00_LockReqMode;
+      pDeleteCmd        : tsp00_Addr;
+      str_id            : tgg00_FileId;
+      shc_key           : tgg00_Lkey;
+      varcol_pos        : tgg00_VarColPosList;
+      shc_rec           : tgg00_Rec;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+m.mb_qual^.mst_addr     := m.mb_st;
+m.mb_qual^.mst_max      := m.mb_st_max;
+varcol_pos.vpl_last     := -1;
+col := m.mb_qual^.mstring_pos;
+WHILE (col < m.mb_qual^.mstring_pos + m.mb_qual^.mstring_cnt)
+      AND (m.mb_trns^.trError_gg00 = e_ok) DO
+    BEGIN
+    g04locate_col (m.mb_st^[col], @rec.recBuf_gg00[1], varcol_pos,
+          col_pos, col_len);
+    (* PTS 1105795 M.Ki.: col_len does not necessarily have to be     *)
+    (* SURROGATE_MXGG00+1 but can also be 2*SURROGATE_MXGG00+1 due to *)
+    (* handling of insert/select for LONG/LONGFILE columns            *)
+    IF  col_len > SURROGATE_MXGG00
+    THEN
+        BEGIN
+        IF  ((rec.recBuf_gg00 [col_pos] <> csp_undef_byte) AND
+            (m.mb_st^[col].etype = st_fixcol))
+        THEN
+            BEGIN
+            str_id := b01niltree_id;
+            SAPDB_PascalMove ('VKB61 ',   2,    
+                  sizeof (rec.recBuf_gg00), sizeof (str_id.fileTabId_gg00),
+                  @rec.recBuf_gg00, col_pos + 1, @str_id.fileTabId_gg00, 1,
+                  sizeof (str_id.fileTabId_gg00), m.mb_trns^.trError_gg00);
+            WITH m.mb_qual^ DO
+                BEGIN
+                str_id.fileUserRef_gg00 := mtree.fileUserRef_gg00;
+                str_id.fileTfn_gg00     := tfnColumn_egg00;
+                str_id.fileType_gg00    := [ftsByteStr_egg00, ftsConcurrent_egg00];
+                old_mcol_cnt            := mcol_cnt;
+                old_mmult_cnt           := mmult_cnt;
+                old_mqual_cnt           := mqual_cnt;
+                old_mstring_cnt         := mstring_cnt;
+                END;
+            (*ENDWITH*) 
+            (* PTS 1105795 M.Ki.: because of Insert...Select for LONGs *)
+            (* we need to check for SQL locks on LONGs                 *)
+            (* first check for table lock: *)
+            tab_surr := m.mb_qual^.mtree.fileTabId_gg00;
+            k51tab_eot_excl_check (m.mb_trns^, tab_surr);
+            IF  m.mb_trns^.trError_gg00 = e_rec_not_locked
+            THEN
+                BEGIN
+                m.mb_trns^.trError_gg00 := e_ok;
+                wanted_lock_state := [];
+                str_surr          := str_id.fileTabId_gg00;
+                str_surr[ 3 ]     := chr(128);
+                k53lock (m.mb_trns^, str_surr, shc_key, lckTabExcl_egg00,
+                      wanted_lock_state, NOT c_nowait, NOT c_collision_test,
+                      dummy_granted);
+                IF  m.mb_trns^.trError_gg00 = e_wait_for_lock_release
+                THEN
+                    k53wait (m.mb_trns^, m.mb_type, m.mb_type2);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  m.mb_trns^.trError_gg00 = e_ok
+            THEN
+                b01filestate (m.mb_trns^, str_id);
+            (*ENDIF*) 
+            IF  m.mb_trns^.trError_gg00 = e_ok
+            THEN
+                k64drop_lob_tree (m.mb_trns^, tab_surr, str_id)
+            ELSE
+                IF  (m.mb_trns^.trError_gg00 = e_file_not_found) AND
+                    (m.mb_st^[col].etype     = st_fixcol       )
+                THEN
+                    BEGIN
+                    m.mb_trns^.trError_gg00 := e_ok;
+                    IF  m.mb_trns^.trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        shc_key.keyLen_gg00 := SURROGATE_MXGG00;
+                        SAPDB_PascalMove ('VKB61 ',   3,    
+                              sizeof (rec.recBuf_gg00), sizeof (shc_key.keyVal_gg00),
+                              @rec.recBuf_gg00, col_pos + 1, @shc_key.keyVal_gg00, 1,
+                              SURROGATE_MXGG00, m.mb_trns^.trError_gg00)
+                        END;
+                    (*ENDIF*) 
+                    IF  m.mb_trns^.trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        str_id :=  m.mb_qual^.mtree;
+                        WITH m.mb_qual^, mtree DO
+                            BEGIN
+                            g04short_col_tree_build (mtree.fileTabId_gg00,
+                                  mtree, m.mb_trns^.trError_gg00);
+                            fileBdUse_gg00   := [];
+                            mcol_cnt         := 0;
+                            mmult_cnt        := 0;
+                            mqual_cnt        := 0;
+                            mstring_cnt      := 0;
+                            END;
+                        (*ENDWITH*) 
+                        (*UWE*)
+                        aux_mtype  := m.mb_type;     (* JA 1996-10-17 *)
+                        aux_mtype2 := m.mb_type2;    (* JA 1996-10-17 *)
+                        m.mb_type  := m_delete;      (* JA 1996-10-17 *)
+                        m.mb_type2 := mm_nil;        (* JA 1996-10-17 *)
+                        ;
+                        pDeleteCmd := NIL;
+                        kb611del_AllocateClass (pDeleteCmd, m.mb_trns^, m.mb_qual^.mstack_desc);
+                        IF  m.mb_trns^.trError_gg00 = e_ok
+                        THEN
+                            b02kb_del_rec (m, pDeleteCmd, shc_key, shc_rec, lckFree_egg00);
+                        (*ENDIF*) 
+                        m.mb_type  := aux_mtype;     (* JA 1996-10-17 *)
+                        m.mb_type2 := aux_mtype2;    (* JA 1996-10-17 *)
+                        (* PTS 1108980 E.Z. *)
+                        IF  (m.mb_trns^.trError_gg00 = e_ok)
+                            AND
+                            NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+                        THEN
+                            kb611del_WriteAfterImage (pDeleteCmd, m.mb_trns^);
+                        (*ENDIF*) 
+                        ;
+                        kb611del_ReleaseClass (pDeleteCmd, m.mb_trns^.trAllocator_gg00)
+                        END;
+                    (*ENDIF*) 
+                    IF  m.mb_trns^.trError_gg00 = e_key_not_found
+                    THEN
+                        m.mb_trns^.trError_gg00 := e_ok;
+                    (*ENDIF*) 
+                    IF  m.mb_trns^.trError_gg00 = e_ok
+                    THEN
+                        WITH m.mb_qual^ DO
+                            BEGIN
+                            mtree       := str_id;
+                            mcol_cnt    := old_mcol_cnt;
+                            mmult_cnt   := old_mmult_cnt;
+                            mqual_cnt   := old_mqual_cnt;
+                            mstring_cnt := old_mstring_cnt;
+                            END
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    col := col + 1
+    END
+(*ENDWHILE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k61table_ins_del_upd (VAR m : tgg00_MessBlock);
+ 
+BEGIN
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mlink_cnt > 0)
+THEN
+    k62linkfile_create (m);
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    k720_single_select (m);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb61check_new_rec (
+            VAR m      : tgg00_MessBlock;
+            VAR rec    : tgg00_Rec;
+            first_qual : boolean);
+ 
+VAR
+      dummy_len : integer;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+IF  rec.recKeyLen_gg00 > PERM_KEY_MXSP00
+THEN
+    m.mb_trns^.trError_gg00 := e_illegal_record
+ELSE
+    IF  cgg_rec_key_offset + rec.recKeyLen_gg00 > rec.recLen_gg00
+    THEN
+        m.mb_trns^.trError_gg00 := e_illegal_record
+    ELSE
+        IF  rec.recLen_gg00 > MAX_RECLEN_GG00
+        THEN
+            m.mb_trns^.trError_gg00 := e_illegal_record
+        ELSE
+            IF  (first_qual AND (m.mb_qual^.mqual_cnt > 0))
+                OR
+                (NOT first_qual AND (m.mb_qual^.mupd_cnt > 0))
+            THEN
+                k71qualification_test (m, first_qual, NOT c_result_wanted, c_check_new_rec,
+                      rec, NIL, 0, dummy_len)
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb61get_and_del (
+            VAR m            : tgg00_MessBlock;
+            VAR k            : tgg00_Lkey;
+            granted_lock     : tgg00_LockReqMode);
+ 
+VAR
+      old_rec    : tgg00_Rec;
+      pDeleteCmd : tsp00_Addr;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+pDeleteCmd              := NIL;
+IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+THEN
+    kb611del_AllocateClass (pDeleteCmd, m.mb_trns^, m.mb_qual^.mstack_desc);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND
+    ( ssSubquery_egg00 in m.mb_qual^.mstack_state )
+THEN
+    k720_test_subquery (m.mb_trns^, m.mb_data^, m.mb_data_size,
+          m.mb_qual^.mstack_desc, old_rec);
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    m.mb_qual^.mtree.fileBdUse_gg00 := [];
+    b02kb_del_rec (m, pDeleteCmd, k, old_rec, granted_lock)
+    END;
+(*ENDIF*) 
+IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+THEN
+    BEGIN
+    IF  (m.mb_trns^.trError_gg00 = e_skip_upd)
+        AND
+        kb611inv_IsExecutionPostponed (pDeleteCmd)
+    THEN
+        BEGIN
+        m.mb_trns^.trError_gg00 := e_ok;
+        kb611del_PostponedExecution (pDeleteCmd, m.mb_trns^, m.mb_qual^.mtree)
+        END;
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611del_WriteAfterImage (pDeleteCmd, m.mb_trns^);
+    (*ENDIF*) 
+    kb611del_ReleaseClass (pDeleteCmd, m.mb_trns^.trAllocator_gg00);
+    END;
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mstring_cnt > 0)
+THEN
+    k61string_delete (m, old_rec);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mlink_cnt > 0)
+THEN
+    k62link_handling (m, old_rec, old_rec);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mtrigger_cnt > 0)
+THEN
+    k62trigger_handling (m, old_rec, old_rec);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mcachetrigger > 0)
+THEN
+    k62CallCatalogCacheTrigger(m, old_rec, old_rec);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb61insert_rec (
+            VAR m           : tgg00_MessBlock;
+            VAR k           : tgg00_Lkey;
+            VAR new_rec     : tgg00_Rec;
+            granted_lock    : tgg00_LockReqMode);
+ 
+VAR
+      curr_granted_lock : tgg00_LockReqMode;
+      pInsertCmd        : tsp00_Addr;
+ 
+BEGIN
+m.mb_trns^.trError_gg00 := e_ok;
+curr_granted_lock       := lckFree_egg00;
+pInsertCmd              := NIL;
+&ifdef TRACE
+t01stdesc (kb, 'StackDesc   ', m.mb_qual^.mstack_desc);
+&endif
+IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+THEN
+    BEGIN
+    kb611ins_AllocateClass (pInsertCmd, m.mb_trns^, m.mb_qual^.mstack_desc);
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  m.mb_type2 = mm_nokey
+        THEN
+            BEGIN
+            (* something different from normal syskey-start used for LockAndCheckUniqueIndex only *)
+            new_rec.recKey_gg00.keyVal_gg00[ 2 ] := chr(0)
+            END;
+        (*ENDIF*) 
+        ;
+        (* in case of nokey InsertCmd is re-initialized in k61bd_ins *)
+        kb611ins_Init (pInsertCmd, m.mb_qual^.mtree, new_rec);
+        kb611inv_LockAndCheckUniqueIndex (pInsertCmd, m.mb_trns^, true, curr_granted_lock)
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  m.mb_trns^.trError_gg00 = e_ok
+THEN
+    BEGIN
+    IF  (curr_granted_lock <> lckSysExcl_egg00) AND
+        (curr_granted_lock <> lckTabExcl_egg00)
+    THEN
+        curr_granted_lock := granted_lock;
+    (*ENDIF*) 
+    m.mb_qual^.mtree.fileBdUse_gg00 := [];
+    b02kb_ins_record (m, pInsertCmd, new_rec, curr_granted_lock)
+    END;
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok)
+    AND
+    ((m.mb_type2 = mm_nokey) OR (m.mb_type2 = mm_specialkey))
+THEN
+    g01key_assign (new_rec.recKey_gg00, k, m.mb_trns^.trError_gg00);
+(*ENDIF*) 
+IF  NOT (ftsTemp_egg00 in m.mb_qual^.mtree.fileType_gg00)
+THEN
+    BEGIN
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611inv_AddInv (pInsertCmd, m.mb_trns^);
+    (*ENDIF*) 
+    IF  m.mb_trns^.trError_gg00 = e_ok
+    THEN
+        kb611ins_WriteAfterImage (pInsertCmd, m.mb_trns^);
+    (*ENDIF*) 
+    ;
+    kb611ins_ReleaseClass (pInsertCmd, m.mb_trns^.trAllocator_gg00);
+    END;
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mlink_cnt > 0)
+THEN
+    k62link_handling (m, new_rec, new_rec);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mtrigger_cnt > 0)
+THEN
+    k62trigger_handling (m, new_rec, new_rec);
+(*ENDIF*) 
+IF  (m.mb_trns^.trError_gg00 = e_ok) AND (m.mb_qual^.mcachetrigger > 0)
+THEN
+    k62CallCatalogCacheTrigger(m, new_rec, new_rec);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb61temp_del_ins_init (
+            VAR t         : tgg00_TransContext;
+            ins_del_type  : tgg00_MessType;
+            VAR temp_file : tgg00_FileId;
+            VAR rec       : tgg00_Rec);
+ 
+BEGIN
+IF  NOT (hsNoLog_egg00 in temp_file.fileHandling_gg00)
+THEN
+    k54del_ins_templog (t, ins_del_type, temp_file, rec)
+ELSE
+    IF  t.trIndex_gg00 = cgg_nil_transindex
+    THEN
+        t.trError_gg00 := e_nil_transindex
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

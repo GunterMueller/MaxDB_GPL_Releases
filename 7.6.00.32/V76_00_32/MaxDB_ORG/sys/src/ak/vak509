@@ -1,0 +1,485 @@
+.nf
+ 
+ .nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-09-11
+*****************************************************
+modname : VAK509
+changed : 2000-09-11
+module  : Pseudo_fieldmap
+ 
+Author  : ElkeZ
+Created : 2004-01-15
+*****************************************************
+ 
+Purpose : Intermediate code to be replaced by correct fieldmap/list.
+ 
+Define  :
+ 
+        FUNCTION
+              a509size_of_map : tsp00_Int4;
+ 
+        FUNCTION
+              a509append_value (map_ptr : tsp00_MoveObjPtr;
+                    databuffer_ptr    : tsp00_MoveObjPtr;
+                    databuffer_length : tsp00_Int4;
+                    value_pos         : tsp00_Int4) : boolean;
+ 
+        FUNCTION
+              a509build_map_from_databuffer (databuffer_ptr : tsp00_MoveObjPtr;
+                    map_ptr                  : tsp00_MoveObjPtr;
+                    VAR length_in_databuffer : tsp00_Int4) : boolean;
+ 
+        FUNCTION
+              a509get_one_value (map_ptr : tsp00_MoveObjPtr;
+                    value_no       : tsp00_Int2;
+                    VAR value_ptr  : tsp00_MoveObjPtr;
+                    VAR value_len  : tsp00_Int4;
+                    VAR is_null    : boolean;
+                    VAR is_default : boolean) : boolean;
+ 
+        FUNCTION
+              a509get_datapos (map_ptr : tsp00_MoveObjPtr;
+                    value_no : tsp00_Int2) : tsp00_Int4;
+ 
+        FUNCTION
+              a509is_long_value (map_ptr : tsp00_MoveObjPtr;
+                    value_no : integer) : boolean;
+ 
+        PROCEDURE
+              a509reset_value_map (map_ptr : tsp00_MoveObjPtr);
+ 
+        PROCEDURE
+              a509set_value_to_null (map_ptr : tsp00_MoveObjPtr;
+                    value_no : integer);
+ 
+        PROCEDURE
+              a509set_long_value (map_ptr : tsp00_MoveObjPtr;
+                    value_no : integer);
+ 
+        FUNCTION
+              a509value_cnt (map_ptr : tsp00_MoveObjPtr) : tsp00_Int2;
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+&       ifdef TRACE
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01char  (
+                    level : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    c   : char);
+ 
+        PROCEDURE
+              t01name (
+                    level : tgg00_Debug;
+                    nam : tsp00_Name);
+ 
+        PROCEDURE
+              t01moveobj (
+                    debug       : tgg00_Debug;
+                    VAR moveobj : tsp00_MoveObj;
+                    startpos    : tsp00_Int4;
+                    endpos      : tsp00_Int4);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+TYPE
+      ak509info = (ov_is_null,
+            ov_is_default,
+            ov_is_long);
+      ak509infoset = SET OF ak509info;
+ 
+      ak509one_values = RECORD
+            ov_pos     : tsp00_Int4;
+            ov_len     : tsp00_Int2;
+            ov_set     : ak509infoset;
+            ov_filler  : boolean;
+      END;
+ 
+      ak509all_values = ARRAY [1..csp_maxvariables] OF ak509one_values;
+ 
+      ak509value_record = RECORD
+            valptr  : tsp00_MoveObjPtr;
+            valcnt  : tsp00_Int2;
+            filler1 : tsp00_Int2;
+            values  : ak509all_values;
+      END;
+ 
+ 
+      ak509ptr_mapping = RECORD
+            CASE boolean OF
+                true :
+                    (pm_move : tsp00_MoveObjPtr);
+                false :
+                    (pm_ak509 : ^ak509value_record);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509size_of_map : tsp00_Int4;
+ 
+BEGIN
+a509size_of_map := sizeof(ak509value_record)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak509next_value (VAR val_map : ak509value_record;
+            val_index            : integer;
+            databuffer_ptr       : tsp00_MoveObjPtr;
+            length_in_databuffer : tsp00_Int4;
+            VAR pos              : tsp00_Int4;
+            VAR ok               : boolean);
+ 
+BEGIN
+WITH val_map, values[val_index] DO
+    BEGIN
+&   ifdef TRACE
+    t01int4 (ak_sem, 'val_index   ', val_index);
+    t01int4 (ak_sem, 'pos         ', pos);
+&   endif
+    IF  pos > length_in_databuffer
+    THEN
+        ok := false
+    ELSE
+        CASE ord(databuffer_ptr^[pos]) OF
+            csp1_fi_special_null,
+            csp1_fi_blob_description :
+                BEGIN
+                ov_pos     := pos+1;
+                ov_len     := 0;
+                ov_set     := [];
+                pos := succ(pos);
+                END;
+            csp1_fi_default_value :
+                BEGIN
+                ov_pos     := pos+1;
+                ov_len     := 0;
+                ov_set     := [ ov_is_default ];
+                pos := succ(pos);
+                END;
+            csp1_fi_null_value :
+                BEGIN
+                ov_pos     := pos+1;
+                ov_len     := 0;
+                ov_set     := [ ov_is_null ];
+                pos := succ(pos);
+                END;
+            csp1_fi_2byte_length :
+                BEGIN
+                ov_pos     := pos+3;
+                ov_len     := ord(databuffer_ptr^[pos+1]) * 256 + ord(databuffer_ptr^[pos+2]);
+                ov_set     := [];
+                pos := pos + 3 + ov_len
+                END;
+            OTHERWISE
+                BEGIN
+                ov_pos     := pos+1;
+                ov_len     := ord(databuffer_ptr^[pos]);
+                ov_set     := [];
+                pos := succ(pos) + ov_len;
+                END;
+            END;
+        (*ENDCASE*) 
+    (*ENDIF*) 
+&   ifdef TRACE
+    t01int4 (ak_sem, 'ov_pos      ', ov_pos);
+    t01int4 (ak_sem, 'ov_len      ', ov_len);
+&   endif
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509append_value (map_ptr : tsp00_MoveObjPtr;
+            databuffer_ptr    : tsp00_MoveObjPtr;
+            databuffer_length : tsp00_Int4;
+            value_pos         : tsp00_Int4) : boolean;
+ 
+VAR
+      ok        : boolean;
+      pos       : tsp00_Int4;
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+ok := true;
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    BEGIN
+    valcnt := succ(valcnt);
+    IF  valcnt = 1
+    THEN
+        valptr := databuffer_ptr;
+    (*ENDIF*) 
+    pos := value_pos;
+    ak509next_value (val_ptr.pm_ak509^, valcnt, databuffer_ptr,
+          databuffer_length, pos, ok);
+    a509append_value := ok;
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509build_map_from_databuffer (databuffer_ptr : tsp00_MoveObjPtr;
+            map_ptr                  : tsp00_MoveObjPtr;
+            VAR length_in_databuffer : tsp00_Int4) : boolean;
+ 
+VAR
+      ok        : boolean;
+      pos       : tsp00_Int4;
+      val_index : integer;
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+ok := true;
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    BEGIN
+    valptr := databuffer_ptr;
+    IF  (valptr = NIL) OR (length_in_databuffer <= 0)
+    THEN
+        BEGIN
+        pos := 1;
+        valcnt := 0
+        END
+    ELSE
+        BEGIN
+        valcnt := ord(databuffer_ptr^[1]) * 256 + ord(databuffer_ptr^[2]);
+        val_index := 1;
+        pos := 3;
+        WHILE ok AND (val_index <= valcnt) DO
+            BEGIN
+            ak509next_value (val_ptr.pm_ak509^, val_index, databuffer_ptr,
+                  length_in_databuffer, pos, ok);
+            val_index := succ(val_index)
+            END
+        (*ENDWHILE*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+length_in_databuffer := pos - 1;
+a509build_map_from_databuffer := ok;
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509get_datapos (map_ptr : tsp00_MoveObjPtr;
+            value_no : tsp00_Int2) : tsp00_Int4;
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    IF  value_no > valcnt
+    THEN
+        a509get_datapos := 1
+    ELSE
+        a509get_datapos := values[value_no].ov_pos;
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509get_one_value (map_ptr : tsp00_MoveObjPtr;
+            value_no       : tsp00_Int2;
+            VAR value_ptr  : tsp00_MoveObjPtr;
+            VAR value_len  : tsp00_Int4;
+            VAR is_null    : boolean;
+            VAR is_default : boolean) : boolean;
+ 
+VAR
+      ok        : boolean;
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+ok := true;
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    BEGIN
+    IF  value_no > valcnt
+    THEN
+        ok := false
+    ELSE
+        WITH values[value_no] DO
+            BEGIN
+            value_ptr := @valptr^[ov_pos];
+            value_len := ov_len;
+            is_null   := ov_is_null in ov_set;
+            is_default:= ov_is_default in ov_set;
+&           ifdef TRACE
+            IF  value_len > 0
+            THEN
+                t01moveobj (ak_sem, value_ptr^, 1, value_len)
+            ELSE
+                t01int4 (ak_sem, 'value_len= 0', ord(is_null));
+            (*ENDIF*) 
+&           endif
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+a509get_one_value := ok;
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509value_cnt (map_ptr : tsp00_MoveObjPtr) : tsp00_Int2;
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+a509value_cnt := val_ptr.pm_ak509^.valcnt
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a509reset_value_map (map_ptr : tsp00_MoveObjPtr);
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+val_ptr.pm_ak509^.valcnt := 0;
+val_ptr.pm_ak509^.valptr := NIL;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a509set_value_to_null (map_ptr : tsp00_MoveObjPtr;
+            value_no : integer);
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    IF  value_no <= valcnt
+    THEN
+        WITH values[value_no] DO
+            BEGIN
+            ov_len     := 0;
+            ov_set     := ov_set + [ ov_is_null ] - [ ov_is_default ];
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a509set_long_value (map_ptr : tsp00_MoveObjPtr;
+            value_no : integer);
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    IF  value_no <= valcnt
+    THEN
+        WITH values[value_no] DO
+            ov_set     := ov_set + [ ov_is_long ];
+        (*ENDWITH*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a509is_long_value (map_ptr : tsp00_MoveObjPtr;
+            value_no : integer) : boolean;
+ 
+VAR
+      val_ptr   : ak509ptr_mapping;
+      is_long   : boolean;
+ 
+BEGIN
+val_ptr.pm_move := map_ptr;
+WITH val_ptr.pm_ak509^ DO
+    IF  value_no <= valcnt
+    THEN
+        is_long := ov_is_long in values[value_no].ov_set
+    ELSE
+        is_long := false;
+    (*ENDIF*) 
+(*ENDWITH*) 
+a509is_long_value := is_long;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

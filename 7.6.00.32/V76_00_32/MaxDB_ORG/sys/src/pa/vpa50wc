@@ -1,0 +1,1100 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA50WC$
+.tt 2 $$$
+.tt 3 $BurkhardD$ODBC SETUP DLL$2000-08-07$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 08-31-1993
+.sp
+.cp 3
+Version : 1994-04-25
+.sp
+.cp 3
+Release :      Date : 2000-08-07
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 63 "vpa50wc" 
+#endif
+//#undef IDC_AUTOCOMMIT
+#include <stdlib.h>
+#include <ctype.h>
+
+/* based on the ODBCSDK Samplesp.c program */
+
+
+// Includes ----------------------------------------------------------------
+#include  <windows.h>                     // Windows include file
+#include <odbcinst.h>
+#include <commdlg.h>
+#ifdef WIN32
+#include  <windowsx.h>
+#define GetDOSEnvironment       GetEnvironmentStrings
+#endif
+
+//EXTERNALS
+extern short  api_ctl3ddialog;
+extern short api_ctl3dsubclass;
+
+// Prototypes
+VOID pa50toup( UCHAR FAR * );
+VOID SetConfigDlgFocus(HWND hdlg);
+
+// Constants ---------------------------------------------------------------
+#define MIN(x,y)      ((x) < (y) ? (x) : (y))
+
+#define MAXPATHLEN      (FILENAME_MAX+1)           // Max path length
+#define MAXKEYLEN       (255+1)   // Max keyword length
+#define MAXDESC         (255+1)           // Max description length
+#define MAXDSNAME       (255+1)            // Max data source name length
+#define MAXSERVERDB     (255+1)           // Max remote database source name length
+#define MAXUSERNAME       (API_USERID_MAX_LEN+1)          // Max data user name length
+
+const char EMPTYSTR  []= "";
+
+// ODBC.INI keywords
+const char ODBC_INI    []="ODBC.INI";     // ODBC initialization file
+const char INI_KDESC   [] = API_SEC_DESCRIPTION;  
+const char INI_KSERVERDB []= API_SEC_SERVERDB;   
+const char INI_KSERVERNODE []= API_SEC_SERVERNODE;
+const char INI_KODBCUSER []= API_SEC_SYSTEMUSER;
+const char INI_KCASE []= API_SEC_CASESENSITIVE;
+const char INI_KCOMMIT []= API_SEC_AUTOCOMMIT;
+const char INI_SDEFAULT[] = API_SEC_DEFAULT;
+const char INI_KSQLMODE[] = API_SEC_SQLMODE;
+const char INI_KLONVARTRUNCATION[] = API_SEC_LONVARTRUNCATION;
+const char INI_KACTIVESTATEMENTS[] = API_SEC_ACTIVESTATEMENTS;
+const char INI_KSQLTRACEFILE[] = API_SEC_SQLTRACEFILE;
+const char INI_KBLOCKMODUS[] = API_SEC_BLOCKMODUS;
+const char INI_KISOLATIONLEVEL[] = API_SEC_ISOLATIONLEVEL;
+const char INI_KCATALOGCOMMENTS[] = API_SEC_CATALOGCOMMENTS;
+
+// Attribute key indexes (into an array of Attr structs, see below)
+#define KEY_DSN       0
+#define KEY_DESC      1
+#define KEY_SERVERDB  2
+#define KEY_ODBCUSER  3
+#define KEY_CASE  4
+#define KEY_COMMIT  5
+#define KEY_SERVERNODE  6
+#define KEY_SQLMODE 7
+#define KEY_BLOCKMODUS 8
+#define KEY_MAXBLOCKSIZE 9
+#define KEY_LONVARTRUNCATION 10
+#define KEY_ACTIVESTATEMENTS 11
+#define KEY_SQLTRACEFILE 12
+#define KEY_ISOLATIONLEVEL 13
+#define KEY_CATALOGCOMMENTS 14
+
+#define NUMOFKEYS     15                   // Number of keys supported
+
+#define NOT_SET        0x00000000
+#define DSNAME_SET     0x00000001
+#define SERVERDB_SET   0x00000004
+#define SERVERNODE_SET 0x00000008
+#ifndef WIN32
+#define ALL_SET (DSNAME_SET | SERVERDB_SET | SERVERNODE_SET)
+#else
+#define ALL_SET (DSNAME_SET | SERVERDB_SET)
+#endif
+
+#define PA50_RESET 0
+#define PA50_GETFROMINI 1
+// Attribute string look-up table (maps keys to associated indexes)
+static struct {
+  char  szKey[MAXKEYLEN];
+  int   iKey;
+} s_aLookup[] = { API_SEC_DSN,         KEY_DSN,				  
+		  API_SEC_DESC,        KEY_DESC,						  
+                  API_SEC_SYSTEMUSER,  KEY_ODBCUSER,
+                  API_SEC_SERVERDB,    KEY_SERVERDB,					  
+                  API_SEC_SERVERNODE,  KEY_SERVERNODE,
+                  API_SEC_DESCRIPTION, KEY_DESC,					  
+                  API_SEC_CASESENSITIVE, KEY_CASE,
+                  API_SEC_AUTOCOMMIT,  KEY_COMMIT,					  
+		  API_SEC_SQLMODE, KEY_SQLMODE,
+		  API_SEC_BLOCKMODUS, KEY_BLOCKMODUS,
+		  API_SEC_MAXBLOCKSIZE, KEY_MAXBLOCKSIZE,
+		  API_SEC_LONVARTRUNCATION, KEY_LONVARTRUNCATION,
+		  API_SEC_ACTIVESTATEMENTS, KEY_ACTIVESTATEMENTS,
+		  API_SEC_SQLTRACEFILE, KEY_SQLTRACEFILE,
+		  API_SEC_ISOLATIONLEVEL, KEY_ISOLATIONLEVEL,
+		  API_SEC_CATALOGCOMMENTS, KEY_CATALOGCOMMENTS,
+                  "",            0
+                };
+	     
+extern pa08ComboBoxListType pa07SQLModeList[];
+
+extern pa08ComboBoxListType pa07IsolationLevelList[];
+
+extern pa08ComboBoxListType pa07TruncationList[];
+
+typedef struct tagAttr {
+  BOOL  fSupplied;
+  char  szAttr[MAXPATHLEN];
+} Attr, FAR * LPAttr;
+
+#define PA50_SQLINIFILE      "sapdb.ini"
+#define PA50_SQLSECTION      "Environment"
+#define PA50_SQLENTRY        "SQLOPT"
+#define PA50_SQLTRACE_EMPTY  0x00000000
+#define PA50_SQLTRACE_LONG   0x00000001
+#define PA50_SQLTRACE_SHORT  0x00000002
+#define PA50_SQLTRACE_NODATE 0x00000004
+#define PA50_SELECTFILE_TITLE "Select SQL Command Trace File"
+
+typedef struct SQLOptionsStruct {
+   UCHAR FileName[128];
+   SWORD Options;
+   SWORD Count;
+   SWORD Seconds;
+} SQLOptionsType;
+
+SQLOptionsType FAR SQLOptions, FAR *lpSQLOptions;
+
+// Globals -----------------------------------------------------------------
+// NOTE:  All these are used by the dialog procedures
+HGLOBAL s_hModule;                            // Dialog instance handle
+HWND    hwndParent;                       // Parent window handle
+LPCSTR  lpszDrvr;                         // Driver description
+HGLOBAL hglbAttr;                         // Attribute array handle
+LPAttr  aAttr;                            // Attribute array pointer
+BOOL    fNewDSN;                          // New data source flag
+BOOL    fDefault;                         // Default data source flag
+char    szDSN[MAXDSNAME];                 // Original data source name
+OFSTRUCT OfStruct;
+char far CmdMsg[300];
+static BOOL fModified = FALSE;
+
+// Prototypes --------------------------------------------------------------
+BOOL pa50GetTraceFileName (HWND hwnd, UCHAR FAR *szFileName, SWORD cbFileName);
+void pa50InitComboBoxList (HWND hwnd, pa08ComboBoxListType *List);
+void pa50ErrorMessage (UINT no, UCHAR FAR *szStr);
+void pa50SetIDOK (HWND hdlg, int *enable, int mark, int all, int idControl, int idEnable);
+
+void     PASCAL pa07CenterDialog (HWND hdlg);
+BOOL FAR PASCAL ConfigDlgProc (HWND hdlg, unsigned int wMsg, WPARAM wParam, LPARAM lParam);
+BOOL  FAR PASCAL ConfigDbProc (HWND hdlg, unsigned int wMsg, WPARAM wParam, LPARAM lParam);
+BOOL FAR PASCAL ConfigDSN (HWND hwnd, WORD fRequest, LPCSTR lpszRsv, LPCSTR lpszAttributes);
+void     PASCAL ParseAttributes (LPCSTR  lpszAttributes);
+BOOL     PASCAL SetDSNAttributes(HWND    hwnd);
+
+int FAR PASCAL  LibMain         (HANDLE  hInstance,
+#ifdef WIN32
+                                 DWORD   dwReason,
+                                 LPVOID  lpReserved);
+#else
+                                 WORD    wDSize,
+                                 WORD    wHSize,
+                                 LPSTR   lpsz);
+int FAR PASCAL  WEP             (int     nParam);
+#endif
+
+VOID FAR PASCAL GetSQLOptions (SQLOptionsType FAR *SQLOptions);
+
+/* LibMain -----------------------------------------------------------------
+  Description:  DLL init routine (called by LIBENTRY.ASM)
+  Input      :  s_hModule -- Instance handle
+                wDSize - Size of data segment (in words)
+                wHSize - Size of heap (in bytes)
+                lpsz --- Pointer to associated application command line
+  Output     :  TRUE (always)
+--------------------------------------------------------------------------*/
+int FAR PASCAL LibMain(HANDLE hInstance,
+#ifdef WIN32
+                       DWORD   dwReason,
+                       LPVOID  lpReserved)
+#else
+                       WORD   wDSize,
+                       WORD   wHSize,
+                       LPSTR  lpsz)
+#endif
+{
+#ifdef WIN32
+  switch (dwReason) {
+  case DLL_PROCESS_ATTACH:
+#else
+    if (wHSize > 0) 
+      UnlockData(0);
+#endif
+
+    s_hModule = hInstance;
+    api_ctl3ddialog=TRUE;
+    api_ctl3dsubclass=TRUE;
+    pa03InstallCtl3d(s_hModule);
+#ifndef WIN32
+  return TRUE;
+}
+
+
+/* WEP ---------------------------------------------------------------------
+  Description:  DLL exit routine
+  Input      :  nParam -- System exit code
+  Output     :  TRUE (always)
+--------------------------------------------------------------------------*/
+int FAR PASCAL WEP (int nParam)
+{
+#else
+  case DLL_THREAD_ATTACH:
+  case DLL_THREAD_DETACH:
+    break;
+  case DLL_PROCESS_DETACH:
+#endif
+    pa03RemoveCtl3d(s_hModule);
+#ifdef WIN32
+  }
+#endif
+  return TRUE;
+}
+
+BOOL INSTAPI ConfigDriver(HWND hwndParent, 
+						  WORD fRequest, 
+                          LPCSTR lpszDriver,
+				          LPCSTR lpszArgs, 
+                          LPSTR  lpszMsg, 
+                          WORD   cbMsgMax, 
+                          WORD 	*pcbMsgOut)
+{
+  BOOL  fSuccess=TRUE;                         // Success/fail flag
+  return fSuccess;  
+}
+
+/* ConfigDSN ---------------------------------------------------------------
+  Description:  ODBC Setup entry point
+                This entry point is called by the ODBC Installer
+                (see file header for more details)
+  Input      :  hwnd ----------- Parent window handle
+                fRequest ------- Request type (i.e., add, config, or remove)
+                lpszDriver ----- Driver name
+                lpszAttributes - data source attribute string
+  Output     :  TRUE success, FALSE otherwise
+--------------------------------------------------------------------------*/
+BOOL FAR PASCAL ConfigDSN(HWND    hwnd,
+                          WORD    fRequest,
+                          LPCSTR  lpszDriver,
+                          LPCSTR  lpszAttributes)
+{
+  BOOL  fSuccess;                         // Success/fail flag
+
+  // Allocate attribute array
+  hglbAttr = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT,
+                          sizeof(Attr) * NUMOFKEYS);
+  if (!hglbAttr)
+    return FALSE;
+  aAttr = (LPAttr)GlobalLock(hglbAttr);
+
+  // Parse attribute string
+  if (lpszAttributes) ParseAttributes(lpszAttributes);
+
+  // Save original data source name
+  if (aAttr[KEY_DSN].fSupplied)
+    API_STRCPY(szDSN, aAttr[KEY_DSN].szAttr);
+  else
+    szDSN[0] = '\0';
+
+  // Remove data source
+  if (ODBC_REMOVE_DSN == fRequest) {
+    // Fail if no data source name was supplied
+    if (!aAttr[KEY_DSN].fSupplied)
+      fSuccess = FALSE;
+
+    // Otherwise remove data source from ODBC.INI
+    else 
+      fSuccess = SQLRemoveDSNFromIni(aAttr[KEY_DSN].szAttr);
+  }
+
+  // Add or Configure data source
+  else {
+    // Save passed variables for global access (e.g., dialog access)
+    hwndParent = hwnd;
+    lpszDrvr   = lpszDriver;
+    fNewDSN    = (ODBC_ADD_DSN == fRequest);
+    fDefault   = !lstrcmpi(aAttr[KEY_DSN].szAttr, INI_SDEFAULT);
+
+    // Display the appropriate dialog (if parent window handle supplied)
+    if (hwnd) {
+       // Display dialog(s)
+       if (fSuccess = (IDOK == DialogBox(s_hModule, MAKEINTRESOURCE(CONFIGDSN),
+	  hwnd, ConfigDlgProc))) {
+       }
+    }
+    else 
+       if (aAttr[KEY_DSN].fSupplied) {
+	  fSuccess = SetDSNAttributes(hwnd);
+	  SendMessage(HWND_BROADCAST, WM_PAINT, 0, 0);
+       }
+       
+       else
+	  fSuccess = FALSE;
+  }
+
+  GlobalUnlock(hglbAttr);
+  GlobalFree(hglbAttr);
+  return fSuccess;
+}
+
+void pa50SetIDOK(HWND  hdlg, int *enable, int mark, int all, int idControl, int idEnable)
+{
+   SQLWCHAR lpsz[2];
+   int xx;
+   if ( GetDlgItemTextW(hdlg, idControl, lpsz, sizeof(lpsz)/sizeof(SQLWCHAR)))
+      *enable |= mark;
+   else
+      *enable &= (-mark-1);
+   if (*enable == all)
+      xx = TRUE;
+   else
+      xx = FALSE;
+   EnableWindow(GetDlgItem(hdlg, idEnable), xx);
+}
+
+VOID FAR PASCAL GetSQLOptions(SQLOptionsType FAR *SQLOptions)
+{
+   UCHAR LocalStr[256];
+   UCHAR FAR *p;
+   int ret;
+   API_STRCPY(SQLOptions->FileName, "sqltrace.pct");
+   SQLOptions->Count   = -1;
+   SQLOptions->Seconds = 0;
+   ret = SQLGetPrivateProfileString(PA50_SQLSECTION, PA50_SQLENTRY, EMPTYSTR,
+      LocalStr, sizeof(LocalStr), PA50_SQLINIFILE);
+   p = LocalStr;
+   for(;*p != '\0'; p++) {
+      switch(*p) {
+	 case '/' : {}
+	 case '-' : {
+	    p++;
+	    switch (*p) {
+	       case 'X' : {
+		  SQLOptions->Options   |= PA50_SQLTRACE_LONG;
+		  break;
+	       }
+	       case 'T' : {
+		  SQLOptions->Options   |= PA50_SQLTRACE_SHORT;
+		  break;
+	       }
+	       case 'N' : {
+		  SQLOptions->Options   |= PA50_SQLTRACE_NODATE;
+		  break;
+	       }
+	       case 'Y' : {
+		  while(isspace(*p))
+		     p++;
+		  SQLOptions->Count = atoi(p);
+		  break;
+	       }
+	       case 'L' : {
+		  while(isspace(*p))
+		     p++;
+		  SQLOptions->Seconds = atoi(p);
+		  break;
+	       }
+	       case 'F' : {
+		  UCHAR *e;
+		  while(isspace(*p))
+		     p++;
+		  e = p;
+		  while(!isspace(*p) && *p != '\0')
+		     p++;
+		  if (p-e > 0)
+		     API_STRNCPY(SQLOptions->FileName, e, p-e);
+		  break;
+	       }
+	    }
+	    break;
+	 }
+      }
+   }
+   return;
+}
+
+/* ConfigDlgProc -----------------------------------------------------------
+  Description:  Manage add data source name dialog
+  Input      :  hdlg --- Dialog window handle
+                wMsg --- Message
+                wParam - Message parameter
+                lParam - Message parameter
+  Output     :  TRUE if message processed, FALSE otherwise
+--------------------------------------------------------------------------*/
+BOOL  FAR PASCAL ConfigDlgProc(HWND  hdlg,
+                               unsigned int wMsg,
+                               WPARAM wParam,
+                               LPARAM lParam)
+{
+#ifdef WIN32
+  WPARAM wParm = LOWORD(wParam);
+  LPARAM lParm = HIWORD(wParam);
+#else
+  WPARAM wParm = wParam;
+  LPARAM lParm = HIWORD(lParam);
+#endif
+  static int idok_enable = NOT_SET;
+/*  pa03Set3dDialog(hdlg, wMsg, wParam, lParam); */
+  switch (wMsg) {
+    // Initialize the dialog
+    case WM_INITDIALOG: {
+      UCHAR Msg[512];     
+      LPCSTR  lpszDSN;
+      LPCSTR  lpszServerDB;
+      LPCSTR  lpszServerNode;      
+      pa07CenterDialog(hdlg);                 // Center dialog
+      lpszDSN = aAttr[KEY_DSN].szAttr;
+      lpszServerDB = aAttr[KEY_SERVERDB].szAttr;
+      lpszServerNode = aAttr[KEY_SERVERNODE].szAttr;
+            
+      // Initialize dialog fields
+      // NOTE: Values supplied in the attribute string will always
+      //       override settings in ODBC.INI
+      
+      API_SPRINTF(Msg, API_PROD_NAME" ODBC (%s)", lpszDSN);
+      SetWindowText(hdlg, Msg);
+
+      SetDlgItemText(hdlg, IDC_DSNAME, lpszDSN);      
+      pa50SetIDOK(hdlg, &idok_enable, DSNAME_SET, ALL_SET, IDC_DSNAME, IDOK);
+      
+      if (!aAttr[KEY_DESC].fSupplied)
+         SQLGetPrivateProfileString(lpszDSN, INI_KDESC, EMPTYSTR,
+             aAttr[KEY_DESC].szAttr, sizeof(aAttr[KEY_DESC].szAttr), ODBC_INI);
+			     
+      SetDlgItemText(hdlg, IDC_DESC, aAttr[KEY_DESC].szAttr);
+
+      if (!aAttr[KEY_SERVERDB].fSupplied)
+        SQLGetPrivateProfileString(lpszDSN, INI_KSERVERDB, EMPTYSTR, 
+	    aAttr[KEY_SERVERDB].szAttr, sizeof(aAttr[KEY_SERVERDB].szAttr), ODBC_INI);
+      SetDlgItemText(hdlg, IDC_SERVERDB, lpszServerDB);
+      pa50SetIDOK(hdlg, &idok_enable, SERVERDB_SET, ALL_SET, IDC_SERVERDB, IDOK);
+
+      if (!aAttr[KEY_SERVERNODE].fSupplied)
+	 SQLGetPrivateProfileString(lpszDSN, INI_KSERVERNODE, EMPTYSTR,
+             aAttr[KEY_SERVERNODE].szAttr, sizeof(aAttr[KEY_SERVERNODE].szAttr), ODBC_INI);
+      SetDlgItemText(hdlg, IDC_SERVERNODE, lpszServerNode);
+#ifndef WIN32      
+      pa50SetIDOK(hdlg, &idok_enable, SERVERNODE_SET, ALL_SET, IDC_SERVERNODE, IDOK);
+#endif   
+
+      if (fDefault) {
+        EnableWindow(GetDlgItem(hdlg, IDC_DSNAME), FALSE);
+        EnableWindow(GetDlgItem(hdlg, IDC_DSNAMETEXT), FALSE);
+      }
+      else 
+	 SendDlgItemMessage(hdlg, IDC_DSNAME, EM_LIMITTEXT, (WPARAM)(MAXDSNAME-1), 0L);
+      SendDlgItemMessage(hdlg, IDC_SERVERDB, EM_LIMITTEXT, (WPARAM)(MAXSERVERDB-1), 0L);
+      SendDlgItemMessage(hdlg, IDC_DESC, EM_LIMITTEXT, (WPARAM)(MAXDESC-1), 0L);
+      SendDlgItemMessage(hdlg, IDC_SERVERNODE, EM_LIMITTEXT, (WPARAM)(MAXSERVERDB-1), 0L);
+      SetConfigDlgFocus(hdlg);
+      fModified = FALSE;
+      return(FALSE);
+    }
+
+    // Process buttons
+    case WM_COMMAND:
+      switch (wParm) {
+        // Ensure the OK button is enabled only when a data source name
+        // is entered
+        case IDC_DSNAME: {
+          if (lParm == EN_CHANGE) {
+            // Enable/disable the OK button
+            pa50SetIDOK(hdlg, &idok_enable, DSNAME_SET, ALL_SET, IDC_DSNAME, IDOK);
+	    return TRUE;
+	  }
+          break;
+       }
+
+       case IDC_SERVERNODE: {
+#ifndef WIN32
+	  if (lParm == EN_CHANGE) {
+	     pa50SetIDOK(hdlg, &idok_enable, SERVERNODE_SET, ALL_SET, IDC_SERVERNODE, IDOK);		
+	     return TRUE;
+	  }
+#endif	  
+	  break; 
+       }
+
+       case IDC_SERVERDB: {
+	  if (lParm == EN_CHANGE) {
+	     pa50SetIDOK(hdlg, &idok_enable, SERVERDB_SET, ALL_SET, IDC_SERVERDB, IDOK);
+	     return TRUE;
+	  }	
+	  break;
+       }
+       case IDOK: {
+	  if (!fDefault)
+	     GetDlgItemText(hdlg, IDC_DSNAME, aAttr[KEY_DSN].szAttr,
+		sizeof(aAttr[KEY_DSN].szAttr));
+	     GetDlgItemText(hdlg, IDC_DESC, aAttr[KEY_DESC].szAttr,
+		sizeof(aAttr[KEY_DESC].szAttr));
+	     GetDlgItemText(hdlg, IDC_SERVERDB,	aAttr[KEY_SERVERDB].szAttr,
+		sizeof(aAttr[KEY_SERVERDB].szAttr));
+	     GetDlgItemText(hdlg, IDC_SERVERNODE, aAttr[KEY_SERVERNODE].szAttr,
+		sizeof(aAttr[KEY_SERVERNODE].szAttr));
+	     SetDSNAttributes(hdlg);
+	  } 
+      case IDCANCEL: {
+	 EndDialog(hdlg, wParam);
+	 return TRUE;
+      }
+      case IDC_INSTALLSYSOPT: {
+          DialogBox(s_hModule, MAKEINTRESOURCE(CONFIGSYSTEM),
+	     hdlg, ConfigDbProc);
+       }
+    }
+ }
+
+  // Message not processed
+  return FALSE;
+}
+
+VOID SetConfigDlgFocus(HWND hdlg)
+{
+   int idControl = IDOK;
+   if (aAttr[KEY_DSN].szAttr[0] == '\0')
+      idControl = IDC_DSNAME;
+   else
+      if (aAttr[KEY_SERVERDB].szAttr[0] == '\0')
+	 idControl = IDC_SERVERDB;
+      else
+	 if (aAttr[KEY_SERVERNODE].szAttr[0] == '\0')
+	    idControl = IDC_SERVERNODE;
+   SetFocus(GetDlgItem(hdlg, idControl));
+}
+
+void InitDialog(HWND hwnd);
+void InitDialog(HWND hwnd)
+{
+   HWND hWndModeCombo, hWndTruncationCombo, hWndIsolationCombo;
+   hWndModeCombo = GetDlgItem(hwnd, IDC_SQLMODE);
+   hWndIsolationCombo = GetDlgItem(hwnd, IDC_ISOLATIONLEVEL);
+   hWndTruncationCombo = GetDlgItem(hwnd, IDC_TRUNCATELONG);
+   pa50InitComboBoxList(hWndModeCombo, pa07SQLModeList);
+   pa50InitComboBoxList(hWndIsolationCombo, pa07IsolationLevelList);
+   pa50InitComboBoxList(hWndTruncationCombo, pa07TruncationList);
+   CheckDlgButton(hwnd, IDC_SQLTRACE, 0);
+#ifdef IDC_AUTOCOMMIT   
+   CheckDlgButton(hwnd, IDC_AUTOCOMMIT, 1);
+#endif
+   return;
+}
+
+void pa50ErrorMessage(UINT no, UCHAR FAR *szStr)
+{
+   char  szBuf[MAXPATHLEN];
+   char  szMsg[MAXPATHLEN];
+   LPCSTR  lpszDSN;
+   lpszDSN = aAttr[KEY_DSN].szAttr;
+   LoadString(s_hModule, no, szBuf, sizeof(szBuf));
+   wsprintf(szMsg, szBuf, szStr, lpszDSN);
+   LoadString(s_hModule, IDS_MSGTITLE, szBuf, sizeof(szBuf));
+   MessageBox(0, szMsg, szBuf, MB_ICONEXCLAMATION | MB_OK);
+}
+
+void SetIniValues(HWND hwnd, SWORD fOption)
+{
+   LPCSTR  lpszDSN;
+   HWND hWndModeCombo, hWndTruncationCombo, hWndIsolationCombo;
+   lpszDSN = aAttr[KEY_DSN].szAttr;
+   hWndModeCombo = GetDlgItem(hwnd, IDC_SQLMODE);
+   hWndIsolationCombo = GetDlgItem(hwnd, IDC_ISOLATIONLEVEL);
+   hWndTruncationCombo = GetDlgItem(hwnd, IDC_TRUNCATELONG);
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KSQLMODE, EMPTYSTR,
+	 aAttr[KEY_SQLMODE].szAttr, sizeof(aAttr[KEY_SQLMODE].szAttr), ODBC_INI);
+   if (aAttr[KEY_SQLMODE].szAttr[0] != '\0') {
+      if (CB_ERR == SendMessage(hWndModeCombo, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)aAttr[KEY_SQLMODE].szAttr)) {
+	 pa50ErrorMessage(IDS_INVVAL, (UCHAR FAR*)INI_KSQLMODE);
+      }
+   }
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KISOLATIONLEVEL, EMPTYSTR,
+	 aAttr[KEY_ISOLATIONLEVEL].szAttr, sizeof(aAttr[KEY_ISOLATIONLEVEL].szAttr), ODBC_INI);
+   if (aAttr[KEY_ISOLATIONLEVEL].szAttr[0] != '\0') {
+      if (isdigit(aAttr[KEY_ISOLATIONLEVEL].szAttr[0])) {
+	 int cbValue = atoi(aAttr[KEY_ISOLATIONLEVEL].szAttr);
+	 if (errno == ERANGE) {
+	    errno = 0;
+	    aAttr[KEY_ISOLATIONLEVEL].szAttr[0] = '\0';
+	 }
+	 else {
+	    pa08ComboBoxListType *p = pa07IsolationLevelList;
+	    aAttr[KEY_ISOLATIONLEVEL].szAttr[0] = '\0';
+	    for(; p->Item[0] != '\0'; p++) {
+	       if (cbValue == p->ItemID) {
+		  API_STRCPY(aAttr[KEY_ISOLATIONLEVEL].szAttr, p->Item);
+		  break;	       
+	       }
+	    }
+	 }
+      }
+      if (CB_ERR == SendMessage(hWndIsolationCombo, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)aAttr[KEY_ISOLATIONLEVEL].szAttr))
+	 pa50ErrorMessage(IDS_INVVAL, (UCHAR FAR*)INI_KISOLATIONLEVEL);
+   }
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KLONVARTRUNCATION, EMPTYSTR,
+	 aAttr[KEY_LONVARTRUNCATION].szAttr, sizeof(aAttr[KEY_LONVARTRUNCATION].szAttr), ODBC_INI);
+   if (aAttr[KEY_LONVARTRUNCATION].szAttr[0] != '\0') {
+      if (CB_ERR == SendMessage(hWndTruncationCombo, CB_SELECTSTRING, (WPARAM)-1, (LPARAM)aAttr[KEY_LONVARTRUNCATION].szAttr)) {	
+	 if (isdigit(aAttr[KEY_LONVARTRUNCATION].szAttr[0]) ||
+	    (aAttr[KEY_LONVARTRUNCATION].szAttr[0] == '-' && isdigit(aAttr[KEY_LONVARTRUNCATION].szAttr[1])) ) {
+	    SDWORD cbValue = atol(aAttr[KEY_LONVARTRUNCATION].szAttr);
+	    if (errno == ERANGE) {
+	       errno = 0;
+	       aAttr[KEY_LONVARTRUNCATION].szAttr[0] = '\0';
+	    }
+	    else {
+	       if(cbValue < 0) {
+		  pa08ComboBoxListType *p = pa07TruncationList;
+		  aAttr[KEY_LONVARTRUNCATION].szAttr[0] = '\0';
+		  for(; p->Item[0] != '\0'; p++) {
+		     if (cbValue == p->ItemID) {
+			API_STRCPY(aAttr[KEY_LONVARTRUNCATION].szAttr, p->Item);
+			break;	       
+		     }
+		  }
+	       }
+	    }
+	    if (aAttr[KEY_LONVARTRUNCATION].szAttr[0] == '\0')
+	       pa50ErrorMessage(IDS_INVVAL, (UCHAR FAR*)INI_KLONVARTRUNCATION);	    		     
+	    else {
+	       LRESULT index = SendMessage(hWndTruncationCombo, CB_ADDSTRING, 0, (LPARAM)aAttr[KEY_LONVARTRUNCATION].szAttr);
+	       if (index != CB_ERR)
+		  SendMessage(hWndTruncationCombo, CB_SETCURSEL, (WPARAM)index, 0);
+	    }
+	 }
+	 else 
+	    pa50ErrorMessage(IDS_INVVAL, (UCHAR FAR*)INI_KLONVARTRUNCATION);	    		     
+      }
+   }
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KSQLTRACEFILE, EMPTYSTR,
+	 aAttr[KEY_SQLTRACEFILE].szAttr, sizeof(aAttr[KEY_SQLTRACEFILE].szAttr), ODBC_INI);
+   if (aAttr[KEY_SQLTRACEFILE].szAttr[0] != '\0') {
+      SetDlgItemText(hwnd, IDC_SQLTRACEFILENAME, aAttr[KEY_SQLTRACEFILE].szAttr);
+      CheckDlgButton(hwnd, IDC_SQLTRACE, 1);
+   }
+#ifdef IDC_AUTOCOMMIT   
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KCOMMIT, EMPTYSTR,
+	 aAttr[KEY_COMMIT].szAttr, sizeof(aAttr[KEY_COMMIT].szAttr), ODBC_INI);
+   switch(aAttr[KEY_COMMIT].szAttr[0]) {
+      case '\0': {}
+      case 'y': {}
+      case 'Y' : {
+	 CheckDlgButton(hwnd, IDC_AUTOCOMMIT, 1);
+	 break;
+      }
+      default: {
+	 CheckDlgButton(hwnd, IDC_AUTOCOMMIT, 0);
+	 break;
+      }
+   }
+#endif   
+   if (fOption == PA50_GETFROMINI)
+      SQLGetPrivateProfileString(lpszDSN, INI_KCATALOGCOMMENTS, EMPTYSTR,
+	 aAttr[KEY_CATALOGCOMMENTS].szAttr, sizeof(aAttr[KEY_CATALOGCOMMENTS].szAttr), ODBC_INI);
+   switch(aAttr[KEY_CATALOGCOMMENTS].szAttr[0]) {
+      case '\0': {}
+      case 'n': {}
+      case 'N' : {
+	 CheckDlgButton(hwnd, IDC_CATALOGCOMMENTS, 0);
+	 break;
+      }
+      default: {
+	 CheckDlgButton(hwnd, IDC_CATALOGCOMMENTS, 1);
+	 break;
+      }
+   }
+   return;
+}
+
+#define PA50_GETCOMBO(hwnd, INI, KEY) \
+index = (WPARAM)SendMessage(hwnd, CB_GETCURSEL, 0, 0);\
+if (index == CB_ERR) {\
+pa50ErrorMessage(IDS_INVFIELD, (UCHAR FAR*)INI);\
+SetFocus(hwnd);\
+return FALSE;\
+}\
+SendMessage(hwnd, CB_GETLBTEXT, index, (LPARAM)aAttr[KEY].szAttr)
+
+BOOL SaveValues(HWND hwnd)
+{
+   LPCSTR  lpszDSN;
+   HWND hWndModeCombo, hWndTruncationCombo, hWndIsolationCombo;
+   WPARAM index;
+   lpszDSN = aAttr[KEY_DSN].szAttr;
+   hWndModeCombo = GetDlgItem(hwnd, IDC_SQLMODE);
+   hWndIsolationCombo = GetDlgItem(hwnd, IDC_ISOLATIONLEVEL);
+   hWndTruncationCombo = GetDlgItem(hwnd, IDC_TRUNCATELONG);
+
+   PA50_GETCOMBO(hWndModeCombo, INI_KSQLMODE, KEY_SQLMODE);
+   
+   PA50_GETCOMBO(hWndIsolationCombo, INI_KISOLATIONLEVEL, KEY_ISOLATIONLEVEL);
+
+   PA50_GETCOMBO(hWndTruncationCombo, INI_KLONVARTRUNCATION, KEY_LONVARTRUNCATION);
+   
+   if (IsDlgButtonChecked(hwnd, IDC_SQLTRACE))
+      GetDlgItemText(hwnd, IDC_SQLTRACEFILENAME, aAttr[KEY_SQLTRACEFILE].szAttr, sizeof(aAttr[KEY_SQLTRACEFILE].szAttr));
+   else
+      aAttr[KEY_SQLTRACEFILE].szAttr[0] = '\0';
+   
+#ifdef IDC_AUTOCOMMIT      
+   if (!IsDlgButtonChecked(hwnd, IDC_AUTOCOMMIT))
+      API_STRCPY(aAttr[KEY_COMMIT].szAttr, "No");
+   else
+      aAttr[KEY_COMMIT].szAttr[0] = '\0';
+#endif   
+
+   if (IsDlgButtonChecked(hwnd, IDC_CATALOGCOMMENTS))
+      API_STRCPY(aAttr[KEY_CATALOGCOMMENTS].szAttr, "Yes");
+   else
+      aAttr[KEY_CATALOGCOMMENTS].szAttr[0] = '\0';
+   
+   
+   return TRUE;
+}
+
+BOOL  FAR PASCAL ConfigDbProc(HWND  hdlg,
+unsigned int  wMsg,
+WPARAM wParam,
+LPARAM lParam)
+{
+#ifdef WIN32
+   WPARAM wParm = LOWORD(wParam);
+   LPARAM lParm = HIWORD(wParam);
+#else
+   WPARAM wParm = wParam;
+   LPARAM lParm = HIWORD(lParam);
+#endif
+/*   pa03Set3dDialog(hdlg, wMsg, wParm, lParm); */
+   switch (wMsg) {
+      case WM_INITDIALOG: {
+	UCHAR Msg[512];     
+	API_SPRINTF(Msg, API_PROD_NAME" ODBC Advanced Setup");
+	SetWindowText(hdlg, Msg);
+
+	 pa07CenterDialog(hdlg);
+	 InitDialog(hdlg);
+	 if (fModified)	    
+	    SetIniValues(hdlg, PA50_RESET);
+	 else 
+	    SetIniValues(hdlg, PA50_GETFROMINI);
+	 return TRUE;
+      }    
+      case WM_COMMAND: {
+	 switch (wParm) {	    
+	    case IDC_TRUNCATELONG: {
+	       if (lParm == CBN_KILLFOCUS) {
+                  char  szBuf[MAXPATHLEN];    /* following three int casts: ia 64 cast */
+		  LRESULT dwIndex = SendDlgItemMessage(hdlg, (int)wParm, WM_GETTEXT, sizeof(szBuf), (LPARAM)szBuf);
+		  LRESULT index = SendDlgItemMessage(hdlg, (int)wParm, CB_ADDSTRING, 0, (LPARAM)szBuf);
+		  if (index != CB_ERR)
+		     SendDlgItemMessage(hdlg, (int)wParm, CB_SETCURSEL, (WPARAM)index, 0);
+	       }
+	       break;
+	    }
+	    case IDOK: {
+	       if (SaveValues(hdlg) != TRUE)
+		  break;	       
+	       fModified = TRUE;
+	    }
+	    case IDCANCEL: {
+	       wParm = IDOK;	       
+	       EndDialog(hdlg, wParm);
+	       return TRUE;
+	    }
+	    case IDRESET: {
+	       InitDialog(hdlg);
+	       break;
+	    }
+	    case IDC_SELECTFILE: {
+	       UCHAR szFileName[256];
+	       GetDlgItemText(hdlg, IDC_SQLTRACEFILENAME, szFileName, sizeof(szFileName));
+	       if(pa50GetTraceFileName(hdlg, szFileName, sizeof(szFileName))) {
+		  SetDlgItemText(hdlg, IDC_SQLTRACEFILENAME, szFileName);
+		  CheckDlgButton(hdlg, IDC_SQLTRACE, 1);
+	       }
+	       break;
+	    }
+	 }
+	 break;
+      }
+   } /* end switch messages */
+   return FALSE;
+}
+
+void pa50InitComboBoxList(HWND hwnd, pa08ComboBoxListType *List)
+{
+   pa08ComboBoxListType *p;
+   WPARAM index;
+   for(p = List, index=0; p->Item[0] != '\0'; p++, index++) {
+      SendMessage(hwnd, CB_ADDSTRING, 0, (LPARAM)p->Item);
+      if (p->Default) {
+	 SendMessage(hwnd, CB_SETCURSEL, index, 0);
+      }
+   }
+}
+
+/* ParseAttributes ---------------------------------------------------------
+  Description:  Parse attribute string moving values into the aAttr array
+  Input      :  lpszAttributes - Pointer to attribute string
+  Output     :  None (global aAttr normally updated)
+--------------------------------------------------------------------------*/
+void PASCAL ParseAttributes(LPCSTR lpszAttributes)
+{
+  LPCSTR  lpsz;
+  LPCSTR  lpszStart;
+  char    aszKey[MAXKEYLEN];
+  short   iElement;
+  long    cbKey;
+
+  for (lpsz=lpszAttributes; *lpsz; lpsz++) {
+    //  Extract key name (e.g., DSN), it must be terminated by an equals
+    lpszStart = lpsz;
+    for (;; lpsz++)
+      if (!*lpsz)            return;      // No key was found
+      else if (*lpsz == '=') break;       // Valid key found
+
+    // Determine the key's index in the key table (-1 if not found)
+    iElement = -1;
+    cbKey    = (long) (lpsz - lpszStart);
+    if (cbKey < sizeof(aszKey)) {
+      register short  j;
+
+      memcpy(aszKey, lpszStart, cbKey);
+      aszKey[cbKey] = '\0';
+      for (j = 0; *s_aLookup[j].szKey; j++)
+        if (!lstrcmpi(s_aLookup[j].szKey, aszKey)) {
+          iElement = s_aLookup[j].iKey;
+          break;
+        }
+    }
+
+    // Locate end of key value
+    lpszStart = ++lpsz;
+    for (; *lpsz; lpsz++);
+
+    // Save value if key is known
+    // NOTE: This code assumes the szAttr buffers in aAttr have been
+    //       zero initialized
+    if (iElement >= 0) {
+      aAttr[iElement].fSupplied = TRUE;
+      _fmemcpy(aAttr[iElement].szAttr,
+               lpszStart,
+               MIN(lpsz-lpszStart+1, sizeof(aAttr[0].szAttr)-1));
+    }
+  }
+  return;
+}
+
+
+/* SetDSNAttributes --------------------------------------------------------
+  Description:  Write data source attributes to ODBC.INI
+  Input      :  hwnd - Parent window handle (plus globals)
+  Output     :  TRUE if successful, FALSE otherwise
+--------------------------------------------------------------------------*/
+BOOL PASCAL SetDSNAttributes(HWND hwnd)
+{
+  LPCSTR  lpszDSN;                        // Pointer to data source name
+
+  lpszDSN = aAttr[KEY_DSN].szAttr;
+
+  // Validate arguments
+  if (fNewDSN && !*aAttr[KEY_DSN].szAttr)
+    return FALSE;
+
+  // Write the data source name
+  if (!SQLWriteDSNToIni(lpszDSN, lpszDrvr)) {
+    if (hwnd) {
+       char  szBuf[MAXPATHLEN];
+       char  szMsg[MAXPATHLEN];       
+       LoadString(s_hModule, IDS_BADDSN, szBuf, sizeof(szBuf));
+       wsprintf(szMsg, szBuf, lpszDSN);
+       LoadString(s_hModule, IDS_MSGTITLE, szBuf, sizeof(szBuf));
+       MessageBox(hwnd, szMsg, szBuf, MB_ICONEXCLAMATION | MB_OK);
+    }
+    return FALSE;
+  }
+
+  // Update ODBC.INI
+  // Save the value if the data source is new, if it was edited, or if
+  // it was explicitly supplied
+#define PA50_WRITEPMACRO(KEY, INI) \
+if (hwndParent || aAttr[KEY].fSupplied )\
+SQLWritePrivateProfileString(lpszDSN, INI,\
+(aAttr[KEY].szAttr[0] == '\0' ? NULL : aAttr[KEY].szAttr),  ODBC_INI)
+    
+   PA50_WRITEPMACRO(KEY_DESC, INI_KDESC);
+   PA50_WRITEPMACRO(KEY_SERVERDB, INI_KSERVERDB);
+   PA50_WRITEPMACRO(KEY_SERVERNODE, INI_KSERVERNODE);
+   PA50_WRITEPMACRO(KEY_DESC, INI_KDESC);
+   PA50_WRITEPMACRO(KEY_SQLMODE, INI_KSQLMODE);
+   PA50_WRITEPMACRO(KEY_SQLTRACEFILE, INI_KSQLTRACEFILE);
+   PA50_WRITEPMACRO(KEY_ISOLATIONLEVEL, INI_KISOLATIONLEVEL);
+   PA50_WRITEPMACRO(KEY_LONVARTRUNCATION, INI_KLONVARTRUNCATION);
+   PA50_WRITEPMACRO(KEY_COMMIT, INI_KCOMMIT);
+   PA50_WRITEPMACRO(KEY_CATALOGCOMMENTS, INI_KCATALOGCOMMENTS);
+
+    /* remove this entrys from inifile */
+   if (hwndParent || aAttr[KEY_CASE].fSupplied )
+      SQLWritePrivateProfileString(lpszDSN, INI_KCASE, NULL, ODBC_INI);
+
+  if (hwndParent || aAttr[KEY_ODBCUSER].fSupplied )
+    SQLWritePrivateProfileString(lpszDSN, INI_KODBCUSER,
+       NULL, ODBC_INI);
+        
+  // If the data source name has changed, remove the old name
+  if (aAttr[KEY_DSN].fSupplied && lstrcmpi(szDSN, aAttr[KEY_DSN].szAttr)) {
+    SQLRemoveDSNFromIni(szDSN);
+  }
+  return TRUE;
+}
+
+/* pa50toup() - convert a C string to all upper case */
+
+VOID pa50toup( UCHAR FAR * string_ptr )
+{
+  UWORD i;
+
+  if (string_ptr != NULL) {
+    for (i=0; i < (UWORD)API_STRLEN(string_ptr); i++) {
+      *(string_ptr + i) = (UCHAR)toupper( *(string_ptr + i) );
+    }
+
+  }
+
+  return;
+
+}
+
+BOOL pa50GetTraceFileName(HWND hwnd, UCHAR FAR *szFileName, SWORD cbFileName)
+{
+   OPENFILENAME ofn;
+   UCHAR szDirName[256];
+   UCHAR szFile[256], szFileTitle[256];
+   UDWORD i, cbString;
+   char chReplace;
+   UCHAR szFilter[256];
+   BOOL ret;
+   LPSTR env;
+   szDirName[0] = '\0';
+   env = (LPSTR)GetDOSEnvironment();
+   while (*env != '\0') {
+      if (!API_MEMCMP(env, "DBROOT=", sizeof("DBROOT=")-1)) {
+	 API_STRCPY(szDirName, env+sizeof("DBROOT=")-1);
+	 API_STRCAT(szDirName, "\\PROT");
+      }
+      env += API_STRLEN(env)+1;
+   }
+   if (szDirName[0] == '\0')
+      GetWindowsDirectory(szDirName, sizeof(szDirName));
+   API_STRCPY(szFile, szFileName);
+   API_STRCPY(szFilter, "Trace Files (*.log;*.pct)|*.log;*.pct|All Files (*.*)|*.*|");
+   cbString = (UDWORD) API_STRLEN(szFilter);
+   
+   chReplace = szFilter[cbString - 1]; /* retrieve wildcard */ 
+   for (i = 0; szFilter[i] != '\0'; i++) { 
+      if (szFilter[i] == chReplace) 
+	 szFilter[i] = '\0';	
+   }
+
+   API_MEMSET(&ofn, 0, sizeof(OPENFILENAME)); 
+      
+   ofn.lStructSize = sizeof(OPENFILENAME);
+   ofn.hwndOwner = hwnd;
+   ofn.lpstrFilter = szFilter;
+   ofn.nFilterIndex = 1;
+   ofn.lpstrFile= szFile;
+   ofn.nMaxFile = sizeof(szFile);
+   ofn.lpstrFileTitle = szFileTitle;
+   ofn.nMaxFileTitle = sizeof(szFileTitle);
+   ofn.lpstrInitialDir = szDirName;
+   ofn.lpstrTitle = PA50_SELECTFILE_TITLE;
+   ofn.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+   if (ret = GetOpenFileName(&ofn))
+      API_STRNCPY(szFileName, ofn.lpstrFile, cbFileName);
+   return (ret);
+}
+
+#ifdef WIN
+void PASCAL s40gbyte ( UCHAR FAR * string_ptr, SWORD pos, 
+SWORD len, UCHAR FAR *hex_ptr, SWORD dpos, SWORD dlen, UCHAR FAR *truncated)
+{
+   return;
+}
+#endif
+/* end of VPA50WC */
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

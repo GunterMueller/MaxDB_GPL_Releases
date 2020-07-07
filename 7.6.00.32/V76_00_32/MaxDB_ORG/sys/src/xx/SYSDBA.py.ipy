@@ -1,0 +1,1156 @@
+#
+# =====================================================
+# @(#) SYSDBA                     7.2        1999-07-29
+# =====================================================
+# Changes in  7.2:
+#        - EXTRACT_EXCEPTIONS not installed
+#        - UTILITY_COMMANDS not installed
+#        - no questioning on UNICODE parameter
+#        - switched diagnose monitor/analyze off (PTS 1105556)
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from string import upper
+from installib import * 
+
+def createPubSynonym (session, synonym):
+    synonym = upper (synonym)
+    rc = sqlRC (session, """
+            SELECT tablename FROM sysdd.synonyms
+            WHERE synonymowner = USER
+            AND synonymname  = '%s'""" % synonym) 
+#   print rc, synonym
+    if rc == 100:
+        stopIfSqlNotOK (session, 'create public synonym "%s" for sysdba."%s"'
+            % (synonym, synonym))
+
+def install (session,options):
+    """Installing SYSDBA tables
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+   
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_CACHES')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_LOAD')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_LOCK')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_LOG')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_LONG')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_PAGES')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_ROW')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_TRANS')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_VTRACE')
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_SNAPSHOT')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MONITOR_SNAPSHOT')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MONITOR_VTRACE')
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_SNAPSHOT')
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW MON_SERVERDB')
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_SERVERDB')
+
+    stopIfSqlNotErr (session, -6006, 'CREATE ROLE DBAROLE') 
+    
+    stopIfSqlNotErr (session, -4004, 'GRANT SELECT ON SYSDBA.SYSUPGRADEHISTORY TO DBAROLE') 
+
+    stopIfSqlNotErr (session, -6006, 
+        """CREATE TRIGGER TUPD FOR SYSCATALOG.SCHEMAPRIVILEGES AFTER UPDATE EXECUTE
+        ( IF NOT CREATEIN AND NOT ALTERIN AND NOT DROPIN
+        THEN
+            DELETE SYSCATALOG.SCHEMAPRIVILEGES WHERE SCHEMAID = :SCHEMAID AND GRANTEE=:GRANTEE;
+            IF $RC <> 0 THEN STOP ($RC, 'SCHEMAPRIVILEGES TRIGGER FAILED');
+        )""")
+         
+    rc = sqlRC (session, 'DROP TABLE SYS_UPDSTATISTICS')
+    if rc != 0 and rc != -8015 and rc != -4004 :
+        stopInstall(session, rc)
+
+
+    loaderCmd (session, 'DIAGNOSE MONITOR PARSEID OFF')
+    loaderCmd (session, 'DIAGNOSE MONITOR OFF')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSPARSEID')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSMONITOR')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSMONDATA')
+
+    stopIfSqlNotOK (session, 
+        """CREATE TABLE SYSPARSEID
+        ("PARSEID" CHAR(12) BYTE,
+         LINKAGE FIXED(1),
+         SELECT_PARSEID CHAR(12) BYTE,
+         OWNER SYSID, 
+         SQL_STATEMENT SYSSTATEMENT, 
+         JOB SYSJOB, 
+         LINE FIXED(10), 
+         CONSTRAINT  SYSP_PK 
+         PRIMARY KEY("PARSEID",LINKAGE)) INTERNAL """)
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,DELETE ON SYSPARSEID TO PUBLIC')
+
+    stopIfSqlNotOK (session, 
+        """CREATE TABLE SYSMONITOR
+        (SYSK CHAR(8) BYTE,
+         LINKAGE CHAR(1) BYTE, 
+         "PARSEID" CHAR(12) BYTE, 
+         ROWS_READ FIXED(20), 
+         ROWS_QUAL FIXED(20), 
+         VIRTUAL_READS FIXED(20),  
+         SUBREQUESTS FIXED(20),
+         STRATEGY CHAR(40) ASCII,
+         RUNTIME FIXED(20,6),
+         VWAITS FIXED(20),
+         VSUSPENDS FIXED(20), 
+         PHYSICAL_IO FIXED(20),
+         ROWS_FETCHED FIXED (20), 
+         FETCH_CALLS FIXED (20), 
+         ROOT1 FIXED(10), 
+         ROOT2 FIXED(10),
+         ROOT3 FIXED(10),
+         ROOT4 FIXED(10),
+         ROOT5 FIXED(10),
+         ROOT6 FIXED(10),      
+         RESULT_COPIED CHAR(3) ASCII,
+         DATETIME TIMESTAMP, 
+         TERMID CHAR(18) ASCII, 
+         USERNAME SYSID,   
+         APPL_PROCESS FIXED(10), 
+         APPL_NODE CHAR(64) ASCII, 
+         CONSTRAINT SYSMONITOR_PK 
+         PRIMARY KEY (SYSK, LINKAGE)) INTERNAL """) 
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,DELETE ON SYSMONITOR TO PUBLIC')
+
+    stopIfSqlNotOK (session, 
+        """CREATE TABLE SYSMONDATA 
+        (SYSK CHAR(8) BYTE, 
+         PARAMNO FIXED(5), 
+         DATA_TYPE SYSDATATYPE,             
+         DATA SYSDATA,                  
+         CONSTRAINT SYSMONDATA_PK 
+         PRIMARY KEY (SYSK,PARAMNO)) INTERNAL """)
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,DELETE ON SYSMONDATA TO PUBLIC')
+
+    loaderCmd (session, 'DIAGNOSE ANALYZE OFF')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSCMD_ANALYZE')
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSDATA_ANALYZE')
+
+    stopIfSqlNotOK (session, 
+        """CREATE TABLE SYSCMD_ANALYZE 
+        (JOB  SYSJOB,
+         LINE FIXED(10),
+         CMDID CHAR(8) BYTE,
+         LINKAGE FIXED(1),
+         SQL_STATEMENT SYSSTATEMENT, 
+         CMDHASH FIXED(10),  
+         HASHLISTPOS FIXED(5),  
+         CONSTRAINT SYSCMD_ANALYZE_PK 
+         PRIMARY KEY (JOB,LINE,CMDHASH,LINKAGE,HASHLISTPOS)) INTERNAL """)
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,DELETE ON SYSCMD_ANALYZE TO PUBLIC')
+
+    stopIfSqlNotOK (session, 
+        """CREATE TABLE SYSDATA_ANALYZE 
+        (CMDID CHAR(8) BYTE,
+         SESSION CHAR (4) BYTE,         
+         CALL_COUNT FIXED(20),                   
+         ROWS_READ FIXED(20),
+         ROWS_QUAL FIXED(20),
+         VIRTUAL_READS FIXED(20),   
+         RUNTIME FIXED(20,6),
+         MIN_RUNTIME FIXED(20,6),
+         MAX_RUNTIME FIXED (20,6),
+         VWAITS FIXED (20),
+         VSUSPENDS FIXED(20),
+         PHYSICAL_IO FIXED(20),
+         ROWS_FETCHED FIXED(20), 
+         USERNAME SYSID,   
+         CONSTRAINT  SYSDATA_ANALYZEPK PRIMARY KEY (CMDID, SESSION)) INTERNAL """)
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,DELETE ON SYSDATA_ANALYZE TO PUBLIC')
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSACCOUNT')
+
+
+    if existsTable (session, "SYSCHECKTABLELOG"): 
+        if (options.migrate):
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSCHECKTABLELOG MODIFY (SCHEMANAME SYSID)')
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSCHECKTABLELOG MODIFY (OWNER      SYSID)')
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSCHECKTABLELOG MODIFY (TABLENAME  SYSID)')
+
+    else:
+        stopIfSqlNotOK (session,
+                        """CREATE TABLE SYSCHECKTABLELOG
+                        (SCHEMANAME   SYSID,
+                         TABLENAME    SYSID,
+                         EXECUTED_AT  TIMESTAMP,
+                         MSGNO        FIXED(5),
+                         OWNER        SYSID,
+                         EXCECUTED_AT TIMESTAMP,
+                         PRIMARY KEY (SCHEMANAME, TABLENAME, MSGNO,
+                                      EXECUTED_AT)
+                        )
+                        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON SYSCHECKTABLELOG TO PUBLIC')
+
+    if existsTable (session, "SYSUPDSTATWANTED"): 
+        if options.migrate:
+            stopIfSqlNotOK (session,
+                            """ALTER TABLE SYSUPDSTATWANTED MODIFY SCHEMANAME SYSID""")
+            stopIfSqlNotOK (session,
+                            """ALTER TABLE SYSUPDSTATWANTED MODIFY OWNER SYSID""")
+            stopIfSqlNotOK (session,
+                            """ALTER TABLE SYSUPDSTATWANTED MODIFY TABLENAME SYSID""")
+            stopIfSqlNotOK (session,
+                            """ALTER TABLE SYSUPDSTATWANTED MODIFY COLUMNNAME SYSID""")
+    else:
+        stopIfSqlNotOK (session,
+                        """CREATE TABLE SYSUPDSTATWANTED
+                        (SCHEMANAME SYSID,
+                        OWNER       SYSID,
+                        TABLENAME   SYSID,
+                        COLUMNNAME  SYSID,
+                        PRIMARY KEY (SCHEMANAME, OWNER, TABLENAME, COLUMNNAME)
+                        )
+                        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT ALL ON SYSUPDSTATWANTED TO PUBLIC')
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSSTATISTICS')
+ 
+    stopIfSqlNotErr (session, -6000, 
+            """CREATE TABLE SYSSTATISTICS (
+         SCHEMANAME      SYSID,
+         OWNER           SYSID,
+         TABLENAME       SYSID,
+         COLUMNNAME      SYSID,
+         INDEXNAME       SYSID,
+         PAGES           FIXED(10),
+         DISTINCT_VALUES FIXED(10),
+         AVG_LIST_LEN    FIXED(10,1)
+        ) INTERNAL """) 
+
+    stopIfSqlNotOK (session, 'GRANT SELECT, INSERT, DELETE, UPDATE ON SYSSTATISTICS TO DBAROLE')
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYSUPDSTATLOG')
+
+
+
+    stopIfSqlNotErr (session, -6000,
+        """CREATE TABLE SYSUPDSTATLOG      
+        (SCHEMANAME      SYSID,
+         TABLENAME       SYSID,
+         TABLEID         CHAR(8) BYTE,
+         COLUMNNAME      SYSID,
+         INDEXNAME       SYSID,
+         EXECUTED_AT     TIMESTAMP,
+         IMPLICIT        CHAR(3) ASCII,
+         SAMPLE_PCT      FIXED(3),
+         SAMPLE_ROW      FIXED(10),
+         EXECUTION_START TIMESTAMP,
+         EXECUTION_END   TIMESTAMP,
+         SESSION         FIXED(10),
+         TERMID          CHAR(18) ASCII,
+         SEQNO           FIXED(5),
+         PRIMARY KEY (SCHEMANAME, TABLENAME, COLUMNNAME, INDEXNAME)
+        ) INTERNAL """) 
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON SYSUPDSTATLOG TO DBAROLE')
+
+
+    if existsTable (session, "SYSUPDATECOUNTERWANTED"): 
+
+        stopIfSqlNotErr (session, -4019,
+                         """DROP TRIGGER SYSUPDATECOUNTERWANTED_INSERT
+                         OF SYSUPDATECOUNTERWANTED""")
+
+        if options.migrate:
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSUPDATECOUNTERWANTED MODIFY (SCHEMANAME SYSID)')
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSUPDATECOUNTERWANTED MODIFY (TABLENAME SYSID)')
+            stopIfSqlNotOK  (session, 'ALTER TABLE SYSUPDATECOUNTERWANTED MODIFY (INDEXNAME SYSID)')
+
+        rc = sqlRC (session, """SELECT * FROM SYSDD.FILES WHERE
+        TREELEAVESSIZE > 8 AND TREEINDEXSIZE = TREELEAVESSIZE""")
+        if rc != 100:
+            # corrupted TREEINDEXSIZE during builds 7.6.00.19-7.6.00.28
+            stopIfSqlNotErr (session, 100,
+                             """INSERT SYSUPDATECOUNTERWANTED
+                             SELECT T.SCHEMANAME, T.TABLENAME, '', 0
+                             FROM SYSDD.TABLES T, SYSDD.FILES F
+                             WHERE
+                             F.TYPE       = 'TABLE'
+                             AND F.FILEID = T.OBJECTID
+                             AND F.FILEID < x'8000000000000000'
+                             UNION
+                             SELECT I.SCHEMANAME, I.TABLENAME, I.INDEXNAME, 0
+                             FROM SYSDD.INDEXES I, SYSDD.FILES F
+                             WHERE
+                             F.TYPE          = 'INDEX'
+                             AND F.FILESTATE = 'OK'
+                             AND I.FILEID    = F.FILEID
+                             IGNORE DUPLICATES
+                             """)
+
+    else:
+
+        stopIfSqlNotOK (session,
+                        """CREATE TABLE SYSUPDATECOUNTERWANTED
+                        (SCHEMANAME SYSID,
+                        TABLENAME   SYSID,
+                        INDEXNAME   SYSID,
+                        CANCELCOUNT FIXED DEFAULT 0,
+                        PRIMARY KEY (SCHEMANAME, TABLENAME, INDEXNAME)
+                        )
+                        INTERNAL""")
+
+        stopIfSqlNotErr (session, 100,
+                         """INSERT SYSUPDATECOUNTERWANTED
+                         SELECT T.SCHEMANAME, T.TABLENAME, '', 0
+                         FROM SYSDD.TABLES T, SYSDD.FILES F
+                         WHERE
+                         (F.TREELEAVESSIZE IS NULL OR F.LOBSIZE IS NULL)
+                         AND F.TYPE   = 'TABLE'
+                         AND F.FILEID = T.OBJECTID
+                         AND F.FILEID < x'8000000000000000'
+                         UNION
+                         SELECT I.SCHEMANAME, I.TABLENAME, I.INDEXNAME, 0
+                         FROM SYSDD.INDEXES I, SYSDD.FILES F
+                         WHERE
+                         F.TREELEAVESSIZE IS NULL
+                         AND F.TYPE      = 'INDEX'
+                         AND F.FILESTATE = 'OK'
+                         AND I.FILEID    = F.FILEID
+                         """)
+                        
+        stopIfSqlNotOK (session, 'GRANT SELECT,INSERT,DELETE ON SYSUPDATECOUNTERWANTED TO DBAROLE')
+        createPubSynonym (session, 'SYSUPDATECOUNTERWANTED')
+
+
+    stopIfSqlNotErr (session, -6000,
+        """CREATE TABLE "SYS%CAT1"
+        (K    CHAR(48)   BYTE,
+         INFO CHAR(3900) BYTE,
+         PRIMARY KEY (K)
+         )
+        INTERNAL""")      
+
+
+    stopIfSqlNotErr (session, -6000,
+        """CREATE TABLE "SYS%CAT2"
+        (K    CHAR(48)   BYTE,
+         INFO CHAR(3900) BYTE,
+         PRIMARY KEY (K)
+         )
+         INTERNAL""")      
+
+
+    stopIfSqlNotErr (session, -4004, 'DROP TABLE SYS_PACKAGE')
+
+
+
+
+    rc = sqlRC (session, 'EXISTS TABLE DUAL')
+
+    if rc != 0:
+        stopIfSqlNotOK (session, 
+            'CREATE TABLE DUAL (DUMMY CHAR(1) ASCII) INTERNAL')
+
+        stopIfSqlNotOK (session, 
+            """INSERT INTO DUAL VALUES ('a')""")
+
+        stopIfSqlNotOK (session, 
+            """GRANT SELECT ON DUAL TO PUBLIC WITH GRANT OPTION""")
+
+
+    stopIfSqlNotErr (session, -4004, 'DROP VIEW OPTIMIZERSTATISTICS') 
+
+    createReplaceView ( session, 'OPTIMIZERSTATISTICS', 
+        """(SCHEMANAME,OWNER,TABLENAME,INDEXNAME,COLUMNNAME,
+           DISTINCTVALUES,PAGECOUNT)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,INDEXNAME,COLUMNNAME,
+             DISTINCTVALUES,PAGECOUNT
+           FROM SYSDD.OPTIMIZER_STATS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON OPTIMIZERSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'CONFIGURATION',
+        """(DESCRIPTION,CHAR_VALUE,NUMERIC_VALUE)
+        AS SELECT
+             DESCRIPTION,"VALUE",NUMERIC_VALUE
+           FROM SYSDD.CONFIGURATION
+           WHERE USER IN(SELECT NAME
+                         FROM SYSCATALOG.AUTHORIZATION
+                         WHERE NAME = USERGROUP 
+                         AND USERKIND IN(x'01', x'04', x'05'))
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON CONFIGURATION TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'INDEXSTATISTICS',
+        """(SCHEMANAME,OWNER,TABLENAME,INDEXNAME,COLUMNNAME,
+           DESCRIPTION,CHAR_VALUE,NUMERIC_VALUE)
+        AS SELECT
+             SCHEMANAME,OWNER,TABLENAME,INDEXNAME,COLUMNNAME,
+             DESCRIPTION,"VALUE",NUMERIC_VALUE
+           FROM SYSDD.INDEXSTATISTICS
+           WHERE OWNER = USERGROUP OR 
+                 USER IN(SELECT NAME
+                         FROM SYSCATALOG.AUTHORIZATION
+                         WHERE NAME = USERGROUP 
+                         AND USERKIND IN(       x'04', x'05'))
+        INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON INDEXSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'LOCKSTATISTICS',
+        """(SESSION, TRANSCOUNT, SUB_TRANS, WRITE_TRANS, PROCESS, 
+           USERNAME, "DATE", "TIME", TERMID, REQTIMEOUT, 
+           LASTWRITE, LOCKMODE, LOCKSTATE, REQMODE, REQSTATE,
+           APPLPROCESS, APPLNODE, SCHEMANAME, OWNER, TABLENAME, TABLEID,
+           ROWIDLENGTH, ROWIDHEX, "ROWID")
+        AS SELECT 
+             SESSION, TRANSCOUNT, SUB_TRANS, WRITE_TRANS, PROCESS, 
+             USERNAME, "DATE", "TIME", TERMID, REQ_TIMEOUT, 
+             LAST_WRITE, LOCK_MODE, LOCK_STATE, REQ_MODE, REQ_STATE, 
+             APPL_PROCESS, APPL_NODEID, SCHEMANAME, OWNER, TABLENAME, TABLEID, 
+             ROWID_LENGTH, ROWID_HEX, "ROWID"
+           FROM SYSDD.LOCKS
+           WHERE SESSION = (SELECT SESSIONID
+                            FROM SYSDD.SESSIONS
+                            WHERE OWN = 'YES')
+           OR OWNER = USERGROUP 
+           OR USERGROUP IN(SELECT NAME
+                           FROM SYSCATALOG.AUTHORIZATION 
+                           WHERE USERKIND IN(x'01', x'04', x'05') 
+                           AND NAME = USERGROUP) 
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON LOCKSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'LOCKLISTSTATISTICS',
+        """(DESCRIPTION, "VALUE")
+            AS SELECT
+            DESCRIPTION, "VALUE"
+            FROM SYSDD.LOCKSTATISTICS_OLD
+            WHERE USERGROUP IN(SELECT NAME
+                              FROM SYSCATALOG.AUTHORIZATION
+                              WHERE USERKIND IN(x'01', x'04', x'05')
+                              AND NAME = USERGROUP)
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON LOCKLISTSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'HISTORYINFO',
+        """(FILENO, FIRSTTRANS, LASTTRANS, PAGECOUNT)
+        AS SELECT 
+              FILE_NO, FIRST_TRANS, LAST_TRANS, PAGECOUNT
+           FROM SYSDD.HISTORY_INFO
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON HISTORYINFO TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'CONSISTENTVIEWS',
+        """(CONSISTENTVIEW, CREATORTRANSCOUNT, OPENTRANS, OPENDATE, OPENTIME, LASTUSED, CANCELLED)
+        AS SELECT 
+              CONSISTENT_VIEW, CREATOR_TRANSCOUNT, OPEN_TRANS, "DATE", "TIME", LAST_USED, CANCELLED
+           FROM SYSDD.CONSISTENTVIEWS
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON CONSISTENTVIEWS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView(session, 'OMS_MEMORY_USAGE',
+        """(TOTAL_HEAP_USAGE, RESERVED, USED_BY_OMS_MALLOC, EMERGENCY_CHUNK_SIZE,
+            EMERGENCY_IN_USE, EMERGENCY_MAX_USED)
+        AS SELECT "HEAPSIZE (BYTES)", RESERVED, USED_BY_OMS_MALLOC, EMERGENCYCHUNKSIZE,
+           EMERGENCYINUSE, EMERGENCYMAXUSED  
+        FROM SYSDD.OMS_MEMORY
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON OMS_MEMORY_USAGE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView(session, 'MEMORY_HOLDERS',
+        """(CHUNK_COUNT, "SIZE", CALL_STACK_ID, CALL_STACK,
+            CALL_STACK_LVL_0, CALL_STACK_LVL_1, CALL_STACK_LVL_2, CALL_STACK_LVL_3,
+            CALL_STACK_LVL_4, CALL_STACK_LVL_5, CALL_STACK_LVL_6, CALL_STACK_LVL_7,
+            CALL_STACK_LVL_8, CALL_STACK_LVL_9)
+        AS SELECT "NUMBER", "SIZE", CALL_STACK_ID, CALL_STACK,
+           CALL_STACK_LVL_0, CALL_STACK_LVL_1, CALL_STACK_LVL_2, CALL_STACK_LVL_3,
+           CALL_STACK_LVL_4, CALL_STACK_LVL_5, CALL_STACK_LVL_6, CALL_STACK_LVL_7,
+           CALL_STACK_LVL_8, CALL_STACK_LVL_9  
+        FROM SYSDD.HEAP_CONTENT
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MEMORY_HOLDERS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView(session,'OMS_HEAP_STATISTICS',
+            """(DESCRIPTION,TOTAL_HEAP_USAGE,MAX_TOTAL_HEAP_USAGE,RESERVED,
+               ALLOC_CNT,FREE_CNT,SYSTEM_ALLOC_CNT,SYSTEM_FREE_CNT,
+               TOTAL_SPINLOCKS, COLLISIONS, TOTAL_SPINLOOPS,
+               TOTAL_YIELDLOOPS,MAX_SPINLOOPS,MAX_YIELDLOOPS,ERROR_CNT) AS SELECT
+               ALLOCATORNAME,USEDSIZE,MAXUSEDSIZE,ALLOCATEDSIZE,ALLOCATECOUNT,DEALLOCATECOUNT,
+               BASEALLOCATECOUNT,BASEDEALLOCATECOUNT,
+               LOCKS,COLLISIONS,TOTAL_SPIN_LOOPS,
+               TOTAL_YIELD_LOOPS,MAX_SPIN_LOOPS,MAX_YIELD_LOOPS,FOUNDERRORCOUNT
+               FROM SYSDD.MEMORYALLOCATORSTATISTICS,SYSDD.SPINLOCKS
+               WHERE ((ALLOCATORNAME LIKE 'LVCMem_Allocator%') OR
+               ( ALLOCATORNAME = 'LVCMem_EmergencyAllocator' ) OR
+               ( ALLOCATORNAME = 'OMS_Allocator'))
+               AND ALLOCATORNAME = SPINLOCK_NAME(+)
+               INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON OMS_HEAP_STATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView(session,'GARBAGECOLLECTOR_STATISTICS',
+            """(TASKID,ACTIVE,ACTIVATE_COUNT, DELETE_OBJ,
+               RELHIST_NORMAL, RELHIST_SENSITIVE, RELHIST_TRUNCATE,
+               HIST_CREATE_FILE, HIST_DELETE_OBJ, HIST_DROP_FILE, 
+               HIST_LOCK_OBJ, HIST_INSERT_OBJ, HIST_NEW_OBJ, HIST_UPDATE_OBJ,
+               RELPAGE_EMPTY,RELPAGE_DROPFILE,DROP_FILE) AS SELECT
+               TASKID,ACTIVE,ACTIVATE_COUNT, DELETE_OBJ,
+               RELHIST_NORMAL, RELHIST_SENSITIVE, RELHIST_TRUNCATE,
+               HIST_CREATE_FILE, HIST_DELETE_OBJ, HIST_DROP_FILE, 
+               HIST_LOCK_OBJ, HIST_INSERT_OBJ, HIST_NEW_OBJ, HIST_UPDATE_OBJ,
+               RELPAGE_EMPTY,RELPAGE_DROPFILE,DROP_FILE
+               FROM SYSDD.INFO_GC_STATS
+               INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON GARBAGECOLLECTOR_STATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_OMS',
+        """(IID, "Methodname",  "CallCnt", "MinRuntime", "MaxRuntime","AvgRuntime",
+        "SumRuntime", 
+        "OMS_Deref",        "LC_Deref", "KeyDeref", "KeyDerefInVersion",
+        "OMS_Store",        "LC_Store", "OMS_Delete", 
+        "LC_Delete",        "LC_Lock", "DerefIter",
+        "OMS_Release",      "OMS_ReleaseExecuted",  
+        "LC_LogHops",       "LC_LogHopsIter",
+        "Exceptions",       "OutOfDateExceptions",
+        "Timeouts",         "OutOfMemoryExceptions",
+        "SubtransRollbacks",
+        "SubtransCommits",  "MaxSubtransLevel", 
+        "VarObjectLoad",   "VarObjectStore",
+        "AvgVarObjectSize", "OmsCacheSize",
+        "MaxWaitForNewConsView", "MinWaitForNewConsView",
+        "AvgWaitForNewConsView", "MallocCnt", "MallocMin", "MallocMax",
+        "MallocAvg", "FreeCnt", "FreeMin", "FreeMax", "FreeAvg",
+        "DeltaAllocMin", "DeltaAllocMax", "DeltaAllocAvg",
+        "OMS_Terminate",
+        "MinStreamBufferReadReq", "MaxStreamBufferReadReq",
+        "AvgStreamBufferReadReq",
+        "MinStreamRowReads", "MaxStreamRowReads", "AvgStreamRowReads", 
+        "MinStreamBufferWriteReq", "MaxStreamBufferWriteReq",
+        "AvgStreamBufferWriteReq",
+        "MinStreamRowWrites", "MaxStreamRowWrites", "AvgStreamRowWrites",
+        "OmsKeyCacheHit", "OmsKeyCacheMiss", "OmsKeyVersion",
+        "OmsMaxChainLen", "OmsAvgChainLenSearched","OmsRehash",
+        "OmsLockObjWaits", "OmsLockObjAvgWaitDelay")
+       AS SELECT IID, METHODNAME, CALL_CNT,
+          RUNTIME_MIN,
+          RUNTIME_MAX,
+          FIXED (RUNTIME / CALL_CNT, 10),
+          RUNTIME,
+          DEREF,
+          DEREF_VIA_LC,
+          DEREF_VIA_KEY,
+          DEREFKEYIN_VERSION,
+          OMS_STORE,
+          LC_STORE,
+          OMS_DELETE,       
+          LC_DELETE, 
+          LC_LOCK,   
+          DEREF_ITERATOR_LC,  
+          OMS_RELEASE,
+          OMS_RELEASE_DONE,         
+          LC_LOG_HOPS, 
+          LC_LOG_HOPS_ITER,
+          EXCEPTIONS,       
+          OUT_OF_DATE,
+          TIMEOUT,  
+          OUT_OF_MEMORY,          
+          SUBTRANS_ROLLBACK,
+          SUBTRANS_COMMIT,  
+          MAX_SUBTRANS_LEVEL,
+          LOAD_VAR_OBJ,     
+          STORE_VAR_OBJ, 
+          AVG_VAR_OBJ_SIZE, 
+          CACHE_SIZE,
+          NEWCONSVIEWMAXWAIT,
+          NEWCONSVIEWMINWAIT,
+          NEWCONSVIEWAVGWAIT,
+          MALLOC_CNT,
+          MALLOC_MIN,
+          MALLOC_MAX,
+          FIXED(DECODE(MALLOC_CNT, 0, NULL, MALLOC_SUM / MALLOC_CNT), 20),
+          FREE_CNT,
+          FREE_MIN,
+          FREE_MAX,
+          FIXED(DECODE(FREE_CNT, 0, NULL, FREE_SUM / FREE_CNT), 20),
+          DELTA_ALLOC_MIN,
+          DELTA_ALLOC_MAX,
+          DELTA_ALLOC_AVG,
+          OMS_TERMINATE,
+          MIN_STRBUF_READ,
+          MAX_STRBUF_READ,
+          AVG_STRBUF_READ,
+          MIN_STRROW_READ,
+          MAX_STRROW_READ,
+          AVG_STRROW_READ,
+          MIN_STRBUF_WRITTEN,
+          MAX_STRBUF_WRITTEN,
+          AVG_STRBUF_WRITTEN,
+          MIN_STRROW_WRITTEN,
+          MAX_STRROW_WRITTEN,
+          AVG_STRROW_WRITTEN,
+          OMS_KEY_CACHE_HIT, 
+          OMS_KEY_CACHE_MISS, 
+          OMS_KEY_VERSION,
+		  OMS_MAX_CHAIN_LEN,
+		  OMS_AVG_HASH_CHAIN,
+		  OMS_REHASH,
+          LOCKOBJ_WAITS,
+          LOCKOBJAVGWAITTIME 
+       FROM SYSDD.OMS_MONITOR
+       INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_OMS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'OMS_LOCKOBJ_INFO',
+        """(PROCESS,SESSION,USERNAME,TERMID,APPLPROCESS,APPLNODEID,
+        LOCK_HANDLE,LOCK_MODE,REQ_MODE,REQ_TIMEOUT)
+       AS SELECT T.PROCESS,T.SESSION,T.USERNAME,T.TERMID,
+       T.APPL_PROCESS,T.APPL_NODEID,
+       L.LOCK_HANDLE,L.LOCK_MODE,L.REQ_MODE,L.REQ_TIMEOUT
+       FROM SYSDD.OMS_LOCKOBJ_INFO L,SYSDD.TRANSACTIONS T
+       WHERE L.PROCESS = T.PROCESS
+       INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON OMS_LOCKOBJ_INFO TO PUBLIC WITH GRANT OPTION')
+    
+    createReplaceView (session, 'SERVERDBSTATISTICS',
+        """(SERVERDBSIZE,  MAXDATAPAGENO, MAXPERM, MAXUSEDPAGES, USEDPERM,
+           PCTUSEDPERM, USEDTMP, PCTUSEDTMP,
+           UNUSED, PCTUNUSED, UPDATEDPERM,
+           SERVERDBFULL, USEDBLOCKS,
+           LOGSIZE, USEDLOG, PCTUSEDLOG,
+           USEDOMSLOG, MINFREEOMSLOG,
+           LOGNOTSAVED, PCTLOGNOTSAVED, LOGSINCEBACKUP,
+           LOGSEGMENTSIZE, SAVEPOINTS,CHECKPOINTS)
+        AS SELECT
+             SIZE, MAX_DATA_PAGE_NO, MAX_PERM_PAGES, MAX_USED_PAGES, 
+             USED_PERM_PAGES,
+             PCT_PERM_USED, USED_TEMP_PAGES, PCT_TEMP_USED,
+             UNUSED_PAGES, PCT_PAGES_UNUSED, UPDATED_PERM_PAGES,
+             SERVERDB_FULL, USED_BLOCKS,
+             LOG_PAGES, USED_LOG_PAGES, PCT_LOGUSED,
+             OMS_LOG_USED, OMS_LOG_MIN_FREE,
+             LOG_NOT_SAVED, PCT_LOG_NOT_SAVED, LOG_SINCE_BACKUP,
+             LOG_SEGMENT_SIZE, SAVEPOINTS, CHECKPOINTS
+           FROM SYSDD.SERVERDB_STATS
+           WHERE USER IN(SELECT NAME
+                         FROM SYSCATALOG.AUTHORIZATION
+                         WHERE NAME = USERGROUP 
+                         AND USERKIND IN(x'01', x'04', x'05'))
+        INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON SERVERDBSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'TABLESTATISTICS',
+    """(SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,CHAR_VALUE,NUMERIC_VALUE)
+    AS SELECT
+     SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,"VALUE",NUMERIC_VALUE
+       FROM SYSDD.TABLESTATISTICS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON TABLESTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'TRANSACTIONS',
+    """(SESSION,TRANSCOUNT,SUB_TRANS,WRITE_TRANS,PROCESS,
+    USERNAME,CONNECTDATE,CONNECTTIME,TERMID,
+    REQTIMEOUT,LASTWRITE,LOCKMODE,LOCKSTATE,
+    REQMODE,REQSTATE,CONSISTENTVIEW,APPLPROCESS,APPLNODEID)
+    AS SELECT
+    SESSION,TRANSCOUNT,SUB_TRANS,WRITE_TRANS,PROCESS,
+    USERNAME,"DATE","TIME",TERMID,
+    REQ_TIMEOUT,LAST_WRITE,LOCK_MODE,LOCK_STATE,
+    REQ_MODE,REQ_STATE,CONSISTENT_VIEW,APPL_PROCESS,APPL_NODEID
+    FROM SYSDD.TRANSACTIONS
+    WHERE SESSION = (SELECT SESSIONID
+                     FROM SYSDD.SESSIONS
+                     WHERE OWN = 'YES')
+    OR USERGROUP IN(SELECT NAME
+               FROM SYSCATALOG.AUTHORIZATION
+               WHERE USERKIND IN(x'01', x'04', x'05')
+               AND NAME = USERGROUP)
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON TRANSACTIONS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'USERSTATISTICS',
+    """(USERNAME,USERMODE,PERMCOUNT,TEMPCOUNT)
+    AS SELECT
+    USERNAME,USERMODE,PERMCOUNT,TEMPCOUNT
+    FROM SYSDD.USERSTATISTICS
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON USERSTATISTICS TO PUBLIC WITH GRANT OPTION')
+
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_CACHES')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_LOAD')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_LOCK')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_LOG')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_PAGES')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_REWRITE')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_ROW')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_TRANS')
+
+    stopIfSqlNotErr (session, -4007, 'DROP PUBLIC SYNONYM MONITOR_VTRACE')
+
+    createReplaceView (session, 'MONITOR_CACHES',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'CACHES'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_CACHES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_LOAD',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'LOAD'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_LOAD TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_LOCK',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'LOCK'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_LOCK TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_LOG',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'LOG'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_LOG TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_LONG',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'LONG'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_LONG TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_PAGES',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'PAGES'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_PAGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_REWRITE',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'REWRITE'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_REWRITE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_ROW',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'ROW'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_ROW TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR_TRANS',
+    """(DESCRIPTION,"VALUE")
+    AS SELECT
+    DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE "TYPE" = 'TRANS'
+    AND USERGROUP IN(SELECT NAME
+            FROM SYSCATALOG.AUTHORIZATION
+            WHERE NAME = USERGROUP
+            AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR_TRANS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'MONITOR',
+    """("TYPE",DESCRIPTION,"VALUE")
+    AS SELECT
+    "TYPE",DESCRIPTION,"VALUE"
+    FROM SYSDD.MONITOR
+    WHERE USERGROUP IN(SELECT NAME
+              FROM SYSCATALOG.AUTHORIZATION
+              WHERE NAME = USERGROUP
+              AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON MONITOR TO PUBLIC WITH GRANT OPTION')
+
+
+
+    createReplaceView (session, 'DBTIMES',
+    """(RESTART_DATE, RESTART_TIME)
+    AS SELECT
+    "DATE", "TIME"
+    FROM SYSDD.SERVERDB_STATS
+    WHERE USERGROUP IN(SELECT NAME
+              FROM SYSCATALOG.AUTHORIZATION
+              WHERE NAME = USERGROUP
+              AND USERKIND IN(x'01', x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DBTIMES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'DBPARAMETERS',
+    """(DESCRIPTION, "VALUE")
+    AS SELECT
+    DECODE("PARAMETERNAME", '_PACKET_SIZE', 'PACKET_SIZE', "PARAMETERNAME"),"VALUE"
+    FROM SYSDD.ACTIVECONFIGURATION
+    WHERE USERGROUP IN(SELECT NAME
+              FROM SYSCATALOG.AUTHORIZATION
+              WHERE NAME = USERGROUP
+              AND USERKIND IN(x'01', x'04', x'05'))
+       OR PARAMETERNAME IN ('_UNICODE', 'INSTANCE_TYPE', 
+                          'DEFAULT_CODE', 'DATE_TIME_FORMAT')
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DBPARAMETERS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'ROOTS',
+    """(TABLEID,SCHEMANAME,OWNER,TABLENAME,INDEXNAME,TYPE,ROOT)
+    AS SELECT 
+    TABLEID,SCHEMANAME,OWNER,TABLENAME,INDEXNAME,TYPE,ROOT
+    FROM SYSDD.ROOTS
+    WHERE OWNER = USERGROUP 
+    OR    USER IN(SELECT NAME
+                  FROM SYSCATALOG.AUTHORIZATION
+                  WHERE NAME = USERGROUP 
+                  AND USERKIND IN(       x'04', x'05'))
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON ROOTS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'RUNNING_COMMANDS',
+    """AS SELECT 
+        T1.TASKID, T2.JOB, T2.LINE, 
+        T1.PARSEID, T2.SQL_STATEMENT
+        FROM SYSDD.RUNNING_COMMANDS T1, SYSPARSEID T2
+        WHERE T1.PARSEID = T2.PARSEID
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON RUNNING_COMMANDS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'RUNNING_PARSEIDS',
+	"""AS SELECT 
+        TASKID, PARSEID 
+        FROM SYSDD.RUNNING_COMMANDS 
+	INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON RUNNING_PARSEIDS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'PAGES',
+    """(SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,CHAR_VALUE,
+            NUMERIC_VALUE,SHORT_COLUMN_PAGES)
+    AS SELECT
+    SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,"VALUE",
+        NUMERIC_VALUE,SHORT_COLUMN_PAGES
+    FROM SYSDD.PAGES
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON PAGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'ESTIMATED_PAGES',
+    """(SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,
+            ESTIMATED_PAGES,SHORT_COLUMN_PAGES)
+    AS SELECT
+    SCHEMANAME,OWNER,TABLENAME,DESCRIPTION,
+        ESTIMATED_PAGES,SHORT_COLUMN_PAGES
+    FROM SYSDD.PAGES
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON ESTIMATED_PAGES TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'INDEXPAGES',
+    """(SCHEMANAME,OWNER,TABLENAME,INDEXNAME,DESCRIPTION,CHAR_VALUE,NUMERIC_VALUE)
+    AS SELECT
+    SCHEMANAME,OWNER,TABLENAME,DECODE(INDEXNAME,NULL,COLUMNNAME,INDEXNAME),
+        DESCRIPTION,"VALUE",NUMERIC_VALUE
+    FROM SYSDD.INDEXPAGES
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON INDEXPAGES TO PUBLIC WITH GRANT OPTION')
+    
+    createReplaceView (session, 'DB_STATE',
+    """("DESCRIPTION","NUMERIC_VALUE","VALUE")
+    AS SELECT
+    DESCRIPTION, NUMERIC_VALUE, "VALUE"
+    FROM SYSDD.SERVER_DB_STATE
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON DB_STATE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'INTERNAL_STATE',
+    """("COMPONENT","DESCRIPTION","VALUE")
+    AS SELECT
+    COMPONENT, DESCRIPTION, "VALUE"
+    FROM SYSDD.INTERNAL_STATE
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON INTERNAL_STATE TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'SPINLOCKS',
+    """(SPINLOCK_NAME,"LOCKS",COLLISIONS,TOTAL_SPIN_LOOPS,
+    TOTAL_YIELD_LOOPS,MAX_SPIN_LOOPS,MAX_YIELD_LOOPS,CURRENT_LOOPS)
+    AS SELECT
+    SPINLOCK_NAME,"LOCKS",COLLISIONS,TOTAL_SPIN_LOOPS,
+    TOTAL_YIELD_LOOPS,MAX_SPIN_LOOPS,MAX_YIELD_LOOPS,CURRENT_LOOPS
+    FROM SYSDD.SPINLOCKS
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON SPINLOCKS TO PUBLIC WITH GRANT OPTION')
+
+    createReplaceView (session, 'ALLOCATORSTATISTIC',
+    """("ALLOCATOR","USED_BYTES","MAXUSED_BYTES","ALLOCATED_BYTES","ALLOCATES","DEALLOCATES",
+    "ALLOCATOR_BASE","ALLOCATOR_BASE_ALLOCATES", "ALLOCATOR_BASE_DEALLOCATES")
+    AS SELECT
+    ALLOCATORNAME, USEDSIZE, MAXUSEDSIZE, ALLOCATEDSIZE, ALLOCATECOUNT, DEALLOCATECOUNT,
+    BASEALLOCATORNAME, BASEALLOCATECOUNT, BASEDEALLOCATECOUNT
+    FROM SYSDD.MEMORYALLOCATORSTATISTICS
+    INTERNAL""")
+    stopIfSqlNotOK (session, 'GRANT SELECT ON ALLOCATORSTATISTIC TO PUBLIC WITH GRANT OPTION')
+
+    createPubSynonym (session, 'SYSCHECKTABLELOG')
+    createPubSynonym (session, 'SYSUPDSTATWANTED')
+    createPubSynonym (session, 'SYSCMD_ANALYZE')
+    createPubSynonym (session, 'SYSDATA_ANALYZE')
+    createPubSynonym (session, 'SYSMONDATA')
+    createPubSynonym (session, 'SYSMONITOR')
+    createPubSynonym (session, 'SYSPARSEID')
+    createPubSynonym (session, 'SYSSTATISTICS')
+    createPubSynonym (session, 'SYSUPDSTATLOG')
+    createPubSynonym (session, 'DUAL')
+    createPubSynonym (session, 'OPTIMIZERSTATISTICS')
+    createPubSynonym (session, 'CONFIGURATION')
+    createPubSynonym (session, 'INDEXSTATISTICS')
+    createPubSynonym (session, 'LOCKSTATISTICS')
+    createPubSynonym (session, 'LOCKLISTSTATISTICS')
+    createPubSynonym (session, 'HISTORYINFO')
+    createPubSynonym (session, 'CONSISTENTVIEWS')
+    createPubSynonym (session, 'OMS_MEMORY_USAGE')
+    createPubSynonym (session, 'MEMORY_HOLDERS')
+    createPubSynonym (session, 'OMS_HEAP_STATISTICS')
+    createPubSynonym (session, 'GARBAGECOLLECTOR_STATISTICS')
+    createPubSynonym (session, 'MONITOR_OMS')
+    createPubSynonym (session, 'OMS_LOCKOBJ_INFO')
+    createPubSynonym (session, 'SERVERDBSTATISTICS')
+    createPubSynonym (session, 'TABLESTATISTICS')
+    createPubSynonym (session, 'TRANSACTIONS')
+    createPubSynonym (session, 'USERSTATISTICS')
+    createPubSynonym (session, 'MONITOR_CACHES')
+    createPubSynonym (session, 'MONITOR_LOAD')
+    createPubSynonym (session, 'MONITOR_LOCK')
+    createPubSynonym (session, 'MONITOR_LOG')
+    createPubSynonym (session, 'MONITOR_LONG')
+    createPubSynonym (session, 'MONITOR_PAGES')
+    createPubSynonym (session, 'MONITOR_REWRITE')
+    createPubSynonym (session, 'MONITOR_ROW')
+    createPubSynonym (session, 'MONITOR_TRANS')
+    createPubSynonym (session, 'MONITOR')
+    createPubSynonym (session, 'DBTIMES')
+    createPubSynonym (session, 'DBPARAMETERS')
+    createPubSynonym (session, 'ROOTS')
+    createPubSynonym (session, 'RUNNING_COMMANDS')
+    createPubSynonym (session, 'RUNNING_PARSEIDS')
+    createPubSynonym (session, 'PAGES')
+    createPubSynonym (session, 'ESTIMATED_PAGES')
+    createPubSynonym (session, 'INDEXPAGES')
+    createPubSynonym (session, 'DB_STATE')
+    createPubSynonym (session, 'INTERNAL_STATE')
+    createPubSynonym (session, 'SPINLOCKS')
+    createPubSynonym (session, 'ALLOCATORSTATISTIC')
+
+
+
+# NMP added PTS 1108439
+&if $OS IN [ DOS, OS2, WIN32 ] || $MACH in [ _IBMR2, PA11, PA20W, SUN, ALPHA, NMP, HP_IA64 ] || $OSSPEC in [ SOLARIS, LINUX ]
+
+    rc = sqlRC (session, 
+         """SELECT PACKAGE 
+         FROM SYSDD.DBPROCEDURES 
+         WHERE SCHEMANAME = USER AND PACKAGE = 'SYS_PACKAGE'""")
+
+    if rc == 0:
+        stopIfSqlNotOK (session, 'DROP PACKAGE SYS_PACKAGE')
+
+    stopIfSqlNotOK (session, 
+        """CREATE PACKAGE SYS_PACKAGE FILE 'dbpinstall' INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC COPY_AND_REG_DLL IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC ACTIVATE_DLL IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC REG_DLL IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC FORCE_CHECKPOINT IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC WAIT_FOR_CHECKPOINT IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC FORCE_AND_WAIT_FOR_CHECKPOINT IN SYS_PACKAGE EXECUTE INPROC""")
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC DROP_SCHEMAS IN SYS_PACKAGE EXECUTE INPROC""")
+        
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC OMS_CLEANUP_AFTER_INIT  IN SYS_PACKAGE EXECUTE INPROC""")
+    
+&endif
+
+    stopIfSqlNotErr (session, -6006, 
+        """CREATE DBPROC SET_QUERY_REWRITE_RULE (IN RULENAME CHAR(32), IN ENABLE CHAR(3)) AS LANGUAGE SYSTEM NAME 'SET_QUERY_REWRITE_RULE'""")
+        
+    stopIfSqlNotErr (session, -6000, 
+        """CREATE TABLE QUERYREWRITERULES (RULENAME CHAR(32) ASCII PRIMARY KEY,
+        ACTIVE   CHAR(3) ASCII ,
+        COMMENT  LONG ASCII,
+        CONSTRAINT C CHECK ACTIVE = 'YES' OR ACTIVE = 'NO') INTERNAL""")
+   
+    stopIfSqlNotErr (session, -6006, 
+        """CREATE TRIGGER TQUERYREWRITERULES FOR QUERYREWRITERULES AFTER INSERT, UPDATE EXECUTE(
+        CALL SET_QUERY_REWRITE_RULE (:NEW.RULENAME, :NEW.ACTIVE);
+        IF $RC <> 0 THEN STOP ($RC, $ERRMSG);)""")
+        
+    stopIfSqlNotErr (session, -6006,
+        """CREATE SYSTEM TRIGGER READ_QUERY_REWRITE_RULES AFTER RESTART EXECUTE (
+        VAR RULE CHAR(32); ACTIVE CHAR(3);
+        DECLARE SYSRESULT CURSOR FOR SELECT * FROM SYSDBA.QUERYREWRITERULES;
+        WHILE $RC = 0 DO
+        BEGIN
+        FETCH SYSRESULT INTO :RULE, :ACTIVE;
+        IF $RC = 0
+        THEN
+            BEGIN
+            CALL SYSDBA.SET_QUERY_REWRITE_RULE (:RULE, :ACTIVE);
+            IF $RC = -31001
+            THEN
+                DELETE SYSDBA.QUERYREWRITERULES WHERE RULENAME = :RULE;
+            END;
+        END;
+        IF $RC <> 100 THEN STOP (-31001, 'QUERYREWRITERULE SYSTEM TRIGGER FAILED');)""")
+    
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('MergeFromSelectOrView', 'YES', 'Merge a select with a fromselect or view')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('MergeExistentialSubquery', 'YES', 'Merge a select with an existential subquery')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('ConvertExistentialSubquery', 'NO', 'Convert a correlated existential subquery to an IN clause')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('ConvertToExistentialSubquery', 'NO', 'Convert INTERSECT or EXCEPT to an existential subquery')""")
+
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('DistinctPullUp', 'YES', 'Remove distinct elimination in a select if all fromselects are distinct')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('DistinctPushDownTo', 'YES', 'Distinct push down to')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('DistinctPushDownFrom', 'YES', 'Distinct push down from')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('DistinctForSubqueries', 'YES', 'Set Distinct for existential and all subqueries')""")
+
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('OptimizeSubqueries', 'YES', 'OptimizeSubqueries')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('SimplifyPredicates', 'YES', 'Simplify Predicates')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('EliminateOrderBy', 'YES', 'Remove unnecessary ORDER BY')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('EliminateGroupByOrDistinct', 'YES', 'Remove unnecessary GROUP BY or DISTINCT')""")
+
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('PushDownPredicates', 'YES', 'Push down predicates')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('PushDownProjection', 'YES', 'Push down projection')""")
+    stopIfSqlNotErr (session, 200, 
+        """INSERT INTO SYSDBA.QUERYREWRITERULES VALUES ('PushDownQuantifier', 'NO', 'Push down quantifier')""")
+
+    stopIfSqlNotOK (session, 'GRANT SELECT,UPDATE ON SYSDBA.QUERYREWRITERULES TO DBAROLE')
+        
+    loaderCmd (session, 'COMMIT')
+  
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, "Installing tables for SYSDBA\n")
+
+

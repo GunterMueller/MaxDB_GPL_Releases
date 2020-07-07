@@ -1,0 +1,1638 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-21
+*****************************************************
+modname : VAK721
+changed : 2000-11-21
+module  : Build_Strategy_4
+ 
+Author  : GertG / HolgerB
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : module for searching for a strategy in executing time
+ 
+Define  :
+ 
+        PROCEDURE
+              a721strategy (
+                    VAR acv           : tak_all_command_glob;
+                    VAR dmli          : tak_dml_info;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR StratInfo_len : tsp00_Int2;
+                    VAR parsk         : tak_parskey;
+                    config            : tak00_access_configuration);
+ 
+        PROCEDURE
+              a721transfer_parse_info (
+                    VAR acv           : tak_all_command_glob;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR access_info   : tak70_strategy_record;
+                    VAR L1_terms      : tak70_term;
+                    VAR order_fields  : tak00_ord_fields;
+                    work_kind         : tak70_backup);
+ 
+.CM *-END-* define --------------------------------------
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01sysnullkey          : tgg00_SysInfoKey;
+              a01defaultkey          : tgg00_SysInfoKey;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace    : tgg00_VtraceState;
+ 
+        FUNCTION
+              g01optimize_cache : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Help_Procedures : VGG041;
+ 
+        PROCEDURE
+              g041name_to_trace (
+                    VAR t  : tgg00_TransContext;
+                    name   : tsp00_Name);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06_systable_get (
+                    VAR acv      : tak_all_command_glob;
+                    dstate       : tak_directory_state;
+                    VAR tableid  : tgg00_Surrogate;
+                    VAR base_ptr : tak_sysbufferaddress;
+                    get_all      : boolean;
+                    VAR ok       : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err   : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10rel_sysinfo (syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10_nil_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    syslen       : tsp00_Int4;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : vak101;
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        FUNCTION
+              a101_GetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy   : VAK70;
+ 
+        VAR
+              a70_glob_zstrat_rec   : tak70_strategy_record;
+              a70glob_inv_strats    : tgg07_StratEnumSet;
+ 
+        PROCEDURE
+              a70L1_strat_search (
+                    VAR acv          : tak_all_command_glob;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    VAR order_fields : tak00_ord_fields;
+                    VAR L1_pageIO    : tsp00_Int4;
+                    VAR L1_stratvalue: tsp00_Longreal);
+ 
+        PROCEDURE
+              a70L2L3_strat_search (
+                    VAR acv          : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR sparr        : tak_syspointerarr;
+                    VAR access_info  : tak70_strategy_record;
+                    VAR gg_strategy  : tgg07_StrategyInfo;
+                    VAR StratInfo_len: tsp00_Int2;
+                    morestratpos     : tsp00_Int4;
+                    VAR eval_info    : tak71_page_eval_rec;
+                    VAR L1_terms     : tak70_term;
+                    VAR order_fields : tak00_ord_fields;
+                    L1_pageIO        : tsp00_Int4;
+                    VAR L1_stratvalue: tsp00_Longreal);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy_2 : VAK71;
+ 
+        PROCEDURE
+              a71set_rescnt(
+                    VAR acv         : tak_all_command_glob;
+                    VAR sparr       : tak_syspointerarr;
+                    str_rowno       : tsp00_Int4;
+                    VAR qprop       : tak70_query_properties);
+ 
+        PROCEDURE
+              a71adjust_configuration (
+                    VAR dmli        : tak_dml_info;
+                    VAR config_qprop : tak70_strategy_record);
+ 
+        PROCEDURE
+              a71change_stack_code(
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR strategy    : tgg07_StrategyInfo);
+         
+      ------------------------------ 
+ 
+        FROM
+              hint_trace_routines : VAK81;
+ 
+        PROCEDURE
+              a81trace_access_config (
+                    VAR transid     : tgg00_TransContext;
+                    VAR config      : tak00_access_configuration);
+&       ifdef trace
+ 
+        PROCEDURE
+              a81debug_access_config (
+                    debug       : tgg00_Debug;
+                    VAR config  : tak00_access_configuration);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_1 : VAK725;
+ 
+        PROCEDURE
+              a725output_access_info (
+                    level           : tgg00_Debug;
+                    nam             : tsp00_Sname;
+                    VAR access_info : tak70_strategy_record);
+ 
+        PROCEDURE
+              a725L1_terms_output (
+                    level        : tgg00_Debug;
+                    VAR L1_terms : tak70_term);
+ 
+        PROCEDURE
+              a725output_involved_cols (
+                    debug   : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    ic_info : tak70_involved_columns);
+ 
+        PROCEDURE
+              a725output_end_strat(
+                    debug             : tgg00_Debug;
+                    nam               : tsp00_Sname;
+                    VAR gg_strategy   : tgg07_StrategyInfo;
+                    VAR eval_info     : tak71_page_eval_rec;
+                    VAR StratInfo_len : tsp00_Int2);
+ 
+        PROCEDURE
+              a725output_query_prop (
+                    debug   : tgg00_Debug;
+                    qprop   : tak70_query_properties);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace_Strategy_2 : VAK727;
+ 
+        PROCEDURE
+              a727trace_tablename (
+                    VAR transid     : tgg00_TransContext;
+                    name            : tsp00_Sname;
+                    VAR tabname     :tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a727trace_strategy_text(
+                    VAR transid : tgg00_TransContext;
+                    name        : tsp00_Sname;
+                    strategy    : tgg07_StratEnum);
+ 
+        PROCEDURE
+              a727trace_query_prop (
+                    VAR transid     : tgg00_TransContext;
+                    VAR qprop       : tak70_query_properties);
+ 
+        PROCEDURE
+              a727L1_terms_trace (
+                    VAR acv      : tak_all_command_glob;
+                    VAR L1_terms : tak70_term);
+ 
+        PROCEDURE
+              a727trace_access_info (
+                    VAR transid     : tgg00_TransContext;
+                    proc_name       : tsp00_Name;
+                    VAR access_info : tak70_strategy_record);
+ 
+        PROCEDURE
+              a727trace_involved_cols (
+                    VAR transid : tgg00_TransContext;
+                    proc_name   : tsp00_Name;
+                    ic_info     : tak70_involved_columns;
+                    distinct    : boolean;
+                    inv_only    : boolean);
+ 
+        PROCEDURE
+              a727trace_ord_fields (
+                    VAR transid : tgg00_TransContext;
+                    proc_name   : tsp00_Name;
+                    ord_fields  : tak00_ord_fields);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120MessBlockTrace (
+                    VAR Trans     : tgg00_TransContext;
+                    TraceType     : tgg00_VtraceType;
+                    VAR MessBlock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Pointer-Arithmetik : VSP35;
+ 
+        FUNCTION
+              s35add_moveobj_ptr_ptocm (
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    pos         : tsp00_Int4) : tsp00_MoveObjPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_allocator_interface : VGG941;
+ 
+        FUNCTION
+              gg941Allocate(
+                    VAR TransContext : tgg00_TransContext;
+                    wantedBytes      : integer) : tsp00_Addr;
+ 
+        PROCEDURE
+              gg941Deallocate(
+                    VAR TransContext : tgg00_TransContext;
+                    VAR p            : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove  (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    source_upb     : tsp00_Int4;
+                    destin_upb     : tsp00_Int4;
+                    source         : tsp00_MoveObjPtr;
+                    source_pos     : tsp00_Int4;
+                    destin         : tsp00_MoveObjPtr;
+                    destin_pos     : tsp00_Int4;
+                    length         : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove  (
+                    size1    : tsp00_Int4;
+                    size2    : tsp00_Int4;
+                    val1     : tsp00_MoveObjPtr;
+                    p1       : tsp00_Int4;
+                    val2     : tsp00_MoveObjPtr;
+                    p2       : tsp00_Int4;
+                    cnt      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Single_Select : VKB720;
+ 
+        PROCEDURE
+              k720ref_statistic (
+                    VAR arr_index : tgg00_RefInfoIndex;
+                    VAR strat     : tgg07_StrategyInfo);
+ 
+        PROCEDURE
+              k720_test_subquery (
+                    VAR trans   : tgg00_TransContext;
+                    VAR datapart: tgg00_DataPart;
+                    datapartsize: tsp00_Int4;
+                    VAR mdesc   : tgg00_StackDesc;
+                    VAR rec     : tgg00_Rec);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01basis_error (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01Int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Name;
+                    int4     : tsp00_Int4);
+ 
+        PROCEDURE
+              t01knl_identifier (
+                    debug      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    identifier : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01sname (
+                    level : tgg00_Debug;
+                    nam : tsp00_Sname);
+ 
+        PROCEDURE
+              t01name (
+                    level : tgg00_Debug;
+                    nam : tsp00_Name);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR mblock    : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01execution_kind (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    ex_kind   : tak_execution_kind);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+ 
+Synonym :
+ 
+        FUNCTION
+              s35add_moveobj_ptr_ptocm;
+ 
+              tsp00_Int4 tsp00_MoveObjPtr;
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a721strategy (
+            VAR acv           : tak_all_command_glob;
+            VAR dmli          : tak_dml_info;
+            VAR gg_strategy   : tgg07_StrategyInfo;
+            VAR StratInfo_len : tsp00_Int2;
+            VAR parsk         : tak_parskey;
+            config            : tak00_access_configuration);
+ 
+VAR
+      _L1_pageIO        : tsp00_Int4;
+      _getlen           : tsp00_Int4;
+      _stratinfoptr     : ^tak70_stratinforecord ;
+      _L1_terms         : tak70_term;
+      _ke               : tgg00_SysInfoKey;
+      _sbuf             : tak_sysbufferaddress;
+      _sparr            : tak_syspointerarr;
+      _access_info      : tak70_strategy_record;
+      _eval_info        : tak71_page_eval_rec;
+      _order_fields     : tak00_ord_fields;
+      _aux_treeid       : tgg00_FileId;
+      _L1_stratvalue    : tsp00_Longreal;
+      _strat_found      : boolean;
+      _ok               : boolean;
+      _b_err            : tgg00_BasisError;
+ 
+      _cast             : RECORD
+            CASE integer OF
+                1 :
+                    (addr: tsp00_Addr);
+                2 :
+                    (rptr : tgg00_RecPtr );
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef TRACE
+t01messblock( ak_strat, 'A721STRATEGY', acv.a_mblock );
+t01bool( ak_strat, 'a_intern_exp', acv.a_intern_explain );
+t01execution_kind( ak_strat, 'init ex kind', acv.a_init_ex_kind );
+t01execution_kind( ak_strat, 'exec kind   ', acv.a_ex_kind );
+t01int4( ak_strat, 'stratpos    ', acv.a_mblock.mb_qual^.mstrat_pos );
+t01int4( ak_strat, 'stratstart  ', acv.a_mblock.
+      mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos );
+t01bool( ak_strat, 'd_join      ', dmli.d_join );
+&endif
+IF  ( NOT ( g01vtrace.vtrStrategy_gg00 ) AND ( cs_trace in config.cfg_switches ))
+THEN
+    BEGIN
+    g01vtrace.vtrStrategy_gg00 := true;
+    g01vtrace.vtrSession_gg00  := acv.a_transinf.tri_trans.trSessionId_gg00;
+    END;
+(*ENDIF*) 
+_strat_found := false;
+_ok          := true;
+IF  ( g01optimize_cache )
+THEN
+    BEGIN
+&   ifdef trace
+    t01sname( ak_strat, 'optim cache ' );
+&   endif
+    _ke := a01sysnullkey;
+    _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+    SAPDB_PascalForcedMove( sizeof( parsk ), sizeof( _ke.sauthid ),
+          @parsk, 1, @_ke.sauthid, 2, mxak_parskey );
+    _ke.sentrytyp := cak_estratinfo;
+    ;
+    a10get_sysinfo( acv, _ke, d_release, _sbuf, _b_err );
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        _aux_treeid   := gg_strategy.str_result_id;
+        _strat_found  := true;
+        _stratinfoptr := @_sbuf^;
+&       ifdef trace
+        (* initialize cost values *)
+        _eval_info.pev_wholeIO_pages    := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_pages     := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_rows      := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_rows_min  := IS_UNDEFINED_GG07;
+        _eval_info.pev_readInvIO_pages  := IS_UNDEFINED_GG07;
+&       endif
+        StratInfo_len := _stratinfoptr^.si_reclen - ( sizeof( _stratinfoptr^ ) -
+              sizeof( _stratinfoptr^.si_gg_stratinfo ));
+        gg_strategy   := _stratinfoptr^.si_gg_stratinfo;
+        gg_strategy.str_result_id
+              := _aux_treeid;
+        IF  ( gg_strategy.str_strategy in a70glob_inv_strats )
+        THEN
+            a71change_stack_code( acv, dmli, gg_strategy );
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( NOT _strat_found )
+THEN
+    BEGIN
+    IF  ( ssSubquery_egg00 in acv.a_mblock.mb_qual^.mstack_state )
+    THEN
+        BEGIN
+        (* change stack code *)
+        _cast.addr := gg941Allocate( acv.a_transinf.tri_trans, sizeof( tgg00_Rec ) );
+        IF  ( _cast.addr <> NIL )
+        THEN
+            BEGIN
+            k720_test_subquery( acv.a_mblock.mb_trns^, acv.a_mblock.mb_data^,
+                  acv.a_mblock.mb_data_size, acv.a_mblock.mb_qual^.mstack_desc,
+                  _cast.rptr^ );
+            gg941Deallocate( acv.a_transinf.tri_trans, _cast.addr );
+            END
+        ELSE
+            a07_b_put_error( acv, e_no_more_memory, 1 );
+        (*ENDIF*) 
+&       ifdef trace
+        t01messblock( ak_strat, 'K720_TEST   ', acv.a_mblock );
+&       endif
+        END;
+    (*ENDIF*) 
+    StratInfo_len            := STRATEGY_START_MXGG07;
+    gg_strategy.str_strategy := strat_undecided;
+    ak721systable_get( acv, d_fix, acv.a_mblock.mb_qual^.mtree,
+          _sparr.pbasep, _ok );
+    IF  ( _ok )
+    THEN
+        BEGIN
+        (* remove pretending to have parameters *)
+        IF  ( cs_pretend_parameter in config.cfg_switches )
+        THEN
+            config.cfg_switches :=
+                  config.cfg_switches - [ cs_pretend_parameter ];
+        (*ENDIF*) 
+        ;
+        (* initialize cost values *)
+        _eval_info.pev_wholeIO_pages    := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_pages     := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_rows      := IS_UNDEFINED_GG07;
+        _eval_info.pev_readIO_rows_min  := IS_UNDEFINED_GG07;
+        _eval_info.pev_readInvIO_pages  := IS_UNDEFINED_GG07;
+        ;
+        (* initialize central strategy record *)
+        _access_info := a70_glob_zstrat_rec;
+        _access_info.srec_config := config;
+        a71adjust_configuration( dmli, _access_info );
+        ;
+        IF  ( g01vtrace.vtrStrategy_gg00 )
+        THEN
+            BEGIN
+            g041name_to_trace( acv.a_transinf.tri_trans,
+                  '>> A721STRATEGY >>' );
+            IF  ( _sparr.pbasep^.sbase.btablen <> NIL )
+            THEN
+                BEGIN
+                a727trace_tablename( acv.a_transinf.tri_trans,
+                      'base table  ', _sparr.pbasep^.sbase.btablen^ );
+                END;
+            (*ENDIF*) 
+            b120MessBlockTrace(acv.a_transinf.tri_trans, ak_send, acv.a_mblock);
+            END;
+        (*ENDIF*) 
+        IF  ( NOT dmli.d_only_table_scan )
+            (* see calculate constant param expression *)
+        THEN
+            a721transfer_parse_info( acv, gg_strategy,
+                  _access_info, _L1_terms, _order_fields, bckp_restore );
+        (*ENDIF*) 
+        ;
+        IF  ( qp_given_rescnt_param in
+            _access_info.srec_query_prop.qps_switches )
+        THEN
+            a71set_rescnt( acv, _sparr, gg_strategy.str_rowno,
+                  _access_info.srec_query_prop );
+        (*ENDIF*) 
+        IF  ( gg_strategy.str_build_result )
+        THEN
+            (* could be set while executing *)
+            _access_info.srec_query_prop.qps_switches :=
+                  _access_info.srec_query_prop.qps_switches + [ qp_build_result ];
+        (*ENDIF*) 
+        IF  ( g01vtrace.vtrStrategy_gg00 )
+        THEN
+            BEGIN
+            a81trace_access_config( acv.a_transinf.tri_trans,
+                  _access_info.srec_config );
+            a727trace_query_prop( acv.a_transinf.tri_trans,
+                  _access_info.srec_query_prop );
+            END;
+        (*ENDIF*) 
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            BEGIN
+            a70L1_strat_search( acv, _sparr, _access_info, gg_strategy,
+                  StratInfo_len, _eval_info, _order_fields, _L1_pageIO, _L1_stratvalue );
+            ;
+            IF  ( qp_missing_value in _access_info.srec_query_prop.qps_switches )
+            THEN
+                BEGIN
+                IF  ( acv.a_ex_kind = only_executing ) AND
+                    ( dmli.d_corr = no_correlation )
+                THEN
+                    a07ak_system_error( acv, 721, 3 );
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                a70L2L3_strat_search( acv, dmli, _sparr,
+                      _access_info, gg_strategy,
+                      StratInfo_len,
+                      acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos +
+                      STRATEGY_START_MXGG07,
+                      _eval_info, _L1_terms, _order_fields, _L1_pageIO, _L1_stratvalue );
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        ;
+        IF  ( gg_strategy.str_strategy in
+            [ strat_undecided, strat_no_result, strat_more_than_one ] )
+        THEN
+            _access_info.srec_strat_cachable := false;
+        (*ENDIF*) 
+        ;
+        (* free mb_strat if possible *)
+        IF  ( gg_strategy.str_strategy <> strat_undecided )
+        THEN
+            acv.a_mblock.mb_strat_len := 0;
+        (*ENDIF*) 
+        a10rel_sysinfo( _sparr.pbasep );
+        ;
+        IF  ( g01optimize_cache AND _access_info.srec_strat_cachable )
+        THEN
+            BEGIN
+            _getlen := sizeof( tak70_stratinforecord ) -
+                  sizeof( gg_strategy ) + StratInfo_len;
+            a10_nil_get_sysinfo( acv, _ke, d_release, _getlen, _sbuf, _b_err );
+            ;
+            IF  ( _b_err = e_ok )
+            THEN
+                BEGIN
+                SAPDB_PascalMove ('VAK721',   1,    
+                      sizeof( gg_strategy ), _getlen,
+                      @gg_strategy, 1,
+                      @_sbuf^,
+                      sizeof( tak70_stratinforecord ) - sizeof( gg_strategy ) + 1,
+                      StratInfo_len,
+                      acv.a_returncode);
+                ;
+                IF  ( acv.a_returncode = e_ok )
+                THEN
+                    a10add_sysinfo (acv, _sbuf, _b_err);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        a07_b_put_error( acv, e_old_fileversion, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+;
+IF  ( _ok  AND ( acv.a_returncode = 0 ))
+THEN
+    BEGIN
+    IF  ( gg_strategy.str_strategy <> strat_undecided )
+    THEN
+        BEGIN
+        dmli.d_qual_kind := gg_strategy.str_qual_kind;
+        k720ref_statistic( dmli.d_strat_info, gg_strategy );
+        END;
+    (*ENDIF*) 
+    ;
+&   ifdef trace
+    a725output_end_strat( ak_strat, 'ENDSTRAT >>>', gg_strategy,
+          _eval_info, StratInfo_len );
+&   endif
+    END;
+(*ENDIF*) 
+;
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_strategy_text( acv.a_transinf.tri_trans,
+          'CHOOSEN     ', gg_strategy.str_strategy );
+    g041name_to_trace( acv.a_transinf.tri_trans,
+          '<< A721STRATEGY <<' );
+    IF  ( cs_trace in config.cfg_switches )
+    THEN
+        BEGIN
+        g01vtrace.vtrStrategy_gg00         := false;
+        g01vtrace.vtrSession_gg00.ci4_gg00 := cgg_nil_session;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak721systable_get (
+            VAR acv      : tak_all_command_glob;
+            dstate       : tak_directory_state;
+            VAR treeid   : tgg00_FileId;
+            VAR base_ptr : tak_sysbufferaddress;
+            VAR ok       : boolean);
+ 
+CONST
+      c_get_all           = true;
+ 
+VAR
+      _b_err : tgg00_BasisError;
+      _sysk  : tgg00_SysInfoKey;
+      _basetable  : tgg00_Surrogate;
+ 
+BEGIN
+ok := false;
+IF  (a101_IsExtendedTempFile (acv, treeid)    AND
+    ( a101_GetExtendedTempFileType (acv, treeid) = ttfnTempTable_egg00 ))
+THEN
+    (* temporary table, i.e. CREATE TABLE Temp.<name> *)
+    BEGIN
+    ok              := true;
+    _sysk           := a01defaultkey;
+    _sysk.sentrytyp := cak_eresult;
+    _sysk.stableid  := cgg_zero_id;
+    _sysk.ssite     := cak_temp_table_site;
+    _sysk.stemp     := a101_GetTempFileIndex (acv, treeid);
+    a10get_sysinfo( acv, _sysk, dstate, base_ptr, _b_err );
+    IF  _b_err <> e_ok
+    THEN
+        ok := false;
+    (*ENDIF*) 
+    END
+ELSE
+    a06_systable_get( acv, dstate, treeid.fileTabId_gg00, base_ptr, true, ok );
+(*ENDIF*) 
+IF  ok AND ( base_ptr^.sbase.btablekind = tonebase )
+THEN
+    BEGIN
+&   ifdef trace
+    t01knl_identifier( ak_strat, 'view/table  ', base_ptr^.sbase.btablen^ );
+&   endif
+    _basetable := base_ptr^.sbase.btreeid.fileTabId_gg00;
+    a10rel_sysinfo( base_ptr );
+    a06_systable_get( acv, d_fix, _basetable, base_ptr, c_get_all, ok );
+    END;
+&ifdef trace
+(*ENDIF*) 
+IF  ok
+THEN
+    t01knl_identifier( ak_strat, 'base table  ', base_ptr^.sbase.btablen^ );
+&endif
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a721transfer_parse_info (
+            VAR acv           : tak_all_command_glob;
+            VAR gg_strategy   : tgg07_StrategyInfo;
+            VAR access_info   : tak70_strategy_record;
+            VAR L1_terms      : tak70_term;
+            VAR order_fields  : tak00_ord_fields;
+            work_kind         : tak70_backup);
+ 
+VAR
+      _used_buffer_len          : tsp00_Int4;
+ 
+      _parse_info_ptr           : RECORD
+            CASE boolean OF
+                true :
+                    (struct_ptr : tak70_optimizer_parsinfo_ptr);
+                false :
+                    (byte_ptr   : tsp00_MoveObjPtr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+&ifdef trace
+IF  ( work_kind = bckp_restore )
+THEN
+    t01sname( ak_strat, 'bckp_restore' )
+ELSE
+    t01sname( ak_strat, 'bckp_save   ' );
+(*ENDIF*) 
+t01int4( ak_strat, 'mb_strat_len', acv.a_mblock.mb_strat_len );
+&endif
+IF  ( work_kind = bckp_save )
+THEN
+    BEGIN
+    gg_strategy.str_strategy := strat_undecided;
+    (* redecided at execution time, but could be decided ad parse time !! *)
+    gg_strategy.str_key_order_support := kos_no_support;
+    END;
+(*ENDIF*) 
+IF  ( acv.a_mblock.mb_strat <> NIL )
+    AND
+    (( ( acv.a_mblock.mb_strat_len > STRATEGY_START_MXGG07 ) AND
+    ( work_kind = bckp_restore ) ) OR ( work_kind = bckp_save ) )
+THEN
+    BEGIN
+    (**** CONFIG ****)
+    IF  ( work_kind = bckp_save )
+    THEN
+        BEGIN
+        (* align parse info length, because _parse_info_ptr will be moved *)
+        (* before parse info und accessed via pointer                     *)
+        IF  (( acv.a_mblock.mb_strat_len MOD ALIGNMENT_GG00 ) <> 0 )
+        THEN
+            BEGIN
+            acv.a_mblock.mb_strat_len := acv.a_mblock.mb_strat_len +
+                  ALIGNMENT_GG00 -
+                  ( acv.a_mblock.mb_strat_len MOD ALIGNMENT_GG00 );
+            END;
+        (*ENDIF*) 
+        _parse_info_ptr.byte_ptr := s35add_moveobj_ptr_ptocm( acv.a_mblock.mb_strat,
+              acv.a_mblock.mb_strat_len + STRATEGY_START_MXGG07 );
+        _used_buffer_len := acv.a_mblock.mb_strat_len + STRATEGY_START_MXGG07 +
+              sizeof( tak70_optimizer_parsinfo );
+        ;
+        access_info.srec_query_prop.qps_switches :=
+              access_info.srec_query_prop.qps_switches -
+              [ qp_missing_value ];
+&       ifdef trace
+        t01Int4( ak_strat, 'write parse info  ', acv.a_mblock.mb_strat_len +
+              STRATEGY_START_MXGG07 );
+        a725output_query_prop( ak_strat, access_info.srec_query_prop );
+        t01Int4( ak_strat, 'L1 predicate cnt  ', access_info.srec_L1_pred_cnt );
+        t01bool( ak_strat, 'L1 pred unus', access_info.srec_unusable_L1_pred );
+        t01bool( ak_strat, 'L23 predicat', access_info.srec_L23_predicates );
+&       endif
+        (* save context information *)
+        _parse_info_ptr.struct_ptr^.op_query_prop :=
+              access_info.srec_query_prop;
+        _parse_info_ptr.struct_ptr^.op_L1_pred_cnt :=
+              access_info.srec_L1_pred_cnt;
+        _parse_info_ptr.struct_ptr^.op_L23_predicates :=
+              access_info.srec_L23_predicates;
+        _parse_info_ptr.struct_ptr^.op_unusable_L1_pred :=
+              access_info.srec_unusable_L1_pred;
+        END
+    ELSE
+        BEGIN
+        (* see above *)
+        _used_buffer_len :=
+              acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos - 1 +
+              acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].elen_var;
+        IF  (( _used_buffer_len MOD ALIGNMENT_GG00 ) <> 0 )
+        THEN
+            BEGIN
+            _used_buffer_len := _used_buffer_len +
+                  ALIGNMENT_GG00 - ( _used_buffer_len MOD ALIGNMENT_GG00 );
+            END;
+        (*ENDIF*) 
+        ;
+&       ifdef trace
+        t01Int4( ak_strat, 'read parse info   ', _used_buffer_len );
+&       endif
+        _parse_info_ptr.byte_ptr := s35add_moveobj_ptr_ptocm( acv.a_mblock.mb_strat,
+              _used_buffer_len );
+        _used_buffer_len := _used_buffer_len + sizeof( tak70_optimizer_parsinfo );
+        ;
+        (* restore context information *)
+        access_info.srec_query_prop :=
+              _parse_info_ptr.struct_ptr^.op_query_prop;
+        access_info.srec_L1_pred_cnt :=
+              _parse_info_ptr.struct_ptr^.op_L1_pred_cnt;
+        access_info.srec_L23_predicates :=
+              _parse_info_ptr.struct_ptr^.op_L23_predicates;
+        access_info.srec_unusable_L1_pred :=
+              _parse_info_ptr.struct_ptr^.op_unusable_L1_pred;
+&       ifdef trace
+        a81debug_access_config( ak_strat, access_info.srec_config );
+        a725output_query_prop( ak_strat, access_info.srec_query_prop );
+        t01Int4( ak_strat, 'L1 predicate cnt  ', access_info.srec_L1_pred_cnt );
+        t01bool( ak_strat, 'L1 pred unus', access_info.srec_unusable_L1_pred );
+        t01bool( ak_strat, 'L23 predicat', access_info.srec_L23_predicates );
+&       endif
+        END
+    (*ENDIF*) 
+    ;
+    (**** ORDER FIELDS ****)
+    ak721order_fields_transfer( acv, order_fields,
+          _parse_info_ptr.struct_ptr, _used_buffer_len, work_kind );
+    ;
+    (**** LEVEL1 ACCESS PATH ****)
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        ak721L1_accesspath_transfer( acv, access_info,
+              _parse_info_ptr.struct_ptr, _used_buffer_len, work_kind );
+    (*ENDIF*) 
+    ;
+    (**** INDEX ONLY INFORMATION ****)
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        ak721involved_cols_transfer( acv, access_info.srec_involved_cols,
+              _parse_info_ptr.struct_ptr, _used_buffer_len, work_kind );
+    (*ENDIF*) 
+    ;
+    (**** LEVEL2/LEVEL3 ACCESS PATH ****)
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        ak721L23_accesspath_transfer( acv, L1_terms,
+              _parse_info_ptr.struct_ptr, _used_buffer_len, work_kind );
+    (*ENDIF*) 
+    IF  ( work_kind = bckp_save )
+    THEN
+        acv.a_mblock.mb_strat_len := _used_buffer_len;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+&   ifdef trace
+    t01int4(ak_strat, 'mb_strat_len', acv.a_mblock.mb_strat_len);
+&   endif
+    a07ak_system_error( acv, 721, 2 );
+    END;
+(*ENDIF*) 
+&ifdef trace
+t01int4( ak_strat, 'mb_strat_len', acv.a_mblock.mb_strat_len );
+t01basis_error( ak_strat, 'a_returncode', acv.a_returncode );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak721L1_accesspath_transfer (
+            VAR acv             : tak_all_command_glob;
+            VAR access_info     : tak70_strategy_record;
+            parserecord_ptr     : tak70_optimizer_parsinfo_ptr;
+            VAR used_buffer_len : tsp00_Int4;
+            work_kind           : tak70_backup);
+ 
+VAR
+      _move_len  : tsp00_Int2;
+      _ix        : tsp00_Int2;
+      _b_err     : tgg00_BasisError;
+ 
+BEGIN
+WITH access_info, srec_keyaccess, srec_invaccess DO
+    BEGIN
+&   ifdef trace
+    t01name( ak_strat, 'transfer L1 preds ' );
+&   endif
+    _b_err := e_ok;
+    IF  ( work_kind = bckp_save )
+    THEN
+        BEGIN
+        (* check length of data *)
+        IF  ( used_buffer_len +
+            ka_startcnt * sizeof( ka_startfields[ 0 ] ) +
+            ka_stopcnt  * sizeof( ka_stopfields[ 0 ] )  +
+            ia_startcnt * sizeof( ia_startfields[ 0 ] ) +
+            ia_stopcnt  * sizeof( ia_stopfields[ 0 ] )  +
+            ia_incnt    * sizeof( ia_infields[ 0 ] )
+            <= acv.a_mblock.mb_strat_size )
+        THEN
+            BEGIN
+&           ifdef trace
+            a725output_access_info( ak_strat, 'save        ', access_info );
+&           endif
+            ;
+            (**** KEY ACCESS ****)
+            (*** store ka_startcnt ***)
+            parserecord_ptr^.op_keystartcnt := ka_startcnt;
+            (*** store ka_stopcnt ***)
+            parserecord_ptr^.op_keystopcnt  := ka_stopcnt;
+            (*** store ka_infield ***)
+            parserecord_ptr^.op_keyinfield  := ka_infield;
+            ;
+            (*** store ka_startfields ***)
+            _move_len := ( ka_startcnt ) * sizeof( ka_startfields[ 0 ] );
+            SAPDB_PascalForcedMove (
+                  sizeof( ka_startfields ),
+                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                  @ka_startfields, 1,
+                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                  _move_len );
+            used_buffer_len := used_buffer_len + _move_len;
+            ;
+            (*** store ka_stopfields ***)
+            _move_len := ( ka_stopcnt ) * sizeof( ka_stopfields[ 0 ] );
+            SAPDB_PascalForcedMove (
+                  sizeof( ka_stopfields ),
+                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                  @ka_stopfields, 1,
+                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                  _move_len );
+            used_buffer_len := used_buffer_len + _move_len;
+            ;
+            (**** INV ACCESS ****)
+            (*** store ia_startcnt ***)
+            parserecord_ptr^.op_idx_startcnt  := ia_startcnt;
+            (*** store ia_stopcnt ***)
+            parserecord_ptr^.op_idx_stopcnt   := ia_stopcnt;
+            (*** store ia_incnt ***)
+            parserecord_ptr^.op_idx_incnt     := ia_incnt;
+            ;
+            (*** store ia_startfields ***)
+            _move_len := ia_startcnt * sizeof( ia_startfields[ 0 ] );
+            SAPDB_PascalForcedMove (
+                  sizeof( ia_startfields ),
+                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                  @ia_startfields, 1,
+                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                  _move_len );
+            used_buffer_len := used_buffer_len + _move_len;
+            ;
+            (*** store ia_stopfields ***)
+            _move_len := ia_stopcnt * sizeof( ia_stopfields[ 0 ] );
+            SAPDB_PascalForcedMove (
+                  sizeof( ia_stopfields ),
+                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                  @ia_stopfields, 1,
+                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                  _move_len );
+            used_buffer_len := used_buffer_len + _move_len;
+            ;
+            (*** store ia_infields ***)
+            _move_len := ia_incnt * sizeof( ia_infields[ 0 ] );
+            SAPDB_PascalForcedMove (
+                  sizeof( ia_infields ),
+                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                  @ia_infields, 1,
+                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                  _move_len );
+            used_buffer_len := used_buffer_len + _move_len;
+            END
+        ELSE
+            a07_b_put_error( acv, e_too_many_mb_strat, 1 );
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        (**** KEY ACCESS ****)
+        (*** restore ka_startcnt ***)
+        ka_startcnt := parserecord_ptr^.op_keystartcnt;
+        (*** restore ka_stopcnt ***)
+        ka_stopcnt  := parserecord_ptr^.op_keystopcnt;
+        (*** restore ka_infield ***)
+        ka_infield  := parserecord_ptr^.op_keyinfield;
+        ;
+        (*** restore ka_startfields ***)
+        _move_len := ( ka_startcnt ) * sizeof( ka_startfields[ 0 ] );
+        SAPDB_PascalMove ('VAK721',   2,    
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              sizeof( ka_startfields ),
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              @ka_startfields, 1,
+              _move_len, _b_err);
+        used_buffer_len := used_buffer_len + _move_len;
+        FOR _ix := ka_startcnt TO MAX_COLPOSARR_IDX_GG07 DO
+            ka_startfields[ _ix ] := 0;
+        (*ENDFOR*) 
+        ;
+        (*** restore ka_stopfields ***)
+        _move_len := ( ka_stopcnt ) * sizeof( ka_stopfields[ 0 ] );
+        SAPDB_PascalMove ('VAK721',   3,    
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              sizeof( ka_stopfields ),
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              @ka_stopfields, 1,
+              _move_len, _b_err);
+        used_buffer_len := used_buffer_len + _move_len;
+        FOR _ix := ka_stopcnt TO MAX_COLPOSARR_IDX_GG07 DO
+            ka_stopfields[ _ix ] := 0;
+        (*ENDFOR*) 
+        ;
+        (**** INV ACCESS ****)
+        (*** restore ia_startcnt ***)
+        ia_startcnt := parserecord_ptr^.op_idx_startcnt;
+        (*** restore ia_stopcnt ***)
+        ia_stopcnt  := parserecord_ptr^.op_idx_stopcnt;
+        (*** restore ia_incnt ***)
+        ia_incnt    := parserecord_ptr^.op_idx_incnt;
+        ;
+        (*** restore ia_startfields ***)
+        _move_len := ia_startcnt * sizeof( ia_startfields[ 0 ] );
+        SAPDB_PascalMove ('VAK721',   4,    
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              sizeof( ia_startfields ),
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              @ia_startfields, 1,
+              _move_len, _b_err);
+        used_buffer_len := used_buffer_len + _move_len;
+        ;
+        (*** restore ia_stopfields ***)
+        _move_len := ia_stopcnt * sizeof( ia_stopfields[ 0 ] );
+        SAPDB_PascalMove ('VAK721',   5,    
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              sizeof( ia_stopfields ),
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              @ia_stopfields, 1,
+              _move_len, _b_err);
+        used_buffer_len := used_buffer_len + _move_len;
+        ;
+        (*** restore ia_infields ***)
+        _move_len := ia_incnt * sizeof( ia_infields[ 0 ] );
+        SAPDB_PascalMove ('VAK721',   6,    
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              sizeof( ia_infields ),
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              @ia_infields, 1,
+              _move_len, _b_err);
+        used_buffer_len := used_buffer_len + _move_len;
+&       ifdef trace
+        a725output_access_info( ak_strat, 'restore     ', access_info );
+&       endif
+        IF  ( _b_err <> e_ok )
+        THEN
+            a07_b_put_error( acv, _b_err, 1 );
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_access_info( acv.a_transinf.tri_trans,
+          'L1_ACCESSPATH     ', access_info );
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak721involved_cols_transfer (
+            VAR acv             : tak_all_command_glob;
+            VAR ic_info         : tak70_involved_columns;
+            parserecord_ptr     : tak70_optimizer_parsinfo_ptr;
+            VAR used_buffer_len : tsp00_Int4;
+            work_kind           : tak70_backup);
+ 
+VAR
+      _move_len   : tsp00_Int2;
+      _ix         : tsp00_Int2;
+      _b_err      : tgg00_BasisError;
+ 
+BEGIN
+_b_err := e_ok;
+IF  ( work_kind = bckp_save )
+THEN
+    BEGIN
+    IF  ( used_buffer_len +
+        ic_info.ic_i_outp_cnt * sizeof( ic_info.ic_i_outp_cols[ 1 ] ) +
+        ic_info.ic_k_outp_cnt * sizeof( ic_info.ic_k_outp_cols[ 0 ] ) +
+        ic_info.ic_i_qual_cnt * sizeof( ic_info.ic_i_qual_cols[ 1 ] ) +
+        ic_info.ic_k_qual_cnt * sizeof( ic_info.ic_k_qual_cols[ 0 ] )
+        <= acv.a_mblock.mb_strat_size )
+    THEN
+        BEGIN
+&       ifdef trace
+        a725output_involved_cols( ak_strat, 'save ic_info', ic_info );
+&       endif
+        (*** store ic_info.ic_i_outp_cnt ***)
+        parserecord_ptr^.op_i_outp_cnt := ic_info.ic_i_outp_cnt;
+        (*** store ic_info.ic_k_outp_cnt ***)
+        parserecord_ptr^.op_k_outp_cnt := ic_info.ic_k_outp_cnt;
+        ;
+        (*** store ic_info.ic_i_outp_cols ***)
+        _move_len := ic_info.ic_i_outp_cnt * sizeof( ic_info.ic_i_outp_cols[ 1 ] );
+        SAPDB_PascalForcedMove (
+              sizeof( ic_info.ic_i_outp_cols ),
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              @ic_info.ic_i_outp_cols, 1,
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              _move_len );
+        used_buffer_len := used_buffer_len + _move_len;
+        ;
+        (*** store ic_info.ic_k_outp_cols ***)
+        _move_len := ic_info.ic_k_outp_cnt * sizeof( ic_info.ic_k_outp_cols[ 0 ] );
+        SAPDB_PascalForcedMove (
+              sizeof( ic_info.ic_k_outp_cols ),
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              @ic_info.ic_k_outp_cols, 1,
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              _move_len );
+        used_buffer_len := used_buffer_len + _move_len;
+        ;
+        (*** store ic_info.ic_i_qual_cnt ***)
+        parserecord_ptr^.op_i_qual_cnt := ic_info.ic_i_qual_cnt;
+        (*** store ic_info.ic_k_qual_cnt ***)
+        parserecord_ptr^.op_k_qual_cnt := ic_info.ic_k_qual_cnt;
+        ;
+        (*** store ic_info.ic_i_qual_cols ***)
+        _move_len := ic_info.ic_i_qual_cnt * sizeof( ic_info.ic_i_qual_cols[ 1 ] );
+        SAPDB_PascalForcedMove (
+              sizeof( ic_info.ic_i_qual_cols ),
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              @ic_info.ic_i_qual_cols, 1,
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              _move_len );
+        used_buffer_len := used_buffer_len + _move_len;
+        ;
+        (*** store ic_info.ic_k_qual_cols ***)
+        _move_len := ic_info.ic_k_qual_cnt * sizeof( ic_info.ic_k_qual_cols[ 0 ] );
+        SAPDB_PascalForcedMove (
+              sizeof( ic_info.ic_k_qual_cols ),
+              acv.a_mblock.mb_strat_size - used_buffer_len,
+              @ic_info.ic_k_qual_cols, 1,
+              acv.a_mblock.mb_strat, used_buffer_len + 1,
+              _move_len );
+        used_buffer_len := used_buffer_len + _move_len;
+        END
+    ELSE
+        a07_b_put_error( acv, e_too_many_mb_strat, 1 );
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    (*** restore ic_info.ic_i_outp_cnt ***)
+    ic_info.ic_i_outp_cnt := parserecord_ptr^.op_i_outp_cnt;
+    (*** restore ic_info.ic_k_outp_cnt ***)
+    ic_info.ic_k_outp_cnt := parserecord_ptr^.op_k_outp_cnt;
+    ;
+    (*** restore ic_info.ic_i_outp_cols ***)
+    _move_len := ic_info.ic_i_outp_cnt * sizeof( ic_info.ic_i_outp_cols[ 1 ] );
+    SAPDB_PascalMove ('VAK721',   7,    
+          acv.a_mblock.mb_strat_size - used_buffer_len,
+          sizeof( ic_info.ic_i_outp_cols ),
+          acv.a_mblock.mb_strat, used_buffer_len + 1,
+          @ic_info.ic_i_outp_cols, 1,
+          _move_len, _b_err);
+    used_buffer_len := used_buffer_len + _move_len;
+    FOR _ix := ic_info.ic_i_outp_cnt + 1 TO MAX_COL_SEQUENCE_GG00 DO
+        ic_info.ic_i_outp_cols[ _ix ] := 0;
+    (*ENDFOR*) 
+    ;
+    (*** restore ic_info.ic_k_outp_cols ***)
+    _move_len := ic_info.ic_k_outp_cnt * sizeof( ic_info.ic_k_outp_cols[ 0 ] );
+    SAPDB_PascalMove ('VAK721',   8,    
+          acv.a_mblock.mb_strat_size - used_buffer_len,
+          sizeof( ic_info.ic_k_outp_cols ),
+          acv.a_mblock.mb_strat, used_buffer_len + 1,
+          @ic_info.ic_k_outp_cols, 1,
+          _move_len, _b_err);
+    used_buffer_len := used_buffer_len + _move_len;
+    FOR _ix := ic_info.ic_k_outp_cnt TO MAX_COLPOSARR_IDX_GG07 DO
+        ic_info.ic_k_outp_cols[ _ix ] := 0;
+    (*ENDFOR*) 
+    ;
+    (*** restore ic_info.ic_i_qual_cnt ***)
+    ic_info.ic_i_qual_cnt := parserecord_ptr^.op_i_qual_cnt;
+    (*** restore ic_info.ic_k_qual_cnt ***)
+    ic_info.ic_k_qual_cnt := parserecord_ptr^.op_k_qual_cnt;
+    ;
+    (*** restore ic_info.ic_i_qual_cols ***)
+    _move_len := ic_info.ic_i_qual_cnt * sizeof( ic_info.ic_i_qual_cols[ 1 ] );
+    SAPDB_PascalMove ('VAK721',   9,    
+          acv.a_mblock.mb_strat_size - used_buffer_len,
+          sizeof( ic_info.ic_i_qual_cols ),
+          acv.a_mblock.mb_strat, used_buffer_len + 1,
+          @ic_info.ic_i_qual_cols, 1,
+          _move_len, _b_err);
+    used_buffer_len := used_buffer_len + _move_len;
+    FOR _ix := ic_info.ic_i_qual_cnt + 1 TO MAX_COL_SEQUENCE_GG00 DO
+        ic_info.ic_i_qual_cols[ _ix ] := 0;
+    (*ENDFOR*) 
+    ;
+    (*** restore ic_info.ic_k_qual_cols ***)
+    _move_len := ic_info.ic_k_qual_cnt * sizeof( ic_info.ic_k_qual_cols[ 0 ] );
+    SAPDB_PascalMove ('VAK721',  10,    
+          acv.a_mblock.mb_strat_size - used_buffer_len,
+          sizeof( ic_info.ic_k_qual_cols ),
+          acv.a_mblock.mb_strat, used_buffer_len + 1,
+          @ic_info.ic_k_qual_cols, 1,
+          _move_len, _b_err);
+    used_buffer_len := used_buffer_len + _move_len;
+    FOR _ix := ic_info.ic_k_qual_cnt TO MAX_COLPOSARR_IDX_GG07 DO
+        ic_info.ic_k_qual_cols[ _ix ] := 0;
+    (*ENDFOR*) 
+&   ifdef trace
+    a725output_involved_cols( ak_strat, 'recov ic_inf', ic_info );
+&   endif
+    IF  ( _b_err <> e_ok )
+    THEN
+        a07_b_put_error( acv, _b_err, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_involved_cols( acv.a_transinf.tri_trans ,
+          'INVOLVED COLS TRAN', ic_info,
+          true (* trace in any case *), true (* trace in any case *));
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak721L23_accesspath_transfer (
+            VAR acv             : tak_all_command_glob;
+            VAR L1_terms        : tak70_term;
+            parserecord_ptr     : tak70_optimizer_parsinfo_ptr;
+            VAR used_buffer_len : tsp00_Int4;
+            work_kind           : tak70_backup);
+ 
+VAR
+      _ic2          : tsp_int_map_c2;
+      _ix           : tsp00_Int2;
+      _ix_terms     : tsp00_Int2;
+      _move_len     : tsp00_Int2;
+      _b_err        : tgg00_BasisError;
+ 
+BEGIN
+&ifdef trace
+t01name( ak_strat, 'trans L2, L3 preds' );
+&endif
+_b_err := e_ok;
+WITH L1_terms DO
+    BEGIN
+    IF  ( work_kind = bckp_restore )
+    THEN
+        BEGIN
+        (*** restore L-1-terms count ***)
+        trm_L1termcnt := parserecord_ptr^.op_L1termcnt;
+        END
+    ELSE
+        BEGIN
+        (*** store L-1-terms count ***)
+        parserecord_ptr^.op_L1termcnt := trm_L1termcnt;
+        END;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4( ak_strat, 'L1-term cnt ', parserecord_ptr^.op_L1termcnt );
+    t01int4( ak_strat, 'used buf len', used_buffer_len );
+&   endif
+    _ix := 0;
+    WHILE ( _ix <= trm_L1termcnt - 1 ) DO
+        (*** (re)store one L-1-term ***)
+        WITH trm_L1terms[ _ix ] DO
+            BEGIN
+            IF  ( work_kind = bckp_restore )
+            THEN
+                BEGIN
+                IF  ( used_buffer_len + 3 <= acv.a_mblock.mb_strat_size )
+                THEN
+                    BEGIN
+                    (*** restore count of L-2-preds and L-3-terms ***)
+                    _ic2.map_c2[ 1 ] :=
+                          acv.a_mblock.mb_strat^[ used_buffer_len + 1 ];
+                    _ic2.map_c2[ 2 ] :=
+                          acv.a_mblock.mb_strat^[ used_buffer_len + 2 ];
+                    used_buffer_len  := used_buffer_len + 2;
+                    l1t_L2pL3tcnt    := _ic2.map_int;
+                    (*** restore useability info ***)
+                    trm_L1terms[ _ix ].l1t_is_usable :=
+                          ( ord( acv.a_mblock.
+                          mb_strat^[ used_buffer_len + 1 ] ) = 1 );
+                    used_buffer_len  := used_buffer_len + 1;
+                    END
+                ELSE
+                    _b_err := e_too_many_mb_strat;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                (*** store count of L-2-preds / L-3-terms ***)
+                _ic2.map_int := trm_L1terms[ _ix ].l1t_L2pL3tcnt;
+                acv.a_mblock.mb_strat^[ used_buffer_len + 1 ] :=
+                      _ic2.map_c2[ 1 ];
+                acv.a_mblock.mb_strat^[ used_buffer_len + 2 ] :=
+                      _ic2.map_c2[ 2 ];
+                used_buffer_len := used_buffer_len + 2;
+                (*** store useability info ***)
+                acv.a_mblock.mb_strat^[ used_buffer_len + 1 ] :=
+                      chr( ord ( trm_L1terms[ _ix ].l1t_is_usable ) );
+                used_buffer_len := used_buffer_len + 1;
+                END;
+            (*ENDIF*) 
+            _ix := succ ( _ix );
+            _ix_terms := 1;
+            WHILE ( _ix_terms <= l1t_L2pL3tcnt ) AND ( _b_err = e_ok ) DO
+                (*** (re)store one L-2-pred / L-3-term ***)
+                WITH l1t_L2terms[ _ix_terms - 1 ] DO
+                    BEGIN
+                    IF  ( work_kind = bckp_restore )
+                    THEN
+                        BEGIN
+                        (*** restore count of predicates ***)
+                        _ic2.map_c2[ 1 ] :=
+                              acv.a_mblock.mb_strat^[ used_buffer_len + 1 ];
+                        _ic2.map_c2[ 2 ] :=
+                              acv.a_mblock.mb_strat^[ used_buffer_len + 2 ];
+                        used_buffer_len  := used_buffer_len + 2;
+                        l2l3p_predcnt    := _ic2.map_int;
+                        (*** restore predicates ***)
+                        _move_len := l2l3p_predcnt * sizeof( l2l3p_preds[ 0 ] );
+                        SAPDB_PascalMove ('VAK721',  11,    
+                              acv.a_mblock.mb_strat_size - used_buffer_len,
+                              _move_len,
+                              acv.a_mblock.mb_strat, used_buffer_len + 1,
+                              @l2l3p_preds[ 0 ], 1,
+                              _move_len, _b_err);
+                        used_buffer_len := used_buffer_len + _move_len;
+                        END
+                    ELSE
+                        BEGIN
+                        IF  ( used_buffer_len + 2 +
+                            l2l3p_predcnt * sizeof( l2l3p_preds[ 0 ] )
+                            <= acv.a_mblock.mb_strat_size )
+                        THEN
+                            BEGIN
+                            (*** store count of predicates ***)
+                            _ic2.map_int := l2l3p_predcnt;
+                            acv.a_mblock.mb_strat^[ used_buffer_len + 1 ] :=
+                                  _ic2.map_c2[ 1 ];
+                            acv.a_mblock.mb_strat^[ used_buffer_len + 2 ] :=
+                                  _ic2.map_c2[ 2 ];
+                            used_buffer_len := used_buffer_len + 2;
+                            (*** store predicates ***)
+                            _move_len := l2l3p_predcnt * sizeof( l2l3p_preds[ 0 ] );
+                            SAPDB_PascalForcedMove (
+                                  _move_len,
+                                  acv.a_mblock.mb_strat_size - used_buffer_len,
+                                  @l2l3p_preds[ 0 ], 1,
+                                  acv.a_mblock.mb_strat, used_buffer_len + 1,
+                                  _move_len );
+                            used_buffer_len := used_buffer_len + _move_len;
+                            END
+                        ELSE
+                            _b_err := e_too_many_mb_strat;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    _ix_terms := succ( _ix_terms );
+                    END;
+                (*ENDWITH*) 
+            (*ENDWHILE*) 
+            END;
+        (*ENDWITH*) 
+    (*ENDWHILE*) 
+&   ifdef trace
+    a725L1_terms_output( ak_strat, L1_terms );
+&   endif
+    IF  ( _b_err <> e_ok )
+    THEN
+        a07_b_put_error( acv, _b_err, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    g041name_to_trace( acv.a_transinf.tri_trans,
+          'L23_ACCESSPATH    ' );
+    a727L1_terms_trace( acv, L1_terms );
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak721order_fields_transfer (
+            VAR acv             : tak_all_command_glob;
+            VAR order_fields    : tak00_ord_fields;
+            parserecord_ptr     : tak70_optimizer_parsinfo_ptr;
+            VAR used_buffer_len : tsp00_Int4;
+            work_kind           : tak70_backup);
+ 
+VAR
+      _ix     : tsp00_Int2;
+      _ic2    : tsp_int_map_c2;
+ 
+      _asc    : RECORD
+            CASE boolean OF
+                true :
+                    (ofasc  : tak00_ooption);
+                false :
+                    (byte   : char);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+IF  ( used_buffer_len + 5 > acv.a_mblock.mb_strat_size )
+THEN
+    a07_b_put_error( acv, e_too_many_mb_strat, 1 )
+ELSE
+    IF  ( work_kind = bckp_save )
+    THEN
+        BEGIN
+        parserecord_ptr^.op_ordered_field_cnt := order_fields.ocntord;
+        FOR _ix := 1 TO order_fields.ocntord DO
+            BEGIN
+            (*** store ofstno  ***)
+            _ic2.map_int := order_fields.ofield[ _ix ].ofstno;
+            acv.a_mblock.mb_strat^[ used_buffer_len + 1 ] := _ic2.map_c2[ 1 ];
+            acv.a_mblock.mb_strat^[ used_buffer_len + 2 ] := _ic2.map_c2[ 2 ];
+            (*** store ofasc   ***)
+            _asc.ofasc := order_fields.ofield[ _ix ].ofasc;
+            acv.a_mblock.mb_strat^[ used_buffer_len + 3 ] := _asc.byte;
+            (*** store offno   ***)
+            _ic2.map_int := order_fields.ofield[ _ix ].offno;
+            acv.a_mblock.mb_strat^[ used_buffer_len + 4 ] := _ic2.map_c2[ 1 ];
+            acv.a_mblock.mb_strat^[ used_buffer_len + 5 ] := _ic2.map_c2[ 2 ];
+            used_buffer_len := used_buffer_len + 5;
+            END;
+        (*ENDFOR*) 
+        END
+    ELSE
+        BEGIN
+        order_fields.ocntord := parserecord_ptr^.op_ordered_field_cnt;
+        FOR _ix := 1 TO order_fields.ocntord DO
+            BEGIN
+            (*** restore ofstno  ***)
+            _ic2.map_c2[ 1 ] := acv.a_mblock.mb_strat^[ used_buffer_len + 1 ];
+            _ic2.map_c2[ 2 ] := acv.a_mblock.mb_strat^[ used_buffer_len + 2 ];
+            order_fields.ofield[ _ix ].ofstno := _ic2.map_int;
+            (*** restore ofasc   ***)
+            _asc.byte := acv.a_mblock.mb_strat^[ used_buffer_len + 3 ];
+            order_fields.ofield[ _ix ].ofasc := _asc.ofasc;
+            (*** restore offno   ***)
+            _ic2.map_c2[ 1 ] := acv.a_mblock.mb_strat^[ used_buffer_len + 4 ];
+            _ic2.map_c2[ 2 ] := acv.a_mblock.mb_strat^[ used_buffer_len + 5 ];
+            order_fields.ofield[ _ix ].offno := _ic2.map_int;
+            used_buffer_len := used_buffer_len + 5;
+            END;
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  ( g01vtrace.vtrStrategy_gg00 )
+THEN
+    BEGIN
+    a727trace_ord_fields( acv.a_transinf.tri_trans,
+          'ORD_FIELDS TRANSFE', order_fields );
+    END;
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

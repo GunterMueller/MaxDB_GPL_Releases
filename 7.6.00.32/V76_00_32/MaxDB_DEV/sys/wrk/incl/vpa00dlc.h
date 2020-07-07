@@ -1,0 +1,157 @@
+#ifndef RC_INVOKED
+#ifdef DEBUG
+#else
+#line 67 "vpa00dlc"
+#endif
+#endif
+/* apdlg.h */
+#define API_CLIK                    104 
+#define API_CANCEL                  101
+#define API_NEVER                   105
+#define API_TRACE_OFF               102
+#define API_TRACE_ON                103
+#define ESQ                         107
+#define ESQICONID                   108
+#define ESQICON                     109
+#define API_TABLENAME               110
+#define APIESQUSEROK                111
+#define APIESQUSERBAIL              112
+#define API_USERID                  113
+#define API_PASSWORD                114
+#define API_USEROK                  115
+#define API_USERBAIL                116
+#define API_SERVERDB                117
+#define API_SERVERNODE              118
+#define API_FILENUMBER              119
+#define API_FILEOK                  122
+#define API_FILECANCEL              123
+#define API_CASESENSITIVE           124
+#define ICO_MAIN                    125
+#define API_ENCRYPT                 126
+/* defines for debugging */
+#define API_TRACEFILE               701
+#define API_TRACELEVEL              702
+#define API_TRACEPATH               703
+
+/* defines for setup dll */
+#define CONFIGDSN                  1001
+#define CONFIGSYSTEM               1002
+
+/* defines for installer dll */
+#define LOGINDLG                   1003
+#define CONFIGMESSAGE              1004
+#define DATASOURCELIST             1005
+#define ABOUTBOX                   1006
+
+#define IDC_DSNAME                  400     
+#define IDC_DSNAMETEXT              401
+#define IDC_SERVERDB                402
+#define IDC_SERVERDBTEXT            403
+#define IDC_INSTALLSYSOPT           404
+#define IDC_DESC                    406
+#define IDC_ODBCUSER                407 
+#define IDC_ODBCUSERTEXT            408
+#define IDC_ODBCPASSWORD            409 
+#define IDC_ODBCPASSWORDTEXT        410
+#define IDC_SYSMESSAGE              411
+#define IDC_EXPORTSYSTABLES         412
+#define IDC_TITLE                   413
+#define IDC_PERCENT                 414
+#define IDC_PERCENTBAR              415
+#define IDC_PERCENTRECT             416
+#define IDC_DATASOURCE              417 
+#define IDC_VERSION                 418
+#define IDC_SERVERNODE              419
+#define IDC_SERVERNODETEXT          420
+#define IDC_SQLMODE                 421
+#define IDC_ISOLATIONLEVEL          422
+#define IDC_SELECTFILE              423
+#define IDC_SQLTRACEFILENAME        424
+#define IDC_SQLTRACE                425
+#define IDC_TRUNCATELONG            426
+#define IDC_AUTOCOMMIT              427
+#define IDC_CATALOGCOMMENTS         428
+
+#define IDCONNECT                   900
+#define IDCCHECKTABLE               901
+#define IDCREATETABLE               902
+#define IDEXIT                      903
+#define IDREMOVE                    904
+#define IDRESET                     905
+
+#define IDS_MSGTITLE                500
+#define IDS_BADDSN                  501
+#define IDS_INVVAL                  502
+#define IDS_INVFIELD                503
+
+#define API_SEC_DSN        "DSN"
+#define API_SEC_DESC       "DESC"
+#define API_SEC_DEFAULT    "Default"
+#define API_SEC_SYSTEMUSER "SystemUser"
+#define API_SEC_SERVERDB   "ServerDB"
+#define API_SEC_SERVERDB2  "DATABASE"
+#define API_SEC_SERVERNODE "ServerNode"
+#define API_SEC_SERVERNODE2 "SERVER"
+#define API_SEC_DRIVERNAME "Driver"              /* PTS 1108230 */
+#define API_SEC_DESCRIPTION "Description"
+#define API_SEC_CASESENSITIVE "CaseSensitive"
+#define API_SEC_SQLMODE       "Sqlmode"
+#define API_SEC_AUTOCOMMIT "AutoCommit"
+#define API_SEC_BLOCKMODUS "BlockModus"
+#define API_SEC_MAXBLOCKSIZE "MaxBlockSize"
+#define API_SEC_LONVARTRUNCATION "LongVarTrunc"
+#define API_SEC_ACTIVESTATEMENTS "ActiveStmts"
+#define API_SEC_SQLTRACEFILE "TraceFileName"
+#define API_SEC_ISOLATIONLEVEL "IsolationLevel"
+#define API_SEC_TRACELEVEL "tracelevel"
+#define API_SEC_TRACEFILE "tracefile"
+#define API_SEC_TRACE "trace"
+#define API_SEC_CATALOGCOMMENTS "CatalogComments"
+#define API_SEC_COMPONENT "Component"
+#define API_SEC_SERVICE "Service"
+#define API_SEC_ENCRYPT "encrypt"
+
+#define MNU_MAIN     200
+#define CMD_EXIT     201
+#define CMD_OPEN     202
+#define CMD_INSTALL  203
+#define CMD_REMOVE   204
+#define CMD_UPDATE   205
+#define CMD_ABOUT    206
+
+#define API_SQLODBC_22000 (-22000)
+#define API_SQLTEXT_22000\
+        "Too many open database sessions"
+	   
+#define API_SQLODBC_22001 (-22001)
+#define API_SQLTEXT_22001\
+        "Missing systemtable (unsuccesfull installation)."
+
+#define API_SQLODBC_899 (-899)
+#define API_SQLTEXT_899\
+	 "ERROR UNKNOWN ("
+	   
+#define API_SQLRUNTIME_9803 (-9083)
+#define API_SQLTEXT_9803\
+	 "UNKNOWN DATA TYPE"
+
+#define API_SQLRUNTIME_3008 (-3008)
+#define API_SQLTEXT_3008\
+	 "INVALID KEYWORD OR MISSING DELIMITER"
+	   
+#define API_SQLODBC_22002 (-22002)
+#define API_SQLTEXT_22002\
+        "Null values not allowed on more than one long column"
+	   
+#define API_SQLODBC_22003 (-22003)
+#define API_SQLTEXT_22003\
+        "Wrong kernel version"
+	   
+#define API_SQLODBC_22004 (-22004)
+#define API_SQLTEXT_22004\
+        "Part not found"
+	   
+#define API_SQLODBC_22005 (-22005)
+#define API_SQLTEXT_22005\
+        "Connection timeout occured. Session reconnected"
+	   

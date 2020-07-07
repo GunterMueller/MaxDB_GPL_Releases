@@ -1,0 +1,4884 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VAK92$
+.tt 2 $$$
+.tt 3 $ElkeZ$Deal-With-User-Commands$2000-06-27$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+Module  : Deal-With-User-Commands
+=========
+.sp
+Purpose : This module analyzes a SQL_PACKET sent to a user
+          process and takes care of its processing depending
+          on its legality.
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              a92find_return_part (
+                    VAR acv      : tak_all_command_glob;
+                    part_kind    : tsp1_part_kind;
+                    VAR part_ptr : tsp1_part_ptr);
+ 
+        PROCEDURE
+              a92_mode_analyzer (
+                    VAR acv     : tak_all_command_glob;
+                    ddl         : tak_ddl_descriptor;
+                    corr_select : boolean);
+ 
+        PROCEDURE
+              a92parse_again (
+                    VAR acv       : tak_all_command_glob;
+                    VAR parsid    : tak_parsid;
+                    dropStoredCmd : boolean); (* PTS 1106250 *)
+ 
+        PROCEDURE
+              a92_reject (
+                    VAR acv        : tak_all_command_glob;
+                    utilityprocess : boolean);
+ 
+        PROCEDURE
+              a92_map_into_upper (
+                    VAR acv  : tak_all_command_glob;
+                    VAR buf  : tsp00_MoveObj;
+                    startpos : tsp00_Int4;
+                    endpos   : tsp00_Int4;
+                    uni_map  : boolean);
+ 
+        PROCEDURE
+              a92_next_part_get (
+                    VAR acv       : tak_all_command_glob;
+                    VAR curr_part : tsp1_part_ptr);
+ 
+        PROCEDURE
+              a92_resname_to_varpart(VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a92next_pcount (
+                    VAR acv   : tak_all_command_glob;
+                    VAR parsk : tak_parskey);
+ 
+        PROCEDURE
+              a92next_monitor_pcount (
+                    VAR acv   : tak_all_command_glob;
+                    VAR parsk : tak_parskey);
+ 
+        PROCEDURE
+              a92_add_pcount (
+                    VAR acv  : tak_all_command_glob;
+                    pcount   : tsp00_C3;
+                    parskind : tgg00_MessType);
+ 
+        PROCEDURE
+              a92ReadLongDemandData (
+                    VAR acv   : tak_all_command_glob;
+                    LongColCnt: tsp00_Int4;
+                    VAR MaxColCnt: tsp00_Int4;
+                    VAR Position: tsp00_Int4;
+                    VAR Length: tsp00_Int4;
+                    VAR AtOnce: boolean);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01char_size          : integer;
+              a01diag_monitor_on    : boolean;
+              a01diag_analyze_on    : boolean;
+              a01defaultkey         : tgg00_SysInfoKey;
+              a01kw                 : tak_keywordtab;
+              a01sysnullkey         : tgg00_SysInfoKey;
+              a01_il_b_identifier   : tsp00_KnlIdentifier;
+              a01_zero_res_name     : tsp00_KnlIdentifier;
+ 
+        FUNCTION
+              a01aligned_cmd_len (len : tsp00_Int4) : tsp00_Int4;
+ 
+        FUNCTION
+              a01_eqkey (
+                    VAR a      : tak_keyword;
+                    sqlmode    : tsp00_SqlMode;
+                    VAR b      : tsp00_MoveObj;
+                    VAR scv    : tak_scanner_glob) : boolean;
+ 
+        PROCEDURE
+              a01_get_keyword (
+                    VAR acv      : tak_all_command_glob;
+                    VAR index    : integer;
+                    VAR reserved : boolean);
+ 
+        PROCEDURE
+              a01_init_command (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a01_next_symbol (VAR acv : tak_all_command_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools :  VAK06;
+ 
+        PROCEDURE
+              a06drop_fieldlist_references (VAR fieldlists : tgg00_FieldLists);
+ 
+        PROCEDURE
+              a06inc_linkage (VAR linkage : tsp00_C2);
+ 
+        PROCEDURE
+              a06reset_retpart (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a06retpart_move (
+                    VAR acv     : tak_all_command_glob;
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    move_len    : tsp00_Int4);
+ 
+        PROCEDURE
+              a06finish_curr_retpart (
+                    VAR acv   : tak_all_command_glob;
+                    part_kind : tsp1_part_kind;
+                    arg_count : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_hex_uni_error (
+                    VAR acv     : tak_all_command_glob;
+                    uni_err     : tsp8_uni_error;
+                    err_code    : tsp00_Int4;
+                    to_unicode  : boolean;
+                    bytestr     : tsp00_MoveObjPtr;
+                    len         : tsp00_Int4 );
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err   : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK071;
+ 
+        FUNCTION
+              a071_return_code (
+                    b_err   : tgg00_BasisError;
+                    sqlmode : tsp00_SqlMode) : tsp00_Int2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10cmd_rollback (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a10new_packet (
+                    VAR acv : tak_all_command_glob;
+                    size    : tsp00_Int4;
+                    VAR ptr : tsp1_part_ptr);
+ 
+        PROCEDURE
+              a10_all_release (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a10del_sysinfo (
+                    VAR acv     : tak_all_command_glob;
+                    VAR syskey  : tgg00_SysInfoKey;
+                    VAR b_err   : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10Displace (
+                    VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a10dispose (
+                    VAR acv : tak_all_command_glob;
+                    VAR p : tsp1_part_ptr);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_cache_delete  (
+                    VAR acv     : tak_all_command_glob;
+                    is_rollback : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        PROCEDURE
+              a101_EnableSchemaMap (
+                    VAR acv  : tak_all_command_glob;
+                    doEnable : boolean);
+ 
+        FUNCTION
+              a101_GetExecuteHandle (
+                    VAR acv      : tak_all_command_glob;
+                    VAR parsedId : tak_parsid;
+                    CountExecuting : boolean) : tgg00_VoidPtr;
+ 
+        FUNCTION
+              a101_SharedSQL_GetStatusParameter : boolean;
+ 
+        PROCEDURE
+              a101_GetMySQLScramble (
+                    VAR scramble : tsp00_C8);
+ 
+        PROCEDURE
+              a101_GetModuleName (
+                    VAR acv            : tak_all_command_glob;
+                    VAR parseId        : tak_parsid;
+                    VAR NamePtr        : tsp00_MoveObjPtr;
+                    VAR Length         : tsp00_Int4);
+ 
+        FUNCTION
+              a101_GetPrepareHandle (
+                    VAR acv            : tak_all_command_glob;
+                    VAR isPrepared     : boolean;
+                    VAR masterParsedId : tak_parsid;
+                    VAR pSegment       : tsp00_MoveObjPtr;
+                    VAR segementLength : integer) : tgg00_VoidPtr;
+ 
+        PROCEDURE
+              a101_GetStatement (
+                    VAR acv               : tak_all_command_glob;
+                    planHandle            : tgg00_VoidPtr;
+                    VAR pStatement        : tsp00_MoveObjPtr;
+                    VAR statementLength   : integer;
+                    VAR pParamDescription : tsp00_MoveObjPtr;
+                    VAR paramDescLength   : integer;
+                    VAR sqlmode           : tsp00_SqlMode;
+                    VAR prepareFlag       : boolean;
+                    VAR massCmdFlag       : boolean);
+ 
+        PROCEDURE
+              a101_InvalidateSelective (
+                    VAR acv        : tak_all_command_glob);
+ 
+        FUNCTION
+              a101_PutParseId (
+                    VAR acv            : tak_all_command_glob;
+                    prepareHandle      : tgg00_VoidPtr;
+                    VAR parseId        : tak_parsid) : boolean;
+ 
+        PROCEDURE
+              a101_ReleaseExecuteHandle (
+                    VAR acv        : tak_all_command_glob;
+                    VAR planHandle : tgg00_VoidPtr);
+ 
+        FUNCTION
+              a101_StorePlan (
+                    VAR acv              : tak_all_command_glob;
+                    VAR parseId          : tak_parsid;
+                    storePlan            : boolean;
+                    prepareHandle        : tgg00_VoidPtr) : boolean;
+ 
+        PROCEDURE
+              a101_ReleasePrepareHandle (
+                    VAR acv              : tak_all_command_glob;
+                    VAR prepareHandle    : tgg00_VoidPtr;
+                    PrepareTimeSecs      : tsp00_Int4;
+                    PrepareTimeMicroSecs : tsp00_Int4);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFiles(
+                    VAR trans      : tgg00_TransContext;
+                    fileType       : tgg00_TfnTemp(*ptocConst*);
+                    level          : tsp00_Int4(*ptocConst*);
+                    subLevel       : tsp00_Int2(*ptocConst*);
+                    VAR fileName   : tgg00_Filename);
+ 
+        PROCEDURE
+              a101_SetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId;
+                    sublevel       : tsp00_Int4(*ptocConst*));
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        PROCEDURE
+              a101_GetLogicalFilename(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_AddGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId;
+                    VAR instanceId : tgg00_Surrogate);
+ 
+        PROCEDURE
+              a101_RemoveGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_GetTempFileInstance(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_distributor : VAK35;
+ 
+        PROCEDURE
+              a35_asql_statement (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a35_asql_statement2 (VAR acv : tak_all_command_glob;
+                    prepareHandle        : tgg00_VoidPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_warm_utility_functions : VAK37;
+ 
+        PROCEDURE
+              a37state_get (
+                    VAR acv  : tak_all_command_glob;
+                    kw_index : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SystemViews : VAK400;
+ 
+        PROCEDURE
+              a400SVDestroyPseudoColumnFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Connect : VAK51;
+ 
+        PROCEDURE
+              a51RestoreUserContext (
+                    VAR acv          : tak_all_command_glob;
+                    VAR pOldContext  : tsp00_Addr);
+ 
+        PROCEDURE
+              a51SaveUserContext (
+                    VAR acv          : tak_all_command_glob;
+                    VAR pOldContext  : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_dispatcher : VAK501;
+ 
+        PROCEDURE
+              a501execute (
+                    VAR acv    : tak_all_command_glob;
+                    VAR parsid : tak_parsid);
+ 
+        PROCEDURE
+              a501GetResultName (
+                    VAR acv : tak_all_command_glob;
+                    VAR resultName : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Pseudo_fieldmap : VAK509;
+ 
+        FUNCTION
+              a509build_map_from_databuffer (databuffer_ptr : tsp00_MoveObjPtr;
+                    map_ptr                  : tsp00_MoveObjPtr;
+                    VAR length_in_databuffer : tsp00_Int4) : boolean;
+ 
+        FUNCTION
+              a509get_one_value (map_ptr : tsp00_MoveObjPtr;
+                    value_no       : tsp00_Int2;
+                    VAR value_ptr  : tsp00_MoveObjPtr;
+                    VAR value_len  : tsp00_Int4;
+                    VAR is_null    : boolean;
+                    VAR is_default : boolean) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Lock_Commit_Rollback : VAK52;
+ 
+        PROCEDURE
+              a52end_rollback_subtrans (
+                    VAR acv           : tak_all_command_glob;
+                    VAR subtrans_name : tsp00_KnlIdentifier;
+                    m_type : tgg00_MessType);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK542;
+ 
+        PROCEDURE
+              a542change_intern_sql_cmd (
+                    VAR acv  : tak_all_command_glob;
+                    VAR tree : tgg00_FileId;
+                    key_int  : tsp00_Int2);
+ 
+        PROCEDURE
+              a542copy_into_packet (
+                    VAR acv    : tak_all_command_glob;
+                    const_addr : tsp00_MoveObjPtr;
+                    const_len  : tsp00_Int4);
+ 
+        PROCEDURE
+              a542InternalPacket (
+                    VAR acv                 : tak_all_command_glob;
+                    release_internal_packet : boolean;
+                    initial_len             : tsp00_Int4;
+                    required_len            : tsp00_Int4);
+ 
+        PROCEDURE
+              a542internal_packet (
+                    VAR acv                 : tak_all_command_glob;
+                    release_internal_packet : boolean;
+                    required_len            : tsp00_Int4);
+ 
+        PROCEDURE
+              a542next_intern_sql_cmd (
+                    VAR acv        : tak_all_command_glob;
+                    release_packet : boolean;
+                    VAR tree       : tgg00_FileId;
+                    VAR key_int    : tsp00_Int2);
+ 
+        PROCEDURE
+              a542reset_packet (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a542store_current_command (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tree    : tgg00_FileId;
+                    VAR key_int : tsp00_Int2);
+ 
+        PROCEDURE
+              a542get_abapinfo (
+                    VAR acv         : tak_all_command_glob;
+                    VAR abapname    : tsp00_C40;
+                    VAR abapnamelen : integer;
+                    VAR abaplinenr  : tsp00_Number);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML-Join-View-Procedures : VAK59;
+ 
+        PROCEDURE
+              a59qualified_dml (
+                    VAR acv   : tak_all_command_glob;
+                    VAR parsk : tak_parskey);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Execute_Select_Expression : VAK660;
+ 
+        PROCEDURE
+              a660_prefix_delete (
+                    VAR acv       : tak_all_command_glob;
+                    VAR parsk     : tak_parskey;
+                    VAR del_cnt   : integer;
+                    prefix_length : integer);
+ 
+        PROCEDURE
+              a660output_tablename (
+                    VAR acv  : tak_all_command_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Complex_View_Optimization : VAK664;
+ 
+        PROCEDURE
+              a664complex_view_optimize (
+                    VAR acv              : tak_all_command_glob;
+                    VAR try_optimization : boolean);
+ 
+        PROCEDURE
+              a664dispose_opt_info (VAR acv : tak_all_command_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              OptiQueryRewrite : VAK664Wrapper;
+ 
+        PROCEDURE
+              a664_FreeQueryRewriteCaches (
+                    VAR acv     : tak_all_command_glob
+                    );
+ 
+      ------------------------------ 
+ 
+        FROM
+              Resultname_handling : VAK663;
+ 
+        PROCEDURE
+              a663_drop_parsid (
+                    VAR acv     : tak_all_command_glob;
+                    VAR p       : tak_parsid;
+                    VAR del_cnt : integer);
+ 
+        PROCEDURE
+              a663_put_result_info (
+                    VAR acv          : tak_all_command_glob;
+                    VAR resname_addr : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120MoveObjectTrace (
+                    VAR Trans  : tgg00_TransContext;
+                    TraceLayer : tgg00_Debug;
+                    TraceType  : tgg00_VtraceType;
+                    Length     : tsp00_Int4;
+                    pEntry     : tsp1_segment_ptr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              task_temp_data_cache : VBD21;
+ 
+        PROCEDURE
+              b21m_parse_again (
+                    temp_cache_ptr  : tgg00_TempDataCachePtr;
+                    VAR parse_again : tsp00_C3);
+ 
+        PROCEDURE
+              b21mp_parse_again_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    parse_again : tsp00_C3);
+ 
+      ------------------------------ 
+ 
+        FROM
+              ref_statistic  : VBD73;
+ 
+        PROCEDURE
+              b73directory_ref_statistic
+                    (op_code : tgg00_DirectoryMonitorOp);
+ 
+        PROCEDURE
+              b73cmd_count (statement_kind : tgg00_RefInfoIndex);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01diag_moni_parse_on  : boolean;
+              g01unicode             : boolean;
+ 
+        PROCEDURE
+              g01opmsg (
+                    msg_prio  : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C24;
+                    msg_value : tsp00_Int4);
+ 
+        PROCEDURE
+              g01optextmsg (
+                    msg_prio  : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C40);
+ 
+        PROCEDURE
+              g01abort (
+                    msg_no     : tsp00_Int4;
+                    msg_label  : tsp00_C8;
+                    msg_text   : tsp00_C24;
+                    bad_value  : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Codetransformation_and_Coding : VGG02;
+ 
+        VAR
+              g02codetables : tgg04_CodeTables;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id   : tsp00_C6;
+                    mod_num  : tsp00_Int4;
+                    obj_upb  : tsp00_Int4;
+                    obj      : tsp00_MoveObjPtr;
+                    obj_pos  : tsp00_Int4;
+                    length   : tsp00_Int4;
+                    fillchar : char;
+                    VAR e    : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove  (
+                    mod_id          : tsp00_C6;
+                    mod_intern_num  : tsp00_Int4;
+                    source_upb      : tsp00_Int4;
+                    destin_upb      : tsp00_Int4;
+                    source          : tsp00_MoveObjPtr;
+                    source_pos      : tsp00_Int4;
+                    destin          : tsp00_MoveObjPtr;
+                    destin_pos      : tsp00_Int4;
+                    length          : tsp00_Int4;
+                    VAR e           : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id          : tsp00_C6;
+                    mod_intern_num  : tsp00_Int4;
+                    source_upb      : tsp00_Int4;
+                    destin_upb      : tsp00_Int4;
+                    source          : tsp00_MoveObjPtr;
+                    source_pos      : tsp00_Int4;
+                    destin          : tsp00_MoveObjPtr;
+                    destin_pos      : tsp00_Int4;
+                    length          : tsp00_Int4;
+                    VAR e           : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove  (
+                    size1    : tsp00_Int4;
+                    size2    : tsp00_Int4;
+                    val1     : tsp00_MoveObjPtr;
+                    p1       : tsp00_Int4;
+                    val2     : tsp00_MoveObjPtr;
+                    p2       : tsp00_Int4;
+                    cnt      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_edit_routines : VGG17;
+ 
+        PROCEDURE
+              g17sname_to_line (
+                    n             : tsp00_Sname;
+                    VAR ln_len    : integer;
+                    VAR ln        : tsp00_Line);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_allocator_interface : VGG941;
+ 
+        FUNCTION
+              gg941Allocate(
+                    VAR TransContext : tgg00_TransContext;
+                    wantedBytes : integer) : tsp00_Addr;
+ 
+        PROCEDURE
+              gg941Deallocate(
+                    VAR TransContext : tgg00_TransContext;
+                    VAR p : tsp00_Addr);
+&       ifdef TRACE
+ 
+        PROCEDURE
+              Kernel_TraceSwitch (VAR TopicStr : tsp00_MoveObj (*ptocSynonym const char**);
+                    TopicStrLen : integer);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_Logging : VKB560;
+ 
+        PROCEDURE
+              kb560SetTraceMaxBufferLength (length : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Packet_handling: VSP26;
+ 
+        PROCEDURE
+              s26finish_part (
+                    packet_ptr      : tsp1_packet_ptr;
+                    VAR finish_part : tsp1_part);
+ 
+        FUNCTION
+              s26packet_len (packet_ptr : tsp1_packet_ptr) : tsp00_Int4;
+ 
+        PROCEDURE
+              s26new_part_init (
+                    packet_ptr       : tsp1_packet_ptr;
+                    VAR segm         : tsp1_segment;
+                    VAR new_part_ptr : tsp1_part_ptr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        FUNCTION
+              s30unilnr (
+                    str       : tsp00_MoveObjPtr;
+                    skip_val  : tsp00_C2;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+ 
+        PROCEDURE
+              s30map (
+                    VAR code_t : tsp00_Ctable;
+                    VAR source : tsp00_MoveObj;
+                    spos       : tsp00_Int4;
+                    VAR dest   : tsp00_MoveObj;
+                    dpos       : tsp00_Int4;
+                    length     : tsp00_Int4);
+ 
+        FUNCTION
+              s30klen (
+                    VAR str : tsp00_KnlIdentifier;
+                    val : char;
+                    cnt : integer) : integer;
+ 
+        FUNCTION
+              s30lnr_defbyte (
+                    str       : tsp00_MoveObjPtr;
+                    defbyte   : char;
+                    start_pos : tsp00_Int4;
+                    length    : tsp00_Int4) : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Pointer-Arithmetik : VSP35;
+ 
+        FUNCTION
+              s35add_bufaddr_ptocm (
+                    addr : tsp00_BufAddr;
+                    pos : tsp00_Int4): tsp00_BufAddr;
+ 
+        FUNCTION
+              s35add_addr1_ptocm (
+                    addr : tgg00_VoidPtr;
+                    pos : tsp00_Int4) : tgg00_VoidPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40gbyte (
+                    VAR buf        : tak_parsid;
+                    pos            : tsp00_Int4;
+                    len            : integer;
+                    VAR dest       : tsp00_C40;
+                    dpos           : tsp00_Int4;
+                    dlen           : integer;
+                    VAR truncated  : boolean);
+ 
+        PROCEDURE
+              s40g4int (
+                    VAR buf  : tsp00_Number;
+                    pos      : tsp00_Int4;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+        PROCEDURE
+              s40glint (
+                    VAR buf  : tsp00_MoveObj;
+                    pos      : tsp00_Int4;
+                    len      : integer;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GETSTRING-Conversions : VSP42;
+ 
+        PROCEDURE
+              s42gchr (
+                    VAR buf  : tsp00_Number;
+                    pos      : tsp00_Int4;
+                    len      : integer;
+                    frac     : integer;
+                    origlen  : integer;
+                    VAR dest : tsp00_MoveObj;
+                    dpos     : tsp00_Int4;
+                    VAR dlen : integer;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-80 : VSP80;
+ 
+        PROCEDURE
+              s80uni_trans
+                    (src_ptr        : tsp00_MoveObjPtr;
+                    src_len         : tsp00_Int4;
+                    src_codeset     : tsp00_Int2;
+                    dest_ptr        : tsp00_MoveObjPtr;
+                    VAR dest_len    : tsp00_Int4;
+                    dest_codeset    : tsp00_Int2;
+                    trans_options   : tsp8_uni_opt_set;
+                    VAR rc          : tsp8_uni_error;
+                    VAR err_char_no : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vclock (
+                    VAR sec      : tsp00_Int4;
+                    VAR microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              AbapInfoToPurify (
+                    AbapInfo : tsp00_C40;
+                    InfoLen  : tsp00_Int4;
+                    lineNo   : tsp00_Int4);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01moveobj (
+                    debug    : tgg00_Debug;
+                    VAR buf  : tsp00_MoveObj;
+                    startpos : tsp00_Int4;
+                    endpos   : tsp00_Int4);
+ 
+        PROCEDURE
+              t01buf (
+                    debug    : tgg00_Debug;
+                    VAR buf  : tak_shortinforecord;
+                    startpos : integer;
+                    endpos   : integer);
+ 
+        PROCEDURE
+              t01segment (
+                    debug       : tgg00_Debug;
+                    VAR segm    : tsp1_segment);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01multiswitch (
+                    VAR s1 : tsp00_C20;
+                    VAR s2 : tsp00_C20);
+ 
+        PROCEDURE
+              t01lmulti_switch (
+                    VAR s20      : tsp00_C20;
+                    VAR s201     : tsp00_C20;
+                    VAR on_text  : tsp00_C16;
+                    VAR off_text : tsp00_C16;
+                    on_count     : integer);
+ 
+        PROCEDURE
+              t01lidentifier (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              t01setmaxbuflength (max_len : tsp00_Int4);
+ 
+        PROCEDURE
+              t01minbuf (min_wanted : boolean);
+ 
+        PROCEDURE
+              t01c64 (
+                    debug   : tgg00_Debug;
+                    VAR msg : tsp00_C64);
+ 
+        PROCEDURE
+              t01addr (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    bufaddr  : tsp00_MoveObjPtr);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        FUNCTION
+              a101_GetPrepareHandle;
+ 
+              tgg00_VoidPtr tsp00_MoveObjPtr
+ 
+        PROCEDURE
+              a101_GetModuleName;
+ 
+              tgg00_VoidPtr tsp00_MoveObjPtr
+ 
+        PROCEDURE
+              a10new_packet;
+ 
+              tsp00_MoveObjPtr tsp1_part_ptr
+ 
+        PROCEDURE
+              a10dispose;
+ 
+              tak_sysbufferaddress tsp1_part_ptr
+ 
+        PROCEDURE
+              b120MoveObjectTrace;
+ 
+              tsp00_BytePtr tsp1_segment_ptr
+ 
+        FUNCTION
+              s35add_bufaddr_ptocm;
+ 
+              tsp00_Int4 tsp00_BufAddr;
+ 
+        FUNCTION
+              s35add_addr1_ptocm;
+ 
+              tsp00_Addr tgg00_VoidPtr
+ 
+        FUNCTION
+              s30klen;
+ 
+              tsp00_MoveObj tsp00_KnlIdentifier
+ 
+        PROCEDURE
+              s40gbyte;
+ 
+              tsp00_MoveObj tak_parsid
+              tsp00_MoveObj tsp00_C40
+ 
+        PROCEDURE
+              s42gchr;
+ 
+              tsp00_MoveObj tsp00_Number
+ 
+        PROCEDURE
+              s40g4int;
+ 
+              tsp00_MoveObj tsp00_Number
+&             ifdef trace
+ 
+        PROCEDURE
+              t01buf;
+ 
+              tsp00_Buf tak_shortinforecord
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : ElkeZ
+.sp
+.cp 3
+Created : 1983-07-29
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 2000-06-27
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+.sp 2
+This module performs the entire processing of a request sent in
+a SQL_PACKET to a user process.
+.br
+It is checked whether the message type that has arrived is allowed in
+the current mode. If not, the SQL_PACKET is immediately sent back with a
+corresponding error message.
+.br
+If it is allowed, the actual processing is achieved by calling the procedures
+belonging to the message type.
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.sp 2
+A92_MAP_INTO_UPPER
+.sp
+In this procedure, the entire command is transferred from the code type of the
+application computer to the code type of the kernel computer. All parts of the
+command outside of single or double apostrophes are at the same time converted
+to upper-case letters in order to simplify the accessing of keywords and names.
+.sp 2;A92_REJECT
+.sp
+This procedure is called if, with the kernel in a particular operating state
+(before/after restart/shutdown), it is not allowed to process the specified
+message type. It just sets the return code in the SQL_PACKET to the value
+intended for it and sends the SQL_PACKET back.
+.br
+If the Vtrace is activated, the reason for rejection can be seen from it.
+.sp 2;ANALYZE_MESSAGETYPE
+.sp
+Depending on the message type, A81FILE_CMD_DISPATCHER (String-file commands),
+A50_EXECUTE (previously parsed commands that now just have to be executed) or
+A35_ASQL_STATEMENT (all other message types that are correct for a user
+process) is called.
+.br;In the case of normal user commands, it is recorded in the ACV whether only
+the syntax is to be checked, whether only parsing is to be performed or whether
+the command is also to be executed and whether the user wants the output of
+long infos for the output parameters.
+.br;The message type m_adbsload is for the fast loading of data files, i.e. the
+interactive component LOAD assembles pages that BD then simply needs to insert
+into the tree.
+.br;The message type m_adbcatalog is needed for the schema-extract and load
+operations. Some commands are then allowed and react slightly differently in
+order to allow the interactive component LOAD to handle schemas.
+.br;There follows a loop that is normally run through only once for each user
+command. This loop is run through more than once only in cases in which a
+complex view (with DISTINCT or GROUP BY or HAVING etc ] is involved.
+.br;In such a case, if it is discovered that there is such a view (e.g.
+A66_SEARCH_ONE_TABLE), its view text is stored in the INTO file (a file that
+always exists).
+.br;If this view, in turn, contains a complex view, the procedure goes deeper
+and deeper recursively until it comes up against views/tables that are not
+complex.
+.br;A set of SELECT commands is collected in the file, which means that the
+views are physically built as temporary results, and are then
+further processed. MAX_INTERN_SELECT specifies the number of commands (SELECTs)
+that are to be processed in order to execute the user command. In the case of
+simple commands, MAX_INTERN_SELECT = 0 in order to show that these are simple
+commands.
+.br;The original user command must, of course, be entered last in the file,
+since the SQL_PACKET gradually contains the different preceding SELECTs.
+The last command to be executed may possibly also lead once more to the
+outputting of long infos that the previous SELECTs did not produce.
+.br;With A92_NEXT_SQL_CMD, the next command is taken from the file to the
+SQL_PACKET.
+.br;Outside of the loop, if there is an error, a rollback is performed for the
+loading of pages by LOAD.
+.br;Temporary auxiliary files have been created for the complex views and they
+all have to be deleted again by A06PREFIX_DESTROY_FILES.
+.br;In order to process the SELECTS for the complex views, the process acts as
+if the respective owner of the view were connected, so that there are no
+problems with privileges. There must be a switch back to the original user
+(INIT_USERID, INIT_NAME).
+.br;If no error has been found, but at least one warning has been found, the
+warningset is converted by S25PWARN to an int2, which is returned to the user in
+the error code of the SQL_PACKET.
+.sp 2;SWITCH
+.sp
+If the message type is
+501, which is used only in the test version of the kernel, is
+specified, this procedure is called. It, by means of VTA01, takes care of
+the outputting of Testoutput or, by means of A92DUMP, forces a DUMP of the
+kernel.
+sp 2;L_SWITCHEN
+.sp
+If the message type 501, which is used only in the test version of the kernel,
+is specified, this procedure is called. It, by means of VTA01, takes care of
+the outputting of Testoutput starting from a specific procedure.
+.sp 2;AK92SPECIAL_MESS_TYPES
+.sp
+This procedure handles all message types that can occur only in the test
+version of the kernel (501-504) and calls, either directly or via SWITCHEN or
+L_SWITCHEN, VTA01, which is responsible for Testoutputs.
+.br;The commands always run correctly (Returncode = 0) and deliver no result.
+.sp 2;A92_MODE_ANALYZER
+.sp
+This procedure is called by VAK93 (user process) and by VAK94 (utility
+process). It checks whether, in the current kernel mode (warm/cold state, during
+restart), a command is allowable or not.
+.br;If it is not allowable, A92_REJECT is called.
+.br;If it is allowable, ANALYZE_MESSAGETYPE is called in order to analyze the
+specified message type and, if applicable, to process the command.
+.br;Only two special cases are handled directly:
+.br;AHELLO (intended only to state whether the kernel is still available and
+whether the user has not yet been released from the kernel process by an
+implicit RELEASE).
+.br;the command VTRACE when the kernel is cold (the only command that a user
+process can execute when the kernel is cold).
+.sp 2;CHECK_LOAD_ROLLBACK
+.sp
+This procedure is called in the event of an error by ANALYZE_MESSAGETYPE if it
+was a command that is used for the loading of pages by the interactive
+component LOAD. A rollback request is sent to KB/BD, with the result that the
+tree is then again in its original state.
+.sp 2;A92_NEXT_SQL_CMD
+.sp
+This procedure is called by ANALYZE_MESSAGETYPE if the next command has to be
+transferred from the file in which SELECT commands for complex views have been
+entered to the SQL_PACKET so that it can be executed normally.
+.br;The file name of the file is built to which the results of the physical
+construction are to be taken. By means of A09CGET_RECORD, the record(s)
+(possibly more than one) in which the command is stored are fetched from the
+INTO file.
+.br;They are stored there with a 4-byte (first record) or 5-byte-long key,
+which reflects their number in the internal Select order and which, in the 5th
+byte, specifies the number of the record within this SELECT.
+.br;So that the SELECT does not fail because of problems with privileges, the
+kernel process is led to believe that the owner of the view that is to be
+created is connected (ACV_CURR_USER_NAME).
+.sp 2;STORE_CURRENT_COMMAND
+.sp
+The command specified by the user is transferred from the SQL_PACKET to
+one or more records in which it is stored in the INTO file together with the
+name of the currently connected user in order later to be fetched again by
+A92_NEXT_SQL_CMD and to be processed.
+ 
+ak92parameter_list:
+The precompiler sends in VARPART2 after the modul_name a list of parameter
+specifications. The elements of this list have following structur:
+        first byte:  type of parameter
+        second byte: length of parameter
+        third byte:  fraction of parameter
+        fourth byte: unused, but we need it for alignment
+The procedure ak92parameter_list saves this elements in a global structur.
+For this action we need memory. If we do not have enough memory, a error is
+returned.
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_change_to_upper = true (* ak92unicode_map *); (* PTS 1121518 E.Z. *)
+      c_uni_map         = true (* a92_map_into_upper *);
+      c_release_packet  = true (* a542internal_packet *);
+      c_to_unicode      = true (* a07_hex_uni_err *);
+      c_uni_swap        = true (* ak92subst_len *);
+      c_is_rollback     = true;
+ 
+TYPE
+ 
+      tak92optimize_info = RECORD
+            oi_try        : boolean;
+            oi_cost_check : boolean;
+            oi_filler1    : boolean;
+            oi_filler2    : boolean;
+            oi_max_select : integer;
+            oi_select_cnt : integer;
+            oi_tree       : tgg00_FileId;
+      END;
+ 
+ 
+      tak92LongDemDataPtr = RECORD (* PTS 1122546 D.T. *)
+            CASE integer OF
+                1:
+                    (LdPtr   : tak_longdemand_ptr);
+                2:
+                    (VoidPtr : tgg00_VoidPtr);
+                3:
+                    (Int4Ptr : ^tsp00_Int4);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92drop_complex_files (VAR acv : tak_all_command_glob);
+ 
+VAR
+      b_err   : tgg00_BasisError;
+      i       : integer;
+      del_cnt : integer;
+ 
+BEGIN
+(* determine serverdbs where results of complex *)
+(* selects reside                                     *)
+b_err := e_ok;
+i := acv.a_returncode;
+acv.a_returncode := 0;
+IF  (acv.a_ex_kind <> only_parsing) AND
+    (acv.a_ex_kind <> only_executing)
+THEN
+    BEGIN
+    a660_prefix_delete (acv, acv.a_pars_last_key,
+          del_cnt, cak_complete_prefix);
+    IF  (i in [ 0, 100 ]) AND
+        (acv.a_returncode <> 0)
+    THEN
+        i := acv.a_returncode;
+    (*ENDIF*) 
+    acv.a_returncode := 0;
+    END;
+(* reset a_intern_res_tree and a_intern_cmd_tree to their logical *)
+(* filenames because the corresponding instance files will be     *)
+(* destroyed                                                      *)
+(*ENDIF*) 
+a101_GetLogicalFilename (acv.a_transinf.tri_trans, acv.a_intern_res_tree);
+a101_GetLogicalFilename (acv.a_transinf.tri_trans, acv.a_intern_cmd_tree);
+a101_DestroyGroupedTempFiles (acv.a_transinf.tri_trans,
+      a101_GetExtendedTempFileType (acv, acv.a_intern_res_tree),
+      -1,
+      -1,
+      acv.a_intern_res_tree.fileName_gg00);
+b_err := acv.a_transinf.tri_trans.trError_gg00;
+IF  b_err <> e_ok
+THEN
+    a07_b_put_error (acv, b_err, 1)
+ELSE
+    acv.a_returncode := i;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak92error_during_execution ( VAR acv : tak_all_command_glob) : boolean;
+ 
+CONST
+      c_min_system_error = -9999;
+      c_max_system_error = -9000;
+ 
+BEGIN
+ak92error_during_execution :=
+      ((acv.a_returncode > c_min_system_error) AND (acv.a_returncode < c_max_system_error))
+      OR
+      (acv.a_returncode = a071_return_code (e_lock_collision, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_request_timeout, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_wait_for_lock_release, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_work_rolled_back, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_cancelled, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_no_more_temp_space, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_no_more_user_temp_space, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_costlimit_overflow, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_disk_not_accessible, acv.a_sqlmode))
+      OR
+      (acv.a_returncode = a071_return_code (e_hostfile_error, acv.a_sqlmode));
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92not_only_execute(
+            VAR acv             : tak_all_command_glob;
+            VAR part_count      : integer;
+            VAR m_function_code : tsp00_Int2;
+            VAR parsk           : tak_parskey;
+            VAR part_desc_ptr   : tsp1_part_ptr;
+            ddl                 : tak_ddl_descriptor;
+            corr_select         : boolean;
+            attempt_count       : integer;
+            VAR isPrepared      : boolean;
+            VAR prepareHandle   : tgg00_VoidPtr;
+            VAR TimeSecs        : tsp00_Int4;
+            VAR TimeMicroSecs   : tsp00_Int4);
+ 
+CONST
+      c_exit_loop = csp_maxint2;
+ 
+VAR
+      do_optimize         : boolean;
+      exit_loop           : boolean;
+      glob_state_modified : boolean;
+      opt_tried           : boolean;
+      prefix_delete       : boolean;
+      init_sqlmode        : tsp00_SqlMode;
+      init_dt_format      : tgg00_DateTimeFormat;
+      del_cnt             : integer;
+      corr_attempt        : integer;
+      loop_cnt            : integer;
+      abapnamelen         : integer;
+      abapint             : integer;
+      segmentLength       : integer;
+      curr_len            : tsp00_Int4;
+      segm_offset         : tsp00_Int4;
+      aux_global_state    : tgg00_HandlingSet;
+      pUserContext        : tsp00_Addr;
+      pParseIdPart        : tsp1_part_ptr;
+      pParseId            : ^tak_parsid;
+      prefix_parsk        : tak_parskey;
+      drop_pars_key       : tak_parskey;
+      opt_info            : tak92optimize_info;
+      abapname            : tsp00_C40;
+      abaplinenr          : tsp00_Number;
+      num_err             : tsp00_NumError;
+      pSegment            : tsp00_MoveObjPtr;
+      parseId             : tak_parsid;
+      instanceId          : tgg00_Surrogate;
+      ke                  : tgg00_SysInfoKey;
+ 
+BEGIN
+acv.a_info_output             := false;
+acv.a_parameter_offset        := 0;
+acv.a_errpos_offset           := 0;
+acv.a_isolation_info          := temp_lock_rec_not_needed;
+acv.a_may_be_direct_sel       := false;
+acv.a_opt_info_ptr            := NIL;
+acv.a_parameter_spec.param_spec_ptr := NIL;
+acv.a_parameter_spec.param_counter  := 0;
+acv.a_error_tableid           := b01niltree_id.fileTabId_gg00;
+do_optimize       := acv.a_optimize_info.o_do_optimize;
+pUserContext      := NIL;
+prefix_delete     := false;
+IF  acv.a_in_session
+THEN
+    BEGIN
+    acv.a_modul_name := bsp_knl_identifier;
+    (* bsp_identifier is correct for modul_name *)
+    WHILE ( part_count < acv.a_cmd_segment_header.sp1s_no_of_parts ) AND
+          ( acv.a_returncode = 0 )DO
+        BEGIN
+        a92_next_part_get (acv, part_desc_ptr);
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            CASE part_desc_ptr^.sp1p_part_kind OF
+                sp1pk_modulname :
+                    BEGIN
+                    acv.a_modulename_part:= part_desc_ptr;
+                    IF  (acv.a_sqlmode = sqlm_oracle)
+                        AND
+                        (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_load)
+                        AND
+                        (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_unload)
+                    THEN
+                        BEGIN
+                        curr_len := part_desc_ptr^.sp1p_buf_len;
+                        IF  curr_len > sizeof(acv.a_modul_name)
+                        THEN
+                            curr_len := sizeof(acv.a_modul_name);
+                        (*ENDIF*) 
+                        SAPDB_PascalMove ('VAK92 ',   1,    
+                              part_desc_ptr^.sp1p_buf_size,
+                              sizeof (acv.a_modul_name),
+                              @part_desc_ptr^.sp1p_buf, 1,
+                              @acv.a_modul_name, 1, curr_len,
+                              acv.a_returncode)
+                        END
+                    (*ENDIF*) 
+                    END;
+                sp1pk_appl_parameter_description :
+                    WITH part_desc_ptr^, acv.a_parameter_spec DO
+                        BEGIN
+                        acv.a_appl_param_part:= part_desc_ptr;
+                        param_spec_ptr := @sp1p_buf[ 1 ];
+                        param_counter  := sp1p_arg_count;
+                        END;
+                    (*ENDWITH*) 
+                sp1pk_data :
+                    IF  acv.a_variable_input
+                    THEN
+                        BEGIN
+                        g01opmsg (sp3p_console, sp3m_error,
+                              csp3_a92_invalid_part_kind,
+                              csp3_n_order, 'PART KIND DATA          ',
+                              ord (part_desc_ptr^.sp1p_part_kind));
+                        a07_b_put_error (acv, e_invalid_segment_construction, 6);
+                        END
+                    ELSE
+                        WITH part_desc_ptr^ DO
+                            BEGIN
+                            acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                            acv.a_data_length := sp1p_buf_len;
+                            acv.a_data_part   := part_desc_ptr;
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                sp1pk_parsid, sp1pk_page,
+                sp1pk_bdinfo :
+                    WITH part_desc_ptr^ DO
+                        BEGIN
+                        acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                        acv.a_data_length := sp1p_buf_len;
+                        acv.a_data_part   := part_desc_ptr;
+                        END;
+                    (*ENDWITH*) 
+                sp1pk_resultcount :
+                    BEGIN
+                    acv.a_rescount_part := part_desc_ptr;
+                    END;
+                sp1pk_abap_info:
+                    BEGIN
+                    acv.a_abap_part := part_desc_ptr;
+&                   ifdef PURIFY
+                    a542get_abapinfo (acv, abapname,
+                          abapnamelen, abaplinenr);
+                    s40g4int (abaplinenr, 1, abapint, num_err);
+                    AbapInfoToPurify (abapname, abapnamelen, abapint);
+&                   endif
+                    END;
+                sp1pk_nil, sp1pk_serial,
+                sp1pk_surrogate, sp1pk_feature :
+                    BEGIN
+                    END;
+                sp1pk_resulttablename :
+                    BEGIN
+                    acv.a_resname_part   := part_desc_ptr;
+                    END;
+                sp1pk_checkpoint_info : (* PTS 1107004 *)
+                    BEGIN
+                    END;
+                sp1pk_long_demand:      (* PTS 1122546 D.T. *)
+                    BEGIN
+                    ak92SaveLongDemandData(acv, part_desc_ptr);
+                    END;
+                sp1pk_vardata :
+                    IF  NOT acv.a_variable_input
+                    THEN
+                        IF  acv.a_in_session
+                        THEN
+                            BEGIN
+                            g01opmsg (sp3p_console, sp3m_error,
+                                  csp3_a92_invalid_part_kind,
+                                  csp3_n_order, 'PART KIND VARDATA       ',
+                                  ord (part_desc_ptr^.sp1p_part_kind));
+                            a07_b_put_error (acv, e_invalid_segment_construction, 5);
+                            END
+                        ELSE
+                            BEGIN
+                            acv.a_in_session := acv.a_in_session;
+                            END
+                        (*ENDIF*) 
+                    ELSE
+                        WITH part_desc_ptr^ DO
+                            BEGIN
+                            acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                            acv.a_data_length := sp1p_buf_len;
+                            acv.a_data_part   := part_desc_ptr;
+                            acv.a_input_data_pos := acv.a_data_length;
+                            IF  NOT a509build_map_from_databuffer (acv.a_data_ptr,
+                                acv.a_input_data_map, acv.a_input_data_pos)
+                            THEN
+                                a07_b_put_error (acv, e_invalid_segment_construction, 9);
+                            (*ENDIF*) 
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                (*====================================*)
+                (*        !!!!                        *)
+                (* if new part_kinds with pointer     *)
+                (* located in acv are included here   *)
+                (* in vak542 ak542maxpartcnt has to   *)
+                (* be increased and the new a_.._part *)
+                (* included into ak542prepare_partlist*)
+                (*====================================*)
+                OTHERWISE
+                    BEGIN
+                    (* h.b. CR  1000179 *)
+                    g01opmsg (sp3p_console, sp3m_error,
+                          csp3_a92_invalid_part_kind,
+                          csp3_n_order, 'UNKNOWN PART KIND       ',
+                          ord (part_desc_ptr^.sp1p_part_kind));
+                    (* PTS 1119138 E.Z. *)
+                    IF  part_desc_ptr^.sp1p_part_kind = sp1pk_command
+                    THEN
+                        BEGIN
+                        g01opmsg (sp3p_console, sp3m_error,
+                              csp3_a93_unknown_part_kind,
+                              csp3_n_order, 'UNKNOWN PART NO         ',
+                              part_count+1);
+                        b120MoveObjectTrace (acv.a_transinf.tri_trans,
+                              ak_packet_segm, ak_receive,
+                              acv.a_cmd_segm^.sp1s_segm_len, acv.a_cmd_segm);
+                        a07ak_system_error (acv, 92, 3);
+                        END;
+                    (*ENDIF*) 
+                    END;
+                END;
+            (*ENDCASE*) 
+            part_count := part_count + 1
+            END
+        ELSE
+            BEGIN
+&           ifdef TRACE
+            g01abort (csp3_a92_incorrect_part_header,
+                  csp3_n_order, 'INCORRECT PART HEADER   ',
+                  part_count+1);
+&           else
+            g01opmsg (sp3p_console, sp3m_error,
+                  csp3_a92_incorrect_part_header,
+                  csp3_n_order, 'INCORRECT PART HEADER   ',
+                  part_count+1);
+            a07_b_put_error (acv, e_invalid_segment_construction, 2);
+&           endif
+            part_count := c_exit_loop;
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01lidentifier (ak_syn, acv.a_modul_name);
+t01int4        (ak_sem, 'mess_type   ', ord (acv.a_cmd_segment_header.sp1c_mess_type));
+&endif
+CASE acv.a_cmd_segment_header.sp1c_mess_type OF
+    sp1m_dbs :
+        BEGIN
+        acv.a_ex_kind := parsing_executing;
+        IF  acv.a_cmd_segment_header.sp1c_with_info
+        THEN
+            acv.a_info_output := true;
+        (*ENDIF*) 
+        END;
+    sp1m_parse :
+        BEGIN
+        acv.a_ex_kind := only_parsing;
+        IF  (acv.a_cmd_segment_header.sp1c_with_info AND
+            (* PTS 1112770 E.Z. *)
+            (acv.a_comp_type <> at_unknown)          AND
+            (acv.a_comp_vers  > '62070'))
+        THEN
+            acv.a_info_output := true;
+        (*ENDIF*) 
+        END;
+    sp1m_syntax :
+        acv.a_ex_kind := only_syntax;
+    (* PTS 1111575 E.Z. *)
+    OTHERWISE
+        IF  ((acv.a_cmd_segment_header.sp1c_mess_type = sp1m_execute) AND
+            (ddl <> no_ddl))
+        THEN
+            acv.a_ex_kind := pars_then_execute
+        ELSE
+            BEGIN
+            acv.a_ex_kind     := parsing_executing;
+            acv.a_returncode := -5;
+            acv.a_errorpos   := 0;
+            END;
+        (*ENDIF*) 
+    END;
+(*ENDCASE*) 
+IF  attempt_count = 0
+THEN
+    acv.a_intern_explain := false;
+(*ENDIF*) 
+acv.a_init_ex_kind      := acv.a_ex_kind;
+(* PTS 1105338 E.Z. *)
+acv.a_init_info_output := acv.a_info_output;
+glob_state_modified := false;
+IF  (acv.a_returncode = 0)               AND
+    (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_load) AND
+    (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_unload)
+THEN
+    BEGIN
+    WITH acv.a_pars_last_key DO
+        BEGIN
+        a92next_pcount (acv, acv.a_pars_last_key);
+        p_id   := chr(0);
+        p_kind := m_nil;
+        p_no   := 0
+        END;
+    (*ENDWITH*) 
+    drop_pars_key := acv.a_pars_last_key;
+    acv.a_first_parskey    := chr(0);
+    loop_cnt           := 0;
+    acv.a_tempinfo_key     := cgg_zero_id;
+    acv.a_corr_select      := corr_select;
+    acv.a_date_time_used   := false;
+    acv.a_optimize_info.o_optimized := false;
+    IF  (acv.a_statement_kind = isql_commands)
+    THEN
+        (* PTS 1111575 E.Z. *)
+        IF  acv.a_ex_kind = only_parsing
+        THEN
+            BEGIN
+            b73cmd_count (iprepares);
+            (* PTS 1105779 E.Z. *)
+            IF  acv.a_parsing_again
+            THEN
+                b73cmd_count (iprepares_again);
+            (*ENDIF*) 
+            END;
+        (* PTS 1121518 E.Z. *)
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  g01unicode                                                          AND
+        (acv.a_cmd_segment_header.sp1c_mess_type in
+        [sp1m_cmd_lower_bound .. sp1m_cmd_upper_bound])                     AND
+        (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_kernel)                AND
+        (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_view_optimizer)        AND
+        (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_complex_view_handling) AND
+        (acv.a_uni_cmd_part = NIL)                                              AND
+        (attempt_count = 0)
+    THEN
+        ak92unicode_map (acv, NOT c_change_to_upper);
+    (*ENDIF*) 
+    exit_loop       := false;
+    opt_info.oi_try := false;
+    init_sqlmode    := acv.a_sqlmode;
+    init_dt_format  := acv.a_dt_format;
+    opt_tried       := false;
+    corr_attempt    := 0;
+    isPrepared      := false;
+    IF  (acv.a_returncode = 0)  AND acv.a_createSharedSQL AND
+        (acv.a_ex_kind = only_parsing) AND ak92IsSharableSqlStatement(acv)
+    THEN
+        prepareHandle := a101_GetPrepareHandle (acv, isPrepared, parseId, pSegment, segmentLength)
+    ELSE
+        prepareHandle := NIL;
+    (*ENDIF*) 
+    acv.a_parsingForSharedSql := prepareHandle <> NIL;
+    acv.a_prepareHandle       := prepareHandle;
+    IF  acv.a_returncode = 0
+    THEN
+        IF  isPrepared
+        THEN
+            BEGIN
+            IF  (pSegment <> NIL)
+            THEN
+                BEGIN
+                (* statement already known in shared sql manager *)
+                parseId.pid_session.ci4_gg00 :=
+                      acv.a_transinf.tri_trans.trSessionId_gg00.ci4_gg00;
+                parseId.pid_parsk.p_count := acv.a_pars_last_key.p_count;
+                parseId.pid_parsk.p_kind  := m_sharedSQLParseid;
+                IF  a101_PutParseId (acv, prepareHandle, parseId)
+                THEN
+                    BEGIN
+                    (* return seqment provided by shared SQL manager *)
+                    segm_offset := acv.a_return_segm^.sp1s_segm_offset;
+                    IF  segmentLength <= acv.a_out_packet^.sp1_header.sp1h_varpart_size - segm_offset
+                    THEN
+                        BEGIN
+                        SAPDB_PascalMove ('VAK92 ',   2,    
+                              segmentLength,
+                              acv.a_out_packet^.sp1_header.sp1h_varpart_size - segm_offset,
+                              @pSegment^, 1, @acv.a_return_segm^, 1, segmentLength, acv.a_returncode);
+                        acv.a_return_segm^.sp1s_segm_offset := segm_offset;
+                        (* substitute master parseid by current parsedid *)
+                        a92find_return_part (acv, sp1pk_parsid, pParseIdPart);
+                        IF  pParseIdPart <> NIL
+                        THEN
+                            BEGIN
+                            isPrepared := true;
+                            pParseId   := @pParseIdPart^.sp1p_buf;
+                            pParseId^  := parseId;
+                            END;
+                        (* PTS 1123313 E.Z. *)
+                        (*ENDIF*) 
+                        acv.a_transinf.tri_trans.trWarning_gg00 :=
+                              acv.a_return_segm^.sp1r_extern_warning;
+                        acv.a_input_data_pos := 1;
+                        END
+                    ELSE
+                        a07_b_put_error (acv, e_too_small_packet_size, 1)
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    acv.a_parsingForSharedSql := false;
+                    isPrepared := false;
+                    END
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                g01opmsg (sp3p_console, sp3m_error,
+                      csp3_a10_cache_error,
+                      csp3_n_akcache, 'SharedSQL: pSegm is NIL ', 0);
+                acv.a_parsingForSharedSql := false;
+                isPrepared := false;
+                END;
+            (*ENDIF*) 
+            ;
+            (* The Prepare Handle must be released in all cases !!!  *)
+            a101_ReleasePrepareHandle(acv, prepareHandle, 0, 0);
+            acv.a_prepareHandle := prepareHandle;
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  NOT isPrepared AND (acv.a_returncode = 0)
+    THEN
+        BEGIN
+        IF  acv.a_parsingForSharedSql
+        THEN
+            vclock (TimeSecs, TimeMicroSecs);
+        (* may be <> 0 in case of unicode-translation *)
+        (*ENDIF*) 
+        REPEAT
+            acv.a_recursive_no := 0;
+            loop_cnt := loop_cnt + 1;
+&           ifdef TRACE
+            t01int4 (ak_sem, 'loop_cnt a92', loop_cnt);
+&           endif
+            a35_asql_statement2 (acv, prepareHandle);
+&           ifdef TRACE
+            t01int4 (ak_sem, 'ret in a92an',
+                  acv.a_returncode);
+            t01int4 (ak_sem, 'intern_selec', acv.a_intern_select_cnt);
+            t01int4 (ak_sem, 'max_intern_s', acv.a_max_intern_select);
+            t01int4 (ak_sem, 'corr_attempt', corr_attempt);
+&           endif
+            IF  (acv.a_returncode <> 0)
+            THEN
+                BEGIN
+                IF  prefix_delete (* PTS 1111062 *)
+                THEN
+                    a660_prefix_delete (acv, prefix_parsk, del_cnt, cak_complete_prefix);
+                (*ENDIF*) 
+                IF  acv.a_queryrewrite_mode
+                    = Statement_Rewrite (* PTS 1128197 D.T. *)
+                THEN
+                    BEGIN
+                    IF  (acv.a_returncode <>
+                        a071_return_code (e_row_not_found, acv.a_sqlmode))
+                        AND
+                        acv.a_optimize_info.o_do_optimize
+                        AND
+                        (acv.a_opt_info_ptr <> NIL)
+                    THEN
+                        a664dispose_opt_info (acv);
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (
+                (acv.a_main_returncode = cak_e_corelated_subquery_not_allowed) OR
+                (acv.a_returncode      = cak_e_corelated_subquery_not_allowed))
+                AND
+                (acv.a_intern_select_cnt > 0) AND
+                (acv.a_max_intern_select > 0)
+            THEN
+                BEGIN
+                corr_attempt := succ(corr_attempt);
+                a542change_intern_sql_cmd (acv,
+                      acv.a_intern_cmd_tree,
+                      acv.a_intern_select_cnt);
+                ak92init_complex_view_select (acv);
+                IF  acv.a_ex_kind = only_parsing
+                THEN
+                    BEGIN
+                    acv.a_intern_select_cnt := 0;
+                    IF  acv.a_isolation_info = temp_lock_rec_get
+                    THEN
+                        acv.a_isolation_info := temp_lock_rec_needed;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    acv.a_intern_select_cnt := pred(acv.a_intern_select_cnt);
+                (*ENDIF*) 
+                IF  corr_attempt > 1
+                THEN
+                    exit_loop := true
+                ELSE
+                    acv.a_returncode := 0;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  opt_info.oi_try
+                THEN
+                    BEGIN
+                    opt_tried                   := true;
+                    opt_info.oi_try             := false;
+                    acv.a_optimize_info.o_optimized := false;
+                    IF  (acv.a_returncode <> 0)
+                        AND
+                        (acv.a_returncode <>
+                        a071_return_code (e_row_not_found, acv.a_sqlmode))
+                    THEN
+                        BEGIN
+                        acv.a_try_again := false;
+                        a10cmd_rollback (acv);
+                        acv.a_shortinfo_key := cgg_zero_id;
+                        IF  acv.a_max_intern_select > 0
+                        THEN
+                            a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans,
+                                  acv.a_intern_cmd_tree);
+                        (*ENDIF*) 
+                        a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+                              opt_info.oi_tree);
+                        instanceId := opt_info.oi_tree.fileTabId_gg00;
+                        a101_RemoveGroupedTempFile (acv.a_transinf.tri_trans,
+                              opt_info.oi_tree);
+                        a101_AddGroupedTempFile (acv.a_transinf.tri_trans,
+                              acv.a_intern_cmd_tree, instanceId);
+                        a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+                              acv.a_intern_cmd_tree);
+                        IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+                        THEN
+                            a07ak_system_error (acv, 92, 1)
+                        ELSE
+                            BEGIN
+                            acv.a_intern_cmd_tree.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+                            (* PTS 1001813 E.Z. *)
+                            IF  (acv.a_rollback_info = []) AND
+                                (acv.a_returncode >= -9000)
+                            THEN
+                                acv.a_returncode := 0;
+                            (*ENDIF*) 
+                            ak92init_complex_view_select (acv);
+                            WITH opt_info DO
+                                BEGIN
+                                acv.a_max_intern_select := oi_max_select;
+                                acv.a_intern_select_cnt := oi_select_cnt;
+                                acv.a_costcheck         := oi_cost_check;
+                                END
+                            (*ENDWITH*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        BEGIN
+                        (* if the sql statement has been sent by the *)
+                        (* terminal driver set warning 9 to indicate *)
+                        (* that the statement has been optimized     *)
+                        (* successfully                              *)
+                        IF  acv.a_comp_type = at_xci
+                        THEN
+                            WITH acv.a_transinf.tri_trans DO
+                                trWarning_gg00 := trWarning_gg00 + [warn9_stmt_optimized];
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans,
+                              opt_info.oi_tree);
+                        IF  (acv.a_intern_select_cnt = 0) AND
+                            (acv.a_max_intern_select > 0)
+                        THEN
+                            (* PTS 1105338 E.Z. *)
+                            ak92start_complex_view_select (acv,
+                                  opt_info, acv.a_init_info_output)
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  (acv.a_intern_select_cnt = 0) AND
+                        (acv.a_max_intern_select > 0)
+                    THEN
+                        BEGIN
+                        (* PTS 1105338 E.Z. *)
+                        a51SaveUserContext (acv, pUserContext);
+                        ak92start_complex_view_select (acv,
+                              opt_info, acv.a_init_info_output);
+                        END
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (acv.a_qualified_jv_upd <> no_jv_upd) AND (loop_cnt = 1)
+            THEN
+                BEGIN
+                m_function_code := acv.a_return_segm^.sp1r_function_code;
+                ak92qualified_jv_update (acv,
+                      aux_global_state, glob_state_modified, parsk);
+                prefix_delete := true; (* PTS 1111062 *)
+                prefix_parsk  := acv.a_pars_last_key
+                END
+            ELSE
+                BEGIN
+                acv.a_errpos_offset := 0;
+                IF  (acv.a_intern_select_cnt < acv.a_max_intern_select)
+                THEN
+                    IF  (acv.a_intern_select_cnt > 0) AND
+                        (acv.a_returncode <> 0)       AND
+                        ak92error_during_execution (acv)
+                    THEN
+                        BEGIN
+                        exit_loop := true;
+                        opt_tried := false;
+                        END
+                    ELSE
+                        BEGIN
+                        (* PTS 1105338 E.Z. *)
+                        ak92complex_view_select (acv, acv.a_init_info_output);
+                        (* PTS 1128314 E.Z. *)
+                        IF  (acv.a_intern_select_cnt = acv.a_max_intern_select) AND
+                            (acv.a_shortinfo_key <> cgg_zero_id)
+                        THEN
+                            BEGIN
+                            ke := a01sysnullkey;
+                            WITH ke DO
+                                BEGIN
+                                sauthid := acv.a_shortinfo_key;
+                                sentrytyp := cak_eshortinfo
+                                END;
+                            (*ENDWITH*) 
+                            a10del_sysinfo (acv, ke, acv.a_transinf.tri_trans.trError_gg00);
+                            IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+                            THEN
+                                a07ak_system_error (acv, 92, 5)
+                            ELSE
+                                acv.a_shortinfo_key := cgg_zero_id
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                ELSE
+                    IF  NOT opt_info.oi_try
+                    THEN
+                        exit_loop := true;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  opt_tried                             AND
+                (acv.a_returncode <> 0) AND
+                (acv.a_returncode <>
+                a071_return_code (e_row_not_found, acv.a_sqlmode)) AND
+                (* PTS 1001813 E.Z. *)
+                (acv.a_returncode >= -9000)     AND
+                (acv.a_rollback_info = [])
+            THEN
+                BEGIN
+                (* Optimization failed, execute *)
+                (* initial statement            *)
+                a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans,
+                      acv.a_intern_cmd_tree);
+                IF  acv.a_comp_type = at_xci
+                THEN
+                    WITH acv.a_transinf.tri_trans DO
+                        trWarning_gg00 := trWarning_gg00 - [warn9_stmt_optimized];
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                exit_loop                      := false;
+                opt_tried                      := false;
+                acv.a_returncode := 0;
+                acv.a_intern_select_cnt            := 0;
+                acv.a_max_intern_select            := 0;
+                acv.a_optimize_info.o_do_optimize  := false;
+                (* D.T.: indicate failed optimization for explain *)
+                acv.a_queryrewrite_exec := [qrwDistinctForSubqueries];
+                a542reset_packet (acv)
+                END;
+            (*ENDIF*) 
+            IF  (acv.a_returncode = 0) AND
+                (NOT exit_loop)
+            THEN
+                BEGIN
+                IF  acv.a_queryrewrite_modified
+                THEN
+                    a664_FreeQueryRewriteCaches(acv);
+                (*ENDIF*) 
+                a06reset_retpart (acv);
+                END;
+            (*ENDIF*) 
+        UNTIL
+            (exit_loop) OR (acv.a_returncode <> 0);
+        (*ENDREPEAT*) 
+        acv.a_sqlmode   := init_sqlmode;
+        IF  loop_cnt > 1
+        THEN
+            acv.a_dt_format := init_dt_format;
+        (* PTS 1109291 E.Z. *)
+        (*ENDIF*) 
+        IF  (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_load) AND
+            (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_unload) AND
+            (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_parse)                     (* PTS 1111575 E.Z. *)
+        THEN
+            IF  NOT
+                (
+                (acv.a_is_ddl = ddl_create_as_select) AND
+                (acv.a_init_ex_kind <> only_syntax  )
+                )
+                AND
+                NOT acv.a_stored_proc_call (* PTS 1111060 *)
+            THEN
+                a92_add_pcount (acv, drop_pars_key.p_count, drop_pars_key.p_kind);
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  glob_state_modified
+THEN
+    acv.a_transinf.tri_global_state := aux_global_state;
+(*
+      IF  acv.a_queryrewrite_modified
+      THEN
+      BEGIN
+      a664_FreeQueryRewriteCaches(acv);
+      IF  ((acv.a_comp_type = at_xci) AND (acv.a_returncode <> 0))
+      THEN
+      WITH acv.a_transinf.tri_trans DO
+      trWarning_gg00 := trWarning_gg00 - [warn15_user_defined_code_user_defined_code];
+      END;
+      *)
+(*ENDIF*) 
+IF  acv.a_invalidateList <> NIL
+THEN
+    a101_InvalidateSelective (acv);
+(*ENDIF*) 
+acv.a_ex_kind := acv.a_init_ex_kind;
+(* PTS 1105338 E.Z. *)
+acv.a_info_output := acv.a_init_info_output;
+IF  pUserContext <> NIL
+THEN
+    BEGIN
+    a51RestoreUserContext (acv, pUserContext);
+    acv.a_optimize_info.o_do_optimize := do_optimize
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92analyze_messagetype (
+            VAR acv       : tak_all_command_glob;
+            ddl           : tak_ddl_descriptor;
+            corr_select   : boolean;
+            attempt_count : integer);
+ 
+CONST
+      c_p_info_pos   = 11;
+ 
+VAR
+      isPrepared          : boolean;
+      varinput_changedtof : boolean;
+      b_err               : tgg00_BasisError;
+      c3                  : tsp00_C3;
+      aux_return          : tsp00_Int2;
+      aux_errorpos        : tsp00_Int4;
+      m_function_code     : tsp00_Int2;
+      part_count          : integer;
+      part_desc_ptr       : tsp1_part_ptr;
+      parsk               : tak_parskey;
+      parsid              : tak_parsid;
+      sysk                : tgg00_SysInfoKey;
+      hopmsg              : tsp00_C40;
+      truncated           : boolean;
+      prepareHandle       : tgg00_VoidPtr;
+      TimeSecs            : tsp00_Int4;
+      TimeMicroSecs       : tsp00_Int4;
+      m_cmd_segment_header: tsp1_segment_header;
+ 
+BEGIN
+isPrepared                := false;
+varinput_changedtof       := false;
+m_function_code           := csp1_nil_fc;
+acv.a_max_intern_select       := 0;
+acv.a_intern_select_cnt       := 0;
+acv.a_init_ddl                := ddl;
+acv.a_is_ddl                  := ddl;
+acv.a_user_defined_error      := false;
+acv.a_qualified_jv_upd        := no_jv_upd;
+acv.a_precomp_info_byte       := csp1_p_none;
+acv.a_command_kind            := single_command;
+acv.a_timestamp               := bsp_c20;
+acv.a_result_name             := a01_zero_res_name;
+acv.a_for_fetch_only          := false;
+acv.a_intern_warnings         := [];
+acv.a_resname_addr[cak_extern_pos] := NIL;
+acv.a_modul_name                   := bsp_knl_identifier;
+acv.a_ap_tree^[ 0 ].n_sa_level:= 0;
+(* bsp_identifier is correct for modul_name *)
+(* PTS 1115978 E.Z. *)
+part_count        := 0;
+part_desc_ptr     := NIL;
+a92_next_part_get (acv, part_desc_ptr);
+(* here the command or parsid part is expected to be the first    *)
+(* one! Instead it should better be allowed to come at any place. *)
+IF  (((acv.a_returncode = 0) OR
+    (  acv.a_returncode = csp_use_new_pars_info))
+    AND
+    ( part_desc_ptr^.sp1p_part_kind in
+    [ sp1pk_command, sp1pk_parsid, sp1pk_bdinfo ]))
+THEN
+    WITH part_desc_ptr^ DO
+        BEGIN
+        part_count    := succ(part_count);
+        IF  acv.a_uni_cmd_part = NIL
+        THEN
+            BEGIN
+            acv.a_cmd_part := part_desc_ptr;
+            IF  acv.a_cmd_part^.sp1p_part_kind = sp1pk_parsid
+            THEN
+                BEGIN
+                IF  (ord(part_desc_ptr^.sp1p_buf[c_p_info_pos]) = csp1_p_dialog_call) AND
+                    acv.a_variable_input
+                THEN
+                    BEGIN
+                    varinput_changedtof := true;
+                    acv.a_variable_input := false;
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END
+    (*ENDWITH*) 
+ELSE
+    BEGIN
+    part_desc_ptr := NIL;
+    acv.a_cmd_part    := NIL;
+    IF  ((acv.a_returncode = 0) OR
+        ( acv.a_returncode = csp_use_new_pars_info)) AND
+        (acv.a_cmd_segment_header.sp1c_mess_type in [
+        sp1m_dbs, sp1m_parse, sp1m_syntax, sp1m_execute, sp1m_utility])
+    THEN
+        BEGIN
+        g01opmsg (sp3p_console, sp3m_error,
+              csp3_a93_unknown_part_kind,
+              csp3_n_order, 'MISSING COMMAND PART    ', 1);
+        a07ak_system_error (acv, 92, 4);
+        END;
+    (*ENDIF*) 
+    m_cmd_segment_header := acv.a_cmd_segm^.sp1s_segm_header;
+    acv.a_cmd_segm^.sp1s_segm_header := acv.a_cmd_segment_header;
+    b120MoveObjectTrace (acv.a_transinf.tri_trans,
+          ak_packet_segm, ak_receive,
+          acv.a_cmd_segm^.sp1s_segm_len, acv.a_cmd_segm);
+    acv.a_cmd_segm^.sp1s_segm_header := m_cmd_segment_header;
+    END;
+(*ENDIF*) 
+acv.a_data_ptr       := NIL;
+acv.a_data_part      := NIL;
+acv.a_rescount_part  := NIL;
+acv.a_resname_part   := NIL;
+acv.a_abap_part      := NIL;
+acv.a_modulename_part:= NIL;
+acv.a_appl_param_part:= NIL;
+acv.a_feature_part   := NIL;
+acv.a_clientid_part  := NIL;
+prepareHandle        := NIL;
+acv.a_prepareHandle   := NIL;
+acv.a_longdemand_data := NIL;
+acv.a_data_length    := 0;
+IF  ((acv.a_cmd_segment_header.sp1c_mess_type in [ sp1m_execute ]) OR NOT acv.a_in_session)
+THEN (* getexecute will not go this way *)
+    BEGIN
+    WHILE (part_count < acv.a_cmd_segment_header.sp1s_no_of_parts)
+          AND  (acv.a_returncode = 0) DO
+        BEGIN
+        a92_next_part_get (acv, part_desc_ptr);
+        WITH part_desc_ptr^ DO
+            CASE part_desc_ptr^.sp1p_part_kind OF
+                sp1pk_data :
+                    IF  acv.a_variable_input
+                    THEN
+                        BEGIN
+                        g01opmsg (sp3p_console, sp3m_error,
+                              csp3_a92_invalid_part_kind,
+                              csp3_n_order, 'PART KIND DATA          ',
+                              ord (part_desc_ptr^.sp1p_part_kind));
+                        a07_b_put_error (acv, e_invalid_segment_construction, 8);
+                        END
+                    ELSE
+                        BEGIN
+                        acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                        acv.a_data_length := sp1p_buf_len;
+                        acv.a_data_part   := part_desc_ptr;
+                        END;
+                    (*ENDIF*) 
+                sp1pk_parsid :
+                    BEGIN
+                    acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                    acv.a_data_length := sp1p_buf_len;
+                    acv.a_data_part   := part_desc_ptr;
+                    END;
+                sp1pk_resultcount :
+                    BEGIN
+                    acv.a_rescount_part   := part_desc_ptr;
+                    END;
+                sp1pk_resulttablename :
+                    BEGIN
+                    acv.a_resname_part   := part_desc_ptr;
+                    END;
+                sp1pk_abap_info :
+                    BEGIN
+                    acv.a_abap_part      := part_desc_ptr;
+                    END;
+                sp1pk_checkpoint_info : (* PTS 1107004 *)
+                    BEGIN
+                    END;
+                sp1pk_long_demand:      (* PTS 1122546 D.T. *)
+                    BEGIN
+                    ak92SaveLongDemandData(acv, part_desc_ptr);
+                    END;
+                sp1pk_vardata :
+                    IF  NOT acv.a_variable_input AND acv.a_in_session
+                        (* CONNECT AUTHORIZE uses always vardata part DanielD *)
+                    THEN
+                        BEGIN
+                        g01opmsg (sp3p_console, sp3m_error,
+                              csp3_a92_invalid_part_kind,
+                              csp3_n_order, 'PART KIND VARDATA       ',
+                              ord (part_desc_ptr^.sp1p_part_kind));
+                        a07_b_put_error (acv, e_invalid_segment_construction, 7);
+                        END
+                    ELSE
+                        WITH part_desc_ptr^ DO
+                            BEGIN
+                            acv.a_data_ptr    := @sp1p_buf[ 1 ];
+                            acv.a_data_length := sp1p_buf_len;
+                            acv.a_data_part   := part_desc_ptr;
+                            END;
+                        (*ENDWITH*) 
+                    (*ENDIF*) 
+                sp1pk_feature :
+                    BEGIN
+                    acv.a_feature_part := part_desc_ptr;
+                    END;
+                sp1pk_clientid :
+                    BEGIN
+                    acv.a_clientid_part := part_desc_ptr;
+                    END;
+                OTHERWISE :
+                END;
+            (*ENDCASE*) 
+        (*ENDWITH*) 
+        part_count           := succ(part_count);
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  ((acv.a_returncode = 0) OR
+    ( acv.a_returncode = csp_use_new_pars_info))
+THEN
+    BEGIN
+    IF  (acv.a_statement_kind = isql_commands)
+    THEN
+        b73directory_ref_statistic (func_count);
+    (*ENDIF*) 
+    IF  (acv.a_cmd_segment_header.sp1c_mess_type = sp1m_execute) AND (ddl = no_ddl)
+    THEN
+        BEGIN
+        acv.a_ex_kind      := only_executing;
+        acv.a_init_ex_kind := only_executing;
+        (* PTS 1105338 E.Z. *)
+        acv.a_init_info_output := acv.a_info_output;
+        IF  (acv.a_statement_kind = isql_commands)
+        THEN
+            b73cmd_count (iexecutes);
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK92 ',   3,    
+              acv.a_cmd_part^.sp1p_buf_size, sizeof(parsid),
+              @acv.a_cmd_part^.sp1p_buf, 1, @parsid, 1, mxak_parsid,
+              acv.a_returncode);
+        IF  acv.a_returncode = 0
+        THEN
+            IF  parsid.pid_session.ci4_gg00 <>
+                acv.a_transinf.tri_trans.trSessionId_gg00.ci4_gg00
+            THEN
+                BEGIN
+                a01_init_command (acv);
+                IF  parsid.pid_session.ci4_gg00 = cgg_zero_c4
+                THEN
+                    a07_b_put_error (acv, e_invalid_command, 1)
+                ELSE
+                    a07_b_put_error (acv, e_old_fileversion, 1);
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                acv.a_statement_parsid := parsid;
+                IF  (parsid.pid_parsk.p_kind = m_sharedSQLParseid)
+                THEN
+                    acv.a_planHandle := a101_GetExecuteHandle (acv, parsid, true);
+                (*ENDIF*) 
+                IF  a01diag_monitor_on OR a01diag_analyze_on
+                THEN
+                    BEGIN
+                    b21m_parse_again (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+                          c3);
+                    IF  c3 = '   '
+                    THEN
+                        BEGIN
+                        WITH acv.a_pars_last_key DO
+                            BEGIN
+                            (* PTS 1109291 E.Z. *)
+                            a92next_monitor_pcount (acv, acv.a_pars_last_key);
+                            p_id   := chr(0);
+                            p_kind := m_nil;
+                            p_no   := 0
+                            END;
+                        (*ENDWITH*) 
+                        b21mp_parse_again_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+                              acv.a_pars_last_key.p_count);
+                        END
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    b21mp_parse_again_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+                          '   ');
+                (*ENDIF*) 
+                a501execute (acv, parsid);
+                IF  g01diag_moni_parse_on
+                    AND
+                    ((acv.a_returncode =
+                    a071_return_code (e_duplicate_sysinfo, acv.a_sqlmode))
+                    OR
+                    (acv.a_returncode =
+                    a071_return_code (e_sysinfo_not_found, acv.a_sqlmode)))
+                THEN
+                    BEGIN
+                    hopmsg := bsp_c40;
+                    s40gbyte (parsid, 1, sizeof(parsid),
+                          hopmsg, 1, sizeof (hopmsg), truncated);
+                    g01optextmsg (sp3p_console, sp3m_error, csp3_a10_cache_dump,
+                          csp3_n_akcache, hopmsg);
+                    END;
+                (*ENDIF*) 
+                IF  acv.a_returncode <> 0 (* PTS 1103790 *)
+                THEN
+                    BEGIN
+                    IF  (acv.a_returncode = cak_e_inv_not_found) OR
+                        (acv.a_returncode = cak_e_table_or_file_dropped)
+                    THEN
+                        acv.a_returncode := csp_old_fileversion;
+                    (*ENDIF*) 
+                    IF  (acv.a_returncode = csp_old_fileversion) OR
+                        (acv.a_returncode = cak_e_cache_full)
+                    THEN
+                        a10_cache_delete (acv, NOT c_is_rollback);
+                    (*ENDIF*) 
+                    IF  (acv.a_returncode = csp_old_fileversion) OR
+                        (acv.a_returncode = cak00_old_parsid)
+                    THEN
+                        BEGIN
+                        IF  acv.a_planHandle <> NIL
+                        THEN
+                            parsid := acv.a_statement_parsid;
+                        (*ENDIF*) 
+                        IF  acv.a_queryrewrite_modified
+                        THEN
+                            BEGIN
+                            a664_FreeQueryRewriteCaches(acv);
+                            IF  ((acv.a_comp_type = at_xci) AND (acv.a_returncode <> 0))
+                            THEN
+                                WITH acv.a_transinf.tri_trans DO
+                                    trWarning_gg00 := trWarning_gg00 - [warn15_user_defined_code];
+                                (*ENDWITH*) 
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        a92parse_again (acv, parsid,
+                              (parsid.pid_parsk.p_kind <> m_create_table) OR
+                              (acv.a_returncode = csp_old_fileversion));
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        ak92not_only_execute(acv, part_count,
+              m_function_code, parsk, part_desc_ptr,
+              ddl, corr_select, attempt_count,
+              isPrepared, prepareHandle, TimeSecs, TimeMicroSecs);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  acv.a_queryrewrite_modified
+THEN
+    BEGIN
+    a664_FreeQueryRewriteCaches(acv);
+    IF  ((acv.a_comp_type = at_xci) AND (acv.a_returncode <> 0))
+    THEN
+        WITH acv.a_transinf.tri_trans DO
+            trWarning_gg00 := trWarning_gg00 - [warn15_user_defined_code];
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  acv.a_resname_addr[cak_extern_pos]  <> NIL
+THEN
+    IF  (acv.a_returncode = 0) OR
+        (acv.a_returncode = 100)
+    THEN
+        a663_put_result_info (acv,
+              acv.a_resname_addr[cak_extern_pos]);
+    (*ENDIF*) 
+(*ENDIF*) 
+IF  acv.a_resultCurrLongFileId > 0
+THEN
+    a400SVDestroyPseudoColumnFile(acv, acv.a_resultCurrLongFileId);
+(*ENDIF*) 
+acv.a_resultCurrLongFileId := -1;
+a06drop_fieldlist_references (acv.a_mblock.mb_fieldlists);
+IF  (acv.a_returncode = 0)                   AND
+    NOT isPrepared                       AND (* result name already in packet *)
+    (acv.a_qualified_jv_upd = no_jv_upd) AND
+    NOT acv.a_try_again
+THEN
+    BEGIN
+&   ifdef TRACE
+    t01int4 (ak_sem, 'fc namtovarp', acv.a_return_segm^.sp1r_function_code);
+&   endif
+    a92_resname_to_varpart (acv);
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode = 0)
+    AND
+    (
+    (acv.a_return_segm^.sp1r_function_code = csp1_insert_fc) OR
+    (acv.a_return_segm^.sp1r_function_code = csp1_minsert_fc)
+    )
+    AND
+    NOT acv.a_try_again
+THEN
+    ak92serial_to_varpart (acv);
+(*ENDIF*) 
+IF  acv.a_update_table_set
+    AND
+    ((acv.a_returncode = 0) OR
+    (acv.a_returncode = 100))
+    AND
+    (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_kernel)
+    AND
+    (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_view_optimizer)
+    AND
+    (acv.a_cmd_segment_header.sp1c_producer <> sp1pr_complex_view_handling)
+THEN
+    a660output_tablename (acv);
+(*ENDIF*) 
+IF  acv.a_max_intern_select > 0
+THEN
+    ak92drop_complex_files (acv);
+(*ENDIF*) 
+IF  (acv.a_qualified_jv_upd <> no_jv_upd) AND
+    (acv.a_returncode = 0)
+THEN
+    BEGIN
+    a59qualified_dml (acv, parsk);
+    acv.a_return_segm^.sp1r_function_code := m_function_code;
+    END;
+(*    IF  acv.a_queryrewrite_modified
+      THEN
+      BEGIN
+      a664_FreeQueryRewriteCaches(acv);
+      IF  ((acv.a_comp_type = at_xci) AND (acv.a_returncode <> 0))
+      THEN
+      WITH acv.a_transinf.tri_trans DO
+      trWarning_gg00 := trWarning_gg00 - [warn15_user_defined_code];
+      END;*)
+(*ENDIF*) 
+WITH acv.a_transinf.tri_trans DO
+    BEGIN
+    acv.a_return_segm^.sp1r_extern_warning := trWarning_gg00;
+    trWarning_gg00 := [  ]
+    END;
+(*ENDWITH*) 
+acv.a_return_segm^.sp1r_intern_warning := acv.a_intern_warnings;
+acv.a_intern_warnings := [];
+IF  prepareHandle <> NIL
+THEN
+    ak92StorePlan (acv, prepareHandle, TimeSecs, TimeMicroSecs);
+(*ENDIF*) 
+IF  acv.a_planHandle <> NIL
+THEN
+    a101_ReleaseExecuteHandle (acv, acv.a_planHandle);
+(*ENDIF*) 
+IF  acv.a_isolation_info = temp_lock_rec_get
+THEN
+    BEGIN (* delete table lock info record *)
+    sysk            := a01sysnullkey;
+    sysk.sentrytyp  := cak_eparsinfo;
+    sysk.sauthid    := cgg_zero_id;
+    sysk.slinkage   := cak_temp_info_linkage;
+    aux_return      := acv.a_returncode;
+    aux_errorpos    := acv.a_errorpos;
+    acv.a_returncode    := 0;
+    a10del_sysinfo (acv, sysk, b_err);
+    acv.a_returncode := aux_return;
+    acv.a_errorpos   := aux_errorpos;
+    END;
+(*ENDIF*) 
+IF  varinput_changedtof
+THEN
+    acv.a_variable_input := true;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92find_return_part (
+            VAR acv      : tak_all_command_glob;
+            part_kind    : tsp1_part_kind;
+            VAR part_ptr : tsp1_part_ptr);
+ 
+CONST
+      c_exit_loop = csp_maxint2;
+ 
+VAR
+      ix       : integer;
+ 
+      curr_ptr : RECORD
+            CASE boolean OF
+                true :
+                    (pptr : tsp1_part_ptr);
+                false :
+                    (bptr : tsp00_BufAddr);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+part_ptr := NIL;
+ix            := 1;
+curr_ptr.pptr := @acv.a_return_segm^.sp1p_part;
+WHILE ix <= acv.a_return_segm^.sp1s_no_of_parts DO
+    BEGIN
+    IF  curr_ptr.pptr^.sp1p_part_kind = part_kind
+    THEN
+        BEGIN
+        part_ptr := curr_ptr.pptr;
+        ix       := c_exit_loop
+        END
+    ELSE
+        BEGIN
+        curr_ptr.bptr := s35add_bufaddr_ptocm (curr_ptr.bptr,
+              sizeof (tsp1_part_header) + a01aligned_cmd_len (
+              curr_ptr.pptr^.sp1p_buf_len));
+        ix := ix + 1
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92complex_view_select (
+            VAR acv     : tak_all_command_glob;
+            info_output : boolean);
+ 
+BEGIN
+IF  acv.a_intern_select_cnt =
+    acv.a_max_intern_select - 1
+THEN
+    BEGIN (* last select *)
+    acv.a_ex_kind     := acv.a_init_ex_kind;
+    acv.a_info_output := info_output;
+    acv.a_precomp_info_byte := csp1_p_none;
+    END;
+(*ENDIF*) 
+a542next_intern_sql_cmd (acv, c_release_packet,
+      acv.a_intern_cmd_tree, acv.a_intern_select_cnt);
+IF  (acv.a_returncode = 0) AND
+    (acv.a_intern_select_cnt < acv.a_max_intern_select)
+THEN
+    BEGIN
+    acv.a_cmd_segment_header.sp1c_producer := sp1pr_complex_view_handling;
+    acv.a_cmd_segm^.sp1c_producer := sp1pr_complex_view_handling;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92init_complex_view_select (VAR acv : tak_all_command_glob);
+ 
+BEGIN
+acv.a_info_output := false;
+IF  (hsTempLock_egg00 in acv.a_transinf.tri_global_state)
+    OR
+    (hsPermLock_egg00 in acv.a_transinf.tri_global_state)
+THEN
+    BEGIN
+    IF  acv.a_isolation_info <> temp_lock_rec_get
+    THEN
+        acv.a_isolation_info := temp_lock_rec_needed;
+    (*ENDIF*) 
+    acv.a_ex_kind      := only_parsing;
+    acv.a_command_kind := complex_view_command;
+    END
+ELSE
+    IF  (acv.a_cmd_segment_header.sp1c_mess_type = sp1m_parse)
+    THEN
+        acv.a_command_kind := complex_view_command;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak92IsSharableSqlStatement(
+            VAR acv : tak_all_command_glob) : boolean;
+ 
+VAR
+      isShared : boolean;
+      kwIndex  : integer;
+      resKw    : boolean;
+ 
+BEGIN
+IF  acv.a_progusage_add
+THEN (* statements in precompiler check phase don't become shared *)
+    ak92IsSharableSqlStatement := false
+ELSE
+    IF   NOT a101_SharedSQL_GetStatusParameter
+    THEN
+        ak92IsSharableSqlStatement := false
+    ELSE
+        BEGIN
+        (* delete, insert, select and update statements become shared *)
+        acv.a_scv.sc_newpos := 1;
+        acv.a_scv.sc_sypos  := 1;
+        a01_next_symbol (acv);
+        a01_get_keyword (acv, kwIndex, resKw);
+        IF  kwIndex = cak_i_update
+        THEN
+            BEGIN
+            a01_next_symbol (acv);
+            isShared :=
+                  NOT a01_eqkey (a01kw[cak_i_stat], acv.a_sqlmode,
+                  acv.a_cmd_part^.sp1p_buf, acv.a_scv)
+                  AND
+                  NOT a01_eqkey (a01kw[cak_i_statistics], acv.a_sqlmode,
+                  acv.a_cmd_part^.sp1p_buf, acv.a_scv);
+            END
+        ELSE
+            isShared := kwIndex in [cak_i_declare, cak_i_delete, cak_i_insert, cak_i_select];
+        (*ENDIF*) 
+        ak92IsSharableSqlStatement := isShared
+              AND
+              ( acv.a_comp_type <> at_load )
+              AND
+              ( acv.a_comp_type <> at_db_manager );
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(* PTS 1109291 E.Z. *)
+(* PTS 1114071 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_add_pcount (
+            VAR acv  : tak_all_command_glob;
+            pcount   : tsp00_C3;
+            parskind : tgg00_MessType);
+ 
+VAR
+      ok   : boolean;
+      i    : integer;
+ 
+BEGIN
+(* Monitoring needs NOT-recycled parsids *)
+IF  NOT ( a01diag_monitor_on OR a01diag_analyze_on )
+THEN
+    BEGIN
+    ok := true;
+    IF  pcount > acv.a_max_used_pcount
+    THEN
+        ok := false
+    ELSE
+        IF  (acv.a_first_free_pcount > 0)
+        THEN
+            BEGIN
+            IF  acv.a_last_free_pcount >= acv.a_first_free_pcount
+            THEN
+                BEGIN
+                FOR i := acv.a_first_free_pcount TO acv.a_last_free_pcount DO
+                    IF  acv.a_free_pcounts [i] = pcount
+                    THEN
+                        ok := false;
+                    (*ENDIF*) 
+                (*ENDFOR*) 
+                END
+            ELSE
+                BEGIN
+                FOR i := 1 TO acv.a_last_free_pcount DO
+                    IF  acv.a_free_pcounts [i] = pcount
+                    THEN
+                        ok := false;
+                    (*ENDIF*) 
+                (*ENDFOR*) 
+                FOR i := acv.a_first_free_pcount TO cak_max_pcounts DO
+                    IF  acv.a_free_pcounts [i] = pcount
+                    THEN
+                        ok := false;
+                    (*ENDIF*) 
+                (*ENDFOR*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ok
+    THEN
+        IF  acv.a_first_free_pcount = 0
+        THEN
+            BEGIN
+            acv.a_first_free_pcount := 1;
+            acv.a_last_free_pcount  := 1;
+            acv.a_free_pcounts [acv.a_first_free_pcount] := pcount;
+            END
+        ELSE
+            IF  (acv.a_first_free_pcount = acv.a_last_free_pcount + 1) OR
+                ((acv.a_first_free_pcount = 1) AND (acv.a_last_free_pcount = cak_max_pcounts))
+            THEN
+                BEGIN (* no space left *)
+                END
+            ELSE
+                BEGIN
+                acv.a_last_free_pcount := succ(acv.a_last_free_pcount);
+                IF  acv.a_last_free_pcount > cak_max_pcounts
+                THEN
+                    acv.a_last_free_pcount := 1;
+                (*ENDIF*) 
+                acv.a_free_pcounts [acv.a_last_free_pcount] := pcount;
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92next_monitor_pcount (
+            VAR acv   : tak_all_command_glob;
+            VAR parsk : tak_parskey);
+ 
+BEGIN
+(* a new pcount, the highest one is necessary *)
+acv.a_first_free_pcount := 0;
+a92next_pcount (acv, parsk);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92next_pcount (
+            VAR acv   : tak_all_command_glob;
+            VAR parsk : tak_parskey);
+ 
+CONST
+      needed_at_least = 20;
+      new_parsk_cnt   = 20;
+ 
+VAR
+      free_pos : integer;
+      i        : integer;
+      i_parsk  : tak_parskey;
+ 
+BEGIN
+IF  acv.a_first_free_pcount > 0
+THEN
+    BEGIN
+    parsk.p_count := acv.a_free_pcounts [acv.a_first_free_pcount];
+    (* 20-40 parsids should be in list to assure some kind of quarantine for recycled ones *)
+    IF  (
+        (acv.a_last_free_pcount >= acv.a_first_free_pcount) AND
+        (acv.a_last_free_pcount + 1 - acv.a_first_free_pcount <= needed_at_least)
+        )
+        OR
+        (
+        (acv.a_last_free_pcount < acv.a_first_free_pcount) AND
+        (acv.a_last_free_pcount + cak_max_pcounts + 1 - acv.a_first_free_pcount <= needed_at_least)
+        )
+    THEN
+        BEGIN
+        free_pos := acv.a_first_free_pcount;
+        acv.a_first_free_pcount := 0;
+        FOR i := 1 TO new_parsk_cnt DO
+            BEGIN
+            a92next_pcount (acv, i_parsk);
+            acv.a_last_free_pcount := succ(acv.a_last_free_pcount);
+            IF  acv.a_last_free_pcount > cak_max_pcounts
+            THEN
+                acv.a_last_free_pcount := 1;
+            (*ENDIF*) 
+            acv.a_free_pcounts [acv.a_last_free_pcount] := i_parsk.p_count;
+            END;
+        (*ENDFOR*) 
+        acv.a_first_free_pcount := free_pos
+        END;
+    (*ENDIF*) 
+    IF  acv.a_first_free_pcount = acv.a_last_free_pcount
+    THEN (* should never happen *)
+        acv.a_first_free_pcount := 0
+    ELSE
+        BEGIN
+        acv.a_first_free_pcount := succ(acv.a_first_free_pcount);
+        IF  acv.a_first_free_pcount > cak_max_pcounts
+        THEN
+            acv.a_first_free_pcount := 1;
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    IF  ord(acv.a_max_used_pcount[3]) = 255
+    THEN
+        BEGIN
+        acv.a_max_used_pcount[3] := chr(0);
+        IF  acv.a_max_used_pcount[2] = chr(255)
+        THEN
+            BEGIN
+            acv.a_max_used_pcount[2] := chr(0);
+            IF  acv.a_max_used_pcount[1] >= chr(252)
+            THEN
+                (* in case of FD keys of parsid's may come      *)
+                (* into collision with keys with temp_table_site*)
+                (* 'FFFD0000' in the beginning, that means:     *)
+                (* with all TEMP-tables.                        *)
+                (* in case of FE keys of parsid's may come    *)
+                (* into collision  with keys of a from select *)
+                (* in case of FF keys of parsid's will come   *)
+                (* into collision with keys, where user_ids   *)
+                (* are in sauthid                             *)
+                a07_b_put_error (acv, e_new_session_required, 1)
+            ELSE
+                acv.a_max_used_pcount[1] := chr(ord(acv.a_max_used_pcount[1])+1)
+            (*ENDIF*) 
+            END
+        ELSE
+            acv.a_max_used_pcount[2] := chr(ord(acv.a_max_used_pcount[2])+1)
+        (*ENDIF*) 
+        END
+    ELSE
+        acv.a_max_used_pcount[3] := chr(ord(acv.a_max_used_pcount[3])+1);
+    (*ENDIF*) 
+    parsk.p_count := acv.a_max_used_pcount;
+    END;
+(*ENDIF*) 
+(* PTS 1111510 E.Z. *)
+acv.a_curr_ex_parskey := parsk;
+END;
+ 
+(* END PTS 1114071 E.Z. *)
+(* END PTS 1109291 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_next_part_get (
+            VAR acv       : tak_all_command_glob;
+            VAR curr_part : tsp1_part_ptr);
+ 
+BEGIN
+IF  curr_part = NIL
+THEN
+    curr_part := @acv.a_cmd_segm^.sp1p_part
+ELSE
+    curr_part := @curr_part^.sp1p_buf[
+          1 + a01aligned_cmd_len (curr_part^.sp1p_buf_len) ];
+(*ENDIF*) 
+IF  ((curr_part^.sp1p_buf_len   <  0)         OR
+    ( curr_part^.sp1p_arg_count < 0)          OR
+    ((curr_part^.sp1p_arg_count = 0) AND
+    ( curr_part^.sp1p_part_kind <> sp1pk_appl_parameter_description) AND
+    ( NOT (sp1pa_last_packet in curr_part^.sp1p_attributes))))
+    AND
+    (acv.a_cmd_segment_header.sp1c_mess_type <> sp1m_hello)
+    AND
+    (curr_part^.sp1p_part_kind <> sp1pk_nil)
+THEN
+    BEGIN
+&   ifdef TRACE
+    g01abort (csp3_a92_incorrect_part_header,
+          csp3_n_order, 'INCORRECT PART HEADER   ', 0);
+&   else
+    g01opmsg (sp3p_console, sp3m_error,
+          csp3_a92_incorrect_part_header,
+          csp3_n_order, 'INCORRECT PART HEADER   ', 0);
+    a07_b_put_error (acv, e_invalid_segment_construction, 3);
+&   endif
+    curr_part^.sp1p_part_kind := sp1pk_page
+    END;
+(* PTS 1111537 E.Z. *)
+(*ENDIF*) 
+IF  (curr_part^.sp1p_buf_len > curr_part^.sp1p_buf_size)
+THEN
+    BEGIN
+&   ifdef TRACE
+    g01abort (csp3_a92_incorrect_partbuf_len,
+          csp3_n_order, 'INCORRECT PARTBUF LEN   ', 0);
+&   else
+    g01opmsg (sp3p_console, sp3m_error,
+          csp3_a92_incorrect_partbuf_len,
+          csp3_n_order, 'INCORRECT PARTBUF LEN   ', 0);
+    a07_b_put_error (acv, e_invalid_segment_construction, 4);
+&   endif
+    curr_part^.sp1p_part_kind := sp1pk_page
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92qualified_jv_update (
+            VAR acv                 : tak_all_command_glob;
+            VAR init_glob_state     : tgg00_HandlingSet;
+            VAR glob_state_modified : boolean;
+            VAR parsk               : tak_parskey);
+ 
+BEGIN
+(* handle qualification of join view *)
+(* delete or update, at least temp locks   *)
+(* are required                            *)
+glob_state_modified := true;
+init_glob_state     := acv.a_transinf.tri_global_state;
+acv.a_ex_kind           := only_parsing;
+IF  acv.a_isolation_info <> temp_lock_rec_get
+THEN
+    acv.a_isolation_info := temp_lock_rec_needed;
+(*ENDIF*) 
+acv.a_command_kind      := subquery_command;
+IF  acv.a_qualified_jv_upd = jv_upd_release_locks
+THEN (* temp locks are release before upd *)
+    acv.a_transinf.tri_global_state :=
+          acv.a_transinf.tri_global_state  -
+          [ hsWithoutLock_egg00 ]    -
+          [ hsConsistentLock_egg00 ] -
+          [ hsCollisionTest_egg00 ]  -
+          [ hsIntentExcl_egg00 ];
+(*ENDIF*) 
+IF  NOT (hsTempLock_egg00 in init_glob_state) AND
+    NOT (hsPermLock_egg00 in init_glob_state)
+THEN
+    acv.a_transinf.tri_global_state :=
+          acv.a_transinf.tri_global_state + [ hsTempLock_egg00 ];
+(*ENDIF*) 
+parsk := acv.a_pars_last_key
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92start_complex_view_select (
+            VAR acv           : tak_all_command_glob;
+            VAR optimize_info : tak92optimize_info;
+            info_output       : boolean);
+ 
+VAR
+      e          : tgg00_BasisError;
+      instanceId : tgg00_Surrogate;
+ 
+BEGIN
+optimize_info.oi_filler1 := true;
+optimize_info.oi_filler2 := true;
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  (acv.a_resname_addr[cak_extern_pos] <> NIL) AND
+        NOT acv.a_intern_explain
+    THEN
+        BEGIN
+        a10del_sysinfo (acv,
+              acv.a_resname_addr[cak_extern_pos]^.syskey, e);
+        acv.a_resname_addr[cak_extern_pos] := NIL
+        END;
+    (*ENDIF*) 
+    a542store_current_command (acv,
+          acv.a_intern_cmd_tree, acv.a_max_intern_select);
+    IF  acv.a_queryrewrite_mode
+        = Statement_Rewrite (* PTS 1128197 D.T. *)
+    THEN
+        a664complex_view_optimize (acv, optimize_info.oi_try);
+    (*ENDIF*) 
+    IF  optimize_info.oi_try
+    THEN
+        BEGIN
+        a10cmd_rollback (acv);
+        optimize_info.oi_tree       := acv.a_intern_cmd_tree;
+        instanceId                  := acv.a_intern_cmd_tree.fileTabId_gg00;
+        a101_GetLogicalFilename (acv.a_transinf.tri_trans,
+              optimize_info.oi_tree);
+        a101_SetTempFileIndex (acv, optimize_info.oi_tree, 0);
+        (* FIXME: this should be RenameGroupedTempFile... *)
+        a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+              acv.a_intern_cmd_tree);
+        a101_RemoveGroupedTempFile (acv.a_transinf.tri_trans,
+              acv.a_intern_cmd_tree);
+        a101_AddGroupedTempFile (acv.a_transinf.tri_trans,
+              optimize_info.oi_tree, instanceId);
+        optimize_info.oi_max_select := acv.a_max_intern_select;
+        optimize_info.oi_select_cnt := acv.a_intern_select_cnt;
+        optimize_info.oi_cost_check := acv.a_costcheck;
+        acv.a_optimize_info.o_optimized := true;
+        acv.a_queryrewrite_done         := Statement_Rewrite;
+        acv.a_max_intern_select         := 0;
+        acv.a_info_output               := info_output;
+        acv.a_ex_kind                   := acv.a_init_ex_kind;
+        acv.a_shortinfo_key             := cgg_zero_id;
+        END
+    ELSE
+        ak92init_complex_view_select (acv);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92StorePlan (
+            VAR acv : tak_all_command_glob;
+            prepareHandle : tgg00_VoidPtr;
+            TimeSecs      : tsp00_Int4;
+            TimeMicroSecs : tsp00_Int4);
+ 
+VAR
+      ignoreStoreError    : boolean;
+      pParseIdPart        : tsp1_part_ptr;
+      pParseId            : ^tak_parsid;
+      TimeSecsEnd         : tsp00_Int4;
+      TimeMicroSecsEnd    : tsp00_Int4;
+ 
+BEGIN
+pParseIdPart     := NIL;
+ignoreStoreError := false;
+IF  acv.a_returncode = 0
+THEN
+    a92find_return_part (acv, sp1pk_parsid, pParseIdPart);
+(*ENDIF*) 
+IF  pParseIdPart <> NIL
+THEN
+    BEGIN
+    pParseId := @pParseIdPart^.sp1p_buf[1];
+    IF  NOT a101_StorePlan (acv, pParseId^, acv.a_parsingForSharedSql, prepareHandle)
+    THEN
+        BEGIN
+        IF  acv.a_returncode = 0
+        THEN
+            ignoreStoreError := true;
+        (*ENDIF*) 
+        a07_b_put_error (acv, e_no_more_memory, 1);
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    a07_b_put_error (acv, e_invalid, 1);
+(*ENDIF*) 
+vclock (TimeSecsEnd, TimeMicroSecsEnd);
+TimeSecs := TimeSecsEnd - TimeSecs;
+IF  TimeMicroSecsEnd < TimeMicroSecs
+THEN
+    BEGIN
+    TimeSecs      := TimeSecs - 1;
+    TimeMicroSecs := TimeMicroSecsEnd - TimeMicroSecs + 1000000;
+    END
+ELSE
+    TimeMicroSecs := TimeMicroSecsEnd - TimeMicroSecs;
+(*ENDIF*) 
+(* must be called even if an error has occured *)
+a101_ReleasePrepareHandle(acv, prepareHandle, TimeSecs, TimeMicroSecs);
+IF  ignoreStoreError
+THEN
+    acv.a_returncode := 0
+ELSE
+    acv.a_prepareHandle       := prepareHandle;
+(*ENDIF*) 
+acv.a_parsingForSharedSql := false;
+END;
+ 
+&ifdef TRACE
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92l_switchen (VAR acv : tak_all_command_glob);
+ 
+VAR
+      o1, o2          : tsp00_C16;
+      trace_str       : tsp00_C20;
+      debug_str       : tsp00_C20;
+      topic_debug_str : tsp00_C20;
+      i               : integer;
+      actpos          : integer;
+      oc              : integer;
+      moveobj_ptr     : tsp00_MoveObjPtr;
+ 
+BEGIN
+WITH acv.a_in_packet^.sp1_segm DO
+    BEGIN
+    trace_str       := bsp_c20;
+    debug_str       := bsp_c20;
+    topic_debug_str := bsp_c20;
+    o1 := bsp_c16;
+    o2 := bsp_c16;
+    oc := 1;
+    actpos := 1;
+    i      := 1;
+    WHILE (i <= mxsp_c20) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        trace_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    i      := 1;
+    WHILE (i <= mxsp_c20) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        debug_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    i      := 1;
+    WHILE (i <= mxsp_c20) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        topic_debug_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    i      := 1;
+    WHILE (i <= mxsp_c16) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        o1[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    i      := 1;
+    WHILE (i <= mxsp_c16) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        o2[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    IF  (actpos + 1 <= sp1p_buf_len)
+    THEN
+        oc := ord(sp1p_buf[ actpos ]) * 256 + ord(sp1p_buf[ actpos + 1 ]);
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+moveobj_ptr := @topic_debug_str;
+Kernel_TraceSwitch (moveobj_ptr^, sizeof(topic_debug_str));
+t01lmulti_switch (debug_str, debug_str, o1, o2, oc);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92switchen (VAR acv : tak_all_command_glob);
+ 
+VAR
+      trace_str       : tsp00_C20;
+      debug_str       : tsp00_C20;
+      topic_debug_str : tsp00_C20;
+      i               : integer;
+      actpos          : integer;
+      moveobj_ptr     : tsp00_MoveObjPtr;
+ 
+BEGIN
+WITH acv.a_in_packet^.sp1_segm DO
+    BEGIN
+    trace_str       := bsp_c20;
+    debug_str       := bsp_c20;
+    topic_debug_str := bsp_c20;
+    actpos := 1;
+    i      := 1;
+    WHILE (i <= mxsp_c20) AND (actpos <= sp1p_buf_len) DO
+        BEGIN
+        trace_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    i      := 1;
+    WHILE (i <= mxsp_c20)
+          AND
+          (actpos <= sp1p_buf_len)
+          AND
+          (sp1p_buf[ actpos ] <> '+') DO
+        BEGIN
+        debug_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    IF  actpos <= sp1p_buf_len
+    THEN
+        BEGIN
+        IF  sp1p_buf[ actpos ] = '+'
+        THEN
+            actpos := actpos + 1; (* skip plus sign *)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    i := 1;
+    WHILE (i <= mxsp_c20)
+          AND
+          (actpos <= sp1p_buf_len) DO
+        BEGIN
+        topic_debug_str[ i ] := sp1p_buf[ actpos ];
+        i       := i + 1;
+        actpos  := actpos + 1;
+        END;
+    (*ENDWHILE*) 
+    moveobj_ptr := @topic_debug_str;
+    Kernel_TraceSwitch (moveobj_ptr^, sizeof(topic_debug_str));
+    t01multiswitch (trace_str, debug_str);
+    END
+(*ENDWITH*) 
+END;
+ 
+&endif
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_map_into_upper (
+            VAR acv  : tak_all_command_glob;
+            VAR buf  : tsp00_MoveObj;
+            startpos : tsp00_Int4;
+            endpos   : tsp00_Int4;
+            uni_map  : boolean);
+ 
+VAR
+      kl_gr : boolean;
+      one_c : char;
+      i     : tsp00_Int4;
+      start : tsp00_Int4;
+ 
+BEGIN
+IF  uni_map                               AND
+    (g01unicode OR
+    ((NOT g01unicode) AND
+    ( acv.a_cmd_packet_header.sp1h_mess_code = csp_unicode)   OR
+    ( acv.a_cmd_packet_header.sp1h_mess_code = csp_unicode_swap)))
+THEN
+    (* PTS 1121518 E.Z. *)
+    ak92unicode_map (acv, c_change_to_upper)
+ELSE
+    BEGIN
+    i     := startpos;
+    kl_gr := true;
+    WHILE i <= endpos DO
+        BEGIN
+        start := i;
+        IF  kl_gr
+        THEN
+            BEGIN
+            WHILE (i <= endpos)                 AND
+                  (buf[ i ] <> csp_ascii_quote) AND
+                  (buf[ i ] <> csp_ascii_double_quote) DO
+                i := succ (i);
+            (*ENDWHILE*) 
+            one_c := buf[ i ]
+            END
+        ELSE
+            WHILE (i <= endpos) AND (buf[ i ] <> one_c) DO
+                i := succ (i);
+            (*ENDWHILE*) 
+        (*ENDIF*) 
+        IF  i > endpos
+        THEN
+            i := endpos;
+        (*ENDIF*) 
+        IF  kl_gr
+        THEN
+            s30map (g02codetables.tables[ cgg04_up_ascii ],
+                  buf, start, buf, start, i - start+1);
+        (*ENDIF*) 
+        kl_gr := NOT kl_gr;
+        i     := succ(i)
+        END;
+    (*ENDWHILE*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_mode_analyzer (
+            VAR acv     : tak_all_command_glob;
+            ddl         : tak_ddl_descriptor;
+            corr_select : boolean);
+ 
+CONST
+      c_max_attempt = 2;
+ 
+VAR
+      enableSchemaMap : boolean;
+      aux_return      : tsp00_Int2;
+      aux_errorpos    : tsp00_Int4;
+      attempt_cnt     : integer;
+      del_cnt         : integer;
+      init_mess_type  : tsp1_cmd_mess_type;
+      init_prepare    : boolean;
+      len             : tsp00_Int4;
+      traceLine       : tsp00_Line;
+      m_cmd_segment_header: tsp1_segment_header;
+ 
+BEGIN
+&ifdef TRACE
+IF  (acv.a_cmd_segment_header.sp1c_mess_type >= sp1m_specials_lower_bound)
+    AND
+    (acv.a_cmd_segment_header.sp1c_mess_type <= sp1m_specials_upper_bound)
+THEN
+    ak92special_mess_types (acv)
+ELSE
+&   endif
+    IF  acv.a_cmd_segment_header.sp1c_mess_type in [sp1m_state_utility, sp1m_get_challenge]
+    THEN
+        ak92special_mess_types (acv)
+    ELSE
+        IF  acv.a_cmd_segment_header.sp1c_mess_type = sp1m_hello
+        THEN
+            BEGIN
+            acv.a_errorpos   := 0;
+            IF  NOT acv.a_in_session
+            THEN
+                acv.a_returncode :=
+                      a071_return_code (e_user_not_connected, acv.a_sqlmode)
+            ELSE
+                acv.a_returncode := 0;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            attempt_cnt     := 0;
+            aux_return      := 0;
+            enableSchemaMap := false;
+            acv.a_parsing_again := acv.a_cmd_segment_header.sp1c_parsing_again;
+            init_mess_type  := acv.a_cmd_segment_header.sp1c_mess_type;
+            init_prepare    := acv.a_cmd_segment_header.sp1c_prepare;
+            acv.a_err_parm_cnt  := 0;
+            REPEAT
+                acv.a_try_again := false;
+                ak92analyze_messagetype (acv, ddl,
+                      corr_select, attempt_cnt);
+                a10_all_release (acv);
+                a10Displace(acv); (* PTS 1110796 *)
+                IF  acv.a_try_again
+                THEN
+                    BEGIN
+                    (* command failed due to cache overflow, *)
+                    (* repeat command once                   *)
+                    aux_return   := acv.a_returncode;
+                    aux_errorpos := acv.a_errorpos;
+                    attempt_cnt := attempt_cnt + 1;
+                    ddl         := acv.a_init_ddl;
+                    (* PTS 1106167 E.Z. *)
+                    IF  acv.a_init_ex_kind = only_parsing
+                    THEN
+                        a660_prefix_delete (acv, acv.a_pars_last_key,
+                              del_cnt, cak_complete_prefix);
+                    (*ENDIF*) 
+                    IF  (attempt_cnt >= c_max_attempt) OR
+                        (acv.a_cmd_segm = NIL)
+                    THEN
+                        acv.a_try_again := false
+                    ELSE
+                        BEGIN
+                        IF  acv.a_returncode = cak_e_schema_mapped
+                        THEN
+                            BEGIN
+                            a101_EnableSchemaMap (acv, false);
+                            enableSchemaMap := true;
+                            END;
+                        (*ENDIF*) 
+                        a06reset_retpart (acv);
+                        acv.a_returncode := 0
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            UNTIL
+                NOT (acv.a_try_again);
+            (*ENDREPEAT*) 
+            IF  enableSchemaMap
+            THEN
+                a101_EnableSchemaMap (acv, true);
+            (*ENDIF*) 
+            IF  (acv.a_returncode = 0) AND
+                (aux_return = csp_use_new_pars_info)
+            THEN
+                BEGIN
+                acv.a_returncode := aux_return;
+                acv.a_errorpos   := aux_errorpos;
+                END;
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_reject (
+            VAR acv        : tak_all_command_glob;
+            utilityprocess : boolean);
+ 
+BEGIN
+acv.a_returncode  := 0;
+IF  utilityprocess
+THEN
+    a07_b_put_error (acv, e_wrong_database_mode, 1)
+ELSE
+    a07_b_put_error (acv, e_shutdown, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92parse_again (
+            VAR acv       : tak_all_command_glob;
+            VAR parsid    : tak_parsid;
+            dropStoredCmd : boolean); (* PTS 1106250 *)
+ 
+VAR
+      is_ddl          : boolean;
+      prepareFlag     : boolean;
+      massCmdFlag     : boolean;
+      b_err           : tgg00_BasisError;
+      rc              : integer;
+      move_len        : integer;
+      length          : integer;
+      ret_code        : integer;
+      del_cnt         : integer;
+      paramDescLength : integer;
+      modNameLength   : integer;
+      packetLength    : integer;
+      resnamelength   : integer;
+      subst_length    : tsp00_Int4;
+      moved_length    : tsp00_Int4;
+      sysbuf          : tak_sysbufferaddress;
+      sysk            : tgg00_SysInfoKey;
+      curr_cmc_header : tsp1_segment_header;
+      data_part_ptr   : tsp1_part_ptr;
+      pApplDescPart   : tsp1_part_ptr;
+      pModulNamePart  : tsp1_part_ptr;
+      pResNamePart    : tsp1_part_ptr;
+      shortinfo_ptr   : tak_sysbufferaddress;
+      p               : tsp00_Addr;
+      pStatement      : tsp00_MoveObjPtr;
+      pParamDesc      : tsp00_MoveObjPtr;
+      pModulName      : tsp00_MoveObjPtr;
+      resname         : tsp00_KnlIdentifier;
+ 
+BEGIN
+curr_cmc_header := acv.a_cmd_segment_header;
+ret_code        := acv.a_returncode;
+acv.a_returncode    := 0;
+IF  acv.a_in_internal_subtr
+THEN
+    a52end_rollback_subtrans (acv, a01_il_b_identifier, m_end);
+(*ENDIF*) 
+acv.a_shortinfo_key := cgg_zero_id;
+IF  (parsid.pid_parsk.p_kind = m_sharedSQLParseid) AND (acv.a_planHandle <> NIL)
+THEN
+    BEGIN
+    is_ddl := false;
+    b_err  := e_ok;
+    a101_GetStatement (acv, acv.a_planHandle, pStatement, length,
+          pParamDesc, paramDescLength, acv.a_sqlmode, prepareFlag, massCmdFlag);
+    IF  NOT prepareFlag
+    THEN
+        b_err := e_sysinfo_not_found
+    ELSE
+        BEGIN
+        acv.a_init_ddl := no_ddl;
+        (* length is command-length, will be aligned in a542InternalPacket *)
+        IF  paramDescLength > 0
+        THEN
+            packetLength := length + sizeof (tsp1_part_header) + a01aligned_cmd_len(paramDescLength)
+        ELSE
+            packetLength := length;
+        (*ENDIF*) 
+        a101_GetModuleName (acv, parsid, pModulName, modNameLength);
+        IF  modNameLength > 0
+        THEN
+            packetLength := packetLength + sizeof (tsp1_part_header) + a01aligned_cmd_len(modNameLength);
+        (*ENDIF*) 
+        a542InternalPacket (acv, c_release_packet, length, packetLength);
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            acv.a_cmd_segm^.sp1c_producer := sp1pr_kernel;
+            acv.a_cmd_segm^.sp1c_prepare  := true;
+            acv.a_cmd_segm^.sp1c_mass_cmd := massCmdFlag;
+            (*
+                  acv.a_cmd_segm^.sp1c_commit_immediately : boolean;
+                  acv.a_cmd_segm^.sp1c_ignore_costwarning : boolean;
+                  acv.a_cmd_segm^.sp1c_with_info          : boolean;
+                  *)
+            acv.a_cmd_segment_header      := acv.a_cmd_segm^.sp1s_segm_header;
+            a542copy_into_packet (acv, pStatement, length);
+            IF  (acv.a_returncode = 0) AND (paramDescLength > 0)
+            THEN
+                BEGIN
+                s26new_part_init (acv.a_in_packet, acv.a_cmd_segm^, pApplDescPart);
+                IF  acv.a_returncode = 0
+                THEN
+                    BEGIN
+                    pApplDescPart^.sp1p_part_kind := sp1pk_appl_parameter_description;
+                    SAPDB_PascalMove  ('VAK92 ',   4,    
+                          paramDescLength, pApplDescPart^.sp1p_buf_size,
+                          pParamDesc, 1, @pApplDescPart^.sp1p_buf, 1, paramDescLength,
+                          acv.a_returncode);
+                    pApplDescPart^.sp1p_buf_len := pApplDescPart^.sp1p_buf_len + paramDescLength;
+                    s26finish_part (acv.a_in_packet, pApplDescPart^);
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (acv.a_returncode = 0) AND (modNameLength > 0)
+            THEN
+                BEGIN
+                s26new_part_init (acv.a_in_packet, acv.a_cmd_segm^, pModulNamePart);
+                IF  acv.a_returncode = 0
+                THEN
+                    BEGIN
+                    pModulNamePart^.sp1p_part_kind := sp1pk_modulname;
+                    SAPDB_PascalMove  ('VAK92 ',   5,    
+                          modNameLength, pModulNamePart^.sp1p_buf_size,
+                          pModulName, 1, @pModulNamePart^.sp1p_buf, 1, modNameLength,
+                          acv.a_returncode);
+                    pModulNamePart^.sp1p_buf_len := pModulNamePart^.sp1p_buf_len + modNameLength;
+                    s26finish_part (acv.a_in_packet, pModulNamePart^);
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    rc               := acv.a_returncode;
+    acv.a_returncode := csp_old_fileversion; (* invalidate plan *)
+    a101_ReleaseExecuteHandle (acv, acv.a_planHandle);
+    acv.a_returncode := rc;
+    END
+ELSE
+    BEGIN
+    is_ddl := (parsid.pid_parsk.p_kind = m_create_table) AND
+          (acv.a_returncode <> csp_old_fileversion);
+    sysk := a01defaultkey;
+    WITH sysk DO
+        BEGIN
+        sauthid[ 1 ] := cak_tempinfo_byte;
+        (* hier hat der Pointer auf tak_parskey nichts zu suchen *)
+        (* sonst Laengenproblem !!!!                             *)
+        SAPDB_PascalForcedMove (sizeof(parsid.pid_parsk), sizeof(sauthid),
+              @parsid.pid_parsk, 1, @sauthid, 2, mxak_parskey);
+        sentrytyp    := cak_estored_cmd
+        END;
+    (*ENDWITH*) 
+    data_part_ptr := NIL;
+    shortinfo_ptr := NIL;
+    length        := 0;
+    moved_length  := 0;
+    REPEAT
+        a10get_sysinfo (acv, sysk, d_release, sysbuf, b_err);
+        IF  b_err = e_ok
+        THEN
+            BEGIN
+            IF  sysk.slinkage = cak_init_linkage
+            THEN
+                BEGIN
+                length := sysbuf^.sstored_cmd.scr_fullen;
+                resnamelength := 0;
+                IF  (NOT is_ddl) AND
+                    (parsid.pid_parsk.p_kind = m_show)
+                THEN
+                    BEGIN
+                    IF  acv.a_data_part <> NIL
+                    THEN
+                        BEGIN
+                        move_len := sizeof (acv.a_data_part^.sp1p_part_header) +
+                              acv.a_data_part^.sp1p_buf_len;
+                        p := gg941Allocate (acv.a_transinf.tri_trans, move_len);
+                        IF  p = NIL
+                        THEN
+                            a07_b_put_error (acv, e_no_more_memory, 1)
+                        ELSE
+                            BEGIN
+                            data_part_ptr := @p^;
+                            SAPDB_PascalMove ('VAK92 ',   6,    
+                                  sizeof (acv.a_data_part^.sp1p_part_header) + acv.a_data_part^.sp1p_buf_size,
+                                  move_len,
+                                  @acv.a_data_part^, 1, @data_part_ptr^, 1, move_len,
+                                  acv.a_returncode);
+                            IF  acv.a_returncode = 0
+                            THEN
+                                subst_length  := length + a01aligned_cmd_len(
+                                      ak92expl_param_length (acv, parsid.pid_parsk, data_part_ptr^, shortinfo_ptr))
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        subst_length := length;
+                    (*ENDIF*) 
+                    IF  acv.a_resname_part <> NIL
+                    THEN
+                        BEGIN
+                        resnamelength := sizeof (tsp1_part_header) +
+                              a01aligned_cmd_len(sizeof (resname));
+                        subst_length := subst_length + resnamelength;
+                        a501GetResultName (acv, resname);
+                        END;
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    subst_length := length;
+                (*ENDIF*) 
+&               ifdef trace
+                t01int4 (ak_sem, 'length      ', length);
+                t01int4 (ak_sem, 'subst_length', subst_length);
+&               endif
+                a542internal_packet (acv, c_release_packet,
+                      subst_length - sizeof (tsp1_segment_header) -
+                      sizeof (tsp1_part_header));
+                acv.a_init_ddl := sysbuf^.sstored_cmd.scr_ddl;
+                acv.a_sqlmode  := sysbuf^.sstored_cmd.scr_sql_mode;
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                move_len := sysbuf^.sstored_cmd.scr_movelen;
+                SAPDB_PascalMove ('VAK92 ',   7,    
+                      sizeof(sysbuf^.sstored_cmd.scr_buf),
+                      acv.a_cmd_segm^.sp1s_segm_len,
+                      @sysbuf^.sstored_cmd.scr_buf, 1,
+                      @acv.a_cmd_segm^, moved_length+1, move_len,
+                      acv.a_returncode)
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                moved_length := moved_length + move_len;
+                IF  dropStoredCmd
+                THEN
+                    a10del_sysinfo (acv, sysk, b_err);
+                (* PTS 1123006 E.Z. *)
+                (*ENDIF*) 
+                acv.a_cmd_segm^.sp1c_producer := sp1pr_kernel;
+                a06inc_linkage (sysk.slinkage)
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    UNTIL
+        (b_err <> e_ok)                       OR
+        (acv.a_returncode <> 0) OR
+        (moved_length >= length);
+    (*ENDREPEAT*) 
+    IF  (b_err =  e_ok) AND
+        (acv.a_returncode = 0)
+    THEN
+        BEGIN
+        IF  subst_length <> length
+        THEN
+            WITH acv.a_cmd_part^.sp1p_part_header DO
+                sp1p_buf_size := sp1p_buf_size + subst_length - length;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        acv.a_cmd_segment_header := acv.a_cmd_segm^.sp1s_segm_header;
+        END;
+    (*ENDIF*) 
+    IF  (NOT is_ddl AND (parsid.pid_parsk.p_kind <> m_show) AND
+        NOT acv.a_cmd_segment_header.sp1c_prepare)
+    THEN
+        b_err := e_sysinfo_not_found;
+    (*ENDIF*) 
+    IF  (NOT is_ddl) AND (parsid.pid_parsk.p_kind = m_show) AND (b_err = e_ok) AND
+        (data_part_ptr <> NIL) AND (shortinfo_ptr <> NIL)
+    THEN
+        ak92substitute_parameters (acv,
+              data_part_ptr^, shortinfo_ptr);
+    (*ENDIF*) 
+    IF  data_part_ptr <> NIL
+    THEN
+        gg941Deallocate  (acv.a_transinf.tri_trans, p);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  b_err = e_ok
+THEN
+    BEGIN
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        IF  NOT is_ddl
+        THEN
+            IF  parsid.pid_parsk.p_kind = m_show
+            THEN
+                BEGIN
+                acv.a_cmd_segm^.sp1c_mess_type          := sp1m_dbs;
+                acv.a_returncode := 0;
+                IF  acv.a_return_segm^.sp1r_function_code = csp1_explain_fc
+                THEN (* This was set by ak92substitute_parameters *)
+                    acv.a_intern_explain := true;
+                (*ENDIF*) 
+                IF  (acv.a_returncode = 0) AND (acv.a_resname_part <> NIL)
+                THEN
+                    BEGIN
+                    s26new_part_init (acv.a_in_packet, acv.a_cmd_segm^, pResNamePart);
+                    IF  acv.a_returncode = 0
+                    THEN
+                        BEGIN
+                        pResNamePart^.sp1p_part_kind := sp1pk_resulttablename;
+                        SAPDB_PascalMove  ('VAK92 ',   8,    
+                              sizeof(resname), pResNamePart^.sp1p_buf_size,
+                              @resname, 1, @pResNamePart^.sp1p_buf, 1, sizeof(resname),
+                              acv.a_returncode);
+                        pResNamePart^.sp1p_buf_len := pResNamePart^.sp1p_buf_len + sizeof(resname);
+                        s26finish_part (acv.a_in_packet, pResNamePart^);
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                (* PTS 1114071 E.Z. *)
+                a663_drop_parsid (acv, parsid, del_cnt);
+                acv.a_cmd_segm^.sp1c_mess_type          := sp1m_parse;
+                acv.a_returncode :=
+                      csp_use_new_pars_info
+                END
+            (*ENDIF*) 
+        ELSE
+            acv.a_cmd_segm^.sp1c_mess_type :=
+                  curr_cmc_header.sp1c_mess_type;
+        (*ENDIF*) 
+        acv.a_cmd_segm^.sp1c_commit_immediately :=
+              curr_cmc_header.sp1c_commit_immediately;
+        acv.a_cmd_segm^.sp1c_with_info :=
+              curr_cmc_header.sp1c_with_info;
+        acv.a_cmd_segm^.sp1c_ignore_costwarning :=
+              curr_cmc_header.sp1c_ignore_costwarning;
+        acv.a_cmd_segment_header := acv.a_cmd_segm^.sp1s_segm_header;
+        acv.a_return_segm^.sp1r_function_code := csp1_nil_fc;
+&       ifdef TRACE
+        t01segment (ak_sem, acv.a_cmd_segm^);
+&       endif
+        WITH acv.a_initial_segment_header DO
+            sp1c_prepare := acv.a_cmd_segm^.sp1c_prepare;
+        (*ENDWITH*) 
+        IF  NOT is_ddl
+        THEN
+            acv.a_parsing_again  := true;
+        (*ENDIF*) 
+        acv.a_try_again := true
+        END
+    (*ENDIF*) 
+    END
+(*
+      ; IF  acv.a_queryrewrite_modified
+      THEN
+      BEGIN
+      a664_FreeQueryRewriteCaches(acv);
+      IF  ((acv.a_comp_type = at_xci) AND (acv.a_returncode <> 0))
+      THEN
+      WITH acv.a_transinf.tri_trans DO
+      trWarning_gg00 := trWarning_gg00 - [warn15_user_defined_code];
+      END
+      *)
+ELSE
+    IF  b_err = e_sysinfo_not_found
+    THEN
+        (* PTS 1110931 E.Z. *)
+        BEGIN
+        a10_cache_delete (acv, NOT c_is_rollback);
+        (* PTS 1111299 E.Z. *)
+        (* PTS 1114071 E.Z. *)
+        a663_drop_parsid (acv, parsid, del_cnt);
+        acv.a_returncode := csp_old_fileversion
+        END
+    ELSE
+        a07_b_put_error (acv, b_err, 1)
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92substitute_parameters (
+            VAR acv       : tak_all_command_glob;
+            VAR data_part : tsp1_part;
+            shortinfo_ptr : tak_sysbufferaddress);
+ 
+VAR
+      align_buflen : tsp00_Int4;
+ 
+BEGIN
+acv.a_cmd_segm^.sp1s_no_of_parts := 1;
+(* h.b. 11.11.98                                       *)
+(* here the substitution of parameters only works      *)
+(* if the command part is the one and only part.       *)
+(* Instead it should better be allowed any combination *)
+(* of parts.                                           *)
+acv.a_ex_kind   := only_syntax;
+a35_asql_statement (acv);
+&ifdef trace
+t01moveobj (ak_sem, data_part.sp1p_buf,
+      1, data_part.sp1p_buf_len);
+&endif
+ak92q_substitute_in_query (acv,
+      data_part, shortinfo_ptr,
+      acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_lo_level);
+align_buflen := a01aligned_cmd_len (acv.a_cmd_part^.sp1p_buf_len);
+acv.a_cmd_segm^.sp1s_segm_len := acv.a_cmd_segm^.sp1s_segm_len +
+      align_buflen - acv.a_cmd_part^.sp1p_buf_len;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92q_substitute_in_query (
+            VAR acv       : tak_all_command_glob;
+            VAR data_part : tsp1_part;
+            shortinfo_ptr : tak_sysbufferaddress;
+            curr_n        : integer);
+ 
+VAR
+      sel_n   : integer;
+      where_n : integer;
+      from_n  : integer;
+ 
+BEGIN
+sel_n := acv.a_ap_tree^[ curr_n ].n_lo_level;
+IF  (acv.a_ap_tree^[ sel_n ].n_proc    = a63) AND
+    (acv.a_ap_tree^[ sel_n ].n_subproc = cak_x_union)
+THEN (* SELECT ... UNION SELECT ... *)
+    BEGIN
+    ak92q_substitute_in_query (acv,
+          data_part, shortinfo_ptr,
+          acv.a_ap_tree^[ sel_n ].n_sa_level);
+    sel_n := acv.a_ap_tree^[ sel_n ].n_lo_level;
+    END;
+(*ENDIF*) 
+IF  ( acv.a_ap_tree^[ sel_n ].n_proc    = a63) AND
+    ((acv.a_ap_tree^[ sel_n ].n_subproc = cak_x_distinct) OR
+    ( acv.a_ap_tree^[ sel_n ].n_subproc = cak_x_mass_select))
+THEN (* SELECT DISTINCT ... *)
+    sel_n := acv.a_ap_tree^[ sel_n ].n_lo_level;
+(*ENDIF*) 
+IF  (acv.a_ap_tree^[ sel_n ].n_proc = no_proc) AND
+    (acv.a_ap_tree^[ sel_n ].n_symb = s_identifier)
+THEN (* SELECT restablename (....) FROM ... *)
+    sel_n := acv.a_ap_tree^[ sel_n ].n_sa_level;
+(*ENDIF*) 
+from_n := acv.a_ap_tree^[ sel_n ].n_sa_level;
+IF  (acv.a_ap_tree^[ from_n ].n_proc    = a60) AND
+    (acv.a_ap_tree^[ from_n ].n_subproc = cak_x_single_select)
+THEN (* SELECT ... INTO :var ...              *)
+    from_n := acv.a_ap_tree^[ from_n ].n_sa_level;
+(*ENDIF*) 
+IF  (acv.a_ap_tree^[ from_n ].n_proc    = a63) AND
+    (acv.a_ap_tree^[ from_n ].n_subproc = cak_x_from_part)
+THEN (* This must be there... *)
+    BEGIN
+    where_n := acv.a_ap_tree^[ from_n ].n_sa_level;
+    from_n  := acv.a_ap_tree^[ from_n ].n_lo_level;
+    IF  (acv.a_ap_tree^[ where_n ].n_proc    = a63) AND
+        (acv.a_ap_tree^[ where_n ].n_subproc = cak_x_search_condition)
+    THEN
+        ak92s_substitute_in_subtree (acv,
+              data_part, shortinfo_ptr,
+              acv.a_ap_tree^[ where_n ].n_lo_level);
+    (*ENDIF*) 
+    IF  ( acv.a_ap_tree^[ from_n ].n_proc    = a66) AND
+        ( acv.a_ap_tree^[ from_n ].n_subproc = cak_x_select_in_from_part)
+    THEN
+        ak92q_substitute_in_query (acv,
+              data_part, shortinfo_ptr,
+              acv.a_ap_tree^[ from_n ].n_lo_level)
+    (*ENDIF*) 
+    END
+ELSE
+    a07ak_system_error (acv, 92, 2)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92s_substitute_in_subtree (
+            VAR acv       : tak_all_command_glob;
+            VAR data_part : tsp1_part;
+            shortinfo_ptr : tak_sysbufferaddress;
+            curr_n        : integer);
+ 
+VAR
+      si_x : integer;
+ 
+BEGIN
+IF  acv.a_ap_tree^[ curr_n ].n_proc = a63query_spec
+THEN
+    ak92q_substitute_in_query (acv,
+          data_part, shortinfo_ptr, curr_n)
+ELSE
+    BEGIN
+    IF  acv.a_ap_tree^[ curr_n ].n_sa_level <> 0
+    THEN
+        ak92s_substitute_in_subtree (acv,
+              data_part, shortinfo_ptr,
+              acv.a_ap_tree^[ curr_n ].n_sa_level);
+    (*ENDIF*) 
+    IF  acv.a_ap_tree^[ curr_n ].n_lo_level <> 0
+    THEN
+        ak92s_substitute_in_subtree (acv,
+              data_part, shortinfo_ptr,
+              acv.a_ap_tree^[ curr_n ].n_lo_level);
+    (*ENDIF*) 
+    IF  (acv.a_ap_tree^[ curr_n ].n_proc = no_proc) AND
+        (acv.a_ap_tree^[ curr_n ].n_symb = s_parameter_name)
+    THEN
+        BEGIN
+        si_x := acv.a_ap_tree^[ curr_n ].n_length;
+        IF  (si_x >= 1) AND (si_x <= shortinfo_ptr^.sshortinfo.sicount)
+        THEN
+            ak92one_parameter_substitute (acv,
+                  data_part, shortinfo_ptr, curr_n, si_x)
+        ELSE
+            a07_b_put_error (acv,
+                  e_parameter_not_allowed, si_x)
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92one_parameter_substitute (
+            VAR acv       : tak_all_command_glob;
+            VAR data_part : tsp1_part;
+            shortinfo_ptr : tak_sysbufferaddress;
+            curr_n        : integer;
+            si_x          : integer);
+ 
+VAR
+      curr_si      : ^tsp1_param_info;
+      subst_length : integer;
+      param_length : integer;
+      param_pos    : integer;
+      end_pos      : integer;
+      ix           : integer;
+      res          : tsp00_NumError;
+      num_len      : integer;
+      frac         : integer;
+      trans_len    : tsp00_Int4;
+      err_char_no  : tsp00_Int4;
+      uni_err      : tsp8_uni_error;
+      tmpbuf       : tsp00_C80;
+      tmpbuf_ptr   : tsp00_MoveObjPtr;
+      value_ptr    : tsp00_MoveObjPtr;
+      value_len    : tsp00_Int4;
+      is_null      : boolean;
+      num          : tsp00_Number;
+ 
+BEGIN
+curr_si      := @shortinfo_ptr^.sshortinfo.siinfo[ si_x ];
+param_pos    := acv.a_ap_tree^[ curr_n ].n_pos;
+param_length := acv.a_ap_tree^[ curr_n ].n_subproc;
+subst_length := ak92subst_len (acv,
+      data_part.sp1p_buf, curr_si^, NOT c_uni_swap,
+      value_ptr, value_len, is_null);
+&ifdef trace
+t01int4 (ak_sem, 'param_no    ', si_x);
+t01int4 (ak_sem, 'data_type   ', ord (curr_si^.sp1i_data_type));
+IF  acv.a_variable_input
+THEN
+    t01int4 (ak_sem, 'param_no    ', curr_si^.sp1i_param_no)
+ELSE
+    t01int4 (ak_sem, 'data_pos    ', curr_si^.sp1i_bufpos);
+(*ENDIF*) 
+t01int4 (ak_sem, 'data_len    ', curr_si^.sp1i_in_out_len);
+t01int4 (ak_sem, 'cmd_pos     ', param_pos);
+t01int4 (ak_sem, 'cmd_len     ', param_length);
+t01int4 (ak_sem, 'subst_len   ', subst_length);
+t01int4 (ak_sem, 'value_len   ', value_len);
+&endif
+SAPDB_PascalOverlappingMove ('VAK92 ',   9,    
+      acv.a_cmd_part^.sp1p_buf_size, acv.a_cmd_part^.sp1p_buf_size,
+      @acv.a_cmd_part^.sp1p_buf, param_pos + param_length,
+      @acv.a_cmd_part^.sp1p_buf, param_pos + subst_length,
+      acv.a_cmd_part^.sp1p_buf_len + 1 - param_pos - param_length,
+      acv.a_returncode);
+acv.a_cmd_part^.sp1p_buf_len := acv.a_cmd_part^.sp1p_buf_len
+      + subst_length - param_length;
+tmpbuf_ptr := NIL;
+IF  is_null
+THEN
+    BEGIN
+    tmpbuf_ptr := @tmpbuf;
+    tmpbuf[ 1 ] := 'N';
+    tmpbuf[ 2 ] := 'U';
+    tmpbuf[ 3 ] := 'L';
+    tmpbuf[ 4 ] := 'L'
+    END
+ELSE
+    CASE curr_si^.sp1i_data_type OF
+        dboolean :
+            BEGIN
+            tmpbuf_ptr := @tmpbuf;
+            IF  value_ptr^[1] = chr(0)
+            THEN
+                BEGIN
+                tmpbuf[ 1 ] := 'F';
+                tmpbuf[ 2 ] := 'A';
+                tmpbuf[ 3 ] := 'L';
+                tmpbuf[ 4 ] := 'S';
+                tmpbuf[ 5 ] := 'E'
+                END
+            ELSE
+                BEGIN
+                tmpbuf[ 1 ] := 'T';
+                tmpbuf[ 2 ] := 'R';
+                tmpbuf[ 3 ] := 'U';
+                tmpbuf[ 4 ] := 'E';
+                tmpbuf[ 5 ] := ' '
+                END
+            (*ENDIF*) 
+            END;
+        dcha, ddate, dtime, dtimestamp, dvarchara, dunicode :
+            BEGIN
+            acv.a_cmd_part^.sp1p_buf[ param_pos ] := csp_unicode_mark;
+            acv.a_cmd_part^.sp1p_buf[ param_pos + a01char_size - 1 ] := '''';
+            IF  g01unicode
+                AND
+                NOT (curr_si^.sp1i_data_type in [dunicode, dvarcharuni])
+                AND
+                (
+                (acv.a_initial_packet_header.sp1h_mess_code < csp_unicode_swap) OR
+                acv.a_ascii_in_and_output (* new feature *)
+                )
+            THEN
+                BEGIN
+                trans_len := value_len * a01char_size;
+                s80uni_trans (value_ptr, value_len, csp_ascii,
+                      @acv.a_cmd_part^.sp1p_buf[ param_pos + a01char_size ],
+                      trans_len, csp_unicode, [ ], uni_err, err_char_no)
+                END
+            ELSE
+                SAPDB_PascalMove ('VAK92 ',  10,    
+                      data_part.sp1p_buf_size, acv.a_cmd_part^.sp1p_buf_size,
+                      @value_ptr^, 1,
+                      @acv.a_cmd_part^.sp1p_buf, param_pos + a01char_size,
+                      value_len, acv.a_returncode);
+            (*ENDIF*) 
+            end_pos := param_pos + subst_length - a01char_size;
+            acv.a_cmd_part^.sp1p_buf[ end_pos ] := csp_unicode_mark;
+            acv.a_cmd_part^.sp1p_buf[ end_pos + a01char_size - 1 ] := '''';
+            IF  curr_si^.sp1i_data_type in [dcha, dvarchara, dunicode, dvarcharuni]
+            THEN      (* For every quote in the parameter string *)
+                BEGIN (* we must put two quotes in the command.  *)
+                ix := param_pos + a01char_size;
+&               ifdef trace
+                t01int4 (ak_sem, 'end_pos     ', end_pos);
+                t01int4 (ak_sem, 'a01char_size', a01char_size);
+                t01int4 (ak_sem, 'ix          ', ix);
+                t01int4 (ak_sem, 'param_pos   ', param_pos);
+                t01int4 (ak_sem, 'data_type   ',
+                      ord (curr_si^.sp1i_data_type));
+&               endif
+                WHILE ix <= end_pos - a01char_size DO
+                    BEGIN
+                    IF  ((curr_si^.sp1i_data_type <> dunicode) OR
+                        (acv.a_cmd_part^.sp1p_buf[ ix ] = csp_unicode_mark))
+                        AND
+                        (acv.a_cmd_part^.sp1p_buf[ ix+a01char_size-1 ] = '''')
+                    THEN      (* By moving this right *)
+                        BEGIN (* we double the quote. *)
+                        SAPDB_PascalOverlappingMove ('VAK92 ',  11,    
+                              acv.a_cmd_part^.sp1p_buf_size,
+                              acv.a_cmd_part^.sp1p_buf_size,
+                              @acv.a_cmd_part^.sp1p_buf, ix,
+                              @acv.a_cmd_part^.sp1p_buf, ix + a01char_size,
+                              end_pos - ix - a01char_size,
+                              acv.a_returncode);
+                        ix := ix + a01char_size
+                        END;
+                    (*ENDIF*) 
+                    ix := ix + a01char_size
+                    END
+                (*ENDWHILE*) 
+                END;
+            (*ENDIF*) 
+            END;
+        dfixed, dinteger, dsmallint, dfloat, dvfloat :
+            BEGIN
+            IF  curr_si^.sp1i_data_type in [ dfloat, dvfloat ]
+            THEN
+                frac := csp_float_frac
+            ELSE
+                frac := curr_si^.sp1i_frac;
+            (*ENDIF*) 
+            tmpbuf_ptr := @tmpbuf;
+            (* erst nach number moven, weil die sourcelänge nicht angebbar ist *)
+            num := csp_null_number;
+            SAPDB_PascalMove ('VAK92 ',  12,    
+                  data_part.sp1p_buf_size, sizeof(num),
+                  @value_ptr^, 1, @num, 1, value_len, acv.a_returncode);
+            s42gchr (num, 1,
+                  curr_si^.sp1i_length, frac,
+                  curr_si^.sp1i_length, tmpbuf_ptr^, 1,
+                  num_len, res);
+            IF  num_len < subst_length
+            THEN
+                (* PTS 1103891 E.Z. *)
+                SAPDB_PascalFill ('VAK92 ',  13,    
+                      sizeof (tmpbuf), @tmpbuf_ptr^, num_len + 1,
+                      subst_length-num_len, csp_ascii_blank,
+                      acv.a_returncode);
+            (*ENDIF*) 
+            END;
+        OTHERWISE
+            BEGIN
+&           ifdef trace
+            t01int4 (ak_sem, 'DATA_TYPE!!!',
+                  ord (curr_si^.sp1i_data_type));
+&           endif
+            SAPDB_PascalMove ('VAK92 ',  14,    
+                  data_part.sp1p_buf_size, acv.a_cmd_part^.sp1p_buf_size,
+                  @value_ptr^, 1,
+                  @acv.a_cmd_part^.sp1p_buf, param_pos + 1,
+                  subst_length, acv.a_returncode);
+            END;
+        END;
+    (*ENDCASE*) 
+(*ENDIF*) 
+IF  tmpbuf_ptr <> NIL
+THEN
+    IF  g01unicode
+    THEN
+        BEGIN
+        trans_len := subst_length;
+        s80uni_trans (tmpbuf_ptr, subst_length, csp_ascii,
+              @acv.a_cmd_part^.sp1p_buf[ param_pos ],
+              trans_len, csp_unicode, [ ], uni_err, err_char_no)
+        END
+    ELSE
+        SAPDB_PascalMove ('VAK92 ',  15,    
+              sizeof (tmpbuf), acv.a_cmd_part^.sp1p_buf_len,
+              tmpbuf_ptr, 1, @acv.a_cmd_part^.sp1p_buf, param_pos,
+              subst_length, acv.a_returncode)
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak92expl_param_length (
+            VAR acv           : tak_all_command_glob;
+            VAR parsk         : tak_parskey;
+            VAR data_part     : tsp1_part;
+            VAR shortinfo_ptr : tak_sysbufferaddress) : integer;
+ 
+VAR
+      sysk        : tgg00_SysInfoKey;
+      b_err       : tgg00_BasisError;
+      si_x        : integer;
+      increase    : integer;
+      value_ptr   : tsp00_MoveObjPtr;
+      value_len   : tsp00_Int4;
+      is_null     : boolean;
+ 
+BEGIN
+increase := 0;
+sysk     := a01defaultkey;
+WITH sysk DO
+    BEGIN
+    sauthid[ 1 ] := cak_tempinfo_byte;
+    SAPDB_PascalForcedMove (sizeof(parsk), sizeof(sauthid),
+          @parsk, 1, @sauthid, 2, mxak_parskey);
+    sentrytyp    := cak_eshortinfo
+    END;
+(*ENDWITH*) 
+a10get_sysinfo (acv, sysk, d_release,
+      shortinfo_ptr, b_err);
+IF  (b_err = e_ok) AND (acv.a_data_part <> NIL)
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4 (ak_sem, 'param_offset', acv.a_parameter_offset);
+    t01int4 (ak_sem, 'data_length ', data_part.sp1p_buf_len);
+    t01moveobj (ak_sem, data_part.sp1p_buf,
+          1, data_part.sp1p_buf_len);
+    t01buf (ak_sem, shortinfo_ptr^.sshortinfo,
+          1, shortinfo_ptr^.sshortinfo.sireclen);
+&   endif
+    FOR si_x := 1 TO shortinfo_ptr^.sshortinfo.sicount DO
+        increase := increase + ak92subst_len (acv,
+              data_part.sp1p_buf, shortinfo_ptr^.sshortinfo.siinfo[ si_x ],
+              c_uni_swap, value_ptr, value_len, is_null);
+    (*ENDFOR*) 
+&   ifdef trace
+    t01int4 (ak_sem, 'increase    ', increase);
+&   endif
+    END;
+(*ENDIF*) 
+ak92expl_param_length := increase
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak92subst_len (
+            VAR acv       : tak_all_command_glob;
+            VAR data_buf  : tsp00_MoveObj;
+            VAR curr_si   : tsp1_param_info;
+            uni_swap      : boolean;
+            VAR value_ptr : tsp00_MoveObjPtr;
+            VAR value_len : tsp00_Int4;
+            VAR is_null   : boolean) : integer;
+ 
+VAR
+      data_length : integer;
+      trans_len   : integer;
+      err_char_no : tsp00_Int4;
+      uni_err     : tsp8_uni_error;
+      def_byte    : char;
+      is_default  : boolean;
+ 
+BEGIN
+IF  curr_si.sp1i_io_type = sp1io_output
+THEN
+    ak92subst_len := 0
+ELSE
+    BEGIN
+    IF  acv.a_variable_input
+    THEN
+        BEGIN
+        IF  NOT a509get_one_value (acv.a_input_data_map, curr_si.sp1i_param_no,
+            value_ptr, value_len, is_null, is_default)
+        THEN
+            a07ak_system_error (acv, 92, 4);
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        value_ptr  := @data_buf[ curr_si.sp1i_bufpos+1 ];
+        value_len  := curr_si.sp1i_in_out_len - 1;
+        is_null    := data_buf[ curr_si.sp1i_bufpos ] = csp_undef_byte;
+        is_default := false;
+        END;
+    (*ENDIF*) 
+    IF  is_null
+    THEN
+        ak92subst_len := 4*a01char_size (* length(NULL) *)
+    ELSE
+        BEGIN
+        IF  uni_swap AND
+            (
+            ((acv.a_initial_packet_header.sp1h_mess_swap <> sw_normal)       AND
+            ( acv.a_initial_packet_header.sp1h_mess_code < csp_unicode_swap) AND
+            ( curr_si.sp1i_data_type in [dunicode, dvarcharuni]) )
+            OR
+            (
+            (acv.a_initial_packet_header.sp1h_mess_code = csp_unicode_swap) AND
+            (curr_si.sp1i_data_type in
+            [ dcha, ddate, dtime, dtimestamp, dvarchara, dunicode, dvarcharuni ]) AND
+            NOT acv.a_ascii_in_and_output (* new feature *)
+            )
+            )
+        THEN
+            BEGIN
+            trans_len := value_len;
+            s80uni_trans (value_ptr, trans_len, csp_unicode_swap,
+                  value_ptr, trans_len, csp_unicode, [ ],
+                  uni_err, err_char_no);
+            IF  uni_err <> uni_ok
+            THEN
+                a07_hex_uni_error (acv,
+                      uni_err, err_char_no, c_to_unicode,
+                      value_ptr, acv.a_max_codewidth)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        CASE curr_si.sp1i_data_type OF
+            dboolean : (* max (length (TRUE), length (FALSE)) *)
+                ak92subst_len := 5*a01char_size;
+            dcha, dvarchara, dunicode, dvarcharuni, ddate, dtime, dtimestamp:
+                BEGIN
+                IF  (curr_si.sp1i_data_type in [dunicode, dvarcharuni])
+                    OR
+                    ((acv.a_initial_packet_header.sp1h_mess_code in [csp_unicode_swap, csp_unicode]) AND
+                    NOT acv.a_ascii_in_and_output (* new feature *)
+                    )
+                THEN
+                    def_byte := csp_unicode_def_byte
+                ELSE
+                    def_byte := csp_ascii_blank;
+                (*ENDIF*) 
+                IF  NOT acv.a_variable_input
+                THEN
+                    value_len := s30lnr_defbyte (value_ptr,
+                          def_byte, 1, value_len);
+                (*ENDIF*) 
+                data_length := value_len;
+                IF  g01unicode AND
+                    (def_byte <> csp_unicode_def_byte)
+                THEN
+                    data_length := data_length * a01char_size;
+                (*ENDIF*) 
+                IF  NOT (curr_si.sp1i_data_type in
+                    [ ddate, dtime, dtimestamp ])
+                THEN
+                    data_length := data_length
+                          + ak92count_quotes (value_ptr^, def_byte,
+                          1, data_length);
+                (*ENDIF*) 
+                ak92subst_len := data_length
+                      + 2*a01char_size (*enclosing quotes*);
+                END;
+            dinteger, dsmallint :
+                ak92subst_len := curr_si.sp1i_length*a01char_size
+                      + 1*a01char_size (*minus*);
+            dfixed :
+                ak92subst_len := curr_si.sp1i_length*a01char_size
+                      + 2*a01char_size (*comma,minus*);
+            dfloat, dvfloat :
+                ak92subst_len := curr_si.sp1i_length*a01char_size
+                      + 6*a01char_size (*comma,minus,exponent*);
+            OTHERWISE
+                BEGIN
+&               ifdef trace
+                t01int4 (ak_sem, 'DATA_TYPE!!!',
+                      ord (curr_si.sp1i_data_type));
+&               endif
+                ak92subst_len := curr_si.sp1i_length;
+                END;
+            END;
+        (*ENDCASE*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak92count_quotes (
+            VAR str   : tsp00_MoveObj;
+            defbyte   : char;
+            start_pos : tsp00_Int4;
+            length    : tsp00_Int4) : integer;
+ 
+VAR
+      quotes : integer;
+      ix     : integer;
+ 
+BEGIN
+quotes := 0;
+IF  defbyte = csp_unicode_def_byte
+THEN
+    BEGIN
+    ix := 0;
+    WHILE ix < length  DO
+        BEGIN
+        IF  (str[ start_pos + ix     ] = csp_unicode_mark) AND
+            (str[ start_pos + ix + 1 ] = '''')
+        THEN
+            quotes := succ (quotes);
+        (*ENDIF*) 
+        ix := ix + 2
+        END
+    (*ENDWHILE*) 
+    END
+ELSE
+    FOR ix := 0 TO length-1 DO
+        IF  str[ start_pos + ix ] = ''''
+        THEN
+            quotes := succ (quotes);
+        (*ENDIF*) 
+    (*ENDFOR*) 
+(*ENDIF*) 
+ak92count_quotes := quotes*a01char_size;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92serial_to_varpart (VAR acv : tak_all_command_glob);
+ 
+VAR
+      c        : tsp00_C1;
+ 
+BEGIN
+IF  acv.a_first_serial <> csp_null_number
+THEN
+    BEGIN
+    c[1] := csp_defined_byte;
+    a06retpart_move (acv, @c[1], 1);
+    a06retpart_move (acv, @acv.a_first_serial, sizeof(acv.a_first_serial));
+    a06retpart_move (acv, @c[1], 1);
+    a06retpart_move (acv, @acv.a_last_serial, sizeof(acv.a_last_serial));
+    a06finish_curr_retpart (acv, sp1pk_serial, 1)
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a92_resname_to_varpart(VAR acv : tak_all_command_glob);
+ 
+VAR
+      resname_len : integer;
+      extern_name : tsp00_C64;
+      e           : tsp8_uni_error;
+      j           : integer;
+      err_char_no : tsp00_Int4;
+ 
+BEGIN
+IF  (acv.a_return_segm^.sp1r_function_code in
+    [csp1_select_fc, csp1_mselect_fc,
+    csp1_explain_fc])
+    (* PTS 1116801 E.Z. *)
+THEN
+    BEGIN
+    IF  g01unicode
+    THEN
+        BEGIN
+        resname_len := s30unilnr (@acv.a_result_name, csp_unicode_blank,
+              1, sizeof(acv.a_result_name));
+&       ifdef TRACE
+        t01lidentifier (ak_sem, acv.a_result_name);
+        t01int4 (ak_sem, 'resname_len ', resname_len);
+&       endif
+        (* PTS 1116801 E.Z. *)
+        j := sizeof(extern_name);
+        s80uni_trans (@acv.a_result_name, resname_len, csp_unicode,
+              @extern_name, j,
+              acv.a_out_packet^.sp1_header.sp1h_mess_code, [ ],
+              e, err_char_no);
+&       ifdef TRACE
+        t01int4 (ak_sem, 'extern_name ', j);
+        t01c64 (ak_sem, extern_name);
+&       endif
+        a06retpart_move (acv, @extern_name, j);
+        IF  (acv.a_returncode = 0) OR
+            (acv.a_returncode = 100)
+        THEN
+            a06finish_curr_retpart (acv, sp1pk_resulttablename, 1);
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        resname_len := s30klen (acv.a_result_name,
+              bsp_c1, sizeof(acv.a_result_name));
+        (* PTS 1116801 E.Z. *)
+        a06retpart_move (acv, @acv.a_result_name, resname_len);
+        IF  (acv.a_returncode = 0) OR
+            (acv.a_returncode = 100)
+        THEN
+            a06finish_curr_retpart (acv, sp1pk_resulttablename, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(* PTS 1121518 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92unicode_map (
+            VAR acv         : tak_all_command_glob;
+            change_to_upper : boolean);
+ 
+VAR
+      new_cmd_part     : tsp1_part_ptr;
+      required_buf_len : tsp00_Int4;
+      err_char_no      : tsp00_Int4;
+      align_cmd_len    : tsp00_Int4;
+      e                : tsp8_uni_error;
+      opt_set          : tsp8_uni_opt_set;
+ 
+BEGIN
+(* PTS 1121518 E.Z. *)
+IF  change_to_upper
+THEN
+    opt_set := [ uni_change_to_upper ]
+ELSE
+    opt_set := [];
+(*ENDIF*) 
+IF  acv.a_cmd_packet_header.sp1h_mess_code = csp_unicode
+THEN
+    BEGIN
+    (* PTS 1121518 E.Z. *)
+    IF  change_to_upper
+    THEN
+        (* because of 'change to upper' *)
+        s80uni_trans (@acv.a_cmd_part^.sp1p_buf[ 1 ], acv.a_cmd_part^.sp1p_buf_len,
+              csp_unicode,
+              @acv.a_cmd_part^.sp1p_buf[ 1 ], acv.a_cmd_part^.sp1p_buf_len,
+              (* PTS 1121518 E.Z. *)
+              csp_unicode, opt_set, e, err_char_no)
+    (*ENDIF*) 
+    END
+ELSE
+    IF  acv.a_cmd_packet_header.sp1h_mess_code = csp_unicode_swap
+    THEN
+        BEGIN
+        s80uni_trans (@acv.a_cmd_part^.sp1p_buf[ 1 ], acv.a_cmd_part^.sp1p_buf_len,
+              csp_unicode_swap,
+              @acv.a_cmd_part^.sp1p_buf[ 1 ], acv.a_cmd_part^.sp1p_buf_len,
+              (* PTS 1121518 E.Z. *)
+              csp_unicode, opt_set, e, err_char_no)
+        END
+    ELSE
+        BEGIN
+        required_buf_len := (2 * acv.a_cmd_part^.sp1p_buf_len);
+        (* PTS 1123775 E.Z. *)
+        align_cmd_len    := a01aligned_cmd_len( required_buf_len );
+        a10new_packet (acv, align_cmd_len + sizeof (tsp1_part_header),
+              new_cmd_part);
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            new_cmd_part^.sp1p_part_header := acv.a_cmd_part^.sp1p_part_header;
+            (* PTS 1123006 E.Z. *)
+            (* PTS 1123775 E.Z. *)
+            new_cmd_part^.sp1p_buf_size    := align_cmd_len;
+            new_cmd_part^.sp1p_buf_len     := required_buf_len;
+            s80uni_trans (@acv.a_cmd_part^.sp1p_buf[ 1 ], acv.a_cmd_part^.sp1p_buf_len,
+                  acv.a_cmd_packet_header.sp1h_mess_code,
+                  @new_cmd_part^.sp1p_buf[ 1 ], new_cmd_part^.sp1p_buf_len,
+                  (* PTS 1121518 E.Z. *)
+                  csp_unicode, opt_set, e, err_char_no);
+            IF  e = uni_ok
+            THEN
+                BEGIN
+                acv.a_uni_cmd_part := new_cmd_part;
+                acv.a_cmd_part     := new_cmd_part
+                END
+            ELSE
+                BEGIN
+                a07_hex_uni_error (acv, e, new_cmd_part^.sp1p_buf_len+1,
+                      c_to_unicode, @acv.a_cmd_part^.sp1p_buf[ err_char_no ],
+                      acv.a_max_codewidth);
+&               ifdef TRACE
+                t01int4 (ak_syn, 'err_char_no ', err_char_no);
+                t01moveobj (ak_syn, new_cmd_part^.sp1p_buf, 1,
+                      new_cmd_part^.sp1p_buf_len);
+&               endif
+                a10dispose (acv, new_cmd_part);
+                END
+            (*ENDIF*) 
+            END;
+&       ifdef TRACE
+        (*ENDIF*) 
+        t01int4 (ak_syn, 'unicode len ', acv.a_cmd_part^.sp1p_buf_len);
+        t01moveobj (ak_syn, acv.a_cmd_part^.sp1p_buf, 1, acv.a_cmd_part^.sp1p_buf_len);
+&       endif
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92special_mess_types (VAR acv : tak_all_command_glob);
+ 
+VAR
+      part_desc_ptr : tsp1_part_ptr;
+ 
+BEGIN
+acv.a_ex_kind := parsing_executing;
+acv.a_is_ddl  := no_ddl;
+IF  acv.a_cmd_segment_header.sp1c_mess_type in [ sp1m_switch, sp1m_minbuf, sp1m_maxbuf ]
+THEN
+    BEGIN
+    part_desc_ptr     := NIL;
+    a92_next_part_get (acv, part_desc_ptr);
+    a92_map_into_upper (acv, part_desc_ptr^.sp1p_buf, 1,
+          part_desc_ptr^.sp1p_buf_len, NOT c_uni_map);
+    END;
+(*ENDIF*) 
+CASE acv.a_cmd_segment_header.sp1c_mess_type OF
+    sp1m_get_challenge :
+        ak92GetChallenge (acv);
+&   ifdef TRACE
+    sp1m_switch :
+        ak92switchen (acv);
+    sp1m_switchlimit :
+        ak92l_switchen (acv);
+    sp1m_buflength :
+        BEGIN
+        t01setmaxbuflength (
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [1]) * 256 +
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [2])        );
+        kb560SetTraceMaxBufferLength (
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [1]) * 256 +
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [2])        );
+        END;
+    sp1m_minbuf :
+        t01minbuf(true);
+    sp1m_maxbuf :
+        t01minbuf(false);
+&   else
+    sp1m_buflength :
+        kb560SetTraceMaxBufferLength (
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [1]) * 256 +
+              ord (acv.a_in_packet^.sp1_segm.sp1p_buf [2])        );
+&   endif
+    sp1m_state_utility:
+        a37state_get (acv, cak_i_save);
+    OTHERWISE
+        BEGIN
+        END
+    END;
+(*ENDCASE*) 
+acv.a_returncode    := 0;
+acv.a_errorpos      := 0;
+acv.a_return_segm^.sp1r_function_code := csp1_diagnose_fc;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak92GetChallenge (VAR acv : tak_all_command_glob);
+ 
+BEGIN
+acv.a_curr_retpart := NIL;
+IF  (acv.a_challenge = cgg_zero_id) AND
+    (acv.a_curr_user_name = a01_il_b_identifier)
+THEN
+    BEGIN
+    a101_GetMySQLScramble (acv.a_challenge);
+    a06retpart_move (acv, @acv.a_challenge, sizeof(acv.a_challenge));
+    a06finish_curr_retpart (acv, sp1pk_data, 1)
+    END
+ELSE
+    a07_b_put_error (acv, e_invalid_command, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE (* PTS 1122546 D.T. *)
+      ak92SaveLongDemandData (
+            VAR acv  : tak_all_command_glob;
+            part_ptr : tsp1_part_ptr);
+ 
+VAR
+      AllocSize : tsp00_Int4;
+      LongDemDataPtr : tak92LongDemDataPtr;
+      NumErr : tsp00_NumError;
+      i : tsp00_Int4;
+      Offset : tsp00_Int4;
+ 
+BEGIN
+IF  (part_ptr <> NIL) AND (part_ptr^.sp1p_arg_count > 0)
+THEN
+    BEGIN
+    AllocSize := part_ptr^.sp1p_arg_count * sizeof(tak_longdemand_rec) + sizeof(tsp00_Int4);
+    acv.a_longdemand_data := gg941Allocate (acv.a_transinf.tri_trans, AllocSize);
+    IF  acv.a_longdemand_data = NIL
+    THEN
+        a07_b_put_error (acv, e_no_more_memory, 1)
+    ELSE
+        BEGIN
+        LongDemDataPtr.VoidPtr  := acv.a_longdemand_data;
+        LongDemDataPtr.Int4Ptr^ := part_ptr^.sp1p_arg_count;
+        LongDemDataPtr.VoidPtr  := s35add_addr1_ptocm (LongDemDataPtr.VoidPtr, 1+sizeof(tsp00_Int4));
+        FOR i:=1 TO part_ptr^.sp1p_arg_count DO
+            BEGIN
+            Offset := (i-1)*16;
+            IF  ( part_ptr^.sp1p_buf[Offset+1] = csp_undef_byte )
+            THEN
+                LongDemDataPtr.LdPtr^.ldem_getatonce := true
+            ELSE
+                LongDemDataPtr.LdPtr^.ldem_getatonce := ord(part_ptr^.sp1p_buf[Offset+2])<>0;
+            (*ENDIF*) 
+            IF  ( part_ptr^.sp1p_buf[Offset+3] = csp_undef_byte )
+            THEN
+                LongDemDataPtr.LdPtr^.ldem_position := 1
+            ELSE
+                BEGIN
+                s40glint (part_ptr^.sp1p_buf, Offset+ 4, csp_resnum_deflen,
+                      LongDemDataPtr.LdPtr^.ldem_position, NumErr);
+                IF  NumErr <> num_ok
+                THEN
+                    a07_b_put_error (acv, e_num_invalid, 1);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  ( part_ptr^.sp1p_buf[Offset+10] = csp_undef_byte )
+            THEN
+                BEGIN
+                LongDemDataPtr.LdPtr^.ldem_length := -1;
+                END
+            ELSE
+                BEGIN
+                s40glint (part_ptr^.sp1p_buf, Offset+11, csp_resnum_deflen,
+                      LongDemDataPtr.LdPtr^.ldem_length,   NumErr);
+                IF  (NumErr <> num_ok) OR (LongDemDataPtr.LdPtr^.ldem_length<0)
+                THEN
+                    a07_b_put_error (acv, e_num_invalid, 1);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            LongDemDataPtr.VoidPtr := s35add_addr1_ptocm (LongDemDataPtr.VoidPtr, 1+sizeof(tak_longdemand_rec));
+            END;
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END; (* PTS 1122546 D.T. *)
+ 
+(*------------------------------*) 
+ 
+PROCEDURE (* PTS 1122546 D.T. *)
+      a92ReadLongDemandData (
+            VAR acv   : tak_all_command_glob;
+            LongColCnt: tsp00_Int4;
+            VAR MaxColCnt: tsp00_Int4;
+            VAR Position: tsp00_Int4;
+            VAR Length: tsp00_Int4;
+            VAR AtOnce: boolean);
+ 
+VAR
+      LongDemDataPtr : tak92LongDemDataPtr;
+      Offset : tsp00_Int4;
+ 
+BEGIN
+IF  acv.a_longdemand_data = NIL
+THEN
+    BEGIN
+    Position  := 1;
+    Length    := -1;
+    MaxColCnt := 0;
+    END
+ELSE
+    BEGIN
+    LongDemDataPtr.VoidPtr := acv.a_longdemand_data;
+    MaxColCnt := LongDemDataPtr.Int4Ptr^;
+    IF  (LongColCnt<=MaxColCnt) AND (LongColCnt>0)
+    THEN
+        BEGIN
+        Offset := (LongColCnt-1)*sizeof(tak_longdemand_rec) + sizeof(tsp00_Int4);
+        LongDemDataPtr.VoidPtr := s35add_addr1_ptocm (LongDemDataPtr.VoidPtr, 1+Offset);
+        AtOnce   := LongDemDataPtr.LdPtr^.ldem_getatonce;
+        Position := LongDemDataPtr.LdPtr^.ldem_position;
+        Length   := LongDemDataPtr.LdPtr^.ldem_length;
+        END
+    ELSE
+        BEGIN
+        a07_b_put_error (acv, e_invalid_parameter, 1);
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END; (* PTS 1122546 D.T. *)
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

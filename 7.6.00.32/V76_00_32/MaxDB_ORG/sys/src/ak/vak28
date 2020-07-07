@@ -1,0 +1,3520 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-22
+*****************************************************
+modname : VAK28
+changed : 2000-11-22
+module  : AK_update_statistics
+ 
+Author  : ThomasA
+Created : 1985-02-06
+*****************************************************
+ 
+Purpose : Semantics of SQL statement 'UPDATE STATISTICS'
+ 
+Define  :
+ 
+        VAR
+              a28updstatwanted_tree : tgg00_FileId;
+ 
+        PROCEDURE
+              a28assign_col_info (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    VAR stat_buf : tak_sysbufferaddress;
+                    colno        : integer;
+                    dist_values  : tsp00_Int4;
+                    pages        : tsp00_Int4;
+                    avg_lst_len  : tsp00_Int4);
+ 
+        PROCEDURE
+              a28column_statistics (
+                    VAR acv            : tak_all_command_glob;
+                    base_ptr           : tak_sysbufferaddress;
+                    VAR col_info       : tak00_columninfo;
+                    infer_stats        : boolean;
+                    VAR statistics     : tak_column_statistics;
+                    VAR stat_rec_found : boolean);
+ 
+        PROCEDURE
+              a28info (
+                    VAR acv        : tak_all_command_glob;
+                    base_ptr       : tak_sysbufferaddress;
+                    VAR pages      : tsp00_Int4;
+                    VAR rows       : tsp00_Int4;
+                    VAR date       : tsp00_Int4;
+                    VAR time       : tsp00_Int4);
+ 
+        PROCEDURE
+              a28new_statistic_info (
+                    VAR acv     : tak_all_command_glob;
+                    base_ptr    : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a28lock_table_for_updstat (
+                    VAR acv       : tak_all_command_glob;
+                    table_surr    : tgg00_Surrogate;
+                    VAR b_err     : tgg00_BasisError);
+ 
+        PROCEDURE
+              a28lock_stat_catalog_rec (
+                    VAR acv       : tak_all_command_glob;
+                    base_ptr      : tak_sysbufferaddress;
+                    lockExclusive : boolean;
+                    VAR stat_buf  : tak_sysbufferaddress;
+                    VAR b_err     : tgg00_BasisError);
+ 
+        FUNCTION
+              a28nextUpdStatWantedEntry(
+                    VAR acv  : tak_all_command_glob;
+                    VAR a41v : tak40_show_glob;
+                    VAR key  : tgg00_Lkey) : boolean;
+ 
+        FUNCTION
+              a28prim_pages (
+                    VAR acv     : tak_all_command_glob;
+                    VAR baserec : tak_baserecord) : tsp00_Int4;
+ 
+        FUNCTION
+              a28primrows (
+                    VAR acv     : tak_all_command_glob;
+                    VAR baserec : tak_baserecord) : tsp00_Int4;
+ 
+        PROCEDURE
+              a28set_col_info (
+                    VAR stat_rec : tak_statisticsinfo;
+                    colno        : integer;
+                    dist_values  : tsp00_Int4;
+                    pages        : tsp00_Int4;
+                    avg_lst_len  : tsp00_Int4);
+ 
+        PROCEDURE
+              a28sys_upd_statistics (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tree    : tgg00_FileId;
+                    mtype       : tgg00_MessType;
+                    m2type      : tgg00_MessType2;
+                    known_pages : tsp00_Int4;
+                    found_pages : tsp00_Int4);
+ 
+        PROCEDURE
+              a28add_table_upd_statistics (
+                    VAR acv       : tak_all_command_glob;
+                    updStatObj    : tsp00_Addr;
+                    bForceUpdStat : boolean;
+                    sample_rows   : tsp00_Int4;
+                    sample_pct    : integer);
+ 
+        PROCEDURE
+              a28table_upd_statistics (
+                    VAR acv       : tak_all_command_glob;
+                    bForceUpdStat : boolean;
+                    sample_rows   : tsp00_Int4;
+                    sample_pct    : integer;
+                    page_cnt      : tsp00_Int4;
+                    rec_cnt       : tsp00_Int4;
+                    sec_cnt       : tsp00_Int4;
+                    colno         : integer;
+                    add           : boolean;
+                    commit        : boolean);
+ 
+        PROCEDURE
+              a28TransferStatistics (
+                    VAR t           : tgg00_TransContext;
+                    VAR base_rec    : tak_baserecord);
+ 
+        FUNCTION
+              a28TreeStoredInVar (VAR tree : tgg00_FileId) : boolean;
+ 
+        PROCEDURE
+              a28update_statistics (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a28rows_and_colstat (
+                    VAR acv        : tak_all_command_glob;
+                    base_ptr       : tak_sysbufferaddress;
+                    VAR col_info   : tak00_columninfo;
+                    VAR statistics : tak_column_statistics;
+                    VAR prim_rows  : tsp00_Int4;
+                    VAR no_cstats  : boolean);
+ 
+.CM *-END-* define --------------------------------------
+***********************************************************
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01defaultkey        : tgg00_SysInfoKey;
+              a01_i_asterisk       : tsp00_KnlIdentifier;
+              a01_il_b_identifier  : tsp00_KnlIdentifier;
+              a01_i_sysstatistics  : tsp00_KnlIdentifier;
+              a01_i_tablekey       : tsp00_KnlIdentifier;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_semantic_scanner_tools : VAK05;
+ 
+        PROCEDURE
+              a05identifier_get (
+                    VAR acv     : tak_all_command_glob;
+                    tree_index  : integer;
+                    obj_len     : integer;
+                    VAR moveobj : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a05_int4_unsigned_get (
+                    VAR acv : tak_all_command_glob;
+                    pos     : integer;
+                    l       : tsp00_Int2;
+                    VAR int : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06a_mblock_init (
+                    VAR acv      : tak_all_command_glob;
+                    mtype        : tgg00_MessType;
+                    m2type       : tgg00_MessType2;
+                    VAR tree     : tgg00_FileId);
+ 
+        PROCEDURE
+              a06rsend_mess_buf (
+                    VAR acv    : tak_all_command_glob;
+                    VAR mblock : tgg00_MessBlock;
+                    result_req : boolean;
+                    VAR e      : tgg00_BasisError);
+ 
+        FUNCTION
+              a06_table_exist (
+                    VAR acv      : tak_all_command_glob;
+                    dstate       : tak_directory_state;
+                    VAR authname : tsp00_KnlIdentifier;
+                    VAR tablen   : tsp00_KnlIdentifier;
+                    VAR sparr    : tak_syspointerarr;
+                    get_all      : boolean) : boolean;
+ 
+        PROCEDURE
+              a06determine_username (
+                    VAR acv       : tak_all_command_glob;
+                    VAR userid    : tgg00_Surrogate;
+                    VAR user_name : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a06get_page_cnt (
+                    VAR acv          : tak_all_command_glob;
+                    VAR file_id      : tgg00_FileId;
+                    do_sample        : boolean;
+                    VAR page_count   : tsp00_Int4;
+                    VAR b_err        : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Identifier_Handling : VAK061;
+ 
+        FUNCTION
+              a061exist_columnname (
+                    VAR base_rec    : tak_baserecord;
+                    VAR column      : tsp00_KnlIdentifier;
+                    VAR colinfo_ptr : tak00_colinfo_ptr) : boolean;
+ 
+        FUNCTION
+              a061identifier_len (VAR id : tsp00_KnlIdentifier) : integer;
+ 
+        PROCEDURE
+              a061get_colname (
+                    VAR col_info : tak00_columninfo;
+                    VAR colname  : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07_nb_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4;
+                    VAR n    : tsp00_KnlIdentifier);
+ 
+        PROCEDURE
+              a07_kw_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4;
+                    kw       : integer);
+ 
+        PROCEDURE
+              a07ak_system_error (VAR acv : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK071;
+ 
+        FUNCTION
+              a071_return_code (
+                    b_err   : tgg00_BasisError;
+                    sqlmode : tsp00_SqlMode) : tsp00_Int2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache   : VAK10;
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_cache_delete  (
+                    VAR acv     : tak_all_command_glob;
+                    is_rollback : boolean);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10next_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    stop_prefix  : integer;
+                    dstate       : tak_directory_state;
+                    rec_kind     : tsp00_C2;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_nil_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    syslen       : tsp00_Int4;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_fix_len_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    required_len : integer;
+                    plus         : integer;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10rel_sysinfo (syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10key_del (
+                    VAR acv        : tak_all_command_glob;
+                    VAR syspointer : tak_sysbufferaddress);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId) : boolean;
+ 
+        FUNCTION
+              a101_IsTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId) : boolean;
+ 
+        PROCEDURE
+              a101_InsertIntoSysUpdStatWanted(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tableSurr  : tgg00_Surrogate);
+ 
+        PROCEDURE
+              a101_InsertIntoSysUpdStatLog(
+                    VAR acv                : tak_all_command_glob;
+                    VAR schemaName         : tsp00_KnlIdentifier;
+                    VAR tableName          : tsp00_KnlIdentifier;
+                    VAR columnName         : tsp00_KnlIdentifier;
+                    VAR indexName          : tsp00_KnlIdentifier;
+                    VAR tableFileNo        : tgg00_Surrogate;
+                    VAR executionTimeStamp : tsp00_Timestamp;
+                    samplePercent          : tsp00_Int4;
+                    sampleRows             : tsp00_Int4;
+                    VAR beginTimeStamp     : tsp00_Timestamp;
+                    VAR endTimeStamp       : tsp00_Timestamp;
+                    VAR session            : tgg91_SessionNo;
+                    VAR termid             : tsp00_TermId;
+                    seqno                  : tsp00_Int4);
+ 
+        PROCEDURE
+              a101_UpdateStatisticsColumn (
+                    VAR acv        : tak_all_command_glob;
+                    samplePercent  : tsp00_Int4;
+                    sampleRows     : tsp00_Int4);
+ 
+        FUNCTION
+              a101_ParallelUpdStatEnabled : boolean;
+ 
+        PROCEDURE
+              a101_UpdStatAddTableRequest(
+                    VAR acv              : tak_all_command_glob;
+                    updStatObj           : tsp00_Addr;
+                    VAR surrogate        : tgg00_Surrogate;
+                    noOfPagesToSample    : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              CatalogWrapper : VAK103;
+ 
+        PROCEDURE
+              a103GetSchemaName (
+                    VAR acv        : tak_all_command_glob;
+                    VAR schemaId   : tgg00_Surrogate (* ptocConst *);
+                    VAR schemaName : tsp00_KnlIdentifier);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Table : VAK11;
+ 
+        PROCEDURE
+              a11put_date_time (
+                    VAR date : tsp00_Int4;
+                    VAR time : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_VIEW_SCAN  : VAK27;
+ 
+        PROCEDURE
+              a27init_viewscanpar (
+                    VAR acv         : tak_all_command_glob;
+                    VAR viewscanpar : tak_viewscan_par;
+                    v_type          : tak_viewscantype);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_cold_utility_functions : VAK36;
+ 
+        FUNCTION
+              a36tree_in_memory (VAR tree_id : tgg00_FileId) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_show_syntax : VAK41;
+ 
+        PROCEDURE
+              a41init_show_glob (
+                    VAR a41v  : tak40_show_glob;
+                    mess_code : tsp00_CodeType);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Show_statistics : VAK42;
+ 
+        PROCEDURE
+              a42index_inf_to_messbuf(
+                    VAR acv         : tak_all_command_glob;
+                    VAR mblock      : tgg00_MessBlock;
+                    VAR a41v        : tak40_show_glob;
+                    VAR indexn      : tsp00_KnlIdentifier;
+                    VAR selectivity : boolean;
+                    diagnose_index  : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Show_index_link : VAK45;
+ 
+        PROCEDURE
+              a45_call_semantic (
+                    VAR acv           : tak_all_command_glob;
+                    VAR a41v          : tak40_show_glob;
+                    onlyUpdStatWanted : boolean;
+                    sample_rows       : tsp00_Int4;
+                    sample_pct        : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Lock_Commit_Rollback : VAK52;
+ 
+        PROCEDURE
+              a52_ex_commit_rollback (
+                    VAR acv                   : tak_all_command_glob;
+                    m_type                    : tgg00_MessType;
+                    n_rel                     : boolean;
+                    normal_release            : boolean);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01int4 (
+                    layer   : tgg00_Debug;
+                    nam     : tsp00_Sname;
+                    int     : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_Logging : vkb560;
+ 
+        FUNCTION
+              kb560IsCatalogTable(VAR tabId : tgg00_Surrogate) : boolean;
+ 
+        PROCEDURE
+              kb560GetSys2CatalogTreeId(
+                    VAR treeId : tgg00_FileId);
+ 
+        PROCEDURE
+              kb560GetSys2CatalogTabId(
+                    VAR tabId : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01glob           : tgg00_KernelGlobals;
+              g01unicode        : boolean;
+ 
+        PROCEDURE
+              g01mblock_init (
+                    VAR source_trans : tgg00_TransContext;
+                    mess_type        : tgg00_MessType;
+                    mess2_type       : tgg00_MessType2;
+                    VAR mblock       : tgg00_MessBlock);
+ 
+        PROCEDURE
+              g01stack_init (
+                    VAR mblock : tgg00_MessBlock;
+                    stack_ptr  : tgg00_StackListPtr;
+                    stack_size : tsp00_Int4;
+                    qual_ptr   : tgg00_QualBufPtr;
+                    qual_size  : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KernelAdministration_Interface : VGG999;
+ 
+        FUNCTION
+              gg999KernelStateIsOnline : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1  : VBD01;
+ 
+        PROCEDURE
+              b01filestate (
+                    VAR t         : tgg00_TransContext;
+                    VAR file_id   : tgg00_FileId);
+ 
+        PROCEDURE
+              b01treeleafnodes (
+                    VAR t                 : tgg00_TransContext;
+                    VAR file_id           : tgg00_FileId;
+                    m_type                : tgg00_MessType;
+                    VAR old_treeleafnodes : tsp00_Int4);
+ 
+        PROCEDURE
+              bd01CalculateRecordsAndLeaves(
+                    VAR Trans           : tgg00_TransContext;
+                    VAR FileId          : tgg00_FileId;
+                    VAR NumberOfLeaves  : tsp00_Int4;
+                    VAR NumberOfRecords : tsp00_Int4 );
+ 
+        PROCEDURE
+              bd01SampleRecordsAndLeaves(
+                    VAR Trans            : tgg00_TransContext;
+                    VAR FileId           : tgg00_FileId;
+                    NumberOfSampleLeaves : tsp00_Int4;
+                    VAR NumberOfLeaves   : tsp00_Int4;
+                    VAR NumberOfRecords  : tsp00_Int4 );
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_2 : VBD02;
+ 
+        PROCEDURE
+              b02del_record (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId;
+                    VAR rk      : tgg00_Lkey);
+ 
+        PROCEDURE
+              b02next_record (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId;
+                    VAR rk      : tgg00_Lkey;
+                    inclusive   : boolean;
+                    VAR b       : tgg00_Rec);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40glint (
+                    VAR buf  : tgg00_RecBody;
+                    pos      : tsp00_Int4;
+                    len      : integer;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              PUT-Conversions : VSP41;
+ 
+        PROCEDURE
+              s41plint (
+                    VAR buf : tsp00_Buf;
+                    pos      : tsp00_Int4;
+                    len      : integer;
+                    frac     : integer;
+                    source   : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vtimestamp (VAR timestamp : tsp00_Timestamp);
+ 
+.CM *-END-* use -----------------------------------------
+***********************************************************
+ 
+Synonym :
+ 
+        PROCEDURE
+              a05identifier_get;
+ 
+              tsp00_MoveObj tsp00_KnlIdentifier
+ 
+        FUNCTION
+              s20or4a;
+ 
+              tsp00_MoveObj  tgg00_QualBuf
+ 
+        PROCEDURE
+              s40glint;
+ 
+              tsp00_MoveObj tgg00_RecBody
+ 
+        PROCEDURE
+              s41plint;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+Specification:
+ 
+The table SYSSTATISTICS is used to import statistics into
+the kernel catalog :
+ 
+Table SYSSTATISTICS (
+   OWNER          CHAR(18),
+   TABLENAME      CHAR(18),
+   COLUMNNAME     CHAR(18),
+   INDEXNAME      CHAR(18),
+   PAGECOUNT      FIXED(10),
+   DISTINCTVALUES FIXED(10),
+   AVGLISTLEN     FIXED(10,1));
+ 
+.CM *-END-* specification -------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_100_pct        = 100;
+      c_undefined      = -1;
+      c_not_used       = 0; (* h.b. PTS 1105036 *)
+      c_get_all        = true;
+      c_num_io_len     = 7; (* FIXED(10) *)
+      c_lock_exclusive = true;
+      c_inferStats     = true;
+      c_isRollback     = true;
+ 
+TYPE
+      tak28_col_info = ARRAY[1..MAX_COL_PER_TAB_GG00] OF tak00_colinfo_ptr;
+ 
+      tak28_statlog_row = RECORD
+            slr_schema          : tsp00_KnlIdentifier;
+            slr_tablename       : tsp00_KnlIdentifier;
+            slr_tableid         : tgg00_Surrogate;
+            slr_columnname      : tsp00_KnlIdentifier;
+            slr_indexname       : tsp00_KnlIdentifier;
+            slr_executed_at     : tsp00_Timestamp;
+            slr_sample_pct      : tsp00_Int4;
+            slr_sample_row      : tsp00_Int4;
+            slr_execution_start : tsp00_Timestamp;
+            slr_execution_end   : tsp00_Timestamp;
+            slr_session         : tgg91_SessionNo;
+            slr_termid          : tsp00_TermId;
+            slr_seqno           : tsp00_Int4;
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28assign_col_info (
+            VAR acv      : tak_all_command_glob;
+            VAR syskey   : tgg00_SysInfoKey;
+            VAR stat_buf : tak_sysbufferaddress;
+            colno        : integer;
+            dist_values  : tsp00_Int4;
+            pages        : tsp00_Int4;
+            avg_lst_len  : tsp00_Int4);
+ 
+VAR
+      b_err       : tgg00_BasisError;
+      sysk        : tgg00_SysInfoKey;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_sem, 'colno       ', colno);
+t01int4 (ak_sem, 'dist_values ', dist_values);
+t01int4 (ak_sem, 'pages       ', pages);
+t01int4 (ak_sem, 'avg_lst_len ', avg_lst_len);
+&endif
+sysk           := syskey;
+sysk.sentrytyp := cak_estatistics;
+a10_fix_len_get_sysinfo (acv, sysk, d_fix,
+      sizeof (tak_statisticsinfo) - (MAX_COL_STATS_AK00 - 1) *
+      sizeof (tak_col_stats),
+      sizeof (tak_col_stats), stat_buf, b_err);
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    IF  stat_buf^.b_sl <
+        sizeof (tak_statisticsinfo) - (MAX_COL_STATS_AK00 - 1) *
+        sizeof (tak_col_stats)
+    THEN
+        a10_fix_len_get_sysinfo (acv, sysk, d_fix, 0,
+              sizeof (tak_statisticsinfo) - (MAX_COL_STATS_AK00 - 1) *
+              sizeof (tak_col_stats) - stat_buf^.b_sl,
+              stat_buf, b_err);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  acv.a_returncode = 0
+THEN
+    a28set_col_info( stat_buf^.sstatistics,
+          colno, dist_values, pages, avg_lst_len );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28cnt_values (
+            VAR acv         : tak_all_command_glob;
+            VAR statlog_row : tak28_statlog_row;
+            VAR stat_buf    : tak_sysbufferaddress;
+            col_cnt         : integer;
+            VAR col_info    : tak28_col_info;
+            sample_rows     : tsp00_Int4;
+            sample_pct      : integer);
+ 
+VAR
+      b_err       : tgg00_BasisError;
+      ix          : integer;
+ 
+BEGIN
+(* constructs a message buffer, that describes the columns *)
+(* whose values are to be counted.                         *)
+(* The message buffer is sent to the KB Layer. As the      *)
+(* result, the number of different values are returned for *)
+(* the required columns. These values are inserted into    *)
+(* the corresponding column catalog information            *)
+WITH acv DO
+    BEGIN
+    a06a_mblock_init (acv,
+          m_column_statistic, mm_clear, a_p_arr1.pbasep^.sbase.btreeid);
+    ak28ColStatinfo (acv, a_mblock, a_p_arr1.pbasep,
+          a_into_tree, sample_rows, sample_pct);
+    a_mblock.mb_qual^.mcol_pos := 1;
+    FOR ix := 1 TO col_cnt DO
+        WITH a_mblock, mb_qual^ DO
+            mb_st^ [mcol_pos + ix - 1] := col_info[ix]^.ccolstack;
+        (*ENDWITH*) 
+    (*ENDFOR*) 
+    a_mblock.mb_qual^.mcol_cnt    := col_cnt;
+    a_mblock.mb_qual^.mfirst_free := a_mblock.mb_qual^.mcol_cnt + 1;
+    vtimestamp (statlog_row.slr_execution_start);
+    a06rsend_mess_buf (acv, a_mblock, cak_return_req, b_err);
+    vtimestamp (statlog_row.slr_execution_end);
+    IF  b_err <> e_ok
+    THEN
+        a07_b_put_error (acv, b_err, 1)
+    ELSE
+        WITH stat_buf^.sstatistics DO
+            BEGIN
+            sti_pages := a_mblock.mb_data^.mbp_ColStat.ColStatNumberOfLeaves_gg00;
+            sti_rows  := a_mblock.mb_data^.mbp_ColStat.ColStatNumberOfRecords_gg00;
+            statlog_row.slr_indexname := a01_il_b_identifier;
+            FOR ix := 1 TO col_cnt DO
+                BEGIN
+                a061get_colname (col_info[ix]^, statlog_row.slr_columnname);
+                ak28insert_statlog (acv, statlog_row);
+                a28assign_col_info (acv, a_p_arr1.pbasep^.syskey,
+                      stat_buf, col_info[ix]^.cextcolno,
+                      a_mblock.mb_data^.mbp_ColStat.ColStatDistValues_gg00[ix],
+                      cak_is_undefined, cak_is_undefined)
+                END
+            (*ENDFOR*) 
+            END;
+        (*ENDWITH*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak28col_stat_required (
+            VAR acv                  : tak_all_command_glob;
+            VAR tableName            : tsp00_KnlIdentifier;
+            VAR schemaId             : tgg00_Surrogate;
+            VAR authId               : tgg00_Surrogate;
+            VAR baseRec              : tak_baserecord;
+            VAR col_cnt              : integer;
+            VAR col_in_sysstatistics : integer;
+            VAR col_info : tak28_col_info) : boolean;
+ 
+CONST
+      c_inclusive = true;
+ 
+VAR
+      stat_rec_found : boolean;
+      is_syskey      : boolean;
+      b_err          : tgg00_BasisError;
+      colname_pos    : integer;
+      ix             : integer;
+      col_set        : tak_columnset;
+      col_name       : tsp00_KnlIdentifier;
+      Schema         : tsp00_KnlIdentifier;
+      Owner          : tsp00_KnlIdentifier;
+      pSchema        : ^tsp00_KnlIdentifier;
+      pOwner         : ^tsp00_KnlIdentifier;
+      pTablen        : ^tsp00_KnlIdentifier;
+      statistics     : tak_column_statistics;
+      lkey           : tgg00_Lkey;
+      Rec            : tgg00_Rec;
+      htreeid        : tgg00_FileId;
+ 
+BEGIN
+WITH acv DO
+    BEGIN
+    col_cnt              := 0;
+    col_in_sysstatistics := 0;
+    col_set              := [];
+    IF  (a28updstatwanted_tree.fileName_gg00 <> cgg_zero_fn)
+    THEN
+        BEGIN
+        a28updstatwanted_tree.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+        htreeid := a28updstatwanted_tree;
+        a06determine_username (acv, authId, Owner);
+        a103GetSchemaName (acv, schemaId, Schema);
+        ak28BuildUpdStatWantedKey (lkey, Schema, Owner,
+              tableName, a01_il_b_identifier);
+        pSchema := @Rec.recKey_gg00.k[2];
+        pOwner  := @Rec.recKey_gg00.k[1 + sizeof(Schema) + 1 + 1];
+        pTablen := @Rec.recKey_gg00.k[1 + sizeof(Schema) + 1 + sizeof(Owner) + 1 + 1];
+        colname_pos := 1 + sizeof(Schema) + 1 + sizeof(Owner) +
+              1 + sizeof(tableName) + 1 + 1;
+        REPEAT
+            b02next_record (acv.a_transinf.tri_trans, htreeid,
+                  lkey, NOT c_inclusive, Rec);
+            IF  acv.a_transinf.tri_trans.trError_gg00 = e_key_not_found
+            THEN
+                BEGIN
+                IF  (pSchema^ <> Schema) OR
+                    (pOwner^  <> Owner)  OR
+                    (pTablen^ <> tableName)
+                THEN
+                    b_err := e_no_next_record
+                ELSE
+                    b_err := e_ok
+                (*ENDIF*) 
+                END
+            ELSE
+                b_err := e_no_next_record;
+            (*ENDIF*) 
+            IF  b_err = e_ok
+            THEN
+                BEGIN
+                col_cnt  := col_cnt + 1;
+                col_name := a01_il_b_identifier;
+                SAPDB_PascalMove ('VAK28 ',   1,    
+                      sizeof (Rec.recKey_gg00.k), sizeof (col_name),
+                      @Rec.recKey_gg00.k, colname_pos,
+                      @col_name, 1, Rec.recKey_gg00.len - colname_pos + 1,
+                      a_returncode);
+                IF  a061exist_columnname (baseRec,
+                    col_name, col_info[col_cnt])
+                THEN
+                    col_set := col_set +
+                          [col_info[col_cnt]^.creccolno]
+                ELSE
+                    col_cnt := col_cnt - 1;
+                (*ENDIF*) 
+                b02del_record (acv.a_transinf.tri_trans,
+                      htreeid, Rec.recKey_gg00);
+                b_err := acv.a_transinf.tri_trans.trError_gg00
+                END;
+            (*ENDIF*) 
+        UNTIL
+            (b_err <> e_ok) OR (a_returncode <> 0);
+        (*ENDREPEAT*) 
+        (* errors are ignored !! *)
+        END;
+    (*ENDIF*) 
+    col_in_sysstatistics := col_cnt;
+    (* PTS 1115043 E.Z. *)
+    stat_rec_found := false;
+    a28column_statistics (acv, @baseRec,
+          a_p_arr1.pbasep^.sbase.bcolumn[baseRec.bfirstindex]^,
+          NOT c_inferStats, statistics, stat_rec_found);
+    IF  stat_rec_found
+    THEN
+        WITH baseRec DO
+            FOR ix := bfirstindex TO blastindex DO
+                BEGIN
+                WITH bcolumn[ix]^ DO
+                    IF  NOT (creccolno in col_set)
+                        AND
+                        (NOT (ctkey in ccolpropset) OR
+                        (bkeycolcount > 1))
+                    THEN
+                        BEGIN
+                        a28column_statistics (acv, @baseRec,
+                              bcolumn[ix]^, NOT c_inferStats, statistics,
+                              stat_rec_found);
+                        IF  statistics.c_values > cak_is_undefined
+                        THEN
+                            BEGIN
+                            col_cnt           := col_cnt + 1;
+                            col_info[col_cnt] := bcolumn[ix]
+                            END;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+                END;
+            (*ENDFOR*) 
+        (*ENDWITH*) 
+    (* PTS 1131825 M.Ki. *)
+    (* collect statistics for all key and indexed columns *)
+    (*ENDIF*) 
+    FOR ix := baseRec.bfirstindex TO baseRec.blastindex DO
+        BEGIN
+        WITH baseRec, baseRec.bcolumn[ix]^ DO
+            IF  NOT (creccolno in col_set)
+            THEN
+                BEGIN
+                is_syskey := ak28isSyskeyColumn (baseRec.bcolumn[ix]^);
+                IF  NOT is_syskey
+                    AND ( (ctmulti in ccolpropset)
+                    OR    (ctkey in ccolpropset  ) )
+                THEN
+                    BEGIN
+                    col_cnt           := col_cnt + 1;
+                    col_info[col_cnt] := bcolumn[ix]
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDWITH*) 
+        END;
+    (*ENDFOR*) 
+    ak28col_stat_required := (col_cnt > 0)
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak28isSyskeyColumn(
+            VAR colInfo : tak00_columninfo) : boolean;
+ 
+BEGIN
+WITH colInfo DO
+    ak28isSyskeyColumn := (ccolpropset = [ ctkey, ctopt ]) OR
+          (ccolpropset = [ ctkey, ctopt, ctmulti ]);
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28init_statlog_row (
+            VAR acv         : tak_all_command_glob;
+            VAR baserec     : tak_baserecord;
+            sample_pct      : tsp00_Int4;
+            sample_rows     : tsp00_Int4;
+            VAR statlog_row : tak28_statlog_row);
+ 
+BEGIN
+WITH statlog_row DO
+    BEGIN
+    a103GetSchemaName (acv, baserec.bschema, slr_schema);
+    slr_tablename       := baserec.btablen^;
+    slr_tableid         := baserec.bsurrogate;
+    slr_columnname      := a01_il_b_identifier;
+    slr_indexname       := a01_il_b_identifier;
+    vtimestamp( slr_executed_at );
+    slr_sample_pct      := sample_pct;
+    slr_sample_row      := sample_rows;
+    slr_session         := acv.a_transinf.tri_trans.trSessionId_gg00;
+    slr_termid          := acv.a_acc_termid;
+    slr_seqno           := 1;
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28insert_statlog (
+            VAR acv         : tak_all_command_glob;
+            VAR statlog_row :  tak28_statlog_row);
+ 
+BEGIN
+WITH statlog_row DO
+    a101_InsertIntoSysUpdStatLog (acv, slr_schema, slr_tablename,
+          slr_columnname, slr_indexname, slr_tableid, slr_executed_at,
+          slr_sample_pct, slr_sample_row, slr_execution_start,
+          slr_execution_end, slr_session, slr_termid, slr_seqno);
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28lock_table_for_updstat (
+            VAR acv       : tak_all_command_glob;
+            table_surr    : tgg00_Surrogate;
+            VAR b_err     : tgg00_BasisError);
+ 
+VAR
+      sys_cat  : tgg00_FileId;
+      sysk     : tgg00_SysInfoKey;
+ 
+BEGIN
+b_err              := e_ok;
+sysk.sreclen       := cgg_rec_key_offset + mxak_standard_sysk;
+sysk.skeylen       := mxak_standard_sysk;
+sysk.svarcoloffset := 0;
+sysk.svarcolcnt    := 0;
+sysk.stableid      := table_surr;
+sysk.sentrytyp     := cak_estatistics;
+sysk.slinkage      := cak_init_linkage;
+kb560GetSys2CatalogTreeId (sys_cat);
+a06a_mblock_init( acv, m_lock, mm_nil, sys_cat );
+acv.a_mblock.mb_qual^.mlock_cnt := 1;
+WITH acv.a_mblock.mb_qual^.mlock[ 1 ] DO
+    BEGIN
+    lockTabId_gg00  := table_surr;
+    lockSite_gg00   := cgg_zero_c2;
+    lockMode_gg00   := lckRowExcl_egg00;
+    lockState_gg00  := [];
+    lockKeyLen_gg00 := 1;
+    lockKeyPos_gg00 := sysk.skeylen + 1;
+    SAPDB_PascalMove ('VAK28 ',   2,    
+          sizeof( sysk.all ),
+          acv.a_mblock.mb_data_size, @sysk.all, 1,
+          @acv.a_mblock.mb_data^.mbp_buf, cgg_rec_key_offset + lockKeyPos_gg00,
+          sysk.skeylen, acv.a_returncode);
+    acv.a_mblock.mb_data^.
+          mbp_buf[ cgg_rec_key_offset + lockKeyPos_gg00 ] := chr( 1 );
+    acv.a_mblock.mb_data_len := cgg_rec_key_offset + sysk.skeylen + 1;
+    acv.a_mblock.mb_qual_len :=
+          MB_PART1_LOCKHEAD_MXGG04 + LOCK_MXGG04;
+    END;
+(*ENDWITH*) 
+a06rsend_mess_buf( acv, acv.a_mblock, cak_return_req, b_err );
+a07_b_put_error (acv, b_err, 1)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28lock_stat_catalog_rec (
+            VAR acv       : tak_all_command_glob;
+            base_ptr      : tak_sysbufferaddress;
+            lockExclusive : boolean;
+            VAR stat_buf  : tak_sysbufferaddress;
+            VAR b_err     : tgg00_BasisError);
+ 
+VAR
+      sysk     : tgg00_SysInfoKey;
+      sys_cat  : tgg00_FileId;
+ 
+BEGIN
+sysk           := base_ptr^.syskey;
+sysk.sentrytyp := cak_estatistics;
+kb560GetSys2CatalogTreeId (sys_cat);
+a06a_mblock_init( acv, m_lock, mm_nil, sys_cat );
+acv.a_mblock.mb_qual^.mlock_cnt := 1;
+WITH acv.a_mblock.mb_qual^.mlock[ 1 ] DO
+    BEGIN
+    kb560GetSys2CatalogTabId (lockTabId_gg00);
+    lockSite_gg00   := cgg_zero_c2;
+    IF  lockExclusive
+    THEN
+        lockMode_gg00   := lckRowExcl_egg00
+    ELSE
+        lockMode_gg00   := lckRowShare_egg00;
+    (*ENDIF*) 
+    lockState_gg00  := [];
+    lockKeyLen_gg00 := sysk.skeylen;
+    lockKeyPos_gg00 := 1;
+    SAPDB_PascalMove ('VAK28 ',   3,    
+          sizeof( sysk.all ),
+          acv.a_mblock.mb_data_size, @sysk.all, 1,
+          @acv.a_mblock.mb_data^.mbp_buf, cgg_rec_key_offset + lockKeyPos_gg00,
+          sysk.skeylen, acv.a_returncode);
+    acv.a_mblock.mb_data_len := cgg_rec_key_offset + sysk.skeylen + 1;
+    acv.a_mblock.mb_qual_len :=
+          MB_PART1_LOCKHEAD_MXGG04 + 2 * LOCK_MXGG04;
+    END;
+(*ENDWITH*) 
+a06rsend_mess_buf( acv, acv.a_mblock, cak_return_req, b_err );
+IF  ( b_err = e_ok )
+THEN
+    BEGIN
+    a10_fix_len_get_sysinfo( acv, sysk, d_fix,
+          sizeof( tak_statisticsinfo ) -
+          ( MAX_COL_STATS_AK00 * sizeof( tak_col_stats ) ),
+          0, stat_buf, b_err );
+    IF  ( b_err = e_sysinfo_not_found )
+    THEN (* this should never happen, emergency code *)
+        a10add_sysinfo( acv, stat_buf, b_err );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28repl_statistics_rec (
+            VAR acv         : tak_all_command_glob;
+            base_ptr        : tak_sysbufferaddress;
+            stat_buf        : tak_sysbufferaddress);
+ 
+VAR
+      b_err  : tgg00_BasisError;
+      qual   : tgg00_QualBuf;
+      mblock : tgg00_MessBlock;
+ 
+BEGIN
+IF  stat_buf^.sstatistics.sti_pages <= 0
+THEN
+    stat_buf^.sstatistics.sti_pages := 1;
+(*ENDIF*) 
+stat_buf^.b_sl := sizeof (stat_buf^.sstatistics) -
+      sizeof (stat_buf^.sstatistics.sti_col_stats) +
+      stat_buf^.sstatistics.sti_col_cnt * sizeof (stat_buf^.sstatistics.sti_col_stats[1]);
+a10repl_sysinfo (acv, stat_buf, b_err);
+IF  b_err = e_ok
+THEN
+    BEGIN
+    IF  base_ptr^.sbase.btreeid.fileLeafNodes_gg00 <>
+        stat_buf^.sstatistics.sti_pages
+    THEN
+        BEGIN
+        (* old and new treeleafnodes are different, *)
+        (* inform KB                                *)
+        base_ptr^.sbase.btreeid.fileLeafNodes_gg00 :=
+              stat_buf^.sstatistics.sti_pages;
+        g01mblock_init (acv.a_transinf.tri_trans,
+              m_set, mm_pages, mblock);
+        g01stack_init  (mblock, NIL, 0, @qual, sizeof (qual));
+        mblock.mb_qual^.mtree := base_ptr^.sbase.btreeid;
+        a06rsend_mess_buf (acv,
+              mblock, cak_return_req, b_err)
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  b_err <> e_ok
+THEN
+    a07_b_put_error (acv, b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28ColStatinfo (
+            VAR acv      : tak_all_command_glob;
+            VAR mblock   : tgg00_MessBlock;
+            base_ptr     : tak_sysbufferaddress;
+            sample_tree  : tgg00_FileId;
+            sample_rows  : tsp00_Int4;
+            sample_pct   : integer);
+ 
+BEGIN
+mblock.mb_data_len                                      :=
+      sizeof(mblock.mb_data^.mbp_ColStat.ColStatCalculate_gg00)      +
+      sizeof(mblock.mb_data^.mbp_ColStat.ColStatNoSampleLeaves_gg00) +
+      sizeof(mblock.mb_data^.mbp_ColStat.ColStatTreeId_gg00)         +
+      sizeof(mblock.mb_data^.mbp_ColStat.ColStatFill1_gg00)          +
+      sizeof(mblock.mb_data^.mbp_ColStat.ColStatFill2_gg00);
+mblock.mb_qual^.mtree.fileLeafNodes_gg00               := cgg_nil_leafnodes;
+mblock.mb_data^.mbp_ColStat.ColStatTreeId_gg00         := sample_tree;
+mblock.mb_data^.mbp_ColStat.ColStatNoSampleLeaves_gg00 := 0;
+mblock.mb_data^.mbp_ColStat.ColStatFill1_gg00          := false;
+mblock.mb_data^.mbp_ColStat.ColStatFill2_gg00          := 0;
+ak28interpret_sample_info (acv, base_ptr, sample_rows, sample_pct,
+      mblock.mb_data^.mbp_ColStat.ColStatCalculate_gg00,
+      mblock.mb_data^.mbp_ColStat.ColStatNoSampleLeaves_gg00);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28interpret_sample_info (
+            VAR acv               : tak_all_command_glob;
+            base_ptr              : tak_sysbufferaddress;
+            sample_rows           : tsp00_Int4;
+            sample_pct            : tsp00_Int4;
+            VAR bCalculate        : boolean;
+            VAR noOfPagesToSample : tsp00_Int4);
+ 
+CONST
+      c_sample             = true;
+      c_minimalSampleCount = 100;
+ 
+VAR
+      _b_err          : tgg00_BasisError;
+      _page_count     : tsp00_Int4;
+ 
+BEGIN
+noOfPagesToSample := 0; (* statistics will be exact if not changed *)
+(* calculate number of sample leaves from percent or row specification *)
+bCalculate :=
+      (sample_pct = c_100_pct)                                     OR
+      ((sample_rows = c_undefined) AND (sample_pct = c_undefined)) OR
+      ((sample_rows = c_not_used) AND (sample_pct = c_not_used));
+IF  NOT bCalculate
+THEN
+    BEGIN
+    a06get_page_cnt (acv, base_ptr^.sbase.btreeid, c_sample,
+          _page_count, _b_err);
+    IF  _b_err <> e_ok
+    THEN
+        a07_b_put_error (acv, _b_err, 1);
+    (*ENDIF*) 
+    IF  _page_count > c_minimalSampleCount
+    THEN
+        IF  sample_rows > 0
+        THEN
+            BEGIN
+            (* PTS 1118179
+                  Data Access handles sample pages so we have to calculate *)
+            noOfPagesToSample :=
+                  sample_rows DIV (cak_page80percent DIV base_ptr^.sbase.bavgrowlen);
+            IF  (noOfPagesToSample > _page_count * 1.5)
+            THEN
+                (* this implies that we try to sample more rows than the *)
+                (* table actually contains, so just calculate precise    *)
+                (* statistics:                                           *)
+                noOfPagesToSample := 0;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            IF  acv.a_returncode = 0
+            THEN
+                noOfPagesToSample := _page_count * sample_pct DIV 100;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  noOfPagesToSample = 0
+    THEN
+        bCalculate := true;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28upd_column_statistics (
+            VAR acv     : tak_all_command_glob;
+            sample_rows : tsp00_Int4;
+            sample_pct  : integer);
+ 
+VAR
+      selectivity    : boolean;
+      all_columns    : boolean;
+      ignore         : boolean;
+      b_err          : tgg00_BasisError;
+      isample_rows   : tsp00_Int4;
+      isample_pct    : integer;
+      stat_buf       : tak_sysbufferaddress;
+      index_name     : tsp00_KnlIdentifier;
+      statlog_row    : tak28_statlog_row;
+      a41v           : tak40_show_glob;
+ 
+BEGIN
+WITH acv, a41v DO
+    BEGIN
+    isample_rows      := c_not_used; (* h.b. PTS 1105036 *)
+    isample_pct       := c_not_used;
+    a41v.a4ti         := 1;
+    a41v.a4authname   := a01_il_b_identifier;
+    a41v.a4tablen     := a01_il_b_identifier;
+    a41v.a4coln       := a01_il_b_identifier;
+    a41v.a4sh_kind    := sh_no_kind;
+    selectivity       := true;
+    all_columns       := false;
+    a42index_inf_to_messbuf (acv,
+          a_mblock, a41v, index_name, selectivity, false);
+    a_p_arr1 := a4p_arr;
+&   ifdef trace
+    t01int4 (ak_sem, 'a4ti        ', a4ti);
+&   endif
+    IF  (a_returncode =
+        a071_return_code (e_column_not_indexed, a_sqlmode)) OR
+        ((a4ti <> 0) AND (a_returncode = 0))
+    THEN
+        BEGIN
+        a_returncode := 0;
+        WITH a4col_ptr^ DO
+            IF  (cdatatyp in [ dstra, dstrb, dstruni,
+                dlonga, dlongb, dlonguni ])
+            THEN
+                a07_b_put_error (acv, e_command_for_string_not_allow, 1)
+            (*ENDIF*) 
+        (*ENDWITH*) 
+        END
+    ELSE
+        IF  (a_returncode =
+            a071_return_code (e_unknown_columnname, a_sqlmode)) AND
+            (a4coln = a01_i_asterisk)
+        THEN
+            BEGIN
+            (* UPDATE STAT COLUMN ( * ) FOR <table name> *)
+            a_returncode := 0;
+            all_columns := true
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( a_returncode = 0 ) AND
+        ( NOT a101_IsExtendedTempFile (acv, acv.a_p_arr1.pbasep^.sbase.btreeid) )
+    THEN
+        IF  ftsArchive_egg00 in acv.a_p_arr1.pbasep^.sbase.btreeid.fileType_gg00
+        THEN
+            a07_b_put_error (acv, e_invalid_tabletype, 1)
+        ELSE
+            BEGIN
+            ignore := false;
+            (* PTS 1103579 E.Z. *)
+            IF  sample_pct = c_undefined
+            THEN
+                WITH a_p_arr1.pbasep^.sbase DO
+                    BEGIN
+                    (* estimate with values from                      *)
+                    (* <sample definition> during <create table>      *)
+                    (* bsample < 0 indicates sample percent was given *)
+                    IF  bsample = 0
+                    THEN
+                        ignore := true
+                    ELSE
+                        IF  bsample < 0
+                        THEN
+                            isample_pct := -bsample
+                        ELSE
+                            isample_rows := bsample
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDWITH*) 
+            ELSE
+                BEGIN
+                isample_rows := sample_rows;
+                isample_pct  := sample_pct;
+                END;
+            (*ENDIF*) 
+            IF  NOT ignore
+            THEN
+                BEGIN
+                ak28init_statlog_row (acv,
+                      a_p_arr1.pbasep^.sbase, isample_pct, isample_rows, statlog_row);
+                a28lock_stat_catalog_rec (acv,
+                      a_p_arr1.pbasep, c_lock_exclusive, stat_buf, b_err);
+                IF  b_err <> e_ok
+                THEN
+                    a07_b_put_error (acv, b_err, 1);
+                (*ENDIF*) 
+                IF  a_returncode = 0
+                THEN
+                    BEGIN
+                    ak28value_cnt (acv, a41v, statlog_row, stat_buf,
+                          isample_rows, isample_pct, all_columns);
+                    END;
+                (*ENDIF*) 
+                IF  a_returncode = 0
+                THEN
+                    BEGIN
+                    statlog_row.slr_columnname := a01_il_b_identifier;
+                    ak28insert_statlog (acv, statlog_row);
+                    END;
+                (*ENDIF*) 
+                IF  a_returncode = 0
+                THEN
+                    ak28repl_statistics_rec (acv,
+                          a_p_arr1.pbasep, stat_buf);
+                (*ENDIF*) 
+                IF  a_returncode = 0
+                THEN
+                    a52_ex_commit_rollback (acv, m_commit, false, false)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28update_statistics (
+            VAR acv           : tak_all_command_glob;
+            onlyUpdStatWanted : boolean;
+            sample_rows       : tsp00_Int4;
+            sample_pct        : integer);
+ 
+VAR
+      a41v : tak40_show_glob;
+ 
+BEGIN
+&ifdef trace
+t01int4 (ak_sem, 'sample_rows ', sample_rows);
+t01int4 (ak_sem, 'sample_pct  ', sample_pct);
+&endif
+a41init_show_glob( a41v, acv.a_cmd_packet_header.sp1h_mess_code );
+a41v.a4ti := acv.a_ap_tree^[ 0 ].n_lo_level;
+acv.a_ap_tree^[acv.a_ap_tree^[ 0 ].n_lo_level].n_subproc :=
+      cak_i_statistics;
+a45_call_semantic( acv, a41v, onlyUpdStatWanted, sample_rows, sample_pct );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28value_cnt (
+            VAR acv         : tak_all_command_glob;
+            VAR a41v        : tak40_show_glob;
+            VAR statlog_row : tak28_statlog_row;
+            VAR stat_buf    : tak_sysbufferaddress;
+            sample_rows     : tsp00_Int4;
+            sample_pct      : integer;
+            all_columns     : boolean);
+ 
+VAR
+      jx         : integer;
+      col_cnt    : integer;
+      pos        : integer;
+      col_info   : tak28_col_info;
+ 
+BEGIN
+WITH acv, a41v DO
+    BEGIN
+    IF  all_columns
+    THEN
+        BEGIN
+        col_cnt := 0;
+        WITH a_p_arr1.pbasep^.sbase DO
+            FOR jx := bfirstindex TO blastindex DO
+                WITH bcolumn[jx]^ DO
+                    IF  NOT (cdatatyp in
+                        [ dstra, dstrb, dstruni,
+                        dlonga, dlongb, dlonguni ])
+                        AND NOT ak28isSyskeyColumn (bcolumn[jx]^)
+                    THEN
+                        BEGIN
+                        col_cnt := col_cnt + 1;
+                        col_info[col_cnt] := bcolumn[jx]
+                        END;
+                    (*ENDIF*) 
+                (*ENDWITH*) 
+            (*ENDFOR*) 
+        (*ENDWITH*) 
+        END
+    ELSE
+        BEGIN
+        col_info[1] := a4col_ptr;
+        col_cnt     := 1;
+        WHILE a4ti <> 0 DO
+            BEGIN
+            (* inspect column list *)
+            WITH a_ap_tree^[a4ti] DO
+                BEGIN
+                a05identifier_get (acv, a4ti, sizeof (a4coln), a4coln);
+                pos  := n_pos;
+                a4ti := n_sa_level
+                END;
+            (*ENDWITH*) 
+            col_cnt := col_cnt + 1;
+            IF  a061exist_columnname (a_p_arr1.pbasep^.sbase, a4coln,
+                col_info[col_cnt])
+            THEN
+                WITH col_info[col_cnt]^ DO
+                    BEGIN
+                    IF  (cdatatyp in
+                        [ dstra, dstrb, dstruni,
+                        dlonga, dlongb, dlonguni ])
+                    THEN
+                        a07_b_put_error (acv,
+                              e_command_for_string_not_allow, 1)
+                              (* PTS 1110277 E.Z. *)
+                    ELSE
+                        IF  (ccolstack.etype = st_varlongchar) AND
+                            (ccolstack.elen_var > PERM_KEY_MXSP00)
+                        THEN
+                            a07_b_put_error (acv,
+                                  e_varchar_not_allowed, 1)
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDWITH*) 
+            ELSE
+                a07_nb_put_error (acv, e_unknown_columnname,
+                      pos, a4coln);
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        END;
+    (*ENDIF*) 
+    ak28cnt_values (acv, statlog_row, stat_buf,
+          col_cnt, col_info, sample_rows, sample_pct)
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28column_statistics (
+            VAR acv            : tak_all_command_glob;
+            base_ptr           : tak_sysbufferaddress;
+            VAR col_info       : tak00_columninfo;
+            infer_stats        : boolean; (* get view statistics from base *)
+            (* tables and distinct count for single column keys            *)
+            (* (except SYSKEYs) if true                                    *)
+            VAR statistics     : tak_column_statistics;
+            VAR stat_rec_found : boolean);
+ 
+VAR
+      b_err   : tgg00_BasisError;
+      prevCnt : integer;
+      ix      : integer;
+      sysbuf  : tak_sysbufferaddress;
+      colname : tsp00_KnlIdentifier;
+      sysk    : tgg00_SysInfoKey;
+ 
+BEGIN
+WITH statistics DO
+    BEGIN
+    c_values       := cak_is_undefined;
+    c_pages        := cak_is_undefined;
+    c_avg_list_len := cak_is_undefined;
+    END;
+(*ENDWITH*) 
+IF  acv.a_returncode = 0
+THEN
+    WITH base_ptr^.sbase DO
+        IF  ( base_ptr^.syskey.sentrytyp < cak_etemp )
+            AND
+            ( bv_tablekind <> tcatalog_table )
+            AND
+            ( col_info.ccolstack.etype <> st_func )
+        THEN
+            BEGIN
+            sysk := base_ptr^.syskey;
+            IF  (btablekind = tview) AND infer_stats
+            THEN
+                BEGIN
+                sysk.sentrytyp := cak_eviewqual_basis;
+                a10get_sysinfo( acv, sysk, d_release, sysbuf, b_err );
+                IF  b_err = e_ok
+                THEN
+                    sysk.stableid := sysbuf^.
+                          sviewqual_basis.vtable[ col_info.ctabno ].vttableid;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  (btablekind = tonebase) AND infer_stats
+                THEN
+                    sysk.stableid := btreeid.fileTabId_gg00
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            sysk.sentrytyp := cak_estatistics;
+            a10get_sysinfo( acv, sysk, d_release, sysbuf, b_err );
+            IF  b_err = e_ok
+            THEN
+                BEGIN
+                (* PTS 1115043 E.Z. *)
+                stat_rec_found := true;
+                IF  ( col_info.ccolstack.etype = st_varkey )
+                    AND
+                    ( bkeycolcount = 1 )
+                    AND
+                    infer_stats
+                THEN
+                    BEGIN
+                    a061get_colname (col_info, colname);
+                    IF  colname <> a01_i_tablekey (* do not output SYSKEY *)
+                    THEN
+                        statistics.c_values := sysbuf^.sstatistics.sti_rows;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  sysbuf^.sstatistics.sti_col_cnt > 0
+                THEN
+                    IF   ( col_info.creccolno in sysbuf^.sstatistics.sti_index )
+                    THEN
+                        BEGIN
+                        prevCnt := 0;
+                        FOR ix := 1 TO col_info.creccolno - 1 DO
+                            IF  ix in sysbuf^.sstatistics.sti_index
+                            THEN
+                                prevCnt := prevCnt + 1;
+                            (*ENDIF*) 
+                        (*ENDFOR*) 
+                        WITH sysbuf^.sstatistics.sti_col_stats[ prevCnt + 1 ] DO
+                            BEGIN
+                            IF  statistics.c_values = cak_is_undefined
+                            THEN
+                                statistics.c_values := cst_dist_values;
+                            (*ENDIF*) 
+                            END
+                        (*ENDWITH*) 
+                        END
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+&       ifdef trace
+        (*ENDIF*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+;
+t01int4 (ak_sem, 'c_values    ', statistics.c_values);
+t01int4 (ak_sem, 'c_pages     ', statistics.c_pages);
+t01int4 (ak_sem, 'c_avg_lst_le', statistics.c_avg_list_len);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28info (
+            VAR acv        : tak_all_command_glob;
+            base_ptr       : tak_sysbufferaddress;
+            VAR pages      : tsp00_Int4;
+            VAR rows       : tsp00_Int4;
+            VAR date       : tsp00_Int4;
+            VAR time       : tsp00_Int4);
+ 
+VAR
+      b_err   : tgg00_BasisError;
+      sysbuf  : tak_sysbufferaddress;
+      sysk    : tgg00_SysInfoKey;
+ 
+BEGIN
+pages := cak_is_undefined;
+rows  := cak_is_undefined;
+date  := cak_is_undefined;
+time  := cak_is_undefined;
+IF  acv.a_returncode = 0
+THEN
+    IF  base_ptr^.syskey.sentrytyp < cak_etemp
+    THEN
+        WITH base_ptr^.sbase DO
+            BEGIN
+            (* PTS 1111576 E.Z. *)
+            IF  (btablekind in
+                [twithkey, twithoutkey, tonebase])
+                AND
+                (bv_tablekind <> tcatalog_table)
+            THEN
+                BEGIN
+                sysk := base_ptr^.syskey;
+                IF  btablekind = tonebase
+                THEN
+                    sysk.stableid := btreeid.fileTabId_gg00;
+                (*ENDIF*) 
+                sysk.sentrytyp := cak_estatistics;
+                a10get_sysinfo (acv, sysk,
+                      d_release, sysbuf, b_err);
+                IF  b_err = e_ok
+                THEN
+                    WITH sysbuf^.sstatistics DO
+                        BEGIN
+                        pages := sti_pages;
+                        rows  := sti_rows;
+                        date  := sti_date;
+                        time  := sti_time
+                        END;
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+    ELSE
+        BEGIN
+        pages := base_ptr^.sbase.bpages;
+        rows  := base_ptr^.sbase.brows;
+        date  := cak_is_undefined;
+        time  := cak_is_undefined
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28new_statistic_info (
+            VAR acv     : tak_all_command_glob;
+            base_ptr    : tak_sysbufferaddress);
+ 
+VAR
+      b_err    : tgg00_BasisError;
+      stat_buf : tak_sysbufferaddress;
+      sysk     : tgg00_SysInfoKey;
+ 
+BEGIN
+sysk           := base_ptr^.syskey;
+sysk.sentrytyp := cak_estatistics;
+a10_nil_get_sysinfo (acv, sysk, d_release,
+      sizeof (tak_statisticsinfo) - MAX_COL_STATS_AK00*sizeof (tak_col_stats) - sizeof(tak_columnset),
+      stat_buf, b_err);
+IF  b_err = e_ok
+THEN
+    WITH stat_buf^.sstatistics DO
+        BEGIN
+        sti_segmentid := base_ptr^.sbase.bsegmentid;
+        sti_col_cnt   := 0;
+        sti_rows      := cak_initrows;
+        sti_pages     := cak_initpages;
+        sti_date      := base_ptr^.sbase.bupdstatdate;
+        sti_time      := base_ptr^.sbase.bupdstattime;
+        sti_filler    := 0;
+        a10add_sysinfo (acv, stat_buf, b_err)
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  b_err <> e_ok
+THEN
+    a07_b_put_error (acv, b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a28prim_pages (
+            VAR acv     : tak_all_command_glob;
+            VAR baserec : tak_baserecord) : tsp00_Int4;
+ 
+VAR
+      b_err    : tgg00_BasisError;
+      stat_buf : tak_sysbufferaddress;
+      sysk     : tgg00_SysInfoKey;
+ 
+BEGIN
+a28prim_pages := 1;
+IF  (baserec.bentrytype > cak_etemp       ) OR
+    (baserec.bv_tablekind = tcatalog_table) OR
+    (baserec.btablekind = tcatalog_table) OR
+    (baserec.btablekind = tview         ) OR
+    (baserec.btablekind = tcomplexview  ) OR
+    (baserec.btablekind = tdb2view      )
+THEN
+    a28prim_pages := baserec.bpages
+ELSE
+    BEGIN
+    sysk           := a01defaultkey;
+    sysk.stableid  := baserec.btreeid.fileTabId_gg00;
+    sysk.sentrytyp := cak_estatistics;
+    a10get_sysinfo (acv, sysk, d_release, stat_buf, b_err);
+    IF  b_err = e_ok
+    THEN
+        a28prim_pages := stat_buf^.sstatistics.sti_pages
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28incopy_statistics (VAR acv : tak_all_command_glob);
+ 
+VAR
+      ok            : boolean;
+      rowInserted   : boolean;
+      b_err         : tgg00_BasisError;
+      ix            : integer;
+      distinctCount : tsp00_Int4;
+      pageCount     : tsp00_Int4;
+      treeid        : tgg00_FileId;
+      schema        : tsp00_KnlIdentifier;
+      owner         : tsp00_KnlIdentifier;
+      tablen        : tsp00_KnlIdentifier;
+      columnn       : tsp00_KnlIdentifier;
+      prevkey       : tsp00_KnlIdentifier;
+      prev_schema   : tsp00_KnlIdentifier;
+      prev_tablen   : tsp00_KnlIdentifier;
+      sysbuf        : tak_sysbufferaddress;
+      p_arr         : tak_syspointerarr;
+      sysk          : tgg00_SysInfoKey;
+ 
+BEGIN
+a10_cache_delete (acv, NOT c_isRollback);
+acv.a_is_ddl := no_ddl; (* catalog records will be explicitly locked *)
+ok := NOT (acv.a_current_user_kind in [uprivate, unoprivate]);
+IF  NOT ok
+THEN
+    a07_kw_put_error (acv, e_missing_privilege, 1, cak_i_dba);
+(*ENDIF*) 
+IF  ok AND a06_table_exist (acv, d_release,
+    g01glob.sysuser_name, a01_i_sysstatistics,
+    p_arr, NOT c_get_all)
+THEN
+    BEGIN
+    treeid := p_arr.pbasep^.sbase.btreeid;
+    FOR ix := 1 TO SURROGATE_MXGG00 + 1 DO
+        prevkey[ix] := chr(0);
+    (*ENDFOR*) 
+    rowInserted := false;
+    prev_schema := a01_il_b_identifier;
+    WITH acv.a_mblock DO
+        BEGIN
+        REPEAT
+            ak28next_row_sysstatistics (acv, treeid, prevkey,
+                  schema, owner, tablen, columnn, distinctCount, pageCount,
+                  b_err);
+            IF  b_err = e_ok
+            THEN
+                BEGIN
+                IF  (prev_schema <> schema) OR (prev_tablen <> tablen)
+                THEN
+                    BEGIN
+                    IF  rowInserted
+                    THEN
+                        BEGIN
+                        ak28store_incopy_tableinfo (acv, p_arr.pbasep, sysbuf);
+                        rowInserted := false;
+                        END;
+                    (*ENDIF*) 
+                    IF  a06_table_exist (acv, d_fix, schema, tablen,
+                        p_arr, c_get_all)
+                    THEN
+                        BEGIN
+                        prev_schema    := schema;
+                        prev_tablen    := tablen;
+                        sysk           := p_arr.pbasep^.syskey;
+                        REPEAT
+                            a28lock_table_for_updstat (acv,
+                                  sysk.stableid, b_err);
+                        UNTIL
+                            b_err <> e_request_timeout;
+                        (*ENDREPEAT*) 
+                        IF  b_err = e_ok
+                        THEN
+                            REPEAT
+                                a28lock_stat_catalog_rec (acv, p_arr.pbasep,
+                                      true, sysbuf, b_err);
+                            UNTIL
+                                b_err <> e_request_timeout;
+                            (*ENDREPEAT*) 
+                        (*ENDIF*) 
+                        IF  b_err = e_ok
+                        THEN
+                            a10get_sysinfo (acv, sysk,
+                                  d_release, sysbuf, b_err);
+                        (*ENDIF*) 
+                        sysk.sentrytyp := cak_estatistics;
+                        IF  b_err = e_ok
+                        THEN
+                            BEGIN
+                            a10get_sysinfo (acv, sysk,
+                                  d_fix, sysbuf, b_err);
+                            IF  b_err = e_sysinfo_not_found
+                            THEN (* skip *)
+                                BEGIN
+                                IF  NOT a101_IsTempFile (acv,
+                                    p_arr.pbasep^.sbase.btreeid)
+                                THEN
+                                    a07ak_system_error (acv, 28, 1);
+                                (*ENDIF*) 
+                                b_err := e_ok;
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        END
+                    ELSE
+                        sysbuf := NIL;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  (sysbuf <> NIL)
+                THEN
+                    BEGIN
+                    rowInserted := true;
+                    ak28one_row_incopy (acv, p_arr.pbasep, sysbuf,
+                          columnn, distinctCount, pageCount);
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        UNTIL
+            (b_err <> e_ok) OR
+            (acv.a_returncode <> 0);
+        (*ENDREPEAT*) 
+        IF  (b_err <> e_no_next_record) AND (acv.a_returncode = 0)
+        THEN
+            a07_b_put_error (acv, b_err, 1);
+        (*ENDIF*) 
+        IF  rowInserted AND (acv.a_returncode = 0)
+        THEN
+            ak28store_incopy_tableinfo (acv, p_arr.pbasep, sysbuf);
+        (*ENDIF*) 
+        IF  p_arr.pbasep <> NIL
+        THEN
+            a10rel_sysinfo (p_arr.pbasep);
+        (*ENDIF*) 
+        IF  sysbuf <> NIL
+        THEN
+            a10rel_sysinfo (sysbuf);
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28next_row_sysstatistics(
+            VAR acv           : tak_all_command_glob;
+            VAR sysstatId     : tgg00_FileId;
+            VAR prevkey       : tsp00_KnlIdentifier;
+            VAR schema        : tsp00_KnlIdentifier;
+            VAR owner         : tsp00_KnlIdentifier;
+            VAR tablen        : tsp00_KnlIdentifier;
+            VAR columnn       : tsp00_KnlIdentifier;
+            VAR distinctCount : tsp00_Int4;
+            VAR pageCount     : tsp00_Int4;
+            VAR b_err         : tgg00_BasisError);
+ 
+CONST
+      c_in_out_len = 7;
+ 
+VAR
+      res    : tsp00_NumError;
+      newVal : tsp00_Int4;
+      ix     : integer;
+      pos    : integer;
+      len    : integer;
+      indexn : tsp00_KnlIdentifier;
+ 
+BEGIN
+(* ignore updated treeleafnodes for this table at this time: *)
+sysstatId.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+WITH acv.a_mblock DO
+    REPEAT
+        (* select next row *)
+        a06a_mblock_init (acv, m_select_row, mm_next, sysstatId);
+        mb_qual^.mqual_pos  := 1;
+        mb_qual^.mqual_cnt  := 1;
+        WITH  mb_st^ [1] DO
+            BEGIN
+            etype          := st_rec_output;
+            eop            := op_none;
+            epos           := 0;
+            elen_var       := 0;
+            ecol_tab [ 1 ] := chr(0);
+            ecol_tab [ 2 ] := chr(0)
+            END;
+        (*ENDWITH*) 
+        mb_qual^.mstrat_pos  := 2;
+        mb_qual^.mstrat_cnt  := 2;
+        WITH mb_st^ [2] DO
+            BEGIN
+            etype         := st_strat;
+            eop           := op_none;
+            epos          := cgg_rec_key_offset + 1;
+            elen_var      := SURROGATE_MXGG00 + 1;
+            ecol_tab[ 1 ] := chr(0);
+            ecol_tab[ 2 ] := chr(0)
+            END;
+        (*ENDWITH*) 
+        SAPDB_PascalMove ('VAK28 ',   4,    
+              sizeof (prevkey), sizeof (mb_data^.mbp_rec.recBody_gg00),
+              @prevkey, 1, @mb_data^.mbp_rec.recBody_gg00, 1,
+              SURROGATE_MXGG00 + 1, acv.a_returncode);
+        WITH mb_st^ [3] DO
+            BEGIN
+            epos     := 0;
+            elen_var := 0;
+            END;
+        (*ENDWITH*) 
+        mb_qual^.mfirst_free := 4;
+        mb_data_len          :=
+              cgg_rec_key_offset + 1 + SURROGATE_MXGG00;
+        a06rsend_mess_buf (acv, acv.a_mblock,
+              cak_return_req, b_err);
+        IF  b_err = e_ok
+        THEN
+            BEGIN
+            SAPDB_PascalMove ('VAK28 ',   5,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00),
+                  sizeof (prevkey),
+                  @mb_data^.mbp_rec.recBody_gg00, 1, @prevkey, 1,
+                  SURROGATE_MXGG00 + 1,
+                  b_err);
+            pos   := 1 + SURROGATE_MXGG00 + 3 * c_num_io_len + 1; (* PTS 1105308 *)
+            len   := ord (mb_data^.mbp_rec.recBody_gg00[pos]);
+            schema:= a01_il_b_identifier;
+            SAPDB_PascalMove ('VAK28 ',   6,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00), sizeof (schema),
+                  @mb_data^.mbp_rec.recBody_gg00, pos + 2, @schema, 1, len - 1,
+                  b_err);
+            pos    := pos + 1 + len;
+            len   := ord (mb_data^.mbp_rec.recBody_gg00[pos]);
+            owner := a01_il_b_identifier;
+            SAPDB_PascalMove ('VAK28 ',   7,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00), sizeof (owner),
+                  @mb_data^.mbp_rec.recBody_gg00, pos + 2, @owner, 1, len - 1,
+                  b_err);
+            pos    := pos + 1 + len;
+            len    := ord (mb_data^.mbp_rec.recBody_gg00[pos]);
+            tablen := a01_il_b_identifier;
+            SAPDB_PascalMove ('VAK28 ',   8,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00),sizeof (tablen),
+                  @mb_data^.mbp_rec.recBody_gg00, pos + 2, @tablen, 1, len - 1,
+                  b_err);
+            pos := pos + 1 + len;
+            len     := ord (mb_data^.mbp_rec.recBody_gg00[pos]);
+            columnn := a01_il_b_identifier;
+            SAPDB_PascalMove ('VAK28 ',   9,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00), sizeof (columnn),
+                  @mb_data^.mbp_rec.recBody_gg00, pos + 2, @columnn, 1, len - 1,
+                  b_err);
+            pos := pos + 1 + len;
+            len    := ord (mb_data^.mbp_rec.recBody_gg00[pos]);
+            indexn := a01_il_b_identifier;
+            SAPDB_PascalMove ('VAK28 ',  10,    
+                  sizeof (mb_data^.mbp_rec.recBody_gg00), sizeof (indexn),
+                  @mb_data^.mbp_rec.recBody_gg00, pos + 2, @indexn, 1, len - 1,
+                  b_err);
+            (* *)
+            pos := 1 + SURROGATE_MXGG00 + 1;
+            FOR ix := 1 TO 2 DO
+                BEGIN
+                IF  mb_data^.mbp_rec.recBody_gg00[pos] = csp_undef_byte
+                THEN
+                    newVal := cak_is_undefined
+                ELSE
+                    BEGIN
+                    s40glint (mb_data^.mbp_rec.recBody_gg00, pos + 1, 10,
+                          newVal, res);
+                    IF  (res <> num_ok) OR (newVal < 0)
+                    THEN
+                        newVal := cak_is_undefined
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                CASE ix OF
+                    1:
+                        pageCount     := newVal;
+                    2:
+                        distinctCount := newVal;
+                    END;
+                (*ENDCASE*) 
+                pos := pos + c_in_out_len;
+                END;
+            (*ENDFOR*) 
+            END;
+        (*ENDIF*) 
+    UNTIL (* skips rows that have a value set for indexname *)
+        (b_err <> e_ok) OR (indexn = a01_il_b_identifier);
+    (*ENDREPEAT*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28one_row_incopy (
+            VAR acv       : tak_all_command_glob;
+            base_ptr      : tak_sysbufferaddress;
+            VAR stat_buf  : tak_sysbufferaddress;
+            VAR colname   : tsp00_KnlIdentifier;
+            distinctCount : tsp00_Int4;
+            pageCount     : tsp00_Int4);
+ 
+VAR
+      col_ptr        : tak00_colinfo_ptr;
+ 
+BEGIN
+IF  colname <> a01_il_b_identifier
+THEN
+    BEGIN
+    IF  a061exist_columnname (base_ptr^.sbase, colname, col_ptr)
+        AND
+        NOT ( (col_ptr^.ccolstack.etype = st_varkey)
+        AND   (base_ptr^.sbase.bkeycolcount = 1) )
+    THEN
+        a28assign_col_info (acv, base_ptr^.syskey,
+              stat_buf, col_ptr^.creccolno,
+              distinctCount, pageCount, cak_is_undefined);
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    stat_buf^.sstatistics.sti_pages := pageCount;
+    stat_buf^.sstatistics.sti_rows  := distinctCount;
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28store_incopy_tableinfo(
+            VAR acv       : tak_all_command_glob;
+            VAR base_ptr  : tak_sysbufferaddress;
+            VAR stat_buf  : tak_sysbufferaddress);
+ 
+VAR
+      b_err : tgg00_BasisError;
+ 
+BEGIN
+a10repl_sysinfo (acv, stat_buf, b_err);
+IF  b_err = e_ok
+THEN
+    ak28update_treeleafnodes (acv, base_ptr, stat_buf);
+(*ENDIF*) 
+a10key_del (acv, stat_buf);
+a10rel_sysinfo (base_ptr);
+IF  (acv.a_returncode = 0) AND (b_err = e_ok)
+THEN
+    ak28commit (acv, m_commit);
+(*ENDIF*) 
+IF  (acv.a_returncode = 0) AND (b_err <> e_ok)
+THEN
+    a07_b_put_error (acv, b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28commit(
+            VAR acv : tak_all_command_glob;
+            m_type  : tgg00_MessType);
+ 
+VAR
+      localCacheUsage : boolean;
+ 
+BEGIN
+localCacheUsage := acv.a_localCacheUsageOnly;
+a52_ex_commit_rollback (acv, m_type, false, false);
+acv.a_localCacheUsageOnly := localCacheUsage;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28update_treeleafnodes(
+            VAR acv    : tak_all_command_glob;
+            base_ptr   : tak_sysbufferaddress;
+            stat_buf  : tak_sysbufferaddress);
+ 
+VAR
+      b_err  : tgg00_BasisError;
+      qual   : tgg00_QualBuf;
+      mblock : tgg00_MessBlock;
+ 
+BEGIN
+b_err := e_ok;
+IF  base_ptr^.sbase.btreeid.fileLeafNodes_gg00 <>
+    stat_buf^.sstatistics.sti_pages
+THEN
+    BEGIN
+    (* old and new treeleafnodes are different, *)
+    (* inform KB                                *)
+    base_ptr^.sbase.btreeid.fileLeafNodes_gg00 :=
+          stat_buf^.sstatistics.sti_pages;
+    g01mblock_init (acv.a_transinf.tri_trans,
+          m_set, mm_pages, mblock);
+    g01stack_init  (mblock, NIL, 0, @qual, sizeof (qual));
+    mblock.mb_qual^.mtree := base_ptr^.sbase.btreeid;
+    a06rsend_mess_buf (acv,
+          mblock, cak_return_req, b_err);
+    END;
+(*ENDIF*) 
+IF  b_err <> e_ok
+THEN
+    a07_b_put_error (acv, b_err, 1)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28outcopy_statistics (VAR acv : tak_all_command_glob);
+ 
+VAR
+      ok             : boolean;
+      stat_rec_found : boolean;
+      b_err          : tgg00_BasisError;
+      ci             : integer;
+      base_buf       : tak_sysbufferaddress;
+      owner          : tsp00_KnlIdentifier;
+      schema         : tsp00_KnlIdentifier;
+      colname        : tsp00_KnlIdentifier;
+      treeid         : tgg00_FileId;
+      b_arr          : tak_syspointerarr;
+      statistics     : tak_column_statistics;
+      sysk           : tgg00_SysInfoKey;
+ 
+BEGIN
+ok := NOT (acv.a_current_user_kind in [uprivate, unoprivate]);
+IF  NOT ok
+THEN
+    a07_kw_put_error (acv, e_missing_privilege, 1, cak_i_dba);
+(*ENDIF*) 
+IF  ok AND a06_table_exist (acv, d_release,
+    g01glob.sysuser_name, a01_i_sysstatistics,
+    b_arr, NOT c_get_all)
+THEN
+    BEGIN
+    ak28commit (acv, m_commit);
+    IF  acv.a_returncode = 0
+    THEN
+        a10_cache_delete (acv, NOT c_isRollback);
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        treeid               := b_arr.pbasep^.sbase.btreeid;
+        treeid.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+        a06a_mblock_init (acv, m_delete, mm_trunc, treeid);
+        a06rsend_mess_buf (acv, acv.a_mblock,
+              cak_return_req, b_err);
+        IF  (b_err <> e_ok) AND (b_err <> e_no_next_record)
+        THEN
+            a07_b_put_error (acv, b_err, 1);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    ok := false;
+(*ENDIF*) 
+IF  ok AND (acv.a_returncode = 0)
+THEN
+    BEGIN
+    sysk   := a01defaultkey;
+    REPEAT
+        a10next_sysinfo (acv, sysk, 0, d_release,
+              cak_etable, base_buf, b_err);
+        ok           := false;
+        IF  b_err = e_ok
+        THEN
+            IF  (base_buf^.sbase.btablekind in [twithkey, twithoutkey])
+                AND
+                (NOT kb560IsCatalogTable (sysk.stableid))
+            THEN
+                ok := true;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        sysk.slinkage [ 2 ] := chr(255);
+        IF  ok
+        THEN
+            BEGIN
+            a06determine_username (acv, base_buf^.sbase.bauthid, owner);
+            a103GetSchemaName (acv, base_buf^.sbase.bschema, schema);
+            WITH base_buf^.sbase DO
+                BEGIN
+                ci := bfirstindex;
+                (* PTS 1115043 E.Z. *)
+                stat_rec_found := false;
+                a28column_statistics (acv,
+                      base_buf, bcolumn[ci]^, NOT c_inferStats,
+                      statistics, stat_rec_found);
+                IF  stat_rec_found
+                THEN
+                    BEGIN
+                    WHILE ci <= blastindex DO
+                        BEGIN
+                        a28column_statistics (acv,
+                              base_buf, bcolumn[ci]^, NOT c_inferStats,
+                              statistics, stat_rec_found);
+                        a061get_colname (bcolumn[ci]^,
+                              colname);
+                        ak28add_one_row (acv, treeid, owner, schema,
+                              base_buf^.sbase.btablen^,
+                              colname,
+                              a01_il_b_identifier,
+                              statistics.c_pages,
+                              statistics.c_values,
+                              statistics.c_avg_list_len);
+                        ci := ci + 1
+                        END;
+                    (*ENDWHILE*) 
+                    ak28add_one_row (acv, treeid, owner, schema,
+                          base_buf^.sbase.btablen^,
+                          a01_il_b_identifier, a01_il_b_identifier,
+                          a28prim_pages (acv, base_buf^.sbase),
+                          a28primrows   (acv, base_buf^.sbase),
+                          cak_is_undefined);
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+            a10rel_sysinfo (base_buf);
+            END;
+        (*ENDIF*) 
+    UNTIL
+        (b_err <> e_ok) OR (acv.a_returncode <> 0);
+    (*ENDREPEAT*) 
+    IF  (b_err = e_no_next_record) AND (acv.a_returncode = 0)
+    THEN
+        ak28commit (acv, m_commit)
+    ELSE
+        BEGIN
+        ak28commit (acv, m_rollback);
+        IF  acv.a_returncode = 0
+        THEN
+            a07_b_put_error (acv, b_err, 1);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28add_one_row (
+            VAR acv         : tak_all_command_glob;
+            VAR treeid      : tgg00_FileId;
+            VAR owner       : tsp00_KnlIdentifier;
+            VAR schema      : tsp00_KnlIdentifier;
+            VAR tablen      : tsp00_KnlIdentifier;
+            VAR column      : tsp00_KnlIdentifier;
+            VAR indexn      : tsp00_KnlIdentifier;
+            pagecount       : tsp00_Int4;
+            distinct_values : tsp00_Int4;
+            avg_list_len    : tsp00_Int4);
+ 
+VAR
+      pos   : integer;
+      b_err : tgg00_BasisError;
+ 
+BEGIN
+IF  ((pagecount >= 0) OR (distinct_values >= 0) OR (avg_list_len >= 0))
+    AND
+    (acv.a_returncode = 0)
+THEN
+    BEGIN
+    a06a_mblock_init (acv, m_insert, mm_nokey, treeid);
+    acv.a_mblock.mb_data^.mbp_rec.keylen := 1 + SURROGATE_MXGG00;
+    acv.a_mblock.mb_data^.mbp_rec.len    :=
+          cgg_rec_key_offset + 1 + SURROGATE_MXGG00;
+    ak28put_number (acv.a_mblock, pagecount, 10);
+    ak28put_number (acv.a_mblock, distinct_values, 10);
+    pos := acv.a_mblock.mb_data^.mbp_rec.len + 1;
+    ak28put_number (acv.a_mblock, avg_list_len, 10);
+    IF  acv.a_mblock.mb_data^.mbp_rec.buf[pos] <> csp_undef_byte
+    THEN
+        acv.a_mblock.mb_data^.mbp_rec.buf[pos+1] :=
+              pred (acv.a_mblock.mb_data^.mbp_rec.buf[pos+1]);
+    (* PTS 1104680 E.Z. *)
+    (*ENDIF*) 
+    acv.a_mblock.mb_data^.mbp_rec.recVarcolOffset_gg00 := acv.a_mblock.mb_data^.mbp_rec.len -
+          cgg_rec_key_offset -
+          acv.a_mblock.mb_data^.mbp_rec.recKeyLen_gg00;
+    acv.a_mblock.mb_data^.mbp_rec.recVarcolCnt_gg00    := 5;
+    ak28put_column (acv, acv.a_mblock, schema);
+    ak28put_column (acv, acv.a_mblock, owner);
+    ak28put_column (acv, acv.a_mblock, tablen);
+    ak28put_column (acv, acv.a_mblock, column);
+    ak28put_column (acv, acv.a_mblock, indexn);
+    acv.a_mblock.mb_data_len := acv.a_mblock.mb_data^.mbp_rec.len;
+    a06rsend_mess_buf (acv, acv.a_mblock,
+          cak_return_req, b_err);
+    IF  b_err <> e_ok
+    THEN
+        a07_b_put_error (acv, b_err, 1)
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28put_column (
+            VAR acv    : tak_all_command_glob;
+            VAR mblock : tgg00_MessBlock;
+            VAR id     : tsp00_KnlIdentifier);
+ 
+VAR
+      id_len : integer;
+ 
+BEGIN
+WITH mblock.mb_data^.mbp_rec DO
+    BEGIN
+    id_len     := a061identifier_len (id);
+    buf[len+1] := chr(id_len+1);
+    (* PTS 1105449 E.Z. *)
+    IF  g01unicode
+    THEN
+        buf[len+2] := csp_unicode_def_byte
+    ELSE
+        buf[len+2] := bsp_c1;
+    (*ENDIF*) 
+    SAPDB_PascalMove ('VAK28 ',  11,    
+          sizeof (id), sizeof (buf),
+          @id, 1, @buf, len + 3, id_len,
+          acv.a_returncode);
+    len := len + 2 + id_len
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28put_number (
+            VAR mblock  : tgg00_MessBlock;
+            value       : tsp00_Int4;
+            digits      : integer);
+ 
+VAR
+      ix  : integer;
+      res : tsp00_NumError;
+ 
+BEGIN
+WITH mblock.mb_data^.mbp_rec DO
+    BEGIN
+    IF  value < 0
+    THEN
+        BEGIN
+        buf[len+1] := csp_undef_byte;
+        FOR ix := 1 TO (1 + (digits + 1) DIV 2)  DO
+            buf[len+ix+1] := chr(0)
+        (*ENDFOR*) 
+        END
+    ELSE
+        BEGIN
+        buf[len+1] := csp_defined_byte;
+        s41plint (buf, len + 2, digits, 0, value, res);
+        END;
+    (*ENDIF*) 
+    len := len + 2 + (digits + 1) DIV 2
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a28primrows (
+            VAR acv     : tak_all_command_glob;
+            VAR baserec : tak_baserecord) : tsp00_Int4;
+ 
+VAR
+      b_err    : tgg00_BasisError;
+      stat_buf : tak_sysbufferaddress;
+      sysk     : tgg00_SysInfoKey;
+ 
+BEGIN
+a28primrows := 1;
+IF  (baserec.bentrytype > cak_etemp       ) OR
+    (baserec.bv_tablekind = tcatalog_table) OR
+    (baserec.btablekind = tcatalog_table) OR
+    (baserec.btablekind = tview         ) OR
+    (baserec.btablekind = tcomplexview  ) OR
+    (baserec.btablekind = tdb2view      )
+THEN
+    a28primrows := baserec.brows
+ELSE
+    BEGIN
+    sysk           := a01defaultkey;
+    sysk.stableid  := baserec.btreeid.fileTabId_gg00;
+    sysk.sentrytyp := cak_estatistics;
+    a10get_sysinfo (acv, sysk, d_release, stat_buf, b_err);
+    IF  b_err = e_ok
+    THEN
+        a28primrows := stat_buf^.sstatistics.sti_rows
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28rows_and_colstat (
+            VAR acv        : tak_all_command_glob;
+            base_ptr       : tak_sysbufferaddress;
+            VAR col_info   : tak00_columninfo;
+            VAR statistics : tak_column_statistics;
+            VAR prim_rows  : tsp00_Int4;
+            VAR no_cstats  : boolean);
+ 
+VAR
+      _b_err   : tgg00_BasisError;
+      _prevCnt : integer;
+      _ix      : integer;
+      _sysbuf  : tak_sysbufferaddress;
+      _sysk    : tgg00_SysInfoKey;
+ 
+BEGIN
+statistics.c_values       := cak_is_undefined;
+statistics.c_pages        := cak_is_undefined;
+statistics.c_avg_list_len := cak_is_undefined;
+_sysbuf   := NIL;
+no_cstats := true;
+prim_rows := cak_initrows;
+IF  acv.a_returncode = 0
+THEN
+    WITH base_ptr^.sbase DO
+        IF  ( base_ptr^.syskey.sentrytyp < cak_etemp )
+            AND
+            ( bv_tablekind <> tcatalog_table )
+            AND
+            ( col_info.ccolstack.etype <> st_func )
+        THEN
+            BEGIN
+            _sysk := base_ptr^.syskey;
+            IF  btablekind = tview
+            THEN
+                BEGIN
+                _sysk.sentrytyp := cak_eviewqual_basis;
+                a10get_sysinfo( acv, _sysk, d_release, _sysbuf, _b_err );
+                IF  _b_err = e_ok
+                THEN
+                    _sysk.stableid := _sysbuf^.
+                          sviewqual_basis.vtable[ col_info.ctabno ].vttableid;
+                (*ENDIF*) 
+                END
+            ELSE
+                BEGIN
+                IF  btablekind = tonebase
+                THEN
+                    _sysk.stableid := btreeid.fileTabId_gg00
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            _sysk.sentrytyp := cak_estatistics;
+            a10get_sysinfo( acv, _sysk, d_release, _sysbuf, _b_err );
+            IF  _b_err = e_ok
+            THEN
+                BEGIN
+                prim_rows := _sysbuf^.sstatistics.sti_rows;
+                IF  ( col_info.ccolstack.etype = st_varkey )
+                    AND
+                    ( bkeycolcount = 1 )
+                THEN
+                    statistics.c_values :=
+                          _sysbuf^.sstatistics.sti_rows
+                ELSE
+                    BEGIN
+                    IF  ( _sysbuf^.sstatistics.sti_rows = 0 )
+                    THEN
+                        statistics.c_values := 0;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  _sysbuf^.sstatistics.sti_col_cnt > 0
+                THEN
+                    BEGIN
+                    IF  ( col_info.creccolno in _sysbuf^.sstatistics.sti_index)
+                    THEN
+                        BEGIN
+                        _prevCnt := 0;
+                        FOR _ix := 1 TO col_info.creccolno - 1 DO
+                            IF  _ix in _sysbuf^.sstatistics.sti_index
+                            THEN
+                                _prevCnt := _prevCnt + 1;
+                            (*ENDIF*) 
+                        (*ENDFOR*) 
+                        WITH _sysbuf^.sstatistics.
+                             sti_col_stats[ _prevCnt + 1 ] DO
+                            BEGIN
+                            IF  statistics.c_values = cak_is_undefined
+                            THEN
+                                statistics.c_values := cst_dist_values;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDWITH*) 
+                        no_cstats := false;
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+&       ifdef trace
+        (*ENDIF*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+;
+t01int4 (ak_sem, 'c_values    ', statistics.c_values);
+t01int4 (ak_sem, 'c_pages     ', statistics.c_pages);
+t01int4 (ak_sem, 'c_avg_lst_le', statistics.c_avg_list_len);
+t01int4 (ak_sem, 'prim_rows   ', prim_rows);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28set_col_info (
+            VAR stat_rec : tak_statisticsinfo;
+            colno        : integer;
+            dist_values  : tsp00_Int4;
+            pages        : tsp00_Int4;
+            avg_lst_len  : tsp00_Int4);
+ 
+VAR
+      ix          : integer;
+      prevInfoCnt : integer;
+ 
+BEGIN
+prevInfoCnt := 0;
+IF  stat_rec.sti_col_cnt = 0
+THEN
+    BEGIN
+    stat_rec.sti_index   := [];
+    END
+ELSE
+    FOR ix := 1 TO colno - 1 DO
+        IF  ix in stat_rec.sti_index
+        THEN
+            prevInfoCnt := prevInfoCnt + 1;
+        (*ENDIF*) 
+    (*ENDFOR*) 
+(*ENDIF*) 
+IF  NOT (colno in stat_rec.sti_index)
+THEN
+    BEGIN
+    IF  stat_rec.sti_col_cnt < MAX_COL_STATS_AK00
+    THEN
+        BEGIN
+        IF  prevInfoCnt < stat_rec.sti_col_cnt
+        THEN
+            FOR ix := stat_rec.sti_col_cnt DOWNTO prevInfoCnt + 1 DO
+                stat_rec.sti_col_stats[ix+1] := stat_rec.sti_col_stats[ix];
+            (*ENDFOR*) 
+        (*ENDIF*) 
+        ix                   := prevInfoCnt + 1;
+        stat_rec.sti_index   := stat_rec.sti_index + [colno];
+        stat_rec.sti_col_cnt := stat_rec.sti_col_cnt + 1;
+        WITH stat_rec.sti_col_stats[ix] DO
+            BEGIN
+            (* h.b. PTS 1104683 *)
+            cst_dist_values := cak_is_undefined;
+            cst_pages       := cak_is_undefined;
+            cst_avg_lst_len := cak_is_undefined;
+            END;
+        (*ENDWITH*) 
+        END
+    ELSE
+        ix := -1;
+    (*ENDIF*) 
+    END
+ELSE
+    ix := prevInfoCnt + 1;
+(*ENDIF*) 
+IF  ix > 0
+THEN
+    WITH stat_rec.sti_col_stats[ix] DO
+        BEGIN
+        IF  dist_values <> cak_is_undefined (* h.b. PTS 1104683 *)
+        THEN
+            cst_dist_values := dist_values;
+        (*ENDIF*) 
+        IF  pages <> cak_is_undefined
+        THEN
+            cst_pages := pages;
+        (*ENDIF*) 
+        IF  avg_lst_len <> cak_is_undefined
+        THEN
+            cst_avg_lst_len := avg_lst_len
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+stat_rec.sti_reclen := sizeof (stat_rec) -
+      sizeof (stat_rec.sti_col_stats) + stat_rec.sti_col_cnt * sizeof (stat_rec.sti_col_stats[1])
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28sys_upd_statistics (
+            VAR acv     : tak_all_command_glob;
+            VAR tree    : tgg00_FileId;
+            mtype       : tgg00_MessType;
+            m2type      : tgg00_MessType2;
+            known_pages : tsp00_Int4;
+            found_pages : tsp00_Int4);
+ 
+VAR
+      store_table : boolean;
+ 
+BEGIN
+WITH acv DO
+    BEGIN
+    store_table := false;
+&   ifdef TRACE
+    t01int4 (ak_sem, 'found_pages ', found_pages);
+    t01int4 (ak_sem, 'known_pages ', known_pages);
+&   endif
+    IF  (a28updstatwanted_tree.fileName_gg00 <> cgg_zero_fn) AND
+        (NOT a101_IsExtendedTempFile (acv, tree)) AND
+        gg999KernelStateIsOnline
+    THEN
+        IF  ((mtype = m_select_row) AND (m2type <> mm_direct))
+            OR
+            ( mtype = m_insert_select)
+            OR
+            ((mtype in [ m_update, m_delete]) AND
+            (* do not insert 'mm_trunc', 'mm_empty' in here *)
+            (* in this case page_cnt is x'3F90', unknown          *)
+            (m2type = mm_qual))
+        THEN
+            store_table := true
+        ELSE
+            IF  ((mtype = m_select) AND (m2type <> mm_with_join))
+            THEN
+                IF  a_mblock.mb_qual^.mr_res_build
+                THEN
+                    store_table := true;
+&               ifdef trace
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    t01int4 (ak_sem, 'store_table ', ord (store_table));
+&   endif
+    IF  store_table
+    THEN
+        IF  ((found_pages > cak68_updstat_minpages) AND
+            (found_pages > known_pages * cak68_updstat_factor) AND
+            NOT (ftsDynamic_egg00 in tree.fileType_gg00))
+            (* forced by R/3 via Rudi on 28.3.95 *)
+        THEN
+            a101_InsertIntoSysUpdStatWanted (acv, tree.fileTabId_gg00);
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28del_in_updstatwanted (VAR acv : tak_all_command_glob);
+ 
+VAR
+      Schema  : tsp00_KnlIdentifier;
+      Owner   : tsp00_KnlIdentifier;
+      Key     : tgg00_Lkey;
+      htreeid : tgg00_FileId;
+ 
+BEGIN
+IF  (a28updstatwanted_tree.fileName_gg00 <> cgg_zero_fn)
+THEN
+    BEGIN
+    a28updstatwanted_tree.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+    htreeid := a28updstatwanted_tree;
+    a06determine_username     (acv, acv.a_p_arr1.pbasep^.sbase.bauthid, Owner);
+    a103GetSchemaName (acv, acv.a_p_arr1.pbasep^.sbase.bschema, Schema);
+    ak28BuildUpdStatWantedKey (Key, Schema, Owner,
+          acv.a_p_arr1.pbasep^.sbase.btablen^, a01_il_b_identifier);
+    b02del_record             (acv.a_transinf.tri_trans, htreeid, Key);
+    (* ignore all errors ! *)
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28BuildUpdStatWantedKey (
+            VAR Key        : tgg00_Lkey;
+            VAR Schema     : tsp00_KnlIdentifier;
+            VAR Owner      : tsp00_KnlIdentifier;
+            VAR Tablen     : tsp00_KnlIdentifier;
+            VAR ColumnName : tsp00_KnlIdentifier);
+ 
+VAR
+      DefByte  : char;
+      pSchema  : ^tsp00_KnlIdentifier;
+      pOwner   : ^tsp00_KnlIdentifier;
+      pTablen  : ^tsp00_KnlIdentifier;
+      pColumn  : ^tsp00_KnlIdentifier;
+ 
+BEGIN
+IF  g01unicode
+THEN
+    DefByte := csp_unicode_def_byte
+ELSE
+    DefByte := csp_ascii_blank;
+(*ENDIF*) 
+Key.k[1]                     := DefByte;
+pSchema                      := @Key.k[2];
+pSchema^                     := Schema;
+Key.k[1 + sizeof(Schema) + 1] := DefByte;
+pOwner                       := @Key.k[1 + sizeof(Schema) + 1 + 1];
+pOwner^                      := Owner;
+Key.k[1 + sizeof(Schema) + 1 + sizeof(Owner) + 1] := DefByte;
+pTablen                      := @Key.k[1 + sizeof(Schema) + 1 + sizeof(Owner) + 1 + 1];
+pTablen^                     := Tablen;
+Key.k[1 + sizeof(Schema) + 1 + sizeof(Owner) + 1 + sizeof(Tablen) + 1] := DefByte;
+pColumn :=
+      @Key.k[1 + sizeof(Schema) + 1 + sizeof(Owner) + 1 + sizeof(Tablen) + 1 + 1];
+pColumn^ := ColumnName;
+Key. keyLen_gg00 := 1 + sizeof(Schema) + 1 + sizeof(Owner)
+      + 1 + sizeof (Tablen) + 1 + a061identifier_len (ColumnName);
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      ak28GetUpdStatWantedTable (
+            VAR acv  : tak_all_command_glob;
+            VAR a41v : tak40_show_glob;
+            VAR rec  : tgg00_Rec) : boolean;
+ 
+VAR
+      key       : ^tgg00_Lkey;
+      pSchema   : ^tsp00_KnlIdentifier;
+      pTablen   : ^tsp00_KnlIdentifier;
+      (* PTS 1131825 M.Ki. *)
+ 
+BEGIN
+key := @rec;
+pSchema := @key^.k[2];
+pTablen := @key^.k[
+      1 + sizeof(tsp00_KnlIdentifier)
+      + 1 + sizeof(tsp00_KnlIdentifier)
+      + 1 + 1];
+ak28GetUpdStatWantedTable := a06_table_exist (acv, d_release,
+      pSchema^, pTablen^, a41v.a4p_arr, false)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28table_upd_statistics (
+            VAR acv       : tak_all_command_glob;
+            bForceUpdStat : boolean;
+            sample_rows   : tsp00_Int4;
+            sample_pct    : integer;
+            page_cnt      : tsp00_Int4;
+            rec_cnt       : tsp00_Int4;
+            sec_cnt       : tsp00_Int4;
+            colno         : integer;
+            add           : boolean;
+            commit        : boolean);
+ 
+VAR
+      _b_err                : tgg00_BasisError;
+      _calculate            : boolean;
+      _ignore_file          : boolean;
+      _localCacheUsageOnly  : boolean;
+      _col_cnt              : integer;
+      _col_in_sysstatistics : integer;
+      _isample_rows         : tsp00_Int4;
+      _isample_pct          : integer;
+      _sample_pages         : integer;
+      _leaves               : tsp00_Int4;
+      _records              : tsp00_Int4;
+      _stat_buf             : tak_sysbufferaddress;
+      _col_info             : tak28_col_info;
+      _statlog_row          : tak28_statlog_row;
+      _viewscanpar          : tak_viewscan_par;
+      _sysk                 : tgg00_SysInfoKey;
+ 
+BEGIN
+IF  NOT bForceUpdStat
+THEN (* PTS 1137889 M.Ki *)
+    _ignore_file := NOT add AND (acv.a_p_arr1.pbasep^.sbase.bsample = 0)
+ELSE
+    _ignore_file := false;
+(*ENDIF*) 
+_ignore_file := _ignore_file
+      OR a36tree_in_memory (acv.a_p_arr1.pbasep^.sbase.btreeid)
+      OR kb560IsCatalogTable (acv.a_p_arr1.pbasep^.sbase.btreeid.fileTabId_gg00)
+      OR a101_IsExtendedTempFile (acv, acv.a_p_arr1.pbasep^.sbase.btreeid);
+IF  NOT _ignore_file
+THEN
+    BEGIN
+    _stat_buf                 := NIL;
+    _localCacheUsageOnly      := acv.a_localCacheUsageOnly;
+    acv.a_localCacheUsageOnly := true;
+    (* PTS 1103579 E.Z. *)
+    IF  ( sample_pct = c_undefined )
+    THEN
+        BEGIN
+        (* estimate with values *)
+        (* from <sample definition> during <create table> *)
+        IF  ( acv.a_p_arr1.pbasep^.sbase.bsample < 0 )
+        THEN
+            BEGIN
+            _isample_rows := c_not_used; (* h.b. PTS 1105036 *)
+            _isample_pct  := -acv.a_p_arr1.pbasep^.sbase.bsample;
+            END
+        ELSE
+            BEGIN
+            _isample_rows := acv.a_p_arr1.pbasep^.sbase.bsample;
+            _isample_pct  := c_not_used; (* h.b. PTS 1105036 *)
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        _isample_rows := sample_rows;
+        _isample_pct  := sample_pct;
+        END;
+    (*ENDIF*) 
+    IF  (_isample_rows = 0) AND (_isample_pct = 0)
+    THEN
+        _ignore_file := true;
+    (*ENDIF*) 
+    _b_err := e_ok;
+    IF  NOT _ignore_file OR add
+    THEN
+        BEGIN
+        ak28init_statlog_row( acv, acv.a_p_arr1.pbasep^.sbase,
+              _isample_pct, _isample_rows, _statlog_row );
+&       ifdef trace
+        t01int4 (ak_sem, 'sample_rows ', _isample_rows);
+        t01int4 (ak_sem, 'sample_pct  ', _isample_pct);
+&       endif
+        _col_cnt              := 0;
+        _col_in_sysstatistics := 0;
+        a27init_viewscanpar( acv, _viewscanpar, v_statistics );
+        a28lock_table_for_updstat( acv, acv.a_p_arr1.pbasep^.sbase.bsurrogate, _b_err );
+        IF  _b_err = e_ok
+        THEN
+            a28lock_stat_catalog_rec( acv, acv.a_p_arr1.pbasep,
+                  NOT c_lock_exclusive, _stat_buf, _b_err );
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        (*********************************************************)
+        (*    table statistics                                   *)
+        (*********************************************************)
+        IF  ( page_cnt = 0 ) AND
+            ( acv.a_init_ddl <> ddl_create_index ) AND
+            ( acv.a_init_ddl <> ddl_create_table ) (* PTS 1118261 *)
+            AND NOT _ignore_file
+        THEN
+            BEGIN
+            IF  ak28col_stat_required(
+                acv,
+                acv.a_p_arr1.pbasep^.sbase.btablen^,
+                acv.a_p_arr1.pbasep^.sbase.bschema,
+                acv.a_p_arr1.pbasep^.sbase.bauthid,
+                acv.a_p_arr1.pbasep^.sbase,
+                _col_cnt,
+                _col_in_sysstatistics, _col_info )
+            THEN
+                ak28cnt_values( acv, _statlog_row,
+                      _stat_buf, _col_cnt, _col_info,
+                      _isample_rows, _isample_pct )
+            ELSE
+                BEGIN (* PTS 1118179 *)
+                vtimestamp (_statlog_row.slr_execution_start);
+                ak28interpret_sample_info ( acv, acv.a_p_arr1.pbasep, _isample_rows, _isample_pct,
+                      _calculate, _sample_pages);
+                IF  _calculate
+                THEN
+                    bd01CalculateRecordsAndLeaves( acv.a_transinf.tri_trans, acv.a_p_arr1.pbasep^.sbase.btreeid,
+                          _leaves, _records )
+                ELSE
+                    bd01SampleRecordsAndLeaves( acv.a_transinf.tri_trans, acv.a_p_arr1.pbasep^.sbase.btreeid,
+                          _sample_pages, _leaves, _records);
+                (*ENDIF*) 
+                vtimestamp( _statlog_row.slr_execution_end );
+                IF  ( acv.a_transinf.tri_trans.trError_gg00 <> e_ok )
+                THEN
+                    a07_b_put_error( acv, acv.a_transinf.tri_trans.trError_gg00, 1 )
+                ELSE
+                    BEGIN
+                    _stat_buf^.sstatistics.sti_pages := _leaves;
+                    _stat_buf^.sstatistics.sti_rows  := _records;
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                _statlog_row.slr_columnname := a01_il_b_identifier;
+                ak28insert_statlog( acv, _statlog_row );
+                END;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            IF  ( add )
+            THEN
+                BEGIN
+                _stat_buf^.sstatistics.sti_pages :=
+                      _stat_buf^.sstatistics.sti_pages + page_cnt;
+                _stat_buf^.sstatistics.sti_rows  :=
+                      _stat_buf^.sstatistics.sti_rows  + rec_cnt;
+                END
+            ELSE
+                IF  NOT _ignore_file
+                THEN
+                    BEGIN
+                    _stat_buf^.sstatistics.sti_pages := page_cnt;
+                    _stat_buf^.sstatistics.sti_rows  := rec_cnt;
+                    IF  ( colno > 0 )
+                    THEN
+                        a28assign_col_info (acv, acv.a_p_arr1.pbasep^.syskey,
+                              _stat_buf, colno, sec_cnt,
+                              cak_is_undefined, cak_is_undefined)
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+&       ifdef TRACE
+        IF  _stat_buf <> NIL
+        THEN
+            BEGIN
+            t01int4 (ak_sem, 'pages       ', _stat_buf^.sstatistics.sti_pages);
+            t01int4 (ak_sem, 'rows        ', _stat_buf^.sstatistics.sti_rows);
+            END;
+&       endif
+        (*ENDIF*) 
+        IF  (acv.a_returncode = 0) AND (_stat_buf <> NIL)
+        THEN
+            a11put_date_time( _stat_buf^.sstatistics.sti_date,
+                  _stat_buf^.sstatistics.sti_time );
+        (*ENDIF*) 
+        END
+    ELSE
+        a07_b_put_error( acv, _b_err, 1 );
+    (*ENDIF*) 
+    IF  ( acv.a_returncode = 0 ) AND (_stat_buf <> NIL)
+    THEN
+        BEGIN
+        (* we have to read statistics record again because        *)
+        (* it may be moved  by additional a10_fix_len_get_sysinfo *)
+        _sysk           := acv.a_p_arr1.pbasep^.syskey;
+        _sysk.sentrytyp := cak_estatistics;
+        a10get_sysinfo( acv, _sysk, d_fix, _stat_buf, _b_err );
+        IF  ( _b_err = e_ok )
+        THEN
+            ak28repl_statistics_rec( acv, acv.a_p_arr1.pbasep, _stat_buf )
+        ELSE
+            a07_b_put_error( acv, _b_err, 1 );
+        (*ENDIF*) 
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            ak28del_in_updstatwanted( acv );
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    acv.a_localCacheUsageOnly := _localCacheUsageOnly;
+    END;
+(*ENDIF*) 
+IF  commit AND ( acv.a_returncode = 0 )
+THEN (* always commit to free locks *)
+    a52_ex_commit_rollback( acv, m_commit, false, false )
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28add_table_upd_statistics (
+            VAR acv       : tak_all_command_glob;
+            updStatObj    : tsp00_Addr;
+            bForceUpdStat : boolean;
+            sample_rows   : tsp00_Int4;
+            sample_pct    : integer);
+ 
+VAR
+      _calculate            : boolean;
+      _ignore_file          : boolean;
+      _isample_rows         : tsp00_Int4;
+      _isample_pct          : integer;
+      _sample_pages         : integer;
+ 
+BEGIN
+IF  NOT bForceUpdStat
+THEN (* PTS 1137889 M.Ki *)
+    _ignore_file := (acv.a_p_arr1.pbasep^.sbase.bsample = 0)
+ELSE
+    _ignore_file := false;
+(*ENDIF*) 
+_ignore_file := _ignore_file
+      OR a36tree_in_memory (acv.a_p_arr1.pbasep^.sbase.btreeid)
+      OR kb560IsCatalogTable (acv.a_p_arr1.pbasep^.sbase.btreeid.fileTabId_gg00)
+      OR a101_IsExtendedTempFile (acv, acv.a_p_arr1.pbasep^.sbase.btreeid);
+IF  NOT _ignore_file
+THEN
+    BEGIN
+    (* PTS 1103579 E.Z. *)
+    IF  ( sample_pct = c_undefined )
+    THEN
+        BEGIN
+        (* estimate with values *)
+        (* from <sample definition> during <create table> *)
+        IF  ( acv.a_p_arr1.pbasep^.sbase.bsample < 0 )
+        THEN
+            BEGIN
+            _isample_rows := c_not_used; (* h.b. PTS 1105036 *)
+            _isample_pct  := -acv.a_p_arr1.pbasep^.sbase.bsample;
+            END
+        ELSE
+            BEGIN
+            _isample_rows := acv.a_p_arr1.pbasep^.sbase.bsample;
+            _isample_pct  := c_not_used; (* h.b. PTS 1105036 *)
+            END;
+        (*ENDIF*) 
+        IF  (_isample_rows = 0) AND (_isample_pct = 0)
+        THEN
+            _ignore_file := true;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        _isample_rows := sample_rows;
+        _isample_pct  := sample_pct;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  NOT _ignore_file AND ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    ak28interpret_sample_info (
+          acv, acv.a_p_arr1.pbasep,
+          _isample_rows, _isample_pct,
+          _calculate, _sample_pages);
+    a101_UpdStatAddTableRequest (
+          acv, updStatObj,
+          acv.a_p_arr1.pbasep^.sbase.btreeid.fileTabId_gg00,
+          _sample_pages);
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28TransferStatistics (
+            VAR t           : tgg00_TransContext;
+            VAR base_rec    : tak_baserecord);
+ 
+VAR
+      do_transfer  : boolean;
+      treeid       : tgg00_FileId;
+ 
+      lock_row     : RECORD
+            CASE boolean OF
+                true :
+                    (sysk : tgg00_SysInfoKey);
+                false :
+                    (k    : tgg00_Lkey);
+                END;
+            (*ENDCASE*) 
+ 
+ 
+BEGIN
+IF  base_rec.bseqno = cak_init_linkage
+THEN
+    BEGIN
+    do_transfer := false;
+    CASE base_rec.btablekind OF
+        (* PTS 1111576 E.Z. *)
+        twithkey, twithoutkey :
+            do_transfer := true;
+        tonebase :
+            IF  base_rec.bv_tablekind <> tcatalog_table
+            THEN
+                do_transfer := true
+            ELSE
+                base_rec.btreeid.fileLeafNodes_gg00 := 1;
+            (*ENDIF*) 
+        tview, tcomplexview, tdb2view :
+            base_rec.btreeid.fileLeafNodes_gg00 := 1;
+        OTHERWISE ;
+        END;
+    (*ENDCASE*) 
+    IF  do_transfer
+    THEN
+        BEGIN
+        base_rec.btreeid.fileRoot_gg00      := NIL_PAGE_NO_GG00;
+        base_rec.btreeid.fileLeafNodes_gg00 := cak_is_undefined;
+        IF  t.trError_gg00 = e_ok
+        THEN
+            b01filestate (t, base_rec.btreeid);
+        (*ENDIF*) 
+        IF  (t.trError_gg00 = e_ok) OR (t.trError_gg00 = e_file_read_only) OR
+            (t.trError_gg00 = e_bad_file)
+        THEN
+            BEGIN
+            treeid := base_rec.btreeid;
+            treeid.fileVersion_gg00.ci2_gg00 := cgg_dummy_file_version;
+            b01treeleafnodes (t, treeid, m_fetch,
+                  base_rec.btreeid.fileLeafNodes_gg00)
+            END
+        ELSE
+            IF  (t.trError_gg00 = e_file_unloaded ) OR
+                (t.trError_gg00 = e_file_not_found)
+            THEN
+                t.trError_gg00 := e_ok
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a28TreeStoredInVar (VAR tree : tgg00_FileId) : boolean;
+ 
+BEGIN
+a28TreeStoredInVar :=
+      (tree.fileTabId_gg00 = a28updstatwanted_tree.fileTabId_gg00)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a28update_statistics (VAR acv : tak_all_command_glob);
+ 
+CONST
+      c_onlyUpdStatWanted = true;
+ 
+VAR
+      error_pos   : integer;
+      ti          : integer;
+      val         : integer;
+      sample_rows : tsp00_Int4;
+      sample_pct  : tsp00_Int4;
+ 
+BEGIN
+IF  ( acv.a_ex_kind <> only_parsing ) OR NOT acv.a_progusage_add
+THEN
+    acv.a_localCacheUsageOnly := true;
+(*ENDIF*) 
+CASE acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_subproc OF
+    cak_x_upd_statistics, cak_x_upd_stat_col, cak_x_upd_stat_system_table :
+        BEGIN
+        (* PTS 1103579 E.Z. *)
+        IF  acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_length =
+            cak_i_compute
+        THEN
+            sample_pct  := c_100_pct
+        ELSE
+            sample_pct := c_undefined;
+        (*ENDIF*) 
+        sample_rows := c_not_used; (* h.b. PTS 1105036 *)
+        ti := acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_sa_level;
+        IF  ( ti <> 0 )
+        THEN
+            BEGIN
+            error_pos := acv.a_ap_tree^[ ti ].n_pos;
+            a05_int4_unsigned_get( acv, acv.a_ap_tree^[ ti ].n_pos,
+                  acv.a_ap_tree^[ ti ].n_length, val );
+            ti := acv.a_ap_tree^[ ti ].n_sa_level;
+            IF  ( acv.a_ap_tree^[ ti ].n_subproc = cak_i_rows )
+            THEN
+                BEGIN
+                sample_pct  := c_not_used; (* h.b. PTS 1105036 *)
+                sample_rows := val;
+                END
+            ELSE
+                BEGIN
+                IF  ( val < 1 ) OR ( val > 100 )
+                THEN
+                    a07_b_put_error( acv,
+                          e_invalid_unsign_integer, error_pos )
+                ELSE
+                    BEGIN
+                    sample_pct := val;
+                    sample_rows := c_not_used; (* h.b. PTS 1105036 *)
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        CASE acv.a_ap_tree^[ acv.a_ap_tree^[ 0 ].n_lo_level ].n_subproc OF
+            cak_x_upd_statistics :
+                ak28update_statistics( acv,
+                      NOT c_onlyUpdStatWanted, sample_rows, sample_pct );
+            cak_x_upd_stat_col :
+                IF  a101_ParallelUpdStatEnabled
+                THEN
+                    a101_UpdateStatisticsColumn (acv, sample_pct, sample_rows)
+                ELSE
+                    ak28upd_column_statistics( acv, sample_rows, sample_pct );
+                (*ENDIF*) 
+            cak_x_upd_stat_system_table :
+                ak28update_statistics( acv,
+                      c_onlyUpdStatWanted, sample_rows, sample_pct );
+            END;
+        (*ENDCASE*) 
+        END;
+    cak_i_load :
+        ak28incopy_statistics( acv );
+    cak_i_unload :
+        ak28outcopy_statistics( acv );
+    END;
+(*ENDCASE*) 
+IF  ( acv.a_returncode <> 0 )
+THEN
+    acv.a_part_rollback := true
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a28nextUpdStatWantedEntry(
+            VAR acv  : tak_all_command_glob;
+            VAR a41v : tak40_show_glob;
+            VAR key  : tgg00_Lkey) : boolean;
+ 
+CONST
+      c_inclusive = true;
+ 
+VAR
+      tabFound : boolean;
+      htreeid  : tgg00_FileId;
+      recBuf   : tgg00_Rec;
+      (* PTS 1131825 M.Ki. *)
+ 
+BEGIN
+tabFound                  := false;
+a28nextUpdStatWantedEntry := false;
+IF  (a28updstatwanted_tree.fileName_gg00 <> cgg_zero_fn)
+THEN
+    BEGIN
+    a28updstatwanted_tree.fileRoot_gg00 := NIL_PAGE_NO_GG00;
+    htreeid := a28updstatwanted_tree;
+    b02next_record(
+          acv.a_transinf.tri_trans,
+          htreeid,
+          key,
+          NOT c_inclusive,
+          recBuf );
+    WHILE (  (acv.a_transinf.tri_trans.trError_gg00 = e_ok)
+          OR (acv.a_transinf.tri_trans.trError_gg00 = e_key_not_found) )
+          AND (NOT tabFound) DO
+        BEGIN
+        acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+        tabFound := ak28GetUpdStatWantedTable (acv, a41v, recBuf);
+        (* update key *)
+        SAPDB_PascalMove ('VAK28 ',  12,    
+              sizeof (recBuf.recKey_gg00), sizeof (key),
+              @recBuf.recKey_gg00, 1,
+              @key, 1,
+              recBuf.recKey_gg00.keyRecLenSpace_gg00,
+              acv.a_transinf.tri_trans.trError_gg00);
+        IF  tabFound
+        THEN
+            a28nextUpdStatWantedEntry := true
+        ELSE
+            BEGIN
+            (* assume that entry is broken *)
+            b02del_record (acv.a_transinf.tri_trans,
+                  htreeid, key);
+            b02next_record(
+                  acv.a_transinf.tri_trans,
+                  htreeid,
+                  key,
+                  NOT c_inclusive,
+                  recBuf );
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  NOT tabFound
+    THEN
+        BEGIN
+        a41v.a4p_arr.pbasep := NIL;
+        IF  (acv.a_transinf.tri_trans.trError_gg00 = e_no_next_record)
+        THEN
+            acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(* PTS 1103591 E.Z. *)
+&ifdef trace
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak28trace (VAR sample_info : tgg00_SampleInfo);
+ 
+BEGIN
+WITH sample_info DO
+    BEGIN
+    t01int4 (ak_sem, 'leafnodes   ', leafnodes);
+    t01int4 (ak_sem, 'sec_key_cnt ', sec_key_cnt);
+    t01int4 (ak_sem, 'prim_key_cnt', prim_key_cnt);
+    t01int4 (ak_sem, 'avg_prim_p_l', avg_prim_per_list);
+    END;
+(*ENDWITH*) 
+END;
+ 
+&endif
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

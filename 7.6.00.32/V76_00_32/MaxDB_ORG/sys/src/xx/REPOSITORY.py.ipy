@@ -1,0 +1,1112 @@
+#
+# =====================================================
+# @(#) Repository                 7.6        2005-04-13
+# =====================================================
+# Created in  7.6:
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+def install (session,options):
+    """Installing tables for Repository (WebDAV)
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    requireSysdba (session)
+
+    #----------------------------------------------------------------------------
+    # Do we have to migrate from 7.5 WebDAV?
+    #----------------------------------------------------------------------------
+    if not sqlOK(session, "SELECT 1 FROM SYSREPOSITORYSHARED.WEBDAV_VERSION WHERE MAJOR_VERSION='2' AND MINOR_VERSION='0'"):
+        #----------------------------------------------------------------------------
+        # Drop initial WebDAV 7.6 schema
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4024, """
+            DROP SCHEMA SYSREPOSITORYSHARED
+        """)
+
+        stopIfSqlNotErr (session, -4024, """
+            DROP SCHEMA SYSREPOSITORY
+        """)
+
+        stopIfSqlNotErr (session, -4024, """
+            DROP SCHEMA SYSREPOSITORYOWN
+        """)
+
+        #----------------------------------------------------------------------------
+        # Create schema SYSREPOSITORYSHARED
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, 'CREATE SCHEMA SYSREPOSITORYSHARED')
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_VERSION
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE SYSREPOSITORYSHARED.WEBDAV_VERSION
+            (
+	            "MAJOR_VERSION"   Fixed (3,0),
+	            "MINOR_VERSION"   Fixed (3,0)
+            ) INTERNAL""")
+
+        stopIfSqlNotOK (session, """
+            INSERT SYSREPOSITORYSHARED.WEBDAV_VERSION
+            (MAJOR_VERSION, MINOR_VERSION) VALUES
+            (2,0)
+        """)
+
+        #----------------------------------------------------------------------------
+        # Do we have to migrate from 7.5 WebDAV?
+        #----------------------------------------------------------------------------
+        if existsTable (session, "WEBDAV_INODE"):
+
+            #----------------------------------------------------------------------------
+            # Update table contents
+            #----------------------------------------------------------------------------
+            #----------------------------------------------------------------------------
+            # Folder Deleted Items (Old 7.4 versions)
+            #----------------------------------------------------------------------------
+
+            if not sqlOK(session, """
+                SELECT 1 FROM WEBDAV_INODE WHERE
+                PId = X'000000000000000000000000000000000000000000000000' AND
+                CId = X'000000000000000000000000000000000000000000000001' AND
+                Name = 'Deleted Items'
+            """):
+
+                stopIfSqlNotOK (session, """
+                    Insert into WEBDAV_INODE Set
+                        PId = X'000000000000000000000000000000000000000000000000',
+                        CId = X'000000000000000000000000000000000000000000000001',
+                        Name = 'Deleted Items',
+                        State = 0,
+                        CompressedLength = 0
+                """)
+
+                stopIfSqlNotOK (session, """
+                    INSERT INTO WEBDAV_PROPERTY SET
+                        CID = X'000000000000000000000000000000000000000000000001',
+                        PROPERTY_ID = X'000000000000000000000000000000000000000000000001',
+                        PROPERTY_SHORT_VALUE = 'Deleted Items'
+                """)
+
+                stopIfSqlNotOK (session, """
+                    INSERT INTO WEBDAV_PROPERTY SET
+                        CID = X'000000000000000000000000000000000000000000000001',
+                        PROPERTY_ID = X'000000000000000000000000000000000000000000000002',
+                        PROPERTY_SHORT_VALUE = 'collection'
+                """)
+
+                stopIfSqlNotOK (session, """
+                    INSERT INTO WEBDAV_PROPERTY SET
+                        CID = X'000000000000000000000000000000000000000000000001',
+                        PROPERTY_ID = X'000000000000000000000000000000000000000000000003',
+                        PROPERTY_SHORT_VALUE = 'sapdbwww/directory'
+                """)
+
+                stopIfSqlNotOK (session, """
+                    INSERT INTO WEBDAV_PROPERTY SET
+                        CID = X'000000000000000000000000000000000000000000000001',
+                        PROPERTY_ID = X'000000000000000000000000000000000000000000000004',
+                        PROPERTY_SHORT_VALUE = '0'
+                """)
+
+                stopIfSqlNotOK (session, """
+                INSERT INTO WEBDAV_PROPERTY 
+			        VALUES (X'000000000000000000000000000000000000000000000001',
+					        X'000000000000000000000000000000000000000000000005',
+					        CHAR(TIMESTAMP,ISO),
+					        NULL)
+                """)
+                
+            #----------------------------------------------------------------------------
+            # Live Property creationdate (Old 7.4 versions)
+            #----------------------------------------------------------------------------
+
+            if not sqlOK(session, """
+                SELECT 1 FROM WEBDAV_PROPERTY_MANAGEMENT WHERE
+                Id = X'000000000000000000000000000000000000000000000010'
+            """):
+
+                stopIfSqlNotOK (session, """
+                    Insert into WEBDAV_PROPERTY_MANAGEMENT Set
+                        Id = X'000000000000000000000000000000000000000000000010',
+                        Name_Space_Id = X'000000000000000000000000000000000000000000000001',
+                        Name_Prefix = 'creationdate'
+                """)
+
+                stopIfSqlNotOK (session, """
+                    INSERT INTO WEBDAV_PROPERTY (CID, PROPERTY_ID, PROPERTY_SHORT_VALUE)
+				        SELECT
+					        P1.CID,
+					        X'000000000000000000000000000000000000000000000010',
+					        P2.PROPERTY_SHORT_VALUE
+				        FROM
+					        WEBDAV_PROPERTY P1, WEBDAV_PROPERTY P2
+				        WHERE
+					        P1.CID = P2.CID AND
+					        P1.Property_Id = P2.Property_Id AND
+					        P2.Property_Id = X'000000000000000000000000000000000000000000000005'
+                """)
+                
+            #----------------------------------------------------------------------------
+            # Live Property originallocation (Old 7.4 versions)
+            #----------------------------------------------------------------------------
+
+            if not sqlOK(session, """
+                SELECT 1 FROM WEBDAV_PROPERTY_MANAGEMENT WHERE
+                Id = X'00000000000000000000000000000000000000000000000F'
+            """):
+
+                stopIfSqlNotOK (session, """
+                    Insert into WEBDAV_PROPERTY_MANAGEMENT Set
+                        Id = X'00000000000000000000000000000000000000000000000F',
+                        Name_Space_Id = X'000000000000000000000000000000000000000000000001',
+                        Name_Prefix = 'originallocation'
+                """)
+
+            #----------------------------------------------------------------------------
+
+            stopIfSqlNotOK (session, """
+                update webdav_inode set pid = x'000000000000000000000000000000000000000000000001' where cid=x'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                delete webdav_property_management where name_prefix='lockdiscovery'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_resourcetype' where name_prefix='resourcetype' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_locktoken' where name_prefix='lockid' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_lockowner' where name_prefix='lockowner' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_locktype' where name_prefix='locktype' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_lockscope' where name_prefix='lockscope' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_locktimeout' where name_prefix='locktimeout' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_lockdepth' where name_prefix='lockdepth' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_docclassid' where name_prefix='docclassid' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_parsestate' where name_prefix='parsestate' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                update webdav_property_management set name_prefix='internal_originallocation' where name_prefix='originallocation' and name_space_id=X'000000000000000000000000000000000000000000000001'
+            """)
+
+            stopIfSqlNotOK (session, """
+                insert into webdav_inode (pid, cid, name) values (X'000000000000000000000000000000000000000000000000', X'000000000000000000000000000000000000000000000000', '')
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_management (ID, NAME_SPACE_ID, name_prefix) VALUES
+                (x'000000000000000000000000000000000000000000000011',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_etag')
+            """)
+
+            guid = loader._createGUID()
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY (CID, PROPERTY_ID, PROPERTY_SHORT_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000011',
+                'W/""" + guid + """')
+            """)
+
+            guid = loader._createGUID()
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY (CID, PROPERTY_ID, PROPERTY_SHORT_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000001',
+                x'000000000000000000000000000000000000000000000011',
+                'W/""" + guid + """')
+            """)
+
+            #----------------------------------------------------------------------------
+            # Update table schema
+            #----------------------------------------------------------------------------
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_INODE MODIFY NAME CHAR(499) ASCII
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME TABLE "WEBDAV_INODE" TO SYSREPOSITORYSHARED.WEBDAV_NODE
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_CONTAINER.CONTENT TO LONG_CONTENT
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME TABLE "WEBDAV_CONTAINER" TO SYSREPOSITORYSHARED.WEBDAV_CONTENT
+            """)
+
+            stopIfSqlNotOK (session, """
+                DROP INDEX WEBDAV_NAME_SPACE_X
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_NAME_SPACE DROP PRIMARY KEY
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_NAME_SPACE ADD PRIMARY KEY (ID)
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_NAME_SPACE.NAME_SPACE TO SHORT_VALUE
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_NAME_SPACE MODIFY  SHORT_VALUE CHAR(499) ASCII
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_NAME_SPACE COLUMN  SHORT_VALUE NOT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_NAME_SPACE ADD LONG_VALUE LONG BYTE DEFAULT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME TABLE "WEBDAV_NAME_SPACE" TO SYSREPOSITORYSHARED.WEBDAV_PROPERTY_NAMESPACE
+            """)
+
+            stopIfSqlNotOK (session, """
+                CREATE INDEX WEBDAV_PROPERTY_NAMESPACE_X1 ON SYSREPOSITORYSHARED.WEBDAV_PROPERTY_NAMESPACE (SHORT_VALUE)
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY_MANAGEMENT DROP PRIMARY KEY
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY_MANAGEMENT ADD PRIMARY KEY (ID)
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY_MANAGEMENT COLUMN NAME_SPACE_ID NOT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_PROPERTY_MANAGEMENT.NAME_PREFIX TO SHORT_VALUE
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY_MANAGEMENT MODIFY  SHORT_VALUE CHAR(300) ASCII NOT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY_MANAGEMENT ADD LONG_VALUE LONG BYTE DEFAULT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME TABLE "WEBDAV_PROPERTY_MANAGEMENT" TO SYSREPOSITORYSHARED.WEBDAV_PROPERTY_NAME
+            """)
+
+            stopIfSqlNotOK (session, """
+                CREATE INDEX WEBDAV_PROPERTY_NAME_X1 ON SYSREPOSITORYSHARED.WEBDAV_PROPERTY_NAME (NAME_SPACE_ID, SHORT_VALUE)
+            """)
+
+            stopIfSqlNotOK (session, """
+                DROP INDEX WEBDAV_PROPERTY_X1
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY ADD PRIMARY KEY (PROPERTY_ID, CID)
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_PROPERTY.PROPERTY_ID TO NAME_ID
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_PROPERTY.PROPERTY_SHORT_VALUE TO SHORT_VALUE
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY MODIFY  SHORT_VALUE CHAR(499) ASCII NOT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME COLUMN WEBDAV_PROPERTY.PROPERTY_LONG_VALUE TO LONG_VALUE
+            """)
+
+            stopIfSqlNotOK (session, """
+                ALTER TABLE WEBDAV_PROPERTY COLUMN LONG_VALUE DEFAULT NULL
+            """)
+
+            stopIfSqlNotOK (session, """
+                RENAME TABLE "WEBDAV_PROPERTY" TO SYSREPOSITORYSHARED.WEBDAV_PROPERTY
+            """)
+
+        #----------------------------------------------------------------------------
+        # We do not have to migrate from 7.5
+        #----------------------------------------------------------------------------
+        else:
+
+            #----------------------------------------------------------------------------
+            # Create schema SYSREPOSITORYSHARED
+            #----------------------------------------------------------------------------
+            switchToSchema (session, 'SYSREPOSITORYSHARED')
+
+            #----------------------------------------------------------------------------
+            # Create table WEBDAV_CONTENT
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                CREATE TABLE "WEBDAV_CONTENT"
+                (
+	                "CID"               Char (24)   BYTE,
+	                "SHORT_CONTENT"     Char (8000) BYTE,
+	                "LONG_CONTENT"      Long        BYTE,
+	                PRIMARY KEY ("CID")
+                ) INTERNAL""")
+
+            #----------------------------------------------------------------------------
+            # Create table WEBDAV_NODE
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                CREATE TABLE "WEBDAV_NODE"
+                (
+	                "PID"               Char  (24)  BYTE,
+	                "CID"               Char  (24)  BYTE   NOT NULL,
+	                "NAME"              Char  (499) ASCII,
+	                "COMPRESSEDLENGTH"  Fixed (10,0)       DEFAULT 0,
+	                "STATE"             Fixed (2)          DEFAULT 0,
+	                PRIMARY KEY ("PID", "NAME"),
+	                CONSTRAINT WEBDAV_NODE_X1 UNIQUE (CID)
+                ) INTERNAL""")
+
+            #----------------------------------------------------------------------------
+            # Create table WEBDAV_PROPERTY
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                CREATE TABLE "WEBDAV_PROPERTY"
+                (
+	                "CID"             Char (24)  BYTE,
+	                "NAME_ID"         Char (24)  BYTE,
+	                "SHORT_VALUE"     Char (499) ASCII   NOT NULL,
+	                "LONG_VALUE"      Long       BYTE    DEFAULT NULL,
+	                PRIMARY KEY ("NAME_ID", "CID")
+                ) INTERNAL""")
+
+            stopIfSqlNotOK (session, """
+                CREATE INDEX WEBDAV_PROPERTY_X1 ON WEBDAV_PROPERTY (CID)
+            """)
+
+            # displayname
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000001',
+                '/', NULL)
+            """)
+
+            # resourcetype
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000002',
+                'collection', NULL)
+            """)
+
+            # getcontenttype
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000003',
+                'sapdbwww/directory', NULL)
+            """)
+
+            # getcontentlength
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000004',
+                '0', NULL)
+            """)
+
+            # getlastmodified
+            stopIfSqlNotOK (session, """
+                SET FORMAT ISO
+            """)
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000005',
+                TIMESTAMP, NULL)
+            """)
+
+            # creationdate
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000010',
+                TIMESTAMP, NULL)
+            """)
+            stopIfSqlNotOK (session, """
+                SET FORMAT INTERNAL
+            """)
+
+            # internal_etag
+            guid = loader._createGUID()
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY
+                (CID, NAME_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000000',
+                x'000000000000000000000000000000000000000000000011',
+                'W/""" + guid + """', NULL)
+            """)
+
+            #----------------------------------------------------------------------------
+            # Create table WEBDAV_PROPERTY_NAME
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                CREATE TABLE "WEBDAV_PROPERTY_NAME"
+                (
+	                "ID"               Char (24)  BYTE,
+	                "NAME_SPACE_ID"    Char (24)  BYTE    NOT NULL,
+	                "SHORT_VALUE"      Char (300) ASCII   NOT NULL,
+	                "LONG_VALUE"       Long       BYTE    DEFAULT NULL,
+	                PRIMARY KEY ("ID")
+                ) INTERNAL""")
+
+            stopIfSqlNotOK (session, """
+                CREATE INDEX WEBDAV_PROPERTY_NAME_X1 ON WEBDAV_PROPERTY_NAME (NAME_SPACE_ID, SHORT_VALUE)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000001',
+                x'000000000000000000000000000000000000000000000001',
+                'displayname', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000002',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_resourcetype', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000003',
+                x'000000000000000000000000000000000000000000000001',
+                'getcontenttype', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000004',
+                x'000000000000000000000000000000000000000000000001',
+                'getcontentlength', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000005',
+                x'000000000000000000000000000000000000000000000001',
+                'getlastmodified', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000006',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_locktoken', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000007',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_lockowner', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000008',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_locktype', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000009',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_lockscope', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000A',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_locktimeout', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000B',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_lockdepth', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000C',
+                x'000000000000000000000000000000000000000000000001',
+                'supported_lock', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000D',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_docclassid', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000E',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_parsestate', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'00000000000000000000000000000000000000000000000F',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_originallocation', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000010',
+                x'000000000000000000000000000000000000000000000001',
+                'creationdate', NULL)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAME
+                (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000011',
+                x'000000000000000000000000000000000000000000000001',
+                'internal_etag', NULL)
+            """)
+
+            #----------------------------------------------------------------------------
+            # Create table WEBDAV_PROPERTY_NAMESPACE
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                CREATE TABLE "WEBDAV_PROPERTY_NAMESPACE"
+                (
+	                "ID"               Char (24)  BYTE,
+	                "SHORT_VALUE"      Char (499) ASCII   NOT NULL,
+	                "LONG_VALUE"       Long       BYTE    DEFAULT NULL,
+	                PRIMARY KEY ("ID")
+                ) INTERNAL""")
+
+            stopIfSqlNotOK (session, """
+                CREATE INDEX WEBDAV_PROPERTY_NAMESPACE_X1 ON WEBDAV_PROPERTY_NAMESPACE (SHORT_VALUE)
+            """)
+
+            stopIfSqlNotOK (session, """
+                INSERT WEBDAV_PROPERTY_NAMESPACE
+                (ID, SHORT_VALUE, LONG_VALUE) VALUES
+                (x'000000000000000000000000000000000000000000000001',
+                'DAV:', NULL)
+            """)
+
+            #----------------------------------------------------------------------------
+            # Grant tables to public
+            #----------------------------------------------------------------------------
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_CONTENT
+                    TO      PUBLIC""")
+
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_NODE
+                    TO      PUBLIC""")
+
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_PROPERTY
+                    TO      PUBLIC""")
+
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_PROPERTY_NAME
+                    TO      PUBLIC""")
+
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_PROPERTY_NAMESPACE
+                    TO      PUBLIC""")
+
+            stopIfSqlNotOK (session, """
+                    GRANT   SELECT, UPDATE, DELETE, INSERT
+                    ON      WEBDAV_VERSION
+                    TO      PUBLIC""")
+
+
+        #----------------------------------------------------------------------------
+        #----------------------------------------------------------------------------
+        # Create tables for own repository
+        #----------------------------------------------------------------------------
+        #----------------------------------------------------------------------------
+
+        stopIfSqlNotOK (session, 'CREATE SCHEMA SYSREPOSITORY')
+
+        switchToSchema (session, 'SYSREPOSITORY')
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_CONTENT
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_CONTENT"
+            (
+	            "CID"               Char (24)   BYTE,
+	            "SHORT_CONTENT"     Char (8000) BYTE,
+	            "LONG_CONTENT"      Long        BYTE,
+	            "VIEWOWNER"         Char (32)   ASCII DEFAULT USER,
+	            PRIMARY KEY ("CID")
+            ) INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_NODE
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_NODE"
+            (
+	            "PID"               Char  (24)  BYTE,
+	            "CID"               Char  (24)  BYTE   NOT NULL,
+	            "NAME"              Char  (499) ASCII,
+	            "COMPRESSEDLENGTH"  Fixed (10,0)       DEFAULT 0,
+	            "STATE"             Fixed (2)          DEFAULT 0,
+	            "VIEWOWNER"         Char  (32)  ASCII  DEFAULT USER,
+	            PRIMARY KEY ("PID", "NAME", "VIEWOWNER"),
+	            CONSTRAINT WEBDAV_NODE_X1 UNIQUE (CID, VIEWOWNER)
+            ) INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_PROPERTY
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_PROPERTY"
+            (
+	            "CID"             Char (24)  BYTE,
+	            "NAME_ID"         Char (24)  BYTE,
+	            "SHORT_VALUE"     Char (499) ASCII   NOT NULL,
+	            "LONG_VALUE"      Long       BYTE    DEFAULT NULL,
+	            "VIEWOWNER"       Char (32)  ASCII   DEFAULT USER,
+	            PRIMARY KEY ("NAME_ID", "CID", "VIEWOWNER")
+            ) INTERNAL""")
+
+        stopIfSqlNotOK (session, """
+            CREATE INDEX WEBDAV_PROPERTY_X1 ON WEBDAV_PROPERTY (CID)
+        """)
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_PROPERTY_NAME
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_PROPERTY_NAME"
+            (
+	            "ID"               Char (24)  BYTE,
+	            "NAME_SPACE_ID"    Char (24)  BYTE    NOT NULL,
+	            "SHORT_VALUE"      Char (300) ASCII   NOT NULL,
+	            "LONG_VALUE"       Long       BYTE    DEFAULT NULL,
+	            "VIEWOWNER"        Char (32)  ASCII   DEFAULT USER,
+	            PRIMARY KEY ("ID")
+            ) INTERNAL""")
+
+        stopIfSqlNotOK (session, """
+            CREATE INDEX WEBDAV_PROPERTY_NAME_X1 ON WEBDAV_PROPERTY_NAME (NAME_SPACE_ID, SHORT_VALUE)
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000001',
+            x'000000000000000000000000000000000000000000000001',
+            'displayname', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000002',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_resourcetype', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000003',
+            x'000000000000000000000000000000000000000000000001',
+            'getcontenttype', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000004',
+            x'000000000000000000000000000000000000000000000001',
+            'getcontentlength', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000005',
+            x'000000000000000000000000000000000000000000000001',
+            'getlastmodified', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000006',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_locktoken', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000007',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_lockowner', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000008',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_locktype', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000009',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_lockscope', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000A',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_locktimeout', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000B',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_lockdepth', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000C',
+            x'000000000000000000000000000000000000000000000001',
+            'supported_lock', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000D',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_docclassid', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000E',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_parsestate', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'00000000000000000000000000000000000000000000000F',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_originallocation', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000010',
+            x'000000000000000000000000000000000000000000000001',
+            'creationdate', NULL, 'PUBLIC')
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAME
+            (ID, NAME_SPACE_ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000011',
+            x'000000000000000000000000000000000000000000000001',
+            'internal_etag', NULL, 'PUBLIC')
+        """)
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_PROPERTY_NAMESPACE
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_PROPERTY_NAMESPACE"
+            (
+	            "ID"               Char (24)  BYTE,
+	            "SHORT_VALUE"      Char (499) ASCII   NOT NULL,
+	            "LONG_VALUE"       Long       BYTE    DEFAULT NULL,
+	            "VIEWOWNER"        Char (32)  ASCII   DEFAULT USER,
+	            PRIMARY KEY ("ID")
+            ) INTERNAL""")
+
+        stopIfSqlNotOK (session, """
+            CREATE INDEX WEBDAV_PROPERTY_NAMESPACE_X1 ON WEBDAV_PROPERTY_NAMESPACE (SHORT_VALUE)
+        """)
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_PROPERTY_NAMESPACE
+            (ID, SHORT_VALUE, LONG_VALUE, VIEWOWNER) VALUES
+            (x'000000000000000000000000000000000000000000000001',
+            'DAV:', NULL, 'PUBLIC')
+        """)
+
+        #----------------------------------------------------------------------------
+        # Create table WEBDAV_VERSION
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+            CREATE TABLE "WEBDAV_VERSION"
+            (
+	            "MAJOR_VERSION"   Fixed (3,0),
+	            "MINOR_VERSION"   Fixed (3,0)
+            ) INTERNAL""")
+
+        stopIfSqlNotOK (session, """
+            INSERT WEBDAV_VERSION
+            (MAJOR_VERSION, MINOR_VERSION) VALUES
+            (2,0)
+        """)
+
+        #----------------------------------------------------------------------------
+        #----------------------------------------------------------------------------
+        # Create views for own repository
+        #----------------------------------------------------------------------------
+        #----------------------------------------------------------------------------
+
+        stopIfSqlNotOK (session, 'CREATE SCHEMA SYSREPOSITORYOWN')
+
+        switchToSchema (session, 'SYSREPOSITORYOWN')
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_CONTENT
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_CONTENT
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_CONTENT AS
+                SELECT CID, Short_Content, Long_Content
+                FROM SYSREPOSITORY.WEBDAV_CONTENT
+                WHERE ViewOwner IN (USER)
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_NODE
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_NODE
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_NODE AS
+                SELECT PID, CID, Name, CompressedLength
+                FROM SYSREPOSITORY.WEBDAV_NODE
+                WHERE ViewOwner IN (USER)
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_PROPERTY
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_PROPERTY
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_PROPERTY AS
+                SELECT CID, Name_Id, Short_Value, Long_Value
+                FROM SYSREPOSITORY.WEBDAV_PROPERTY
+                WHERE ViewOwner IN (USER)
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_PROPERTY_NAME
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_PROPERTY_NAME
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_PROPERTY_NAME AS
+                SELECT ID, Name_Space_Id, Short_Value, Long_Value
+                FROM SYSREPOSITORY.WEBDAV_PROPERTY_NAME
+                WHERE ViewOwner IN (USER, 'PUBLIC')
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_PROPERTY_NAMESPACE
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_PROPERTY_NAMESPACE
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_PROPERTY_NAMESPACE AS
+                SELECT ID, Short_Value, Long_Value
+                FROM SYSREPOSITORY.WEBDAV_PROPERTY_NAMESPACE
+                WHERE ViewOwner IN (USER, 'PUBLIC')
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Create the view of WEBDAV_VERSION
+        #----------------------------------------------------------------------------
+        stopIfSqlNotErr (session, -4004, """
+            DROP VIEW WEBDAV_VERSION
+        """)
+
+        stopIfSqlNotOK (session, """
+                CREATE VIEW WEBDAV_VERSION AS
+                SELECT *
+                FROM SYSREPOSITORY.WEBDAV_VERSION
+            WITH CHECK OPTION INTERNAL""")
+
+        #----------------------------------------------------------------------------
+        # Grant views to public
+        #----------------------------------------------------------------------------
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_CONTENT
+                TO      PUBLIC""")
+
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_NODE
+                TO      PUBLIC""")
+
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_PROPERTY
+                TO      PUBLIC""")
+
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_PROPERTY_NAME
+                TO      PUBLIC""")
+
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_PROPERTY_NAMESPACE
+                TO      PUBLIC""")
+
+        stopIfSqlNotOK (session, """
+                GRANT   SELECT, UPDATE, DELETE, INSERT
+                ON      WEBDAV_VERSION
+                TO      PUBLIC""")
+
+    #----------------------------------------------------------------------------
+    # Commit the data definitions
+    #----------------------------------------------------------------------------
+
+    loaderCmd (session, 'COMMIT')
+
+    switchToDefaultSchema (session, options)
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, install.__doc__)
+
+

@@ -1,0 +1,104 @@
+#! /bin/bash
+# Copyright (c) 2001-2004 SAP AG, Germany.
+#
+# Author: <maxdb@lists.mysql.com>
+#
+# init.d/maxdbweb
+#
+#   and symbolic its link
+#
+#
+# System startup script for the nessus backend nessusd
+#
+### BEGIN INIT INFO
+# Provides: MaxDBWeb 
+# Required-Start: $remote_fs $syslog
+# Required-Stop:  $remote_fs $syslog
+# Default-Start:  3 5
+# Default-Stop:   0 1 2 6
+# Description:    Start MaxDB web server.
+### END INIT INFO
+
+
+
+# check program fuser
+FUSER=/bin/fuser
+test -x $FUSER || FUSER=/sbin/fuser
+test -x $FUSER || FUSER=/usr/sbin/fuser	
+test -x $FUSER || echo "program fuser not found" >&2
+test -x $FUSER || exit 5
+
+
+function RunningPort () {
+	if [ -f /var/log/sdb/httperr.log ]; then
+		_o=`cat /var/log/sdb/httperr.log | grep on\ port | sed -e s/^.*port// | sed -e s/\\\[.*//`
+		for _i in $_o; do
+			_port=$_i
+		done
+	fi
+}
+
+function StartPort () {
+	if [ -f /var/spool/sql/ini/WebAgent76.ini ]; then
+		_o=`cat /var/spool/sql/ini/WebAgent76.ini | grep Port`
+		for _i in $_o; do
+                        _port=`echo $_i | sed -e s/^.*Port=//`
+                done
+	fi	
+}
+
+case "$1" in
+	start)
+		_o=`$0 status | grep not`
+		if [ "$_o" = "" ]; then
+			RunningPort
+			echo "MaxDB WebServer is already running on port $_port"
+		else 
+			StartPort
+			echo -n "Starting MaxDB WebServer on port $_port:"
+			cd /opt/sdb/web/pgm
+			export LD_LIBRARY_PATH=/opt/sdb/web/lib:/opt/sdb/interfaces/odbc/lib:$LD_LIBRARY_PATH
+			./wahttp > /dev/null 2>&1 & 
+		fi		
+		;;
+		
+	stop)
+		_o=`$0 status | grep not`
+		if [ "$_o" = "" ]; then
+                	echo -n "Shutting down MaxDB WebServer:"
+			_o=`$FUSER -a /opt/sdb/web/pgm/wahttp`
+			for _i in $_o; do
+				_pid=`echo $_i | grep e | tr -d e | sed -e s/^.*:$//`
+				if [ "$_pid" != "" ]; then
+					#echo "killing process $_pid"
+					kill -9 $_pid > /dev/null
+				fi 
+			done
+		else
+                        echo $_o 
+                fi	
+		;;
+	status)
+            	_o=`$FUSER -s /opt/sdb/web/pgm/wahttp`
+            	if [ $? -eq 0 ]; then
+                	RunningPort
+			echo "MaxDB WebServer is running on port $_port"
+                	RETVAL=0
+            	else
+                	echo "MaxDB WebServer is not running"
+             	   	RETVAL=0
+            	fi
+        	;;
+	restart)
+        	$0 stop
+        	$0 start
+        	;;
+	reload)
+        	$0 stop
+        	$0 start
+        	;;
+    	*)
+        	echo "Usage: maxdbweb {start|stop|status|reload|restart}"
+        	exit 1
+        	;;
+esac

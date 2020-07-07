@@ -1,0 +1,1734 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VBD72$
+.tt 2 $$$
+.tt 3 $JuergenP$filestatistic$$$1999-10-20$
+***********************************************************
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+.nf
+.sp
+Module  : filestatistic
+=========
+.sp
+Purpose : static file statistics
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+ 
+        PROCEDURE
+              bd72SampleMultiColumnStatistic(
+                    VAR MessBlock        : tgg00_MessBlock;
+                    VAR Current          : tbd_current_tree;
+                    VAR TempCurrent      : tbd_current_tree;
+                    NumberOfSampleLeaves : tsp00_Int4;
+                    VAR NumberOfLeaves   : tsp00_Int4;
+                    VAR NumberOfRecords  : tsp00_Int4;
+                    VAR DistinctValues   : tgg00_ColumnDistinctValues);
+ 
+        PROCEDURE
+              bd72InitSampleInfo (
+                    VAR tree          : tgg00_FileId;
+                    VAR info          : tgg00_SampleInfo;
+                    VAR stat_aux_vars : tbd_stat_aux_vars);
+ 
+        PROCEDURE
+              bd72SampleInfoEpilog (
+                    VAR info          : tgg00_SampleInfo;
+                    scol_only         : boolean;
+                    VAR stat_aux_vars : tbd_stat_aux_vars);
+ 
+.CM *-END-* define --------------------------------------
+.sp
+.cp 3
+Use     :
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4;
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tbd_nodeptr;
+                    curr_buf_cnt   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              nodehandling : VBD13;
+ 
+        PROCEDURE
+              bd13GetNode (VAR Current : tbd_current_tree;
+                    Pno          : tsp00_PageNo;
+                    PageLockMode : tbd00_PageLockMode;
+                    NodeReq      : tbd_node_request;
+                    VAR Nptrs    : tbd_node_ptrs);
+ 
+        PROCEDURE
+              b13r_release_node (VAR nptr : tbd_node_ptrs;
+                    VAR current : tbd_current_tree;
+                    lru_info    : tbd_lru_info);
+ 
+      ------------------------------ 
+ 
+        FROM
+              treehandling         : VBD30;
+ 
+        PROCEDURE
+              bd30AddToTempTree (
+                    bCountDuplicates : boolean;
+                    VAR rec          : tgg00_Lkey;
+                    VAR current      : tbd_current_tree);
+ 
+        PROCEDURE
+              bd30GetSubTree (
+                    VAR current : tbd_current_tree;
+                    indexPageNo : tsp00_PageNo);
+ 
+        PROCEDURE
+              bd30ReleaseSubTree(
+                    VAR current : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              indexhandling : VBD50;
+ 
+        PROCEDURE
+              bd50PositionLeaf (
+                    leafpos           : tsp00_Int4;
+                    leafnodes         : tsp00_Int4;
+                    VAR left_estimate : tsp00_Int4;
+                    VAR rightestimate : tsp00_Int4;
+                    VAR nptrs         : tbd_node_ptrs;
+                    VAR current       : tbd_current_tree);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        FUNCTION
+              bd999UnpackRow (
+                    VAR Source      : tgg00_Rec;
+                    VAR Destination : tgg00_Rec) : tgg00_RecPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120InsertTrace (VAR t   : tgg00_TransContext;
+                    trace_layer  : tgg00_Debug;
+                    trace_object : tgg00_VtraceType;
+                    body_len     : tsp00_Int2;
+                    trace_body   : tgg11_VtraceBodyPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace : tgg00_VtraceState;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04locate_col (VAR st : tgg00_StackEntry;
+                    rec_buf        : tgg00_RecPtr;
+                    VAR varcol_pos : tgg00_VarColPosList;
+                    VAR col_pos    : integer;
+                    VAR col_len    : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_edit_routines : VGG17;
+ 
+        PROCEDURE
+              g17sname_to_line (
+                    n             : tsp00_Sname;
+                    VAR ln_len    : integer;
+                    VAR ln        : tsp00_Line);
+ 
+        PROCEDURE
+              g17trimint4_to_line (
+                    int        : tsp00_Int4;
+                    VAR ln_len : integer;
+                    VAR ln     : tsp00_Line);
+ 
+        PROCEDURE
+              g17longreal_to_line (
+                    re     : tsp00_Longreal;
+                    digits : integer;
+                    pos    : integer;
+                    VAR ln : tsp00_Line);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-30 : VSP30;
+ 
+        PROCEDURE
+              s30luc (VAR buf1   : tbd_node;
+                    fieldpos1    : tsp00_Int4;
+                    fieldlength1 : tsp00_Int4;
+                    VAR buf2     : tbd_node;
+                    fieldpos2    : tsp00_Int4;
+                    fieldlength2 : tsp00_Int4;
+                    VAR l_result : tsp00_LcompResult);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        FUNCTION
+              vexp ( value : tsp00_Longreal ;
+                    VAR error : tsp00_NumError ): tsp00_Longreal;
+ 
+        FUNCTION
+              vln  ( value : tsp00_Longreal ;
+                    VAR error : tsp00_NumError ): tsp00_Longreal;
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01c64 (debug : tgg00_Debug; VAR msg : tsp00_C64);
+ 
+        PROCEDURE
+              t01int4 (layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+ 
+        PROCEDURE
+              t01real (debug : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    r        : tsp00_Longreal;
+                    digits   : integer);
+ 
+        FUNCTION
+              t01trace (layer : tgg00_Debug) : boolean;
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              b06dump_bad_page;
+ 
+              tbd_univ_ptr tbd_nodeptr
+ 
+        PROCEDURE
+              bd30AddToTempTree;
+ 
+              tgg00_Rec tgg00_Lkey
+ 
+        PROCEDURE
+              s30luc;
+ 
+              tsp00_MoveObj tbd_node
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  :     JuergenP
+.sp
+.cp 3
+Created : 1981-02-03
+.sp
+.cp 3
+.sp
+.cp 3
+Release :      Date : 1999-10-20
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+.sp 2
+b72column_statistic
+.sp
+tgg00_MessType = m_column_statistic leads to b72column_statistic via
+k05functions, k71column_statistic and b01column_statistic.
+.br;With tgg00_MessType2 = mm_clear it is called by ak28cnt_values and
+by ak42column_statistics.
+.br;a28table_upd_statistics -> ak28cnt_values,
+.br;a28update_statistics with cak_x_upd_stat_col ->
+ak28upd_column_statistics -> ak28value_cnt -> ak28cnt_values,
+.br;a42_call_semantik with cak_i_column -> ak42column_statistics.
+.br;With tgg00_MessType2 = mm_nil it is called by ak25create_link and
+adds values of current tree as keys into temp_current tree.
+.br;With tgg00_MessType2 = mm_key it is called by kb721seq_search and
+counts only all the records in all the leaves of the current tree.
+No sampling is allowed for mm_key. But the same is also done by
+b72sfile_statistics(,,NOT c_with_sel,,,,,).
+.sp 2
+-----------------------------------------------------------------------
+.sp 2
+The file statistics supply file-specific statements that refer,
+first, to storage utilization and, second, to the file entries
+themselves.
+.sp
+They are as follows:
+.sp
+  - no. of full pages (total)
+  - no. of index pages
+  - no. of leaf pages
+  - tree height
+  - storage utilization (total) in %
+  - storage utilization (index) in %
+  - storage utilization (leaves) in %
+  - no. of entries
+  - no. of entries spanning more than one page
+  - average entry length
+  - minimum entry length
+  - maximum entry length
+  - average key length
+  - minimum key length
+  - maximum key length
+   etc.
+.sp 2
+For the sake of joins a640multiplier_get calls a24column_statistics to
+use the values c_values := col_info.cspages and c_avg_list_len :=
+sysbuf^.ssmindex.siavglistlen.
+.sp 2
+b72sfile_statistic
+      (stringcol_cnt, varcol_cnt_offset, with_sel,
+      scol_only, VAR res_info, VAR current)
+.sp
+When this routine is called, the statistics for the file from current
+are generated.  The results are entered in the statistics info
+'res_info'.
+.sp
+The analyzation of a tree is done by computation or by estimation
+controlled by res_info.sam_rows and res_info.sam_percent.
+.sp
+sam_rows and sam_percent may be set by the SQL
+statement
+.sp;.nf
+        <update statistics statement> ::=
+            UPDATE STAT[ISTICS] COLUMN <table name>.<column name>
+                 [ESTIMATE SAMPLE <unsigned integer> <unit of sample>]
+          | UPDATE STAT[ISTICS] [<owner>.]<table name>
+          |      [ESTIMATE SAMPLE <unsigned integer> <unit of sample>]
+ 
+        <unit of sample> ::=
+             <PERCENT>
+           | <ROWS>
+.fo;.sp
+Syntax and semantic of ESTIMATE SAMPLE <unsigned integer> PERCENT and
+ESTIMATE SAMPLE <unsigned integer> ROWS has been taken from the
+Oracle statement ANALYZE TABLE.
+.sp
+Nil values for sam_rows = -1 and for sam_percent = 100.
+.sp;A computation is done
+.br;if sam_percent < 0 and sam_rows < 0 or
+.br;if sam_percent = 0 and sam_rows = 0 or
+.br;if sam_percent >= 50 regardless sam_rows.
+.br;An initial estimation with one leaf is done in any case.
+.br;If not a computation but an estimation only should be done with
+sam_rows >= 0 and the initial estimation signifies that
+sam_rows means 50% or more of all estimated rows nevertheless
+a computation is done.
+.sp
+tgg00_MessType in (m_index_statistic, m_table_statistic) leads to
+b72sfile_statistic (,,,with_sel, NOT c_scol_only,,,,) via k05functions,
+k71file_statistic and b01sfile_statistic (,,with_sel,) whereby with_sel
+:= tgg00_MessType2 = mm_test.
+.sp
+tgg00_MessType = m_index_statistic is generated by
+a28single_index_stat with tgg00_MessType2 = mm_nil, by
+ak42one_index_statistics with tgg00_MessType2 = mm_test and by
+a42index_inf_to_messbuf with tgg00_MessType2 in (mm_nil, mm_test).
+.sp
+a28single_index_stat will augment leafnodes as if all supposed missing
+null values in the column would have the average length in the secondary
+tree. Missing null values are supposed when sec_key_cnt from this
+m_index_statistic is smaller than records from preceeding
+m_table_statistic, see cak_page80percent.
+.sp
+tgg00_MessType = m_table_statistic (with tgg00_MessType2 = mm_nil)
+is generated by ak28upd_column_statistics, by a28table_upd_statistics
+(UPDATE STATISTICS <table name>) and by ak42table_statistics.
+.sp2
+bd72InitSampleInfo  (curr_tree_id, info)
+.sp
+All fields but *filler*, *dummy* and dist_values of the record info :
+tgg00_SampleInfo are set with default values.
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.sp2
+.nf
+                    k05functions
+   (m_index_statistic,         (m_column_statistic)    .
+    m_table_statistic)                   |             .
+          |                              |             |
+          |                              |        k720_select
+          |                              |             |
+          |                              | k721strat_distribution
+          |                              |             |
+       k71file_                      k71column_ kb721seq_search
+          |                              |             |
+          |                              |-------------|----+
+          |                                                 |
+       b01sfile_                                       b01column_
++>>>>>+   |                                                 |
+^     |   |                                                 |
+^     |-+-|                                                 |
+^       |                                                   |
+^   b72sfile_                                          b72column_
+^       |                                                   |
+^ +-----|-+-------------+------+------+-++        +---------|--++
+^<|       |             |      |      | ||        |            ||
+          |             |  bd72root_  | || bd72mult_column_    ||
+      bd72index_        |     | |     | ||        |            ||
+          |             |     | |     | ||--------|-----+------||
++>>>>>+   |             |     | |     | |               |       |
+^     |   |             |     | |     | |           bd72init_   |
+^     |-+-|             |     | |     | |-------+---------------|
+^       |               |     | |     |         |
+^ bd72subindex_         |     | |     |     bd72result_
+^     |                 |     | |     |
+^ +---|-+               |     | |     |
+^<|     |        bd72sleaves_ | | bd72pleaves_
+        |               |     | |     |
+bd72indexnode_          |+----| |----+|
+                         |           |
+                     bd72sleaf_  bd72pleaf_
+                                     |
+                                 b60strcol_
+.fo
+.sp2
+b72sfile_statistic
+.sp
+The static file statistics supply statements concerning a
+specific file or the associated B* tree.  Information is
+collected in a special statistics info (type statistic_info)
+and edited.
+.sp
+When statistics are generated, the B* tree structure is taken
+into account; i.e. B* index and B* file are handled separately.
+The index section is processed recursively whereas the leaves
+are scanned sequentially, supported by the concatenation.
+A decisive factor for the leaf nodes is also whether the file
+concerned is a primary file or an inversion.  The index
+is handled the same for both types of files.
+.sp
+Before statistic generation is begun, the parameters of the statistics
+info contain defined initial values (bd72InitSampleInfo ).
+If the tree consists of the root only (bd72root_statistic) and if
+this root is not empty, it is considered to be a leaf and checked
+by calling the routine bd72pleaf_statistic or bd72sleaf_statistic.
+Alternatively, as is much more frequently the case, the index is
+processed first (bd72index_statistic).  A special recursion procedure
+handles the index nodes (bd72index_statistic) of individual subtrees of
+the B* index (bd72subindex_statistic) and, finally, the tree root.
+Before the leaf nodes are processed, the function g04inv_tfn
+identifies the type of file concerned.  The general procedure
+(bd72pleaves_statistic,bd72sleaves_statistic), but not the examination
+of the individual leaf nodes, is independent of this.  At this
+point, the essential differences in setup and, above all, in the
+length of the entries must be taken into account (bd72pleaf_statistic,
+bd72sleaf_statistic). If the B* tree has been completely processed
+and no errors have occured, the routine bd72SampleInfoEpilog
+is finally used to calculate the final value for some statistic
+parameters.
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_count_duplicates = true;
+      (* *)
+      (* the following constants are machine dependend *)
+      (* from /usr/include/float.h *)
+      c_dbl_epsilon = 2.2204460492503131e-16 (* bd72estimate_sample *);
+      (* *)
+      MAX_LIST_OF_DUPLICATES_BD72 = 1024;
+      (* within one level 1 subtree only, >30% of one page = nonsense *)
+      cbd72_max_rec_in_prim_page = (MAX_BOTTOM_BD00 - BODY_BEG_BD00) DIV
+            (MIN_RECORD_LEN_BD00 + POINTERSIZE_BD00);
+ 
+TYPE
+ 
+      bd72ListOfDuplicates = RECORD
+            ld_DoLeafScanOnly_bd72 : boolean;
+            ld_Filler_bd72         : boolean;
+            ld_FirstFree_bd72      : tsp00_Int2;
+            ld_ChainedLeaves_bd72  : ARRAY [1..MAX_LIST_OF_DUPLICATES_BD72] OF tsp00_PageNo
+      END;
+ 
+ 
+      bd72col_of_node = RECORD
+            pos : ARRAY [1..cbd72_max_rec_in_prim_page] OF tsp00_Int2;
+            len : ARRAY [1..cbd72_max_rec_in_prim_page] OF tsp00_Int2
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      bd72_IsLeafInDuplicateList (
+            VAR list : bd72ListOfDuplicates;
+            pageNo   : tsp00_PageNo) : boolean;
+ 
+VAR
+      duplicated_leaf : boolean;
+      loop_count      : integer;
+ 
+BEGIN
+duplicated_leaf := false;
+loop_count      := 1;
+WHILE NOT list.ld_DoLeafScanOnly_bd72 AND (loop_count < list.ld_FirstFree_bd72) AND
+      NOT duplicated_leaf DO
+    BEGIN
+    duplicated_leaf := list.ld_ChainedLeaves_bd72 [loop_count] = pageNo;
+    loop_count := succ(loop_count)
+    END;
+(*ENDWHILE*) 
+bd72_IsLeafInDuplicateList := duplicated_leaf
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      bd72estimate_sample (
+            tot_values          : tsp00_Int4;
+            sample_values       : tsp00_Int4;
+            distincts_in_sample : tsp00_Int4) : tsp00_Int4;
+ 
+CONST
+      c_itmax  = 40 (* maximal number of steps for Newton Iteration *);
+      c_epmach = c_dbl_epsilon;
+ 
+VAR
+      long_real_atol : tsp00_Longreal;
+      long_real_h    : tsp00_Longreal;
+      long_real_pr   : tsp00_Longreal;
+      long_real_ps   : tsp00_Longreal;
+      long_real_qr   : tsp00_Longreal;
+      long_real_qs   : tsp00_Longreal;
+      long_real_qpr  : tsp00_Longreal;
+      long_real_qps  : tsp00_Longreal;
+      long_real_qpp  : tsp00_Longreal;
+      long_real_rtj  : tsp00_Longreal;
+      long_real_rtjn : tsp00_Longreal;
+      long_real_rtjn_diff : tsp00_Longreal;
+      (*
+      a,an,d,hd,hs,s : tsp00_Longreal;
+      p,q            : tsp00_Longreal;
+      weight         : tsp00_Longreal;
+      *)
+      aux_int4       : tsp00_Int4;
+      loop_count     : tsp00_Int4;
+      input_error    : boolean;
+      num_error      : tsp00_NumError;
+&     ifdef TRACE
+      newton_iteration : tsp00_C64;
+&     endif
+ 
+BEGIN
+(* Estimation of the number of distinct values for    *)
+(* a column of a table.                               *)
+(* The rows of the table are the entries in the       *)
+(* leaf nodes of a B*-tree.                           *)
+(* Assume "a" to be the number of possible distinct   *)
+(* values of the column.                              *)
+(* Assume "n" to be the number of inspected rows.     *)
+(* Assume f(n) to be the average number of distinct   *)
+(* values within "n" rows.                            *)
+(* Than yields: f(x+1)=f(x)+(a-f(x))/a.               *)
+(* ==> f'(x)=(f(x+1)-f(x))/(x+1-x)=1-f(x)/a           *)
+(* ==> f(x)=a-a*exp(-x/a)                             *)
+(* The following algorithm results from a proposal of *)
+(* Dr. Klaus-Dieter Reinsch from the Mathematical     *)
+(* Institute of the Technical University of Munich,   *)
+(* august 26, 1995, to Heinz Bayen.                   *)
+(* As exp(-x/a)=(exp(-1/a))**x=(1-1/a)**x for a>>x    *)
+(* ==> f(x)=a-a*(1-1/a)**x                            *)
+(* The unknown a will be calculated by an             *)
+(* interpolation for f(x) with the pivot element      *)
+(* (p,q) := (sample_values, distincts_in_sample).     *)
+(* P(1/a) := f(p)/a - q/a = 1 - (1-1/a)**p - q/a or   *)
+(* Q(b) := 1 - (1-b)**p - q*b with b:=1/a or          *)
+(* R(rtj) := 1 - rtj**p - q + q*rtj with rtj:=1-1/a   *)
+(* R'(rtj) = - p*rtj**(p-1) + q                       *)
+(* The null value of R(rtj) will be calculated by the *)
+(* Newton iteration:                                  *)
+(* rtjn:=rtj - R(rtj)/(R'(rtj))                       *)
+(* rtjn:=rtj + (1-rtj**p-q+q*rtj)/(p*(rtj**(p-1)-q/p))*)
+(*      =(p*rtj**p-rtj*q+1-rtj**p-q+q*rtj)            *)
+(*                               /(p*(rtj**(p-1)-q/p))*)
+(*      =(p*rtj**p+1-rtj**p-q)   /(p*(rtj**(p-1)-q/p))*)
+(*      =((p-1)/p)*(rtj**p+(1-q)/(p-1))               *)
+(*                               /(   rtj**(p-1)-q/p )*)
+(*      =((p-1)/p)*(rtj**(p-1)*rtj-(q-1)/(p-1))/      *)
+(*                 (rtj**(p-1)    -  q  /  p  )       *)
+(* The iteration starts with rtj:=1-1/q=(q-1)/q       *)
+(* *)
+(* The input variables should meet the following unequations: *)
+(* *)
+(* 0 <= distincts_in_sample <= sample_values <= tot_values    *)
+(* *)
+(* As the show must go on for wrong input, too, the following         *)
+(* estimation is guessed: Each input value which is too small will be *)
+(* augmented to its minimal size.                                     *)
+(* *)
+input_error := false;
+(* *)
+IF  distincts_in_sample <  0
+THEN
+    BEGIN
+&   ifdef TRACE
+    t01int4 (bd_index, 'distincts_in' ,distincts_in_sample);
+&   endif
+    distincts_in_sample := 0;
+    input_error         := true
+    END;
+(*ENDIF*) 
+IF  sample_values       <  distincts_in_sample
+THEN
+    BEGIN
+&   ifdef TRACE
+    t01int4 (bd_index, 'sample_value' ,sample_values);
+&   endif
+    sample_values       := distincts_in_sample;
+    input_error         := true
+    END;
+(*ENDIF*) 
+IF  tot_values          <  sample_values
+THEN
+    BEGIN
+&   ifdef TRACE
+    t01int4 (bd_index, 'tot_values  ' ,tot_values);
+&   endif
+    tot_values          := sample_values;
+    input_error         := true
+    END;
+(*34567890123456789012345678901234567890123456789012345678901234567890*)
+(*ENDIF*) 
+IF  (distincts_in_sample <= 1) OR
+    input_error
+THEN
+    bd72estimate_sample := distincts_in_sample
+ELSE
+    BEGIN
+    long_real_pr   := sample_values;       (* > 0 *)
+    long_real_qr   := distincts_in_sample; (* > 1 *)
+    long_real_qpr  := long_real_qr / long_real_pr; (* 0<qpr< 1 (soon) *)
+    IF  long_real_pr <= 1.05 * long_real_qr
+        (* deviation from a straight line <= 5% *)
+    THEN
+        bd72estimate_sample := trunc(0.5 + long_real_qpr*tot_values)
+    ELSE
+        BEGIN
+        (* 2 <= distincts_in_sample < sample_values *)
+        long_real_atol := sqrt(c_epmach);
+        aux_int4       := sample_values - 1;
+        long_real_ps   := aux_int4;            (* > 1 *)
+        aux_int4       := distincts_in_sample - 1;
+        long_real_qs   := aux_int4;            (* > 0 *)
+        long_real_qps  := long_real_qs / long_real_ps; (* 0<qps<qpr *)
+        long_real_qpp  := long_real_ps / long_real_pr; (* 0<qpp< 1  *)
+        long_real_rtj  := long_real_qs / long_real_qr; (* 0<rtj<qpp *)
+&       ifdef TRACE
+        IF  t01trace (bd_index)
+        THEN
+            BEGIN
+            t01real (bd_index, 'c_epmaxh    ', c_epmach     , 5);
+            t01real (bd_index, 'atol        ', long_real_atol,5);
+            t01real (bd_index, 'DistinctsInS', long_real_qr , 5);
+            t01real (bd_index, 'SampleValues', long_real_pr , 5);
+            t01real (bd_index, 'Reinsch: rtj', long_real_rtj, 5);
+            END;
+&       endif
+        (*ENDIF*) 
+        loop_count := 0;
+        REPEAT
+            BEGIN
+            (* h := rtj**(p-1) = exp((p-1)*ln rtj) *)
+            (* poor PASCAL has no power like ForTran rtj**ps: *)
+            IF  long_real_rtj <= 0
+            THEN
+                long_real_h := 0
+            ELSE
+                BEGIN
+                long_real_h := long_real_ps*vln(long_real_rtj,num_error); (* < 0 *)
+                long_real_h := vexp(long_real_h,num_error) (* 0 <= h < 1 *);
+                END;
+            (*ENDIF*) 
+            long_real_rtjn := long_real_qpp *
+                  (long_real_h * long_real_rtj - long_real_qps) /
+                  (long_real_h - long_real_qpr);
+&           ifdef TRACE
+            t01real (bd_index, 'Reinsch: rtj', long_real_rtjn, 5);
+&           endif
+            long_real_rtjn_diff := abs(long_real_rtjn - long_real_rtj);
+            IF  (long_real_rtjn_diff >
+                long_real_atol * abs(1.0 - long_real_rtj))
+            THEN
+                BEGIN
+                long_real_rtj := long_real_rtjn;
+                loop_count    := succ (loop_count)
+                END
+            ELSE
+                loop_count   := c_itmax;
+            (*ENDIF*) 
+            END;
+        UNTIL
+            (loop_count >= c_itmax);
+        (*ENDREPEAT*) 
+&       ifdef TRACE
+        IF  t01trace (bd_index)
+        THEN
+            BEGIN
+            newton_iteration :=
+                  'Newton iteration according to Dr. K.-H. Reinsch, TU Muenchen    ';
+            t01c64 (bd_index, newton_iteration);
+            newton_iteration :=
+                  'estimated distincts := (1 - rtj**total) / (1 - rtj)             ';
+            t01c64 (bd_index, newton_iteration);
+            END;
+&       endif
+        (* The preceeding Newton interation holds for a>>x with*)
+        (* rtjn=1-1/a            or                            *)
+        (* a   =1/(1-rtjn) >> x  or                            *)
+        (* (x-1)/x < rtjn < 1                                  *)
+        (*ENDIF*) 
+        IF  (0.0 >= long_real_rtjn       ) OR
+            (       long_real_rtjn >= 1.0)
+        THEN
+            bd72estimate_sample :=
+                  trunc (0.5 + long_real_qpr * tot_values)
+        ELSE
+            BEGIN
+            (* 0 < rtjn < 1                     *)
+            (* f(x)=a-a*exp(-x/a)               *)
+            (*     =a*(1-exp(-x/a))             *)
+            (* f(x)=(1-exp((rtjn-1)*x)/(1-rtjn) *)
+            long_real_h := (long_real_rtjn - 1.0) * tot_values;
+            (* -tot_values < long_real_h < 0 *)
+            long_real_h := 1.0 - vexp(long_real_h, num_error); (*0<h<1*)
+            IF  long_real_h >
+                (1.0 - long_real_rtjn) * long_real_qpr * tot_values
+            THEN
+                bd72estimate_sample :=
+                      trunc (0.5 + long_real_qpr * tot_values)
+            ELSE
+                bd72estimate_sample :=
+                      trunc (0.5 + long_real_h / (1.0 - long_real_rtjn))
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        (* Coefficients for a polynom of degree 2: y=p*x**2+q*x *)
+        END
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72_RecordEstimation (
+            VAR EstimatedLeaves     : tsp00_Int4;
+            VAR EstimatedRecords    : tsp00_Int4;
+            SampledLeaves           : tsp00_Int4;
+            SampledRecords          : tsp00_Int4;
+            SampleTotalRecordLength : tsp00_Longreal;
+            NumberOfLeafNodes       : tsp00_Int4);
+ 
+VAR
+      long_real_leafnodes      : tsp00_Longreal;
+      long_real_records        : tsp00_Longreal;
+      long_real_weight_count   : tsp00_Longreal;
+      long_real_provisional    : tsp00_Longreal;
+ 
+BEGIN
+IF  SampledLeaves <  1
+THEN
+    SampledLeaves := 1;
+(*ENDIF*) 
+IF  SampledRecords <  SampledLeaves
+THEN
+    SampledRecords := SampledLeaves;
+(*ENDIF*) 
+IF  NumberOfLeafNodes  <  SampledLeaves
+THEN
+    NumberOfLeafNodes := SampledLeaves;
+(*ENDIF*) 
+EstimatedLeaves := NumberOfLeafNodes;
+(* *)
+IF  0 < SampleTotalRecordLength
+THEN
+    IF  SampledRecords < MAX_INT4_SP00 DIV (MIN_RECORD_LEN_BD00 + 2)
+    THEN
+        BEGIN
+        IF  SampleTotalRecordLength <
+            SampledRecords * (MIN_RECORD_LEN_BD00 + 2)
+        THEN
+            SampleTotalRecordLength := 0;
+        (*ENDIF*) 
+        IF  SampledRecords < MAX_INT4_SP00 DIV (MAX_RECLEN_GG00 + 2)
+        THEN
+            IF  SampleTotalRecordLength > SampledRecords * (MAX_RECLEN_GG00 + 2)
+            THEN
+                SampleTotalRecordLength := 0;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        SampleTotalRecordLength := 0;
+    (*ENDIF*) 
+(*ENDIF*) 
+long_real_leafnodes := SampledLeaves;
+long_real_records   := SampledRecords;
+IF  SampleTotalRecordLength  <= 0
+THEN
+    BEGIN
+    EstimatedRecords       := 0;
+    long_real_weight_count := 100;
+    END
+ELSE
+    BEGIN
+    (* Some people told me that 81% is the average filling of a *)
+    (* balanced tree like those here: cak_page80percent. *)
+    (* This formula tries to estimate the lowest number of *)
+    (* average records which fills more than 75% of a page. *)
+    (* It tries the same with 50% for not balanced trees. *)
+    (* 1.)  maximal number of records in a full filled page  + 1 *)
+    long_real_provisional :=
+          (long_real_records * FULLCOVERING_BD00 / SampleTotalRecordLength
+          + 1);
+    IF  long_real_provisional <= MAX_INT4_SP00
+    THEN
+        EstimatedRecords := trunc (long_real_provisional)
+    ELSE
+        EstimatedRecords := MAX_INT4_SP00;
+    (*ENDIF*) 
+    IF  EstimatedRecords >  FULLCOVERING_BD00 DIV (MIN_RECORD_LEN_BD00 + 2)
+    THEN
+        EstimatedRecords := FULLCOVERING_BD00 DIV (MIN_RECORD_LEN_BD00 + 2);
+    (*ENDIF*) 
+    IF  EstimatedRecords <  1
+    THEN
+        EstimatedRecords := 1;
+    (* *)
+    (* 2.) + maximal number of records in a half filled page *)
+    (* *)
+    (*ENDIF*) 
+    long_real_provisional := trunc
+          (HALF_COVERING_BD00 * long_real_records
+          / SampleTotalRecordLength);
+    long_real_provisional := EstimatedRecords + long_real_provisional;
+    IF  long_real_provisional <= MAX_INT4_SP00
+    THEN
+        EstimatedRecords := trunc (long_real_provisional)
+    ELSE
+        EstimatedRecords := MAX_INT4_SP00;
+    (*ENDIF*) 
+    (* *)
+    (* 3.) estimated number of records in the tree *)
+    (* *)
+    long_real_provisional := EstimatedRecords;
+    long_real_provisional := long_real_provisional * EstimatedLeaves / 2;
+    (* estimated number of records in a leaf * estimated leaves *)
+    IF  long_real_provisional <= MAX_INT4_SP00
+    THEN
+        EstimatedRecords := trunc (long_real_provisional)
+    ELSE
+        EstimatedRecords := MAX_INT4_SP00;
+    (*ENDIF*) 
+    (* The weight in % for the following simpler but exact formula *)
+    long_real_weight_count := long_real_leafnodes * 300 / EstimatedLeaves;
+    END;
+(*ENDIF*) 
+&ifdef TRACE
+t01real (bd_index, 'weight_count', long_real_weight_count, 5);
+&endif
+IF  long_real_weight_count >  100
+THEN
+    long_real_weight_count := 100;
+(*ENDIF*) 
+long_real_provisional :=
+      (
+      EstimatedRecords
+      * (100 - long_real_weight_count)
+      +
+      (* estimated leaves * counted records / counted leaves *)
+      EstimatedLeaves * long_real_records / long_real_leafnodes
+      * long_real_weight_count
+      ) / 100;
+IF  long_real_provisional <= MAX_INT4_SP00
+THEN
+    EstimatedRecords := trunc (long_real_provisional)
+ELSE
+    EstimatedRecords := MAX_INT4_SP00;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72InitSampleInfo (VAR tree : tgg00_FileId;
+            VAR info          : tgg00_SampleInfo;
+            VAR stat_aux_vars : tbd_stat_aux_vars);
+ 
+BEGIN
+WITH stat_aux_vars DO
+    BEGIN
+    sav_separators  := 0;
+    sav_long_oflw   := false;
+    sav_reclen_oflw := false;
+    END;
+(*ENDWITH*) 
+WITH info DO
+    BEGIN
+    (*fname            := tree.fileName_gg00;*)
+    rootsegm         := tree.fileRoot_gg00;
+    smplFileType_gg00:= tree.fileType_gg00;
+    nodes            := 0;
+    indexnodes       := 0;
+    leafnodes        := 0;(*PAGECOUNT of COLUMN NAME: TABLE STATISTICS*)
+    hight            := 0;
+    treecov          := 0;
+    rootcov          := 0;
+    indexcov         := 0;
+    min_indexcov     := 10000;
+    max_indexcov     := 0;
+    leafcov          := 0;
+    min_leafcov      := 10000;
+    max_leafcov      := 0;
+    records          := 0;(*DISTINCTVALUES of COLUMN NAMEs:*)
+    (*                      TABLE STATISTICS and <name of key column>*)
+    rec_per_page     := 0;
+    min_rec_per_page := 10000;
+    max_rec_per_page := 0;
+    (*splitted_records := 0;*)
+    ave_rec_length   := 0;
+    min_rec_length   := -1;
+    max_rec_length   := 0;
+    ave_key_length   := 0;
+    min_key_length   := PERM_KEY_MXSP00;
+    max_key_length   := 0;
+    ave_sep_length   := 0;
+    min_sep_length   := PERM_KEY_MXSP00;
+    max_sep_length   := 0;
+    all_stringcol_pages := 0;
+    defined_stringcols  := 0;
+    ave_len_stringcol   := 0;
+    min_len_stringcol   := MAX_INT4_SP00 - 1;
+    max_len_stringcol   := 0;
+    ave_stringcol_pages := 0;
+    min_stringcol_pages := MAX_INT4_SP00 - 1;
+    max_stringcol_pages := 0;
+    invsel_1            := 0;
+    invsel_5            := 0;
+    invsel_10           := 0;
+    invsel_25           := 0;
+    invsel_notsel       := 0;
+    sec_key_cnt         := 0;
+    prim_key_cnt        := 0;
+    min_prim_per_list   := MAX_INT4_SP00 - 1;
+    max_prim_per_list   := 0;
+    avg_prim_per_list   := 0;
+    min_sec_key_len     := PERM_KEY_MXSP00;
+    max_sec_key_len     := 0;
+    avg_sec_key_len     := 0;
+    null_value_cnt      := 0;
+    (*distinct_values     := 0;*)
+    (*reclen_oflw         := false;*)
+    (*invsel_oflw         := false*)
+    sam_clustercount    := 0;
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72SampleMultiColumnStatistic(
+            VAR MessBlock        : tgg00_MessBlock;
+            VAR Current          : tbd_current_tree;
+            VAR TempCurrent      : tbd_current_tree;
+            NumberOfSampleLeaves : tsp00_Int4;
+            VAR NumberOfLeaves   : tsp00_Int4;
+            VAR NumberOfRecords  : tsp00_Int4;
+            VAR DistinctValues   : tgg00_ColumnDistinctValues);
+ 
+VAR
+      bFinish                    : boolean;
+      listOfDuplicates           : bd72ListOfDuplicates;
+      columnNo                   : tsp00_Int4;
+      avgNumberOfEstimatedLeaves : tsp00_Int4;
+      maxNumberOfSamples         : tsp00_Int4;
+      AuxNumberOfLeaves          : tsp00_Int4;
+      AuxNumberOfRecords         : tsp00_Int4;
+      leftSideEstimatedLeaves    : tsp00_Int4;
+      rightSideEstimatedLeaves   : tsp00_Int4;
+      AuxTotalRecLength          : tsp00_Longreal;
+      sumOfAllEstimatedLeaves    : tsp00_Longreal;
+      nptr                       : tbd_node_ptrs;
+ 
+BEGIN
+nptr.np_ptr        := NIL;
+nptr.np_cbptr      := NIL;
+WITH Current, curr_trans^ DO
+    BEGIN
+    FOR columnNo := 1 TO MessBlock.mb_qual^.mcol_cnt DO
+        DistinctValues [columnNo] := 0;
+    (*ENDFOR*) 
+    AuxNumberOfLeaves  := 0;
+    AuxNumberOfRecords := 0;
+    AuxTotalRecLength  := 0;
+    (* *)
+    bd50PositionLeaf( 0, 0, leftSideEstimatedLeaves, rightSideEstimatedLeaves, nptr, Current );
+    (* *)
+    IF  trError_gg00 = e_ok
+    THEN
+        BEGIN
+        bFinish                    := false;
+        avgNumberOfEstimatedLeaves := leftSideEstimatedLeaves + rightSideEstimatedLeaves;
+        sumOfAllEstimatedLeaves    := avgNumberOfEstimatedLeaves;
+        IF  NumberOfSampleLeaves > avgNumberOfEstimatedLeaves
+        THEN
+            maxNumberOfSamples := avgNumberOfEstimatedLeaves
+        ELSE
+            maxNumberOfSamples := NumberOfSampleLeaves
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    listOfDuplicates.ld_FirstFree_bd72         := 2;
+    listOfDuplicates.ld_ChainedLeaves_bd72 [1] := nptr.np_ptr^.nd_id;
+    listOfDuplicates.ld_DoLeafScanOnly_bd72    := false;
+    listOfDuplicates.ld_Filler_bd72            := false;
+    (* *)
+    WHILE (trError_gg00 = e_ok) AND NOT bFinish DO
+        BEGIN
+        bd72_MultiColumnStatisticForSinglePage( curr_trans^, MessBlock,
+              TempCurrent, nptr, DistinctValues );
+        IF  (trError_gg00 = e_ok) AND (trRteCommPtr_gg00^.to_cancel)
+        THEN
+            trError_gg00 := e_cancelled;
+        (*ENDIF*) 
+        IF  trError_gg00 = e_ok
+        THEN
+            BEGIN
+            AuxNumberOfLeaves  := AuxNumberOfLeaves + 1;
+            AuxNumberOfRecords := AuxNumberOfRecords + nptr.np_ptr^.nd_record_cnt;
+            (* *)
+            (* the author realy wants to add up all records lengths! *)
+            (* funny notation, because of implicit type cast *)
+            (* *)
+            AuxTotalRecLength:= AuxTotalRecLength + (nptr.np_ptr^.nd_bottom/1) - BODY_BEG_BD00;
+            (* *)
+            bd72_SampleNext (AuxNumberOfLeaves, maxNumberOfSamples,
+                  sumOfAllEstimatedLeaves, avgNumberOfEstimatedLeaves, nptr,
+                  bFinish, listOfDuplicates, Current)
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    (* *)
+    (* Start final interpretation *)
+    (* *)
+    IF  trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, Current, lru_normal);
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        bd72_RecordEstimation (NumberOfLeaves, NumberOfRecords,
+              AuxNumberOfLeaves, AuxNumberOfRecords, AuxTotalRecLength,
+              avgNumberOfEstimatedLeaves);
+        (* *)
+        FOR columnNo := 1 TO MessBlock.mb_qual^.mcol_cnt DO
+            DistinctValues[columnNo] :=
+                  bd72estimate_sample ( NumberOfRecords,
+                  AuxNumberOfRecords, DistinctValues [columnNo]);
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72SampleInfoEpilog (VAR info : tgg00_SampleInfo;
+            scol_only         : boolean;
+            VAR stat_aux_vars : tbd_stat_aux_vars);
+ 
+BEGIN
+WITH info, stat_aux_vars DO
+    BEGIN
+    IF  nodes > 0
+    THEN
+        IF  MAX_INT4_SP00 - (nodes DIV 2) > treecov
+        THEN
+            treecov := (treecov + (nodes DIV 2)) DIV nodes
+        ELSE
+            treecov := treecov DIV nodes;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  hight > 1
+    THEN
+        BEGIN
+        indexcov := indexcov - rootcov;
+        IF  MAX_INT4_SP00 - ((indexnodes - 1) DIV 2) > indexcov
+        THEN
+            indexcov := (indexcov + ((indexnodes - 1) DIV 2))
+                  DIV (indexnodes-1)
+        ELSE
+            indexcov := indexcov DIV (indexnodes-1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  hight = 1
+    THEN
+        BEGIN
+        indexcov     := rootcov;
+        min_indexcov := rootcov;
+        max_indexcov := rootcov
+        END;
+    (*ENDIF*) 
+    IF  hight = 0
+    THEN
+        BEGIN
+        indexcov     := 0;
+        min_indexcov := 0;
+        max_indexcov := 0;
+        rootcov      := 0
+        END;
+    (*ENDIF*) 
+    IF  leafnodes > 0
+    THEN
+        BEGIN
+        IF  MAX_INT4_SP00 - (leafnodes DIV 2) > leafcov
+        THEN
+            leafcov := (leafcov + (leafnodes DIV 2)) DIV leafnodes
+        ELSE
+            leafcov := leafcov DIV leafnodes;
+        (*ENDIF*) 
+        IF  MAX_INT4_SP00 - (leafnodes DIV 2) > records
+        THEN
+            rec_per_page := (records + (leafnodes DIV 2)) DIV leafnodes
+        ELSE
+            rec_per_page := records DIV leafnodes
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        leafcov := 0;
+        min_leafcov := 0;
+        max_leafcov := 0
+        END;
+    (*ENDIF*) 
+    IF  records > 0
+    THEN
+        BEGIN
+        IF  NOT (sav_reclen_oflw OR scol_only)
+        THEN
+            IF  MAX_INT4_SP00 - (records DIV 2) > ave_rec_length
+            THEN
+                ave_rec_length := (ave_rec_length + (records DIV 2))
+                      DIV records
+            ELSE
+                ave_rec_length := ave_rec_length DIV records;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  MAX_INT4_SP00 - (records DIV 2) > ave_key_length
+        THEN
+            ave_key_length := (ave_key_length + (records DIV 2))
+                  DIV records
+        ELSE
+            ave_key_length := ave_key_length DIV records
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        min_rec_length   := 0;
+        min_rec_per_page := 0;
+        min_key_length   := 0
+        END;
+    (*ENDIF*) 
+    IF  min_leafcov = 10000
+    THEN
+        min_leafcov := 0;
+    (*ENDIF*) 
+    IF  sav_separators > 0
+    THEN
+        BEGIN
+        IF  MAX_INT4_SP00 - (sav_separators DIV 2) > ave_sep_length
+        THEN
+            ave_sep_length := (ave_sep_length + (sav_separators DIV 2))
+                  DIV sav_separators
+        ELSE
+            ave_sep_length := ave_sep_length DIV sav_separators;
+        (*ENDIF*) 
+        IF  ave_sep_length < min_sep_length
+        THEN
+            ave_sep_length := min_sep_length
+        (*ENDIF*) 
+        END
+    ELSE
+        min_sep_length := 0;
+    (*ENDIF*) 
+    IF  defined_stringcols > 0
+    THEN
+        BEGIN
+        IF  ave_len_stringcol > 0
+        THEN
+            BEGIN
+            IF  NOT sav_long_oflw
+            THEN
+                IF  MAX_INT4_SP00 - (defined_stringcols DIV 2) >
+                    ave_len_stringcol
+                THEN
+                    ave_len_stringcol := (ave_len_stringcol +
+                          (defined_stringcols DIV 2))
+                          DIV defined_stringcols
+                ELSE
+                    ave_len_stringcol := ave_len_stringcol
+                          DIV defined_stringcols
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END
+        ELSE
+            ave_len_stringcol := 0;
+        (*ENDIF*) 
+        IF  MAX_INT4_SP00 - (defined_stringcols DIV 2) >
+            ave_stringcol_pages
+        THEN
+            ave_stringcol_pages := (ave_stringcol_pages +
+                  (defined_stringcols DIV 2))
+                  DIV defined_stringcols
+        ELSE
+            ave_stringcol_pages := ave_stringcol_pages
+                  DIV defined_stringcols
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        min_len_stringcol := 0;
+        min_stringcol_pages := 0
+        END;
+    (*ENDIF*) 
+    IF  sec_key_cnt > 0
+    THEN
+        BEGIN
+        IF  prim_key_cnt = 0
+        THEN
+            prim_key_cnt := avg_prim_per_list;
+        (*ENDIF*) 
+        IF  avg_prim_per_list > 0
+        THEN
+            BEGIN
+            IF  MAX_INT4_SP00 DIV 10 > avg_prim_per_list
+            THEN
+                BEGIN
+                avg_prim_per_list := avg_prim_per_list * 10;
+                IF  MAX_INT4_SP00 - (sec_key_cnt DIV 2) >
+                    avg_prim_per_list
+                THEN
+                    avg_prim_per_list := (avg_prim_per_list +
+                          (sec_key_cnt DIV 2)) DIV sec_key_cnt
+                ELSE
+                    avg_prim_per_list := avg_prim_per_list DIV
+                          sec_key_cnt;
+                (*ENDIF*) 
+                END
+            ELSE
+                avg_prim_per_list := ((max_prim_per_list +
+                      min_prim_per_list) * 10 + 1) DIV 2
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  avg_sec_key_len > 0
+        THEN
+            IF  MAX_INT4_SP00 - (sec_key_cnt DIV 2) > avg_sec_key_len
+            THEN
+                avg_sec_key_len := (avg_sec_key_len +
+                      (sec_key_cnt DIV 2)) DIV sec_key_cnt
+            ELSE
+                avg_sec_key_len := avg_sec_key_len DIV sec_key_cnt;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        min_prim_per_list := 0;
+        min_sec_key_len   := 0
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72_SampleNext (
+            currNumberOfSamples            : tsp00_Int4;
+            maxNumberOfSamples             : tsp00_Int4;
+            VAR sumOfAllEstimatedLeaves    : tsp00_Longreal;
+            VAR avgNumberOfEstimatedLeaves : tsp00_Int4;
+            VAR nptr                       : tbd_node_ptrs;
+            VAR bFinish                    : boolean;
+            VAR listOfDuplicates           : bd72ListOfDuplicates;
+            VAR current                    : tbd_current_tree);
+ 
+VAR
+      useRightNeighbourLeaf    : boolean;
+      leafPosition             : tsp00_Int4;
+      leftSideEstimatedLeaves  : tsp00_Int4;
+      rightSideEstimatedLeaves : tsp00_Int4;
+      currEstimatedLeaves      : tsp00_Int4;
+      auxPosition              : tsp00_Longreal;
+      currPageNo               : tsp00_PageNo;
+      nextPageNo               : tsp00_PageNo;
+      nextIndexPage            : tsp00_PageNo;
+ 
+BEGIN
+WITH current, curr_trans^, listOfDuplicates DO
+    BEGIN
+    nextPageNo    := nptr.np_ptr^.nd_right;
+    currPageNo    := nptr.np_ptr^.nd_id;
+    nextIndexPage := NIL_PAGE_NO_GG00;
+    ld_ChainedLeaves_bd72[ ld_FirstFree_bd72 ] :=  nextPageNo;
+    b13r_release_node (nptr, current, lru_mid);
+    (* *)
+    bd30ReleaseSubTree (current);
+    (* *)
+    bFinish := (currNumberOfSamples >= maxNumberOfSamples) OR (nextPageNo = NIL_PAGE_NO_GG00);
+    IF  (trError_gg00 = e_ok) AND (NOT bFinish)
+    THEN
+        BEGIN
+        (* funny notation, because of implicit type cast *)
+        auxPosition  := (avgNumberOfEstimatedLeaves * (currNumberOfSamples /1)) / maxNumberOfSamples;
+        leafPosition := trunc (auxPosition) + 1;
+        (* *)
+        IF  NOT ld_DoLeafScanOnly_bd72
+        THEN
+            BEGIN
+            bd50PositionLeaf (leafPosition, avgNumberOfEstimatedLeaves,
+                  leftSideEstimatedLeaves, rightSideEstimatedLeaves, nptr, current);
+            IF  trError_gg00 = e_ok
+            THEN
+                BEGIN
+                currEstimatedLeaves := 1 + leftSideEstimatedLeaves + rightSideEstimatedLeaves;
+                nextPageNo          := nptr.np_ptr^.nd_right;
+                currPageNo          := nptr.np_ptr^.nd_id;
+                IF  nptr.np_ptr^.nd_right = NIL_PAGE_NO_GG00
+                THEN
+                    bFinish := true
+                ELSE
+                    BEGIN
+                    sumOfAllEstimatedLeaves    := sumOfAllEstimatedLeaves + currEstimatedLeaves;
+                    avgNumberOfEstimatedLeaves := trunc (sumOfAllEstimatedLeaves / (currNumberOfSamples + 1)) + 1;
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_ok) AND (NOT bFinish)
+    THEN
+        BEGIN
+        useRightNeighbourLeaf := bd72_IsLeafInDuplicateList(listOfDuplicates, currPageNo);
+        IF  (NOT ld_DoLeafScanOnly_bd72) AND (NOT useRightNeighbourLeaf)
+        THEN
+            BEGIN (* common case *)
+            ld_FirstFree_bd72         := 2;
+            ld_ChainedLeaves_bd72[ 1 ]:= currPageNo;
+            END
+        ELSE
+            BEGIN
+            IF  useRightNeighbourLeaf
+            THEN
+                BEGIN
+                b13r_release_node (nptr, current, lru_mid);
+                ld_FirstFree_bd72 := listOfDuplicates.ld_FirstFree_bd72 + 1;
+                IF  listOfDuplicates.ld_FirstFree_bd72 >= MAX_LIST_OF_DUPLICATES_BD72
+                THEN
+                    BEGIN
+                    ld_DoLeafScanOnly_bd72 := true;
+                    ld_FirstFree_bd72      := 1
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  (ftsPerm_egg00 IN curr_tree_id.fileType_gg00) AND
+                (currRightBound_bd00 = currPageNo             ) AND (* subtree boundary reached *)
+                (currIndexNptrs_bd00.np_ptr <> NIL          )
+            THEN
+                BEGIN
+                nextIndexPage := currIndexNptrs_bd00.np_ptr^.nd_right;
+                IF  nextIndexPage <> NIL_PAGE_NO_GG00
+                THEN
+                    BEGIN
+                    bd30ReleaseSubTree (current);
+                    bd30GetSubTree (current, nextIndexPage);
+                    nextIndexPage := NIL_PAGE_NO_GG00;
+                    listOfDuplicates.ld_FirstFree_bd72         := 2;
+                    listOfDuplicates.ld_ChainedLeaves_bd72 [1] := nextPageNo;
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  trError_gg00 = e_ok
+            THEN
+                bd13GetNode (current, nextPageNo, plmLock_ebd00, nr_for_read, nptr);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        bFinish := bFinish OR (leafPosition >= avgNumberOfEstimatedLeaves)
+        END;
+    (*ENDIF*) 
+    IF  (trError_gg00 = e_ok) AND (NOT bFinish) AND g01vtrace.vtrBdPrim_gg00
+    THEN
+        bd50_WriteVtraceForSampling (curr_trans^, currNumberOfSamples,
+              sumOfAllEstimatedLeaves, avgNumberOfEstimatedLeaves,
+              leafPosition, nptr.np_ptr^.nd_id, (NOT ld_DoLeafScanOnly_bd72));
+    (*ENDIF*) 
+    IF  (trError_gg00 <> e_ok) OR bFinish
+    THEN
+        BEGIN
+        IF  nptr.np_ptr <> NIL
+        THEN
+            b13r_release_node (nptr, current, lru_normal)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd72_MultiColumnStatisticForSinglePage(
+            VAR Trans          : tgg00_TransContext;
+            VAR MessBlock      : tgg00_MessBlock;
+            VAR TempCurrent    : tbd_current_tree;
+            VAR Nptrs          : tbd_node_ptrs;
+            VAR DistinctValues : tgg00_ColumnDistinctValues);
+ 
+VAR
+      UniqueRecordInNode     : boolean;
+      PackedRowFound         : boolean;
+      CompareResult          : tsp00_LcompResult;
+      RecIndex               : tsp00_Int4;
+      CurrentRecord          : tsp00_Int4;
+      CurrentColumn          : tsp00_Int4;
+      StackIndex             : tsp00_Int4;
+      comparison_number      : tsp00_Int4;
+      ColumnPosition         : tsp00_Int4;
+      ColumnLength           : tsp00_Int4;
+      RecPos                 : tsp00_Int4;
+      VarColPos              : tgg00_VarColPosList;
+      col_of_node            : bd72col_of_node;
+      pRec                   : tgg00_RecPtr;
+      AuxKey                 : tgg00_Lkey;
+      UnpackedRow            : tgg00_Rec;
+ 
+BEGIN
+WITH Trans, MessBlock  DO
+    BEGIN
+    PackedRowFound := false;
+    CurrentColumn  := mb_qual^.mcol_pos;
+    WHILE (trError_gg00 = e_ok) AND (CurrentColumn < mb_qual^.mcol_pos + mb_qual^.mcol_cnt) DO
+        BEGIN
+        RecIndex := FIRST_REC_INDEX_BD00;
+        WHILE (trError_gg00 = e_ok) AND (RecIndex < Nptrs.np_ptr^.nd_record_cnt) DO
+            WITH Nptrs.np_ptr^ DO
+                BEGIN
+                RecPos     := nd_pointer_list [MAX_POINTERINDEX_BD00 - RecIndex];
+                pRec       := @(nd_body [RecPos]);
+                StackIndex := CurrentColumn - mb_qual^.mcol_pos + 1;
+                IF  (
+                    (mb_st^[CurrentColumn].etype = st_varkey) AND
+                    (mb_st^[CurrentColumn].epos  = 1)
+                    )                                            OR
+                    (mb_st^[CurrentColumn].eop = op_unique)      OR
+                    (mb_st^[CurrentColumn].eop = op_unique_desc)
+                THEN
+                    (* the number of distinct values of a key *)
+                    (* column which is the only one in the    *)
+                    (* table or of an unique column need not  *)
+                    (* be counted via testing its uniqueness  *)
+                    DistinctValues [StackIndex] :=  DistinctValues [StackIndex] + 1
+                ELSE
+                    BEGIN
+                    CurrentRecord      := succ (RecIndex);
+                    VarColPos.vpl_last := -1;
+                    IF  pRec^.recVarcolOffset_gg00 < 0 (* PTS 1139184 *)
+                    THEN
+                        BEGIN
+                        pRec := bd999UnpackRow (pRec^, UnpackedRow);
+                        PackedRowFound := true;
+                        END;
+                    (* *)
+                    (*ENDIF*) 
+                    g04locate_col (mb_st^ [CurrentColumn],
+                          pRec, VarColPos, ColumnPosition, ColumnLength);
+                    col_of_node.pos [CurrentRecord] := RecPos - 1 + ColumnPosition;
+                    col_of_node.len [CurrentRecord] := ColumnLength;
+                    (* *)
+                    IF  ColumnLength <= 0
+                    THEN
+                        AuxKey.keyLen_gg00 := 1
+                    ELSE
+                        IF  pRec^.recBuf_gg00 [ColumnPosition] = csp_undef_byte
+                        THEN
+                            AuxKey.keyLen_gg00 := 1
+                        ELSE
+                            AuxKey.keyLen_gg00 := ColumnLength; (* PTS HB 1115096 27-03-2002 *)
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    (* *)
+                    (* value of column already in same page node? *)
+                    (* *)
+                    UniqueRecordInNode := true;
+                    comparison_number  := 1;
+                    IF  NOT PackedRowFound
+                    THEN
+                        WHILE (comparison_number < CurrentRecord          ) AND
+                              (UniqueRecordInNode                         ) AND
+                              (nd_record_cnt <= cbd72_max_rec_in_prim_page) DO
+                            BEGIN
+                            s30luc (Nptrs.np_ptr^
+                                  , col_of_node.pos [comparison_number]
+                                  , col_of_node.len [comparison_number]
+                                  , Nptrs.np_ptr^
+                                  , col_of_node.pos [CurrentRecord]
+                                  , col_of_node.len [CurrentRecord]
+                                  , CompareResult);
+                            UniqueRecordInNode := CompareResult <> l_equal;
+                            comparison_number  := succ(comparison_number)
+                            END;
+                        (*ENDWHILE*) 
+                    (*ENDIF*) 
+                    IF  UniqueRecordInNode
+                    THEN
+                        BEGIN
+                        IF  AuxKey.keyLen_gg00 > 1
+                        THEN
+                            BEGIN
+                            (* absoluter Notnagel gegen zu lange Spalten *)
+                            IF  AuxKey.keyLen_gg00 > sizeof (AuxKey.keyVal_gg00)
+                            THEN
+                                AuxKey.keyLen_gg00 := sizeof (AuxKey.keyVal_gg00);
+                            (*ENDIF*) 
+                            SAPDB_PascalMove ('VBD72 ',   1,    
+                                  sizeof (Nptrs.np_ptr^),
+                                  sizeof (AuxKey.keyVal_gg00),
+                                  @Nptrs.np_ptr^,
+                                  col_of_node.pos [CurrentRecord],
+                                  @AuxKey.keyVal_gg00, 1,
+                                  AuxKey.keyLen_gg00, trError_gg00);
+                            IF  trError_gg00 = e_move_error
+                            THEN
+                                BEGIN
+                                trError_gg00 := e_data_page_corrupted;
+                                b06dump_bad_page (trTaskId_gg00, 'd',
+                                      FILE_EXT_COR_BD00, nd_id, Nptrs.np_ptr, 1)
+                                END
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        AuxKey.keyVal_gg00 [1]     := chr (StackIndex);(* TODO *)
+                        AuxKey.keyRecLenSpace_gg00 := AuxKey.keyLen_gg00 + cgg_rec_key_offset;
+                        IF  trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            bd30AddToTempTree (NOT c_count_duplicates, AuxKey, TempCurrent);
+                            IF  trError_gg00 = e_ok
+                            THEN
+                                BEGIN
+                                DistinctValues [StackIndex] := DistinctValues [StackIndex] +1
+                                END
+                            ELSE
+                                IF  trError_gg00 = e_duplicate_key
+                                THEN
+                                    trError_gg00 := e_ok
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                RecIndex := RecIndex + 1
+                END;
+            (*ENDWITH*) 
+        (*ENDWHILE*) 
+        CurrentColumn := CurrentColumn + 1
+        END
+    (*ENDWHILE*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      bd50_WriteVtraceForSampling (
+            VAR trans          : tgg00_TransContext;
+            sampleNo           : tsp00_Int4;
+            sumEstimatedLeaves : tsp00_Longreal;
+            avgEstimatedLeaves : tsp00_Int4;
+            leafPosition       : tsp00_Int4;
+            currPageNo         : tsp00_Int4;
+            randomAccess       : boolean);
+ 
+VAR
+      len        : tsp00_Int4;
+      traceLine  : tsp00_Line;
+ 
+BEGIN
+(* *)
+len := 0;
+(* *)
+g17sname_to_line ('*** SampleNo', len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+g17trimint4_to_line (sampleNo, len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+(* *)
+g17sname_to_line ('SumEstLeafs:', len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+(* *)
+g17longreal_to_line (sumEstimatedLeaves, 5, len, traceLine);
+len := len + 12;
+traceLine[len] := ' ';
+(* *)
+g17sname_to_line ('avgEstLeafs:', len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+g17trimint4_to_line (avgEstimatedLeaves, len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+(* *)
+g17sname_to_line ('leafPos:    ', len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+g17trimint4_to_line (leafPosition, len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+(* *)
+g17sname_to_line ('pageNo:     ', len, traceLine);
+len            := len + 1;
+traceLine[len] := ' ';
+g17trimint4_to_line (currPageNo, len, traceLine);
+(* *)
+IF  randomAccess
+THEN
+    g17sname_to_line (' Random     ', len, traceLine)
+ELSE
+    g17sname_to_line (' Scan       ', len, traceLine);
+(*ENDIF*) 
+(* *)
+b120InsertTrace (trans, gg, gg_opmsg, len, @traceLine);
+(* *)
+trans.trError_gg00 := e_ok;
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

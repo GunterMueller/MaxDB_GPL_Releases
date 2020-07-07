@@ -1,0 +1,200 @@
+#!/usr/bin/perl
+#
+# put the version of the c- and c++-compilers into the environment so that
+# vmake can use them in description files
+# the names of variables and the format of version is the same like the macros
+# used by the preprocessor
+#
+
+package CCVers;
+
+sub setup_compiler_version {
+    if ($^O eq "solaris") {
+        setup_compiler_version_solaris ();
+    } elsif ($^O eq "aix") {
+        setup_compiler_version_aix ();
+    } elsif ($^O eq "dec_osf") {
+        setup_compiler_version_dec ();
+    } elsif ($^O eq "linux") {
+        setup_compiler_version_linux ();
+    }
+}
+
+sub setup_compiler_version_linux {
+	# gcc defines 2 constants, __GNUC__ and __GNUC_MINOR__
+	# where __GNUC__ is the value before the first decimal dot
+	# and __GNUC_MINOR__ is the value after the first dot
+	# example:
+	# gcc version is 2.91.66
+	#     __GNUC__     =  2
+	#     __GNUC_MINOR = 91
+	#
+	unless (defined $ENV{'__GNUC__'} && defined $ENV{'__GNUC_MINOR__'}) {
+		open (INPUT, "cc -v 2>&1 |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /gcc version/);
+		}
+		close (INPUT);
+		$CCVers{'CC'} = $_;
+		$CCVers{'CPLUSPLUS'} = $_;
+		$_ =~ /(\d+)\.(\d+)\.(\d+)/;
+		$ENV{'__GNUC__'} = $1;
+		$ENV{'__GNUC__MINOR__'} = $2;
+	}
+
+	unless (defined $CCVers{'OS'}) {
+		$CCVers{'OS'} = 'Linux';
+	}
+
+	unless (defined $CCVers{'ARCH'}) {
+		$CCVers{'ARCH'} = 'ix86 32 Bit';
+	}
+}
+
+sub setup_compiler_version_solaris {
+    unless (defined $ENV{'__SUNPRO_C'}) {
+	# please keep in mind that we are using a 
+        # hexadecimal compiler version
+	# like the preprocessor does
+	# e.g. Workshop Compiler 4.2 => __SUNPRO_C=0x0420
+	# or   Workshop Compiler 5.0 => __SUNPRO_C=0x0500
+
+        # first C compiler version
+        open (INPUT, "cc -V 2>&1 |");
+        $_ = <INPUT>;
+        chomp;
+        close (INPUT);
+        $_ =~ /WorkShop Compilers ([\d.]+)/g;
+	$CCVers{'CC'} = $_;
+        $_ = 256 * $1;
+        $ENV{'__SUNPRO_C'} = $_;
+    }
+
+    unless (defined $ENV{'__SUNPRO_CC'}) {
+        # then C++-Compiler-Version
+        open (INPUT, "CC -V 2>&1 |");
+        $_ = <INPUT>;
+        chomp;
+        close (INPUT);
+        $_ =~ /WorkShop Compilers ([\d.]+)/g;
+	$CCVers{'CPLUSPLUS'} = $_;
+        $_ = 256 * $1;
+        $ENV{'__SUNPRO_CC'} = $_;
+    }
+
+    unless (defined $CCVers{'OS'}) {
+	chomp (my $OsVers = 'uname -r');
+	if ($OsVer =~ /^5\.7$/) {
+		$OsVer = 7;
+	} elsif ($OsVer =~ /^5\.8$/) {
+		$OsVer = 8;
+	} elsif ($OsVer =~ /^(\d)\.(\d)\.(\d)$/) {
+		$1 -= 3;
+		$OsVer = $1.".".$2.".".$3;
+	} elsif ($OsVer =~ /^(\d)\.(\d)\$/) {
+		$1 -= 3;
+		$OsVer = $1.".".$2;
+	}
+	$CCVers{'OS'} = "Solaris ".$OsVer;
+     }
+     
+    unless (defined $CCVers{'ARCH'}) {
+	$CCVers{'ARCH'} = "SPARC 32 Bit";
+	$CCVers{'ARCH'} = "SPARC-V9 64 Bit" if defined $ENV{'BIT64'};
+    }
+}
+
+sub setup_compiler_version_aix {
+	unless (defined $ENV{'__AIXCPP'}) {
+
+		my($number)="0";
+		open (INPUT, "lslpp -L *.cmp 2>&1 |");
+		while ( $line=<INPUT>)
+		{
+			if ($line=~/.*\.cmp\s*(\d\.\d\.\d\.\d)/g)
+			{
+				$number=$1;
+				last;
+			}
+		}
+		close INPUT;
+		if ($number eq "0")
+		{
+			open (INPUT, "lslpp -L *.cmp.C 2>&1 |");
+			while ( $line=<INPUT>)
+			{
+				if ($line=~/.*\.cmp\.C\s*(\d\.\d\.\d\.\d)/g)
+				{
+					$number=$1;
+					last;
+				}
+			}
+			close INPUT;
+		}
+		$number=~s/\.//g;
+		$ENV{__AIXCPP}=$number;
+		return;
+	}
+}
+
+sub setup_compiler_version_dec {
+	unless (defined $ENV{'__DECC'}) {
+        open (INPUT, "cc -V 2>&1 |");
+        $_ = <INPUT>;
+        chomp;
+		if ($_ =~ /DEC C V(\d)\.(\d+)-(\d+)/g) {
+		    $CCVers{'CC'} = $_;
+		    $ENV{'__DECC'} = (100 * $1 + $2);
+		}
+		if ($_ =~ /Compaq C V(\d)\.(\d+)-(\d+)/g) {
+		    $ENV{'__DECC'} = (100 * $1 + $2);
+		    $CCVers{'CC'} = $_;
+		}
+		close (INPUT);
+		return;
+	}
+
+	unless (defined $ENV{'__DECCXX'}) {
+                open (INPUT, "cc -V 2>&1 |");
+                $_ = <INPUT>;
+                chomp;
+		if ($_ =~ /DIGITAL C\+\+ V(\d)\.(\d+)-(\d+)/g) {
+		    $CCVers{'CPLUSPLUS'} = $_;
+		    $ENV{'__DECCXX'} = (100 * $1 + $2);
+		}
+		if ($_ =~ /Compaq C\+\+ V(\d)\.(\d+)-(\d+)/g) {
+		    $CCVers{'CPLUSPLUS'} = $_;
+		    $ENV{'__DECCXX'} = (100 * $1 + $2);
+		}
+		close (INPUT);
+		return;
+	}
+ 
+	unless (defined $CCVers{'OS'}) {
+		chomp (my $OsVer = 'uname -v');
+		chomp (my $OsRel = 'uname -r');
+		
+		if ($OsRel eq "V4.0") {
+			if ($OsVer == 576) {
+				$OsVers = "Digital Unix V4.0 B";	
+			} elsif ($OsRel == 878) {
+				$OsVers = "Tru64 Unix V4.0 D";
+			} else {
+				$OsVers = "True64 Unix V4.0 ?";
+			}
+		} else {
+			$OsVers = "True64 Unix V?.? ?";
+		}
+		$CCVers{'OS'} = $OsVers;
+	}
+
+	unless (defined $CCVers{'ARCH'}) {
+		$CCVers{'ARCH'} = "ALPHA 64 Bit";
+	}
+}
+
+setup_compiler_version ();
+
+1;
+

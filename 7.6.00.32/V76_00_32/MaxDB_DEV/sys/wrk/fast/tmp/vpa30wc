@@ -1,0 +1,447 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA30WC$
+.tt 2 $$$
+.tt 3 $BurkhardD$SQLDB-ODBC DLL MAIN PROGRAM$2001-05-10$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :        
+#ifndef DEBUG
+#line 20 "vpa30wc"
+#endif
+#ifdef WIN
+#define WM_ASYNCEXECUTE		(WM_USER+100)
+VOID pa30ProtectThread();
+VOID pa30UnProtectThread();
+#endif /* WIN */
+.CM *-END-* define --------------------------------------
+Use     :
+
+        FROM
+              DOS_Environment : VEN08WC ;
+
+        PROCEDURE
+              e08dosenvironment;
+      
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 1993-09-13
+.sp
+.cp 3
+Version : 1994-04-25
+.sp
+.cp 3
+Release :  7.3    Date : 2001-05-10
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 87 "vpa30wc"
+#endif
+#include <direct.h>
+#include <winsock.h>
+
+#include "heo07.h"
+#include "gos00.h"
+
+#include "vpa00global.h"
+#include "vpa60Stmt.h"
+#include "vpa09.h"
+
+#define API_SEC_3DDIALOG "3dDialog"
+#define API_SEC_3DSUBCLASS "3dSubClass"
+#define API_SEC_SQL_DRIVER_NAME "SQL_DRIVER_NAME"
+#define API_SEC_SQL_DRIVER_VER "SQL_DRIVER_VER"
+#define API_SEC_SQL_DBMS_NAME "SQL_DBMS_NAME"
+#define API_SEC_SQL_DBMS_VER "SQL_DBMS_VER"
+UCHAR pa30_sql_driver_name[128];
+UCHAR pa30_sql_driver_ver[64];
+UCHAR pa30_sql_dbms_name[128];
+UCHAR pa30_sql_dbms_ver[64];
+
+
+VOID pa07CloseTrace();
+SWORD pa07IsTraceOn();
+
+/* declarations for multithreading */
+VOID pa07DeleteCriticalSection();
+VOID pa09FreeTLS();
+
+/* declarations for shared data */
+pa09Component pa30Component;
+typedef struct {
+   int version;
+   HWND hwnd;
+   int status;
+   char FileName[260];
+   int TraceLevel;
+} TraceStatus;
+
+extern short api_ctl3ddialog;
+extern short api_ctl3dsubclass;
+extern api_global_tab pa07global[MAX_TASK];
+SDWORD api_dispatch;
+extern SDWORD pa07blockmodus;
+extern DWORD pa09ThreadCount;
+
+LRESULT FAR PASCAL ODBCWndProc(HWND, UINT, WPARAM, LPARAM);
+
+HINSTANCE pa30hinstAnaly=NULL;   
+HINSTANCE pa30hinstLibRte=NULL;   
+HANDLE s_hModule;		/* Saved module handle. */
+HWND s_hwMain;
+DLGPROC lpSendAHello;
+FARPROC lpODBCHook, lpDefaultHook=NULL;
+
+WORD wVersionRequested;
+WSADATA wsaData;
+
+VOID FAR PASCAL pa30GeneralInit(VOID);
+
+BOOL    WINAPI   DllMain (HANDLE hModule, 
+                            ULONG dwReason,
+                            LPVOID lpReserved)
+{
+    switch (dwReason) {
+    case DLL_PROCESS_ATTACH: {
+        WNDCLASS wc;
+        s_hModule = hModule;
+        sqlSetModuleHandle (s_hModule);
+        API_TRACE_INIT(88);
+        API_TRACE(API_TR_MSG,"DLL_PROCESS_ATTACH",0);
+#ifdef SAPDB_FAST
+        if (pa07IsTraceOn()) {
+            UCHAR txt[256];
+            API_SPRINTF(txt, API_MSG_PREFIX" Trace functionality is not available in the FAST version of ODBC. Continue execution ?");
+            if (MessageBox( 0, txt,
+                            ODBCDR_TITLE, MB_ICONEXCLAMATION | MB_YESNO)
+                ==IDNO) {
+                return FALSE;
+            }
+        }
+#endif
+#ifdef MEMTRAP
+        e96hModule = hModule;
+#endif
+        wc.style=CS_VREDRAW | CS_HREDRAW; 
+        wc.lpfnWndProc=(WNDPROC) ODBCWndProc;
+        wc.cbClsExtra=0; 
+        wc.cbWndExtra=0;
+        wc.hInstance=hModule; 
+        wc.hIcon=NULL; //(HICON)ICO_MAIN; 
+        wc.hCursor=NULL; // LoadCursor(0,IDC_ARROW);
+        wc.hbrBackground=(HBRUSH)(COLOR_BACKGROUND);
+        wc.lpszMenuName=0;
+        wc.lpszClassName="SQLODBC"; 
+
+        if (!RegisterClass(&wc)) {
+            API_TRACE_LEN( API_TR_LASTERROR,
+                           "RegisterClass failed",
+                           NULL, GetLastError());
+        }
+   
+        {
+            pa30Component.cbSize = sizeof(pa30Component);
+            strcpy(pa30Component.szComponent, ODBCDR_TITLE);
+
+            /*if (pa09RegisterTF(&pa30Component, hModule)) {
+              }*/
+        }
+#ifndef SAPDB_FAST    
+        if (api_trace_status == 1) {
+            CHAR FAR *env = GetDOSEnvironment();
+            UCHAR szBuf[MAX_PATH];
+            WORD wReturn;
+            GetModuleFileName(hModule, szBuf, sizeof(szBuf));
+            API_TRACE(API_TR_STRING, "DRIVER", szBuf);
+            GetModuleFileName(NULL, szBuf, sizeof(szBuf));
+            API_TRACE(API_TR_STRING, "Application", szBuf);
+            API_TRACE(API_TR_STRING, "CommandLine", GetCommandLine());
+            while (*env != '\0') {
+                if (!API_MEMCMP(env, "PATH", sizeof("PATH")-1)) {
+                    API_TRACE(API_TR_STRING, "env", env);
+                }
+                if (!API_MEMCMP(env, "DBROOT", sizeof("DBROOT")-1)) {
+                    API_TRACE(API_TR_STRING, "env", env);
+                }
+                env += API_STRLEN(env)+1;
+            }
+            wReturn = GetSystemDirectory(szBuf, sizeof(szBuf));
+            if (wReturn) {    
+                wReturn = (wReturn > sizeof(szBuf)) ? sizeof(szBuf) : wReturn;
+                API_TRACE_LEN( API_TR_ODBC_STRING,
+                               "SystemDirectory",
+                               szBuf, wReturn );
+            }
+            wReturn = _getdrive();
+            if (_getdcwd(wReturn, szBuf, sizeof(szBuf)))
+                API_TRACE(API_TR_STRING, "CurrentPath", szBuf);       
+        }    
+#endif 
+#ifdef CTL3D_ALL    
+        pa30GeneralInit();
+#endif
+#ifdef DYNAMICLOAD
+        if (!pa03LoadRte()) {
+            /* loading of sqluser.. failed */
+            return FALSE;
+        };
+#endif        
+        {
+          /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1124459 */
+            teo07_ThreadErr ok;
+            tsp00_ErrTextc  errTxt;
+  
+            pa09InitMultiThreading (errTxt, &ok);
+            if (ok != THR_OK_EO07) {
+                API_TRACE( API_TR_MSG, "init multithreading failed!", 0 );
+                API_TRACE( API_TR_STRING, "errTxt", errTxt );
+                
+                return FALSE;
+            }; /* if */
+        };
+        break;
+    }
+    case DLL_THREAD_ATTACH: {
+        API_TRACE(API_TR_MSG, "DLL_THREAD_ATTACH", 0);
+        break;
+    }
+    case DLL_THREAD_DETACH: {
+        API_TRACE(API_TR_MSG, "DLL_THREAD_DETACH", 0);
+        pa09FreeTLS();
+        break;
+    }
+    case DLL_PROCESS_DETACH: {
+        if (pa09ThreadCount == 1) {
+            /* wenn der Aufrufer die Appliakation mit der exit Function
+             * verlaesst, werden keine DLL_THREAD_DETACH Nachrichten
+             * gesendet die TSL sind aber schon freigegeben. Trace und
+             * andere functionen laufen dann nicht mehr */
+            API_TRACE(API_TR_MSG, "DLL_PROCESS_DETACH", 0);
+#ifndef SAPDB_FAST            
+            pa07CloseTrace();
+#endif            
+        };
+#ifdef CTL3D_ALL    
+        pa03RemoveCtl3d(s_hModule);
+#endif
+
+        UnregisterClass("SQLODBC", s_hModule);
+        /*pa09UnregisterTF(s_hModule);*/
+        pa09FreeTLS();
+        pa07DeleteCriticalSection();
+        pa09DeleteCriticalSection();
+#ifdef DYNAMICLOAD
+        pa03FreeRte();
+#endif
+        break;
+    }
+    }
+    return TRUE;
+} /* LibMain */
+
+
+LRESULT FAR PASCAL ODBCWndProc(HWND hw,UINT iMsg,WPARAM uP1,LPARAM lP2)
+{
+    LRESULT ret=FALSE;
+    API_TRACE(API_TR_MSG, "ODBCWndProc", 0);
+    API_TRACE(API_TR_HWND, "hw", &hw);
+    API_TRACE(API_TR_WORD, "iMsg", &iMsg);
+    API_TRACE(API_TR_WORD, "uP1", &uP1);
+    API_TRACE(API_TR_DWORD, "lP2", &lP2);
+    switch (iMsg) {
+    case WM_CREATE: {
+        API_TRACE(API_TR_MSG,"(WM_CREATE)", 0);
+        break;
+    }
+    case WM_COMMAND: {
+        switch ((WPARAM) LOWORD(uP1)) {
+        }
+        API_TRACE(API_TR_MSG,"(WN_COMMAND)", 0);
+        break;
+    }
+    case WM_ASYNCEXECUTE: {
+        tpa60Stmt FAR * stmt_block_ptr;
+        teo07_Thread Thread;
+        API_TRACE(API_TR_MSG, "start async", 0);
+        stmt_block_ptr = (tpa60Stmt*) apdlock ((HSTMT) lP2);
+        Thread = stmt_block_ptr->async.hThread;
+        apdunlk ((HSTMT) lP2);   
+        if (Thread) {
+            tsp00_ErrText   errtext;
+            teo07_ThreadErr notok;
+            sqlresumethread( Thread, errtext, &notok );
+            if (notok) {           
+                API_TRACE(API_TR_STRING, "sqlresumethread", errtext);
+                pa09ThreadProc((HSTMT) lP2);
+            }
+        }
+        else {
+            pa09ThreadProc((HSTMT) lP2);
+        }
+        ret = TRUE;
+        API_TRACE(API_TR_MSG, "end async", 0);
+        break;
+    }
+    case WM_DESTROY: {
+        API_TRACE(API_TR_MSG,"(WM_DESTROY)", 0);
+        break;
+    }
+    case WM_COPYDATA:{
+        COPYDATASTRUCT *pcds=(COPYDATASTRUCT *)lP2;  
+        TraceStatus *s;
+        if (pcds) {
+            switch (pcds->dwData) {
+            case (1): {
+                s=(TraceStatus*) pcds->lpData;
+                if (s) {             
+                    API_TRACE(API_TR_SWORD,"(WM_COPYDATA)", &pcds->cbData);
+                    API_TRACE(API_TR_STRING, "FileName", s->FileName);      
+                    API_TRACE(API_TR_SDWORD, "TraceLevel", &s->TraceLevel);
+                    if (s->status == 1) {
+                        pa07TraceSwitch(-1);
+                    }
+                    if (s->status == 2) {
+                        pa07SetTraceFileName(s->FileName);
+                        pa07TraceSwitch((SWORD)s->TraceLevel);
+                    }
+                }
+                ret = TRUE;
+                break;
+            }         
+            }
+        }
+        break;
+    }      
+    } /* switch */
+    if (ret == FALSE) {
+        ret = DefWindowProc(hw,iMsg,uP1,lP2);
+    }
+    API_TRACE(API_TR_SDWORD, "ret", &ret);
+    return ret;
+} /* ODBCWndProc */
+
+
+VOID FAR PASCAL pa30GeneralInit(VOID) 
+{
+    UCHAR profstr[40];
+    API_TRACE(API_TR_ENTRY, "pa30GeneralInit", 0);
+    GetPrivateProfileString( (UCHAR*) API_TR_PROFENTRY,
+                             (UCHAR*) API_SEC_3DDIALOG,
+                             (UCHAR*) "N",
+                             (UCHAR*) profstr,
+                             sizeof(profstr),
+                             (UCHAR*) "sql-db.ini");
+    if (profstr[0] == 'n' || profstr[0] == 'N' )
+        api_ctl3ddialog = FALSE;
+    else {       
+        api_ctl3ddialog = TRUE;
+    }
+    if (api_ctl3ddialog) {
+        GetPrivateProfileString((UCHAR FAR *) API_TR_PROFENTRY, (UCHAR FAR *) API_SEC_3DSUBCLASS,
+                                (UCHAR FAR *) "N", (UCHAR FAR *) profstr, sizeof(profstr), (UCHAR FAR *) "sql-db.ini");
+        if (profstr[0] == 'n' || profstr[0] == 'N' )
+            api_ctl3dsubclass = FALSE;
+        else {       
+            api_ctl3dsubclass = TRUE;
+        }
+    }
+    GetPrivateProfileString( (UCHAR*) API_TR_PROFENTRY,
+                             (UCHAR*) API_SEC_SQL_DRIVER_NAME,
+                             (UCHAR*) API_DRIVER_NAME,
+                             (UCHAR*) pa30_sql_driver_name,
+                             sizeof(pa30_sql_driver_name),
+                             (UCHAR*) "sql-db.ini");
+    GetPrivateProfileString( (UCHAR*) API_TR_PROFENTRY,
+                             (UCHAR*) API_SEC_SQL_DRIVER_VER,
+                             (UCHAR*) API_DRIVER_VER,
+                             (UCHAR*) pa30_sql_driver_ver,
+                             sizeof(pa30_sql_driver_ver),
+                             (UCHAR*) "sql-db.ini");
+    GetPrivateProfileString( (UCHAR*) API_TR_PROFENTRY,
+                             (UCHAR*) API_SEC_SQL_DBMS_NAME,
+                             (UCHAR*) API_DBMS_NAME,
+                             (UCHAR*) pa30_sql_dbms_name,
+                             sizeof(pa30_sql_dbms_name),
+                             (UCHAR*) "sql-db.ini");
+    GetPrivateProfileString( (UCHAR*) API_TR_PROFENTRY,
+                             (UCHAR*) API_SEC_SQL_DBMS_VER,
+                             (UCHAR*) API_DBMS_VER,
+                             (UCHAR*) pa30_sql_dbms_ver,
+                             sizeof(pa30_sql_dbms_ver),
+                             (UCHAR*) "sql-db.ini");
+    API_TRACE(API_TR_SWORD, "api_ctl3ddialog", &api_ctl3ddialog);
+    API_TRACE(API_TR_SWORD, "api_ctl3dsubclass", &api_ctl3dsubclass);
+    API_TRACE(API_TR_EXIT, "pa30GeneralInit", 0);
+} /* pa30GeneralInit */
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

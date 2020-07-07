@@ -1,0 +1,152 @@
+#!/usr/bin/perl
+# pcgetp
+#
+# @(#)pcgetp  7.2  1999-08-20
+#
+# writes the appropriated parametervalue to stdout.
+#
+# Burkhard Diesing
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use Getopt::Std;
+
+sub PrintErrorProt;
+sub PrintParamValue;
+sub PrintParamFormatError;
+
+$DBMUSR="control";
+$DBMPWD="control";
+$DBMCLI_PROG="dbmcli";
+$DBMCLI_PROT=".temp";
+
+if (!getopts ('hd:u:iv') || $opt_h ) {
+   print <DATA>;
+   exit;
+}
+
+if ($opt_d) {
+   $SERVERDB=$opt_d;
+}
+
+if ($opt_u =~ /(.*),(.*)/) {
+    $DBMUSR = $1;
+    $DBMPWD = $2;
+}
+
+if ($ENV{RELVER} eq "R62" || $ENV{RELVER} eq "R71")
+{
+    $DBMOPT="-uDBM ";
+}
+else {
+    if ($ENV{RELVER} ge "R72")
+    {
+	$DBMOPT="-uUTL ";
+    }
+    else
+    {
+	print "Unsupported release ($ENV{RELVER})";
+	exit -1;
+    }
+}
+
+if (@ARGV < 1 || @ARGV > 2) {
+   print <DATA>;
+   exit;
+}
+
+my($PARAM)=$ARGV[0];
+if ($opt_i) {
+    $PARAM = uc $PARAM;
+}
+
+
+my($CMD)="$DBMCLI_PROG -u $DBMUSR,$DBMPWD -n p26235 -d $SERVERDB -o $DBMCLI_PROT param_directgetall";
+print $CMD."\n" if ($opt_v);
+my($RC)=system($CMD);
+
+print "RC=$RC\n" if ($opt_v);
+if ( $RC == 0) {
+    PrintParamValue($PARAM);
+}
+else {
+    PrintErrorProt;
+}
+
+sub PrintParamValue
+{
+    my($PARAM) = $_[0];
+    open(FILE_IN, "<$DBMCLI_PROT") || die "Can't open $DBMCLI_PROT: $!";
+    if (<FILE_IN> =~ /OK/) {
+	while (<FILE_IN>) {
+	    print $_ if ($opt_v);
+	    /(\w+)\s+(.+)/;
+	    $PARAMETER="$1";
+	    $VALUE=$2;
+	    $XX="YES";
+
+	    if ($XX =~ /NO/) {
+		print STDOUT "YES\n";
+	    }
+
+	    if ($PARAMETER =~ /${PARAM}/) {
+		print STDOUT "$PARAMETER\t$VALUE  $PARM\n";
+	    }
+	}
+    }
+    else {
+	PrintParamFormatError;
+    }
+    close(FILE_IN);
+}
+
+sub PrintParamFormatError
+{
+    print STDERR "ERROR: Parameter output format doesn't match.\n";
+    PrintErrorProt;
+}
+
+sub PrintErrorProt
+{
+    open(FILE_IN, "<$DBMCLI_PROT") || die "Can't open $DBMCLI_PROT: $!";
+    while(<FILE_IN>) {
+	print STDERR $_;
+    }
+    close(FILE_IN);
+}
+
+__DATA__
+
+ USAGE: pcgetp [-h | [-d dbname] [-u uid,pwd] [-[iv]] ] <parameter>
+
+           Switched kernel vtrace on or off .
+
+ OPTIONS:    -h         (prints this help)
+             -d dbname  (Default $SERVERDB)
+             -u uid,pwd (Default control,control)
+             -i         ignore case
+             -v         verbose
+
+ <parameter>: Any allowed kernelparameter.
+
+
+

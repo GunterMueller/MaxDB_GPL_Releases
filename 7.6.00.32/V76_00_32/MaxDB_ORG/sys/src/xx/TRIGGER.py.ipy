@@ -1,0 +1,278 @@
+#
+# =====================================================
+# @(#) TRIGGER                     7.6       2005-06-01
+# =====================================================
+#
+#    ========== licence begin  GPL
+#    Copyright (c) 2000-2005 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+
+from installib import *
+
+def install (session,options):
+    """Installing additional triggers
+    """
+
+    loaderCmd (session, 'INSTALLATION ON')
+    loaderCmd (session, 'AUTOCOMMIT OFF')
+
+    stopIfSqlNotErr (session, -4019,
+                     """DROP TRIGGER SYSUPDSTATWANTED_INSERT OF SYSUPDSTATWANTED""")
+
+    stopIfSqlNotOK (
+        session,
+"""CREATE TRIGGER SYSUPDSTATWANTED_INSERT FOR SYSUPDSTATWANTED AFTER INSERT EXECUTE (
+    VAR TABLETYPE CHAR(8);
+        DATATYPE  CHAR(10);
+        ACTOWNER  CHAR(32);
+
+    SELECT T.OWNER INTO :ACTOWNER FROM DOMAIN.TABLES T
+    WHERE
+        T.TABLENAME      = :TABLENAME
+        AND T.SCHEMANAME = :SCHEMANAME
+        AND T.OWNER      = :OWNER
+        AND T.TABLETYPE  = 'TABLE';
+    IF $RC = 100 THEN
+        STOP (-8055, 'unknown table name');
+    IF ACTOWNER <> USER THEN
+        STOP (-8055, 'missing privilege');
+
+    IF TRIM(COLUMNNAME) <> '' THEN
+    BEGIN
+        SELECT (C.DATATYPE) INTO :DATATYPE FROM DOMAIN.COLUMNS C
+        WHERE
+            C.TABLENAME      = :TABLENAME
+            AND C.SCHEMANAME = :SCHEMANAME
+            AND C.COLUMNNAME = :COLUMNNAME;
+        IF $RC = 100 THEN
+            STOP (-8055, 'unknown column name');
+
+        IF DATATYPE = 'LONG' OR DATATYPE = 'LONGFILE' THEN
+            STOP (-8055, 'invalid datatype');
+    END;
+)""")
+
+    stopIfSqlNotOK (session,
+                    """COMMENT ON TRIGGER SYSUPDSTATWANTED.SYSUPDSTATWANTED_INSERT IS
+                    'Verify whether inserted table and column exist and belong to user'""")
+
+    stopIfSqlNotErr (session, -6006, 
+        """CREATE DBPROC INVALIDATE_CATALOGCACHE (IN SCHEMANAME CHAR(32), IN TABLENAME CHAR(32)) AS LANGUAGE SYSTEM NAME 'INVALIDATE_CATALOGCACHE'""")
+
+
+    stopIfSqlNotErr (session, -4019,
+                     """DROP TRIGGER SYSUPDSTATWANTED_DELETE OF SYSUPDSTATWANTED""")
+                     
+    stopIfSqlNotOK (
+        session,
+        """CREATE TRIGGER SYSUPDSTATWANTED_DELETE FOR SYSUPDSTATWANTED AFTER DELETE EXECUTE (
+        CALL SYSDBA.INVALIDATE_CATALOGCACHE (:SCHEMANAME, :TABLENAME);
+        )""")
+
+    stopIfSqlNotOK (session,
+                    """COMMENT ON TRIGGER SYSUPDSTATWANTED.SYSUPDSTATWANTED_DELETE IS
+                    'invalidates the cached catalog information of the table identified by the deleted row'""")
+
+    stopIfSqlNotErr (session, -4019,
+                     """DROP TRIGGER SYSUPDATECOUNTERWANTED_INSERT OF SYSUPDATECOUNTERWANTED""")
+
+    stopIfSqlNotOK (
+        session,
+        """CREATE TRIGGER SYSUPDATECOUNTERWANTED_INSERT FOR SYSUPDATECOUNTERWANTED AFTER INSERT EXECUTE (
+        VAR ACTOWNER CHAR(32);
+
+        IF INDEXNAME = '' THEN
+        BEGIN
+            SELECT T.OWNER INTO :ACTOWNER FROM DOMAIN.TABLES T
+            WHERE
+                T.TABLENAME      = :TABLENAME
+                AND T.SCHEMANAME = :SCHEMANAME
+                AND T.TABLETYPE  = 'TABLE';        
+            IF $RC = 100 THEN
+                STOP (-8055, 'unknown table name');
+        END
+        ELSE
+        BEGIN
+            SELECT I.OWNER INTO :ACTOWNER FROM DOMAIN.INDEXES I
+            WHERE
+                I.TABLENAME      = :TABLENAME
+                AND I.SCHEMANAME = :SCHEMANAME
+                AND I.INDEXNAME  = :INDEXNAME;        
+            IF $RC = 100 THEN
+                STOP (-8055, 'unknown index name');
+        END;
+        IF ($RC = 0) AND (ACTOWNER <> USER) AND (USER <> SYSDBA) THEN
+            STOP (-8055, 'missing privilege');
+    
+        IF $RC <> 0 THEN
+            STOP (-8055, 'SYSUPDATECOUNTERWANTED trigger failed: ' || CHR($RC));
+    )""")
+
+    stopIfSqlNotOK (session,
+                    """COMMENT ON TRIGGER SYSUPDATECOUNTERWANTED.SYSUPDATECOUNTERWANTED_INSERT IS
+                    'Verify whether inserted table or index exists'""")
+
+    # commit to free locks on catalog
+    loaderCmd (session, 'COMMIT')
+
+    stopIfSqlNotErr (session, -4016, 'DROP DBPROC SYSDDLTRIGGERPL')
+
+    stopIfSqlNotOK (session, 
+        """CREATE DBPROC SYSDDLTRIGGERPL as
+        VAR 
+        action     char(32);
+        objtype    char(32);
+        param1     char(32);
+        param2     char(32);
+        param3     char(32);
+        param4     char(32);
+        param5     char(32);
+        owner      char(32); 
+        tablename  char(32);
+        columnname char(32);
+        stmt       char(128);
+        rc         integer;
+        DECLARE SYSRESULT CURSOR FOR
+          SELECT ACTION, OBJECTTYPE, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5 
+          FROM SYSDD.PARAMETERS;
+        WHILE $RC = 0 DO
+          BEGIN
+          FETCH  SYSRESULT INTO :ACTION, :OBJTYPE, 
+              :PARAM1, :PARAM2, :PARAM3, :PARAM4, :PARAM5;
+          if $RC = 0
+          THEN
+            BEGIN
+            IF ACTION = 'DROP'
+            THEN
+              BEGIN
+              IF OBJTYPE = 'USER'
+              THEN
+                BEGIN
+                DELETE  SYSDBFILESYSTEM.INODE WHERE "VIEWOWNER" = :PARAM2;
+                IF $RC = 100 THEN $RC = 0;
+                IF $RC = 0
+                THEN
+                  BEGIN
+                  DELETE  SYSDBFILESYSTEM.CONTAINER WHERE "VIEWOWNER" = :PARAM2;
+                  IF $RC = 100 THEN $RC = 0;
+                  END;
+                IF $RC = 0 
+                THEN  
+                  BEGIN
+                  DELETE  SYSDBA.SYSUPDSTATWANTED WHERE OWNER = :PARAM2 OR SCHEMANAME = (SELECT SCHEMANAME FROM DOMAIN.SCHEMAS WHERE SCHEMAS.OWNER = :PARAM2);
+                  IF $RC IN (100, -4004, -4005) THEN $RC = 0;
+                  END;
+                CONTINUE;
+                END; /* USER */
+              IF OBJTYPE IN ('SYNONYM', 'TABLE', 'VIEW')
+              THEN
+                BEGIN
+                DELETE  SYSDBA.SYSUPDSTATWANTED WHERE SCHEMANAME = :PARAM5 AND OWNER = :PARAM1 AND TABLENAME = :PARAM2;
+                IF $RC IN (0, 100, -4004, -4005)
+                THEN 
+                  DELETE SYSDBA.SYSUPDATECOUNTERWANTED WHERE SCHEMANAME = :PARAM1 AND TABLENAME = :PARAM2;
+                IF $RC IN (100, -4004, -4005) THEN $RC = 0;
+                CONTINUE;
+                END; /* TABLE */
+              IF OBJTYPE = 'COLUMN'
+              THEN
+                BEGIN
+                DELETE  SYSDBA.SYSUPDSTATWANTED WHERE SCHEMANAME = :PARAM5 AND OWNER = :PARAM1 AND TABLENAME = :PARAM2 AND COLUMNNAME = :PARAM3;
+                IF $RC IN (100, -4004, -4005) THEN $RC = 0;
+                CONTINUE;
+                END; /* COLUMN */
+              IF OBJTYPE = 'INDEX'
+              THEN
+                BEGIN
+                DELETE SYSDBA.SYSUPDATECOUNTERWANTED WHERE SCHEMANAME = :PARAM1 AND TABLENAME = :PARAM2 AND INDEXNAME = :PARAM4;
+                IF $RC IN (100, -4004) THEN $RC = 0;
+                CONTINUE;
+                END;
+              IF OBJTYPE = 'TRIGGER'
+              THEN
+                BEGIN
+                stmt = 'CALL SYNCHRONIZATIONSERVICE.DROPPED_SYSTEM_TRIGGERS (''' || PARAM2 || ''',''' || PARAM3 || ''')';
+                EXECUTE stmt;
+                IF $RC = -4016 THEN $RC = 0; 
+                CONTINUE;
+                END; /* DROP TRIGGER */
+              END; /* DROP */
+            IF ACTION = 'RENAME'
+            THEN
+              BEGIN
+              IF OBJTYPE = 'USER'
+              THEN
+                BEGIN
+                UPDATE SYSDBA.SYSUPDATECOUNTERWANTED SET SCHEMANAME = :PARAM3 WHERE SCHEMANAME = :PARAM2;
+                /* ignore errors */
+                UPDATE SYSDBFILESYSTEM.INODE SET "VIEWOWNER" = :PARAM3 WHERE "VIEWOWNER" = :PARAM2;
+                IF $RC = 0 OR $RC = 100
+                THEN
+                  UPDATE SYSDBFILESYSTEM.CONTAINER SET "VIEWOWNER" = :PARAM3 WHERE "VIEWOWNER" = :PARAM2;
+                IF $RC = 0 OR $RC = 100 
+                THEN
+                  BEGIN
+                  UPDATE SYSDBA.SYSUPDSTATWANTED SET SCHEMANAME = :PARAM3, OWNER = :PARAM3 WHERE SCHEMANAME = :PARAM2 AND OWNER = :PARAM2;
+                  END;
+                IF $RC IN (100, -4004, -4005) THEN $RC = 0; 
+                CONTINUE;
+                END;
+              IF OBJTYPE IN ('SYNONYM', 'TABLE', 'VIEW')
+              THEN
+                BEGIN
+                UPDATE SYSDBA.SYSUPDATECOUNTERWANTED SET SCHEMANAME = :PARAM4, TABLENAME = :PARAM3 WHERE SCHEMANAME = :PARAM5 AND TABLENAME = :PARAM2;
+                /* ignore errors */
+                UPDATE SYSDBA.SYSUPDSTATWANTED SET SCHEMANAME = :PARAM4, TABLENAME = :PARAM3 WHERE SCHEMANAME = :PARAM5 AND TABLENAME = :PARAM2;
+                IF $RC IN (100, -4004, -4005) THEN $RC = 0;
+                CONTINUE;
+                END;
+              IF OBJTYPE = 'COLUMN'
+              THEN
+                BEGIN
+                UPDATE SYSDBA.SYSUPDSTATWANTED SET COLUMNNAME = :PARAM4 WHERE SCHEMANAME = :PARAM5 AND TABLENAME = :PARAM2 AND COLUMNNAME = :PARAM3;
+                IF $RC IN (100, -4004, -4005) THEN $RC = 0;
+                CONTINUE;
+                END;
+              IF OBJTYPE = 'INDEX'
+              THEN
+                BEGIN
+                UPDATE SYSDBA.SYSUPDATECOUNTERWANTED SET INDEXNAME = :PARAM3 WHERE SCHEMANAME = :PARAM5 AND TABLENAME = :PARAM2 AND INDEXNAME = :PARAM4;
+                $RC = 0; /* ignore errors */
+                CONTINUE;
+                END;
+              END; /* RENAME */
+            END; /* FETCH */
+          END; /* WHILE */
+          rc = $RC;
+          CLOSE SYSRESULT;
+          IF $RC = 0 
+          THEN
+            $RC = rc;
+          IF $RC <> 0 AND $RC <> 100 AND $RC <> -4004
+          THEN
+            STOP (-9406, 'DDL Trigger failed : ' || CHR($RC));""")
+
+    loaderCmd (session, 'COMMIT')
+
+    loaderCmd (session, 'INSTALLATION OFF')
+
+    # End of Install
+
+
+
+if __name__ == '__main__':
+    connectAndInstall (install, "Installing additional triggers\n")

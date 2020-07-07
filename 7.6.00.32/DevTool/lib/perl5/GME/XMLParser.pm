@@ -1,0 +1,133 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package XMLParser;
+
+use Exporter;
+use XML::Parser::Expat;
+use GME::XMLElement;
+
+@ISA = ('Exporter');
+
+@Export = ('new', 'ParseFile', 'ParseStream');
+
+my %ParserHash;
+
+sub new {
+	my $self = {};
+	bless $self;
+
+	$self->{Parser} = new XML::Parser::Expat;
+	$self->{Parser}->setHandlers (
+	        Start  => \&HandleStart,
+       		Char   => \&HandleChar,
+	        End    => \&HandleEnd );
+	$self->{Current} = 0;
+	$self->{Parent} = 0;
+	$self->{Tree} = 0;
+
+	$ParserHash{$self->{Parser}} = $self;
+	return $self;
+}
+
+sub ParseFile {
+	my $self = shift;
+	my $filename = shift;
+	$self->{Parser}->parsefile ($filename);
+	return $self->{Tree};
+}
+
+sub ParseStream {
+	my $self = shift;
+	my $fh_ref = shift;
+	undef $bla;
+	XML::Parser::Expat::ParseStream
+		($self->{Parser}->{Parser}, $fh_ref, $bla);
+	return $self->{Tree};
+}
+
+sub HandleStart {
+	my ($ExpatParser, $Type, %Attr) = @_;
+	my $Parser = $ParserHash{$ExpatParser};
+
+	$Parser->{Current} = XMLElement->new ($Type);
+	$Parser->{Current}->SetParent ($Parser->{Parent});
+
+	if ($Type eq "releases") {
+		$Parser->{Tree} = $Parser->{Current};
+		$Parser->{Parent} = $Parser->{Current};
+	} elsif ($Type eq "vmake_path") {
+		$Parser->{Parent} = $Parser->{Current};
+		$Parser->{Current}->SetAttribute("build", $Attr{build});
+		$Parser->{Current}->SetAttribute("correction", $Attr{correction});
+		$Parser->{Current}->SetAttribute("release", $Attr{release});
+		$Parser->{Current}->SetAttribute("state", $Attr{state});
+		if ((defined $Attr{alias}) && ($Attr{alias} ne "")) {
+			$Parser->{Current}->SetAttribute
+				("alias", $Attr{alias});
+		} else {
+				$Parser->{Current}->SetAttribute
+					("alias", undef);
+		}
+		$Parser->{Current}->SetAttribute("sut", $Attr{sut});
+		if ((defined $Attr{sut}) && ($Attr{sut} ne "")) {
+			$Parser->{Current}->SetAttribute
+				("sut", $Attr{sut});
+		} else {
+			$Parser->{Current}->SetAttribute
+				("sut", undef);
+		}
+	} elsif ($Type eq "layer") {
+		$Parser->{Parent} = $Parser->{Current};
+		if ((defined $Attr{loc}) && ($Attr{loc} ne "")) {
+			$Parser->{Current}->SetAttribute ("loc", $Attr{loc});
+		} else {
+			$Parser->{Current}->SetAttribute ("loc", undef);
+		}
+	} elsif ($Type eq "depot") {
+		$Parser->{Parent} = $Parser->{Current};
+	}
+}
+
+sub HandleEnd {
+	my ($ExpatParser, $Type) = @_;
+	my $Parser = $ParserHash{$ExpatParser};;
+
+	$Parser->{Current}->Insert();
+	$Parser->{Parent} = $Parser->{Current}->GetParent();
+	$Parser->{Current} = $Parser->{Parent};
+}
+
+sub HandleChar {
+	my  ($ExpatParser, $Content) = @_;
+	my $Parser = $ParserHash{$ExpatParser};;
+
+	# don't care empty Content
+	return unless ($Content =~ /\S/);
+
+	#$Content =~ /(\S+)/;
+	#$Parser->{Current}->SetContent ($1);
+	$Parser->{Current}->SetContent ($Content);
+}
+
+1;
+

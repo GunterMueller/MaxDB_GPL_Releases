@@ -1,0 +1,639 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPR16C$
+.tt 2 $$$
+.TT 3 $$SQL-Profiling$1999-11-24$
+*********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+.nf
+.sp
+MODULE  : Embedded SQL Profiling
+=========
+.sp
+Purpose : Embedded SQL Profiling
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+#define FCALL
+#define FLOAT float
+/*PRETTY*/
+void p16profinit (sqlratype *sqlra, sqlgaentry *gaentry,
+                  char *progn,  tsp00_Int2 lang,
+                  struct SQLERROR *ret) ;
+void p16profexec (sqlratype *sqlra, sqlgaentry *gaentry,
+                  char *stmt, char *progn, char *modn,
+                  tsp00_Int2 lang, tsp00_Int2 lino, 
+                  char *pid, struct SQLERROR *ret) ;
+void p16delprof (sqlratype *sqlra, sqlgaentry *gaentry,
+                 char *user, char *prog, tsp00_Int2 lang,
+                 struct SQLERROR *ret) ;
+void p16insprof (sqlratype *sqlra, sqlgaentry *gaentry,
+                 char *user, char *prog, char *modn,
+                 tsp00_Int2 lang, tsp00_Int4 lino, char *pid,
+                 char *stmt, tsp00_Int4 deltatime,
+                 struct SQLERROR *ret) ;
+void p16updprof (sqlratype *sqlra, sqlgaentry *gaentry,
+                 tsp00_KnlIdentifier VAR_ARRAY_REF user, tsp00_Name VAR_ARRAY_REF prog, tsp00_Name VAR_ARRAY_REF modn, tsp00_Int2 lang, tsp00_Int4 lino, char *pid,
+                 tsp00_Int4 deltatime, struct SQLERROR *ret) ;
+
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : 
+.sp
+.cp 3
+Created : 1995-09-28
+.sp
+.cp 3
+Version : 1993-07-01
+.sp
+.cp 3
+Release :      Date : 1999-11-24
+.sp
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Specification:
+ 
+PROCEDURE
+      p16profinit :
+L?oscht in der Sysprofiletabelle alle Eintrage mit
+dem Username, programname und Language.
+.sp 4
+PROCEDURE
+      p16profexec :
+?Andert einen Eintrag, d.h. setzt den Count um eins hoch und
+addiert die Cpu-time auf. Erfolgt ein Fehler so wird der
+neue Satz eingef?ugt. Erfolgt hiebei auch ein Fehler,
+so wird versucht die Tabelle unter den actuellen User
+zucreieren und den Satz einzuf?ugen.
+.sp
+?Uber p03sqlclock wird die REAL-zeit in sqlrap^.raprofsec errechnet.
+.sp 2
+.nf
+      CREATE TABLE SYSPROFILE (
+                USERNAME  CHAR  (18) KEY,
+                PROGNAME  CHAR  (18) KEY,
+                MODNAME   CHAR  (18) KEY,
+                LANGUAGE  CHAR  (12) KEY,
+                LINENO    FIXED ( 7) KEY,
+                PARSEID   CHAR  (12) BYTE KEY,
+                RUNDATE   DATE,
+                RUNCOUNT     FIXED (10),
+                SECONDS      FIXED (12,3),
+                STMBEGIN  CHAR  (1950)	)
+.sp 2
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+ 
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY */
+#include <stdio.h>
+#include <memory.h>
+#include <stdlib.h>
+#include <ctype.h>
+#ifdef MSDOS
+#define FCALL _pascal
+#else
+#define FCALL
+#endif
+
+#define MEMADD  (void *)
+#define MEMLEN  (int)
+
+#define ALLADD  (void **)
+#define ALLLEN  (tsp00_Int4)
+#define ALLRET  (unsigned char *)
+
+#define FREEADD (void *)
+
+#define MX_STMT 1600
+
+&ifdef DEBUG
+&else
+#line 173 "vpr16c"
+&endif
+
+/*--------------------------------------------------------*/
+/*        Prototypes                                      */
+/*--------------------------------------------------------*/
+
+/********  vsp26  functions   **********/
+extern FCALL    s26new_part_init (tsp1_packet * packet_ptr,
+    tsp1_segment * segm_ptr,
+    tsp1_part ** part_ptr);
+extern FCALL    s26finish_part (tsp1_packet * packet_ptr,
+    tsp1_part * part_ptr);
+
+/*--------------------------------------------------------*/
+void 
+p16delprof (sqlratype * sqlra, sqlgaentry * gaentry,
+    char *user, char *prognam, tsp00_Int2 lang,
+    struct SQLERROR *ret)
+{
+   #define P16DELETE  "DELETE FROM LOCALSYSDBA.SYSPROFILE WHERE"
+   #define DELETEL strlen(P16DELETE)
+   #define USERN   " USERNAME='"
+   #define USERNL  strlen(USERN)
+   #define PROGN   "' AND PROGNAME='"
+   #define PROGNL  strlen(PROGN)
+   #define LANGU   "' AND LANGUAGE='"
+   #define LANGUL  strlen(LANGU)
+    tsp1_packet    *pck = gaentry->gareqptr;
+    tsp1_part      *part_ptr;
+    tsp00_Int4       *p1l;
+    tsp00_Uint1    *buf;
+    tsp00_Int2        retkamode;
+    tsp00_Int2        retansimode;
+
+    if (gaentry->gareqptr != NULL)
+        {
+        p03cpacketinit (NULL, sqlra, gaentry, sp1m_dbs);
+        s26new_part_init (pck, sqlra->rasegptr, &part_ptr);
+        part_ptr->sp1p_part_header.sp1p_part_kind = (char) sp1pk_command;
+        buf = part_ptr->sp1p_buf;
+        sqlra->rasegmpartptr [sp1pk_command] = part_ptr;
+        p1l = &part_ptr->sp1p_part_header.sp1p_buf_len;
+        *p1l = 0;
+        memcpy (MEMADD & buf[*p1l], MEMADD P16DELETE, MEMLEN DELETEL);
+        *p1l += DELETEL;
+        memcpy (MEMADD & buf[*p1l], MEMADD USERN, MEMLEN USERNL);
+        *p1l += USERNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD user, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD PROGN, MEMLEN PROGNL);
+        *p1l += PROGNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD prognam, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD LANGU, MEMLEN LANGUL);
+        *p1l += LANGUL;
+        switch (lang)
+            {
+            case CPR_LA_C:
+                memcpy (MEMADD & buf[*p1l], MEMADD "C           '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_COBOL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "COBOL       '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_CALL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "CALL-INTERF.'",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_OCI:
+                memcpy (MEMADD & buf[*p1l], MEMADD "OCI         '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            default:
+                memcpy (MEMADD & buf[*p1l], MEMADD "UNKNOWN     '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            }
+        s26finish_part (pck, part_ptr);
+        retkamode = sqlra->rakamode;
+        retansimode = sqlra->rasqlansi;
+        sqlra->rakamode = CPR_KIND_INTERNAL;
+        sqlra->rasqlansi = CPR_KIND_EMPTY;
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_first);
+        p03creqrecpacket (sqlra, gaentry, ret);
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_end);
+        sqlra->rakamode = retkamode;
+        sqlra->rasqlansi = retansimode;
+       #undef P16DELETE
+       #undef DELETEL
+       #undef USERN
+       #undef USERNL
+       #undef PROGN
+       #undef PROGNL
+       #undef LANGU
+       #undef LANGUL
+        }
+}     /*--------------------------------------------*/
+
+
+void 
+p16insprof (sqlratype * sqlra, sqlgaentry * gaentry,
+    char *user, char *prog, char *modn,
+    tsp00_Int2 lang, tsp00_Int4 lino, char *pid,
+    char *stmt, tsp00_Int4 deltatime,
+    struct SQLERROR *ret)
+{
+   #define INSERT  "INSERT INTO LOCALSYSDBA.SYSPROFILE SET"
+   #define INSERTL strlen(INSERT)
+   #define USERN   " USERNAME='"
+   #define USERNL  strlen(USERN)
+   #define PROGN   "', PROGNAME='"
+   #define PROGNL  strlen(PROGN)
+   #define MODNA   "', MODNAME='"
+   #define MODNAL  strlen(MODNA)
+   #define LANGU   "', LANGUAGE='"
+   #define LANGUL  strlen(LANGU)
+   #define LINENO  ", LINENO="
+   #define LINENOL strlen(LINENO)
+   #define PARSID  ", PARSEID=X'"
+   #define PARSIDL strlen(PARSID)
+   #define STMBEG  "', STMBEGIN='"
+   #define STMBEGL strlen(STMBEG)
+   #define RUNCNT  "', RUNDATE=DATE, RUNCOUNT=1, SECONDS="
+   #define RUNCNTL strlen(RUNCNT)
+    tsp00_Int2        i, stmlen;
+    char            istr[17];
+    char            hstr[25];
+    tsp1_packet    *pck = gaentry->gareqptr;
+    tsp1_part      *part_ptr;
+    tsp00_Int4       *p1l;
+    tsp00_Uint1    *buf;
+    double          rasec;
+    tsp00_Int2        retkamode;
+    tsp00_Int2        retansimode;
+
+    if (gaentry->gareqptr != NULL)
+        {
+        p03cpacketinit (NULL, sqlra, gaentry, sp1m_dbs);
+        s26new_part_init (pck, sqlra->rasegptr, &part_ptr);
+        part_ptr->sp1p_part_header.sp1p_part_kind = (char) sp1pk_command;
+        p1l = &part_ptr->sp1p_part_header.sp1p_buf_len;
+        buf = part_ptr->sp1p_buf;
+        sqlra->rasegmpartptr [sp1pk_command] = part_ptr;
+        *p1l = 0;
+        memcpy (MEMADD & buf[*p1l], MEMADD INSERT, MEMLEN INSERTL);
+        *p1l += (tsp00_Int4) INSERTL;
+        memcpy (MEMADD & buf[*p1l], MEMADD USERN, MEMLEN USERNL);
+        *p1l += (tsp00_Int4) USERNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD user, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD PROGN, MEMLEN PROGNL);
+        *p1l += (tsp00_Int4) PROGNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD prog, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD MODNA, MEMLEN MODNAL);
+        *p1l += (tsp00_Int4) MODNAL;
+        memcpy (MEMADD & buf[*p1l], MEMADD modn, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD LANGU, MEMLEN LANGUL);
+        *p1l += (tsp00_Int4) LANGUL;
+        switch (lang)
+            {
+            case CPR_LA_C:
+                memcpy (MEMADD & buf[*p1l], MEMADD "C           '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_COBOL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "COBOL       '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_CALL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "CALL-INTERF.'",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_OCI:
+                memcpy (MEMADD & buf[*p1l], MEMADD "OCI         '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            default:
+                memcpy (MEMADD & buf[*p1l], MEMADD "UNKNOWN     '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            }
+        memcpy (MEMADD & buf[*p1l], MEMADD LINENO, MEMLEN LINENOL);
+        *p1l += (tsp00_Int4) LINENOL;
+        sprintf (istr, "%d ", lino);
+        memcpy (MEMADD & buf[*p1l], MEMADD istr, MEMLEN strlen (istr));
+        *p1l += (tsp00_Int4) strlen (istr);
+        memcpy (MEMADD & buf[*p1l], MEMADD PARSID, MEMLEN PARSIDL);
+        *p1l += (tsp00_Int4) PARSIDL;
+        if (pid != 0)
+            {
+            for (i = 0; i < 12; i++)
+                {
+                sprintf (&hstr[i * 2], "%02x", (unsigned char) pid[i]);
+                }
+            }
+        else
+            memcpy (MEMADD hstr, MEMADD "000000000000000000000000", MEMLEN 24);
+        memcpy (MEMADD & buf[*p1l], MEMADD hstr, MEMLEN 24);
+        *p1l += 24;
+        memcpy (MEMADD & buf[*p1l], MEMADD STMBEG, MEMLEN STMBEGL);
+        *p1l += (tsp00_Int4) STMBEGL;
+        memcpy (&stmlen, stmt, 2);
+        stmlen = (tsp00_Int2) (stmlen < MX_STMT ? stmlen : MX_STMT);
+        for (i = 2; i < stmlen + (tsp00_Int2) 2; i++)
+            {
+            if (stmt[i] == '\'')
+                {
+                buf[*p1l] = '\'';
+                (*p1l)++;
+                }
+            buf[*p1l] = stmt[i];
+            (*p1l)++;
+            }
+        memcpy (MEMADD & buf[*p1l], MEMADD RUNCNT, MEMLEN RUNCNTL);
+        *p1l += (tsp00_Int4) RUNCNTL;
+        rasec = (double) (deltatime);
+        sprintf (istr, "%.3f ", (float) (rasec / 1000));
+        memcpy (MEMADD & buf[*p1l], MEMADD istr, MEMLEN strlen (istr));
+        *p1l += (tsp00_Int4) strlen (istr);
+        s26finish_part (pck, part_ptr);
+        retkamode = sqlra->rakamode;
+        retansimode = sqlra->rasqlansi;
+        sqlra->rakamode = CPR_KIND_INTERNAL;
+        sqlra->rasqlansi = CPR_KIND_EMPTY;
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_first);
+        p03creqrecpacket (sqlra, gaentry, ret);
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_end);
+        sqlra->rakamode = retkamode;
+        sqlra->rasqlansi = retansimode;
+       #undef INSERT
+       #undef INSERTL
+       #undef USERN
+       #undef USERNL
+       #undef PROGN
+       #undef PROGNL
+       #undef MODNA
+       #undef MODNAL
+       #undef LANGU
+       #undef LANGUL
+       #undef LINENO
+       #undef LINENOL
+       #undef PARSID
+       #undef PARSIDL
+       #undef STMBEG
+       #undef STMBEGL
+       #undef RUNCNT
+       #undef RUNCNTL
+        }
+}     /*--------------------------------------------*/
+
+
+void 
+p16updprof (sqlratype * sqlra, sqlgaentry * gaentry,
+    tsp00_KnlIdentifier VAR_ARRAY_REF user, tsp00_Name VAR_ARRAY_REF prog, tsp00_Name VAR_ARRAY_REF modn, tsp00_Int2 lang, tsp00_Int4 lino, char *pid,
+    tsp00_Int4 deltatime, struct SQLERROR *ret)
+{
+   #define UPDATE  "UPDATE LOCALSYSDBA.SYSPROFILE SET"
+   #define UPDATEL strlen(UPDATE)
+   #define RUNCNT  " RUNCOUNT=RUNCOUNT+1, SECONDS=SECONDS+"
+   #define RUNCNTL strlen(RUNCNT)
+   #define UPDKEY  " KEY"
+   #define UPDKEYL strlen(UPDKEY)
+   #define USERN   " USERNAME='"
+   #define USERNL  strlen(USERN)
+   #define PROGN   "', PROGNAME='"
+   #define PROGNL  strlen(PROGN)
+   #define MODNA   "', MODNAME='"
+   #define MODNAL  strlen(MODNA)
+   #define LANGU   "', LANGUAGE='"
+   #define LANGUL  strlen(LANGU)
+   #define LINENO  ", LINENO="
+   #define LINENOL strlen(LINENO)
+   #define PARSID  ", PARSEID=X'"
+   #define PARSIDL strlen(PARSID)
+    tsp00_Int2        i;
+    char            istr[17];
+    char            hstr[25];
+    tsp1_packet    *pck = gaentry->gareqptr;
+    tsp1_part      *part_ptr;
+    tsp00_Int4       *p1l;
+    tsp00_Uint1    *buf;
+    double          rasec;
+    tsp00_Int2        retkamode;
+    tsp00_Int2        retansimode;
+
+    if (gaentry->gareqptr != NULL)
+        {
+        p03cpacketinit (NULL, sqlra, gaentry, sp1m_dbs);
+        s26new_part_init (pck, sqlra->rasegptr, &part_ptr);
+        part_ptr->sp1p_part_header.sp1p_part_kind = (char) sp1pk_command;
+        p1l = &part_ptr->sp1p_part_header.sp1p_buf_len;
+        buf = part_ptr->sp1p_buf;
+        sqlra->rasegmpartptr [sp1pk_command] = part_ptr;
+        *p1l = 0;
+        memcpy (MEMADD & buf[*p1l], MEMADD UPDATE, MEMLEN UPDATEL);
+        *p1l += (tsp00_Int4) UPDATEL;
+        memcpy (MEMADD & buf[*p1l], MEMADD RUNCNT, MEMLEN RUNCNTL);
+        *p1l += (tsp00_Int4) RUNCNTL;
+        rasec = (double) (deltatime);
+        sprintf (istr, "%.3f ", (float) (rasec / 1000));
+        memcpy (MEMADD & buf[*p1l], MEMADD istr, MEMLEN strlen (istr));
+        *p1l += (tsp00_Int4) strlen (istr);
+        memcpy (MEMADD & buf[*p1l], MEMADD UPDKEY, MEMLEN UPDKEYL);
+        *p1l += (tsp00_Int4) UPDKEYL;
+        memcpy (MEMADD & buf[*p1l], MEMADD USERN, MEMLEN USERNL);
+        *p1l += (tsp00_Int4) USERNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD user, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD PROGN, MEMLEN PROGNL);
+        *p1l += (tsp00_Int4) PROGNL;
+        memcpy (MEMADD & buf[*p1l], MEMADD prog, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD MODNA, MEMLEN MODNAL);
+        *p1l += (tsp00_Int4) MODNAL;
+        memcpy (MEMADD & buf[*p1l], MEMADD modn, MEMLEN 18);
+        *p1l += 18;
+        memcpy (MEMADD & buf[*p1l], MEMADD LANGU, MEMLEN LANGUL);
+        *p1l += (tsp00_Int4) LANGUL;
+        switch (lang)
+            {
+            case CPR_LA_C:
+                memcpy (MEMADD & buf[*p1l], MEMADD "C           '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_COBOL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "COBOL       '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_CALL:
+                memcpy (MEMADD & buf[*p1l], MEMADD "CALL-INTERF.'",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            case CPR_LA_OCI:
+                memcpy (MEMADD & buf[*p1l], MEMADD "OCI         '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            default:
+                memcpy (MEMADD & buf[*p1l], MEMADD "UNKNOWN     '",
+                    MEMLEN 13);
+                *p1l += 13;
+                break;
+            }
+        memcpy (MEMADD & buf[*p1l], MEMADD LINENO, MEMLEN LINENOL);
+        *p1l += (tsp00_Int4) LINENOL;
+        sprintf (istr, "%d ", lino);
+        memcpy (MEMADD & buf[*p1l], MEMADD istr, MEMLEN strlen (istr));
+        *p1l += (tsp00_Int4) strlen (istr);
+        memcpy (MEMADD & buf[*p1l], MEMADD PARSID, MEMLEN PARSIDL);
+        *p1l += (tsp00_Int4) PARSIDL;
+        if (pid != 0)
+            {
+            for (i = 0; i < 12; i++)
+                {
+                sprintf (&hstr[i * 2], "%02x", (unsigned char) pid[i]);
+                }
+            }
+        else
+            memcpy (MEMADD hstr, MEMADD "000000000000000000000000", MEMLEN 24);
+        memcpy (MEMADD & buf[*p1l], MEMADD hstr, MEMLEN 24);
+        *p1l += 24;
+        buf[*p1l] = '\'';
+        ++*p1l;
+        s26finish_part (pck, part_ptr);
+        retkamode = sqlra->rakamode;
+        retansimode = sqlra->rasqlansi;
+        sqlra->rakamode = CPR_KIND_INTERNAL;
+        sqlra->rasqlansi = CPR_KIND_EMPTY;
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_first);
+        p03creqrecpacket (sqlra, gaentry, ret);
+        if (sqlra->raopprof == cpr_is_only_pc)
+               p03csqlclock (sqlra, cpr_is_end);
+        sqlra->rakamode = retkamode;
+        sqlra->rasqlansi = retansimode;
+
+       #undef UPDATE
+       #undef UPDATEL
+       #undef RUNCNT
+       #undef RUNCNTL
+       #undef UPDKEY
+       #undef UPDKEYL
+       #undef USERN
+       #undef USERNL
+       #undef PROGN
+       #undef PROGNL
+       #undef MODNA
+       #undef MODNAL
+       #undef LANGU
+       #undef LANGUL
+       #undef LINENO
+       #undef LINENOL
+       #undef PARSID
+       #undef PARSIDL
+        }
+}     /*--------------------------------------------*/
+
+
+void 
+p16profinit (sqlratype * sqlra, sqlgaentry * gaentry,
+    char *progn, tsp00_Int2 lang, struct SQLERROR *ret)
+{
+  /**  p03csqlclock (sqlra, cpr_is_end);  **/
+    if (gaentry->gaprofinit == cpr_is_false)
+        {
+        p16delprof (sqlra, gaentry, (char*)gaentry->gaxuserrec.xu_user,
+            progn, lang, ret);
+        if (ret->ereturncode != 100)
+            {
+            if (ret->ereturncode != 0)
+                ret->ereturncode = -4004;
+            }
+        }
+}     /*--------------------------------------------*/
+
+
+void 
+p16profexec (sqlratype * sqlra, sqlgaentry * gaentry,
+    char *stmt, char *progn, char *modn,
+    tsp00_Int2 lang, tsp00_Int2 lino,
+    char *pid, struct SQLERROR *ret)
+{
+    p16updprof (sqlra, gaentry, gaentry->gaxuserrec.xu_user, (unsigned char*)progn,
+        (unsigned char*)modn, lang, lino, pid, sqlra->raprofsec, ret);
+    if (ret->ereturncode != 0)
+        {
+        p03initsqlem (ret);
+        p16insprof (sqlra, gaentry, (char*)gaentry->gaxuserrec.xu_user, progn,
+            modn, lang, lino, pid, stmt, sqlra->raprofsec, ret);
+        }
+}     /*--------------------------------------------*/
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :        280
+*-PRETTY-*  lines of code :        632        PRETTY  3.09 
+*-PRETTY-*  lines in file :        954         1992-11-23 
+.PA 

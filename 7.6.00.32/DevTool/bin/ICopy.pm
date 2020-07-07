@@ -1,0 +1,992 @@
+#!/usr/bin/perl
+# @(#)ICopy		1997-11-18
+#
+# G. Großmann, SAP AG
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package ICopy;
+require 5.003;
+use File::Copy;
+use File::Basename;
+use Cwd;
+
+use Sys::Hostname;
+use Env;
+
+@EXPORT_OK = qw(GetFilePath iview icp GetLastBackupName);
+
+my $UseSMB = 0;
+if (defined $ENV{"USE_ICOPY_SMB"} && $ENV{"USE_ICOPY_SMB"} =~ /^y$/i)
+{
+	require SMB::File::Copy;
+	$UseSMB = 1;
+	SMB::logon ((getpwuid ($<))[0], "*");
+}
+
+sub IsUseSMB
+{
+	return $UseSMB;
+}
+
+sub ModifyVmakePath {
+	my @in = split (',', $ENV{'VMAKE_PATH'});
+	my @out = ();
+	my $hostname = hostname ();
+	foreach (@in) {
+		if ($_ =~ /^$hostname:(.*)/) {
+			push @out, $1;
+		} else {
+			push @out, $_;
+		}
+	}
+	$ENV{'VMAKE_PATH'} = join (',', @out);
+}
+
+ModifyVmakePath () unless ($^O =~ /MsWin/i);
+
+#
+# PTS 1104985 jrg 10.12.1999
+#
+%SAPDBDirectory = ();
+#
+# jrg - 19 July 2001 - remserver sometimes fails to get copy of DirectoryMapping file.
+# But since it is not needed always (i.e. during linkage DirectoryMapping is of no interest)
+# it is now moved into _MapModuleName. This is better than before, and maybe someday remserver
+# get replaced by a better program (if Gerald will ever get a time slot for this...)
+#
+$SAPDBDirectorySearched = 0;
+#
+# force ok
+#
+1;
+
+########################################################################
+#
+# Funktion: icp($source, $target, $level, $exclusive, $quiet)
+#
+# kopiert eine Datei entsprechend der vmake-Pfad-Hierarchie nach %OWN%
+# in den jeweiligen relativen Pfad
+#
+# $source    : zu kopierende Datei
+# $target    : absoluter Zielpfad, rel. Zielpfad ab %OWN% mit/ohne Dateinamen
+#              undefiniert (source wird in den ensprechenden rel. Pfad nach %OWN% kopiert)
+# $level     : Pfad-Hierarchie, ab der gesucht werden soll
+# $exclusive : es wird nur auf dem angegebenen Pfad-Hierarchie gesucht
+# $quiet     : Ausgabe von Messages wird unterdrückt
+# Rückgabe   : true bei Erfolg, 0 sonst
+#
+sub icp
+{
+	local($source, $target, $level, $exclusive, $quiet) = @_;
+	die "ICopy::icp: parameter mismatch\n" unless defined($source)
+		&& defined($level) && defined($exclusive);
+	local  $rc;
+	( $vmakepath, $rel_source ) = GetFilePath($source, $level, $exclusive, $quiet);
+	if ( !defined($rel_source) ) {
+		$! = 2;
+		return 0;
+	}
+	$target = cwd()."/$target" if $target =~ m!^\.!; #relative to cwd()
+	$target = $rel_source unless defined($target);
+	$target = "$OWN/$target" unless _is_absolute_path($target);
+	return ICopy::copy("$vmakepath/$rel_source", $target, $quiet);
+}
+
+
+########################################################################
+#
+# Funktion: iview(\@source, $level, $exclusive, $editor, $quiet, $resultfiles)
+#
+# zeigt eine Datei entsprechend der vmake-Pfad-Hierarchie
+#
+# \@source   : Referenz auf eine Dateiliste
+# $level     : Pfad-Hierarchie, ab der gesucht werden soll
+# $exclusive : es wird nur auf dem angegebenen Pfad-Hierarchie gesucht
+# $editor    : der zu verwendende Editor (0 falls nur kopiert werden soll)
+# $quiet     : Ausgabe von Messages wird unterdrückt
+# $resultfiles: Referenz zu einem Array, enthaelt Dateinamen als Outputparameter
+# Rückgabe   : 1 bei Erfolg, 0 sonst
+#
+sub iview
+{
+	local( $r_source, $level, $exclusive, $editor, $quiet, $resultfiles ) = @_;
+	die "ICopy::iview: parameter mismatch\n" unless defined($r_source)
+		&& defined($level) && defined($exclusive) && defined($editor);
+	local ( @tmpfiles, @localfiles, $rc, $fNoTriple );
+	$rc = 1;
+	foreach $source ( @$r_source ) {
+		# test, ob eine Description gezielt angesprochen wird
+		$fNoTriple = 1 if $source =~ m!^((f|fast)|(q|quick)|(s|slow)[/\\])!i;
+		$source = GetFilePath( $source, $level, $exclusive, $quiet );
+		return 0 unless defined( $source );
+		local( $src_name, $src_path ) = fileparse($source);
+        local($MyOwn); $MyOwn = $OWN; if ($MyOwn !~ m![\\/]$! ) { $MyOwn .= "/" }
+		if ( defined($src_name) )
+        {
+			# test for desc/<version>/$src_name PTS 1103893/2
+            if (  ICopy::_is_desc_ext( $src_name ) && $source !~ m#desc/(fast|quick|slow)/$src_name#i )
+            {
+                $fNoTriple = 1;
+            }
+			if ( ICopy::_is_desc_ext( $src_name ) && ! $fNoTriple )
+            {
+				# Description wird gezogen, d.h. alle Drei Vesionen holen
+				local $tmp;
+				if ( $tmp = GetFilePath("slow/$src_name", $level, $exclusive, 1) )
+                {
+                    if (index($tmp, $MyOwn) == -1)
+                    {
+					    push @tmpfiles, "$TMP/$src_name.s"
+                            if ICopy::copy($tmp, "$TMP/$src_name.s", $quiet);
+                        warn $! if $?;
+                    }
+                    else
+                    {
+                        print "$tmp: local source!\n";
+    			        push @localfiles, "$tmp";
+                    }
+				}
+				if ( $tmp = GetFilePath("quick/$src_name", $level, $exclusive, 1) ) {
+                    if (index($tmp, $MyOwn) == -1)
+                    {
+					    push @tmpfiles, "$TMP/$src_name.q"
+                            if ICopy::copy($tmp, "$TMP/$src_name.q", $quiet);
+                        warn $! if $?;
+                    }
+                    else
+                    {
+                        print "$tmp: local source!\n";
+    			        push @localfiles, "$tmp";
+                    }
+				}
+				if ( $tmp = GetFilePath("fast/$src_name", $level, $exclusive, 1) )
+                {
+                    if (index($tmp, $MyOwn) == -1)
+                    {
+					    push @tmpfiles, "$TMP/$src_name.f"
+                            if ICopy::copy($tmp, "$TMP/$src_name.f", $quiet);
+                        warn $! if $?;
+                    }
+                    else
+                    {
+                        print "$tmp: local source!\n";
+    			        push @localfiles, "$tmp";
+                    }
+				}
+			}
+			else {
+                if ( index($source, $MyOwn ) == -1 )
+                {
+				    push @tmpfiles, "$TMP/$src_name"
+                        if ICopy::copy("$source", "$TMP/$src_name", $quiet);
+                    warn $! if $?;
+                }
+                else
+                {
+                    print "$source: local source!\n";
+    			    push @localfiles, "$source";
+                }
+			}
+		}
+		else { return 0 }
+	}
+    $outindex = 0;
+	if ( $editor && @tmpfiles != 0 ) {
+		local @ARGV = ("-e", $editor, "-r", @tmpfiles );
+		do "$TOOL/bin/opendoc$TOOLEXT";
+		if ( $@ ) { print "$@" unless $quiet; return 0; }
+	}
+    if (defined ($resultfiles) &&  @tmpfiles != 0) {
+        for ($i = 0; $i < scalar (@tmpfiles); ++$i, ++$outindex) {
+            $resultfiles->[$outindex] = $tmpfiles [$i];
+        }
+    }
+	if ( $editor && @localfiles != 0 ) {
+		local @ARGV = ("-e", $editor, @localfiles );
+		do "$TOOL/bin/opendoc$TOOLEXT";
+		if ( $@ ) { print "$@" unless $quiet; return 0; }
+	}
+    if (defined ($resultfiles) && @localfiles != 0 ) {
+        for ($i = 0; $i < scalar (@localfiles); ++$i, ++$outindex) {
+            $resultfiles->[$outindex] = $localfiles [$i];
+        }
+    }
+	return $rc;
+}
+
+
+
+########################################################################
+#
+# Funktion: GetFilePath($source, $level, $exclusive, $quiet)
+#
+# liefert den absoluten Pfad einer Datei entlang der vmake-Pfad-Hierarchie
+#
+# $source    : zu suchende Datei
+# $level     : Pfad-Hierarchie, ab der gesucht werden soll
+# $exclusive : es wird nur auf dem angegebenen Pfad-Hierarchie gesucht
+# $quiet     : Ausgabe von Messages wird unterdrückt
+# Rückgabe   : den absoluten Pfad bei Erfolg, 'undef' sonst; im Arraykontext wird
+#              der entsprechende Vmake-Pfad und der rel. Pfad ausgegeben
+#
+sub GetFilePath
+{
+	local( $source, $level, $exclusive, $quiet ) = @_;
+	local @path = _solve_path( $source );
+	local @vmakepath = _GetPathList();
+	local( $start, $stop ) = ( $level, $exclusive ? $level : $#vmakepath );
+	foreach $spath ( @path )
+    {
+        if ( ! _is_absolute_path( $spath ) )
+        {
+            $spath =~ s!^\./!!;
+		    foreach $vmakepath ( @vmakepath[ $start..$stop ] )
+            {
+			    if ( _file_test( $vmakepath, $spath ) )
+                {
+                   wantarray() ? return ( $vmakepath, $spath ) : return "$vmakepath/$spath";
+			    }
+		    }
+        }
+        else
+        {
+    		local( $modname, $modpath ) = fileparse( $spath );
+    		if ( _file_test( $modpath, $modname ) )
+            {
+    		   wantarray() ? return ( undef , $spath ) : return $spath;
+    		}
+    		wantarray() ? return () : return undef;
+        }
+	}
+	unless ( $quiet ) {
+		print "\n", join "\n", @path;
+		print "\n\nNOT found in:\n", join "\n", @vmakepath[$start..$stop];
+		print "\n";
+	}
+	wantarray() ? return () : return undef;
+}
+
+########################################################################
+# Funktion: GetLastBackupName( $source )
+#
+# $source    : Source, für die der Backup-Name gefunden werden soll
+#
+# Rückgabe   :  Backup-Name, falls Backups existeren, undef falls kein
+#               Backup existiert
+sub GetLastBackupName
+{
+    my $source = shift;
+    my $bpath = ICopy::_GetBackupPath($source);
+
+    if ( ICopy::_get_path_status($bpath) eq 'local' )
+    {
+	    if ($^O !~ /mswin32/i )
+	    {
+		open(PIPE_IN, "ls -t $bpath/$source.* 2>&1 |" )
+		    || warn "Can't open pipe 'ls -t $bpath/$source.* 2>&1' : $!\n";
+		chomp($file2 = <PIPE_IN>);
+		close(PIPE_IN);
+	    } else {
+                $bpath =~ tr [/][\\];
+		open(PIPE_IN, "dir /O-D /B  $bpath\\$source.* 2>&1 |" )
+		    || warn "Can't open pipe 'dir /OD /B $bpath/$source.* 2>&1' : $!\n";
+		chomp($file2 = <PIPE_IN>);
+                $file2 = "$bpath/$file2";
+		close(PIPE_IN);
+	    }
+    }
+    else
+    {
+        local ($computer, $rpath) = $bpath =~ /([\w\.]+):(.*)/;
+        local @output = split(/\n/, `$REMCL sh $computer ls -t $rpath/$source.*`);
+        $file2 = $computer.":".$output[0];
+    }
+    $file2 = undef
+        if ( $file2 =~ /no such file/i );
+    return $file2;
+}
+
+
+#---------------------- private Routinen --------------------------------
+
+########################################################################
+#
+# Funktion: copy($source, $target, $quiet)
+#
+# copy kopiert eine Datei in ein Verzeichnis.
+#
+# $source  : absoluter Dateipfad
+# $target  : absoluter Zielpfad mit/ohne Dateinamen
+# $quiet   : keine Ausgaben auf STDOUT;
+#
+# Rückgabe : 1 bei Erfolg, 0 sonst, $! wird gesetzt
+#
+sub copy
+{
+	local($source, $target, $quiet) = @_;
+
+	# source, target auf Plausibilität prüfen
+	$target = "$OWN/$target" if !_is_absolute_path( $target );
+	# &gar create directory if not exists (PTS 1102509)
+	return 0
+		if (ICopy::checkdir($target) == 0);
+
+	if (!defined ($source) || !defined ($target) || ! -d dirname ($target))
+	{
+		$! = 2; # no such file or directory
+		return 0;
+	}
+	local ($src_name, $src_path) = fileparse ($source);
+	# $target vervollständigen, falls nur Pfadangabe als target
+	if (-d $target)
+	{
+		$target .= "/$src_name" ;
+	}
+	if (! _pathcmp ("$source", $target))
+	{
+		print "Don't need to copy. $target already exists!\n"
+			if (!$quiet);
+		return 1 ;
+	}
+	local $PathStatus = _get_path_status ($source);
+	local $rc;
+	unlink $target;
+	if ($PathStatus eq 'local')
+	{
+		$rc = File::Copy::copy ($source, $target);
+	}
+	else
+	{
+		if ($UseSMB)
+		{
+                        $rc = SMB::File::Copy::copy (
+                        make_smbfilename ($source), $target);
+                }
+		else
+		{
+                        $rc = ! system ("$REMCL -suvc cp $source $target");
+                }
+	}
+	print "$source copied to $target\n"
+		if (!$quiet && $rc);
+	return $rc;
+}
+
+########################################################################
+# Funktion _is_absolute_path($path)
+#
+# $path : der zutestende Pfad
+#
+sub _is_absolute_path
+{
+	my $path = shift;
+	$path =~ m!^(/|\\|\w+:)! ? return 1 : return 0;
+}
+
+
+########################################################################
+# Funktion: _file_test($path)
+#
+# $path  : der zu testende Pfad
+#
+sub _file_test
+{
+    local ($path, $file)= @_;
+    local $PathStatus = _get_path_status ($path);
+    if ($PathStatus eq 'local') {
+        return (-f "$path/$file");
+    } else {
+        if ($UseSMB) {
+            return (SMB::stat (make_smbfilename ($path."/".$file)));
+        }
+		local ($computer, $spath) = $path =~ /([\w\.]+):(.*)/;
+        my $cmd = "$REMCL sh $computer ls $spath/$file ";
+        if ($^O =~ /MsWin/i) {
+            $cmd.= ">NUL";
+        } else {
+            $cmd.= ">/dev/null";
+        }
+        my $rc = system ($cmd);
+        return (!$rc);
+    }
+}
+
+
+########################################################################
+# Funktion: _get_path_status($path)
+#
+# $path : der zu testende Pfad
+#
+# Returnwert    : local | remote (RemClient-Pfadangabe lag vor)
+#
+sub _get_path_status {
+	local $path = shift;
+	local $PathStatus;
+
+	if ( $path =~ /^(\w\w+)|([\d\.]+):/ ) {
+		# Pfadangabe gemäß RemClient (computername:Path)
+		$PathStatus = 'remote';
+	} else {
+		$PathStatus = 'local';
+	}
+	return $PathStatus;
+}
+
+
+########################################################################
+# Funktion: _pathcmp($path1, $path2)
+#
+# $path1, $path2 : die zu vergleichenden Pfade
+#
+sub _pathcmp
+{
+	local ( $path1, $path2) = @_;
+	$path1 =~ tr[\\][/]; $path2 =~ tr[\\][/];
+	if ( $^O =~ /^mswin32/i) {
+		$path1 = lc($path1); $path2 = lc($path2);
+	}
+	return ($path1 cmp $path2);
+}
+
+########################################################################
+# Funktion: _is_std_ext( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : 0,1
+#
+sub _is_std_ext
+{
+    my $modname = shift;
+    $modname =~ m#\.(c|cpp|h|hpp|p|s)$# ? return 1 : return 0;
+}
+
+
+########################################################################
+# Funktion: _is_desc_ext( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : 0,1
+#
+sub _is_desc_ext
+{
+    my $modname = shift;
+#
+# PTS 1104985 jrg 10.12.1999 Allowed caseinsensitive comparison
+#
+	lc($modname) =~ m#(\.(mac|shm|lnk|dld|shr|rel|lib|com|jpr)$)|^(extra|langinfo|langextinfo|directorymapping|sapdbenv)$#
+    ? return 1 : return 0;
+}
+
+
+########################################################################
+# Funktion: _is_oldstyled_modname( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : 0,1
+#
+sub _is_oldstyled_modname
+{
+    my $modname = shift;
+	local $osty = ( $modname =~ m#^[vhgi](([a-zA-Z]{2,})+)(\d{2,})+?#i );
+    if ($osty and ($modname =~ /\.\w+$/) )
+    {
+        $osty &= _is_std_ext( $modname );
+    }
+    $osty ? return 1 : return 0 ;
+}
+
+########################################################################
+# Funktion: _is_name_convention( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : 0,1
+#
+#sub _is_name_convention
+#{
+#    my $modname = shift;
+#
+#        ( $modname =~ m#^[vhgi]([a-zA-Z][a-zA-Z]+)\d+#i )
+#        ? return 1 : return 0 ;
+#}
+
+
+########################################################################
+# Funktion: _get_layer( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : layer, 'undef' sonst
+#
+sub _get_layer
+{
+    my $modname = shift;
+
+    if ( $modname =~ m#^::?(.+)[/|\\].+# )
+    {
+        return $1;
+    }
+    elsif ( _is_oldstyled_modname( $modname ) )
+    {
+            $modname =~ /^.([^\d]+)/;
+            return $1;
+    }
+    else
+    {
+        local ( $ext ) = $modname =~ m!(\.[^.]+)$! ;
+        if ( $ext && ! _is_desc_ext( $modname ) )
+        {
+            local $found = 0;
+            local $layer;
+		    local $EXTRA = ICopy::GetFilePath( "Extra", 0, 0, 0 );
+		    unless ( defined($EXTRA) )
+            {
+			    warn "Can't get Extra Info!\n";
+            }
+		    else
+            {
+			    if ( ICopy::_get_path_status( $EXTRA ) eq 'remote' )
+                {
+				    ICopy::copy( $EXTRA, "$TMP/Extra", 1 );
+				    $EXTRA = "$TMP/Extra";
+			    }
+			    if ( open(EXTRA) )
+                {
+				    while(<EXTRA>)
+                    {
+					    if ( /^(\.\w+)\s+(\w+)/ )
+                        {
+						    $layer = $2;
+						    if ( $1 =~ /$ext/ )
+                            {
+                                $found = 1;
+                                last;
+                            }
+					    }
+				    }
+				    close(EXTRA);
+                }
+			    else
+                {
+                    warn "Can't get Extra Info!\n";
+                }
+		    }
+            ( $found == 1 ) ? return $layer : return undef;
+        }
+        else
+        {
+            return undef;
+        }
+    }
+}
+
+
+########################################################################
+# Funktion: _skip_index( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : Dateiname ohne Index
+#
+sub _skip_index
+{
+    my $modname = shift;
+
+    $modname =~ m#^:.+[/|\\](.+)# ? return $1 : return $modname ;
+}
+
+
+########################################################################
+# Funktion: _is_valid_modname( $modulename )
+#
+# $modulename: Dateiname
+# Rückgabe   : 0,1
+#
+sub _is_valid_modname
+{
+    my $modname = shift;
+    $modname = _skip_index( $modname );
+	(
+      _is_std_ext( $modname )           ||
+      _is_oldstyled_modname( $modname )
+    )
+	? return 1 : return 0 ;
+}
+
+########################################################################
+# Funktion: _MapModuleName( $modname )
+#
+# PTS 1104985 jrg 10.12.1999
+#
+# $modname  : Modulename
+# Rückgabe  : $modname wird eventuell verändert
+#
+sub _MapModuleName
+{
+    if ( $SAPDBDirectorySearched == 0 )
+    {
+    # must be set in advance (set anyhow even on error...) to prevent endless loop
+    # since GetFilePath indirectly calls _MapModuleName again...
+        $SAPDBDirectorySearched = 1;
+
+        local $DirectoryMapping = ICopy::GetFilePath( "DirectoryMapping", 0, 0, 1 );
+
+        if ( defined($DirectoryMapping) )
+        {
+        	if ( ICopy::_get_path_status( $DirectoryMapping ) eq 'remote' )
+	        {
+		        ICopy::copy( $DirectoryMapping, "$TMP/DirectoryMapping", 1 );
+		        $DirectoryMapping = "$TMP/DirectoryMapping";
+	        }
+	        if ( open ( MAPFILE, $DirectoryMapping ) )
+	        {
+		        local $SAPDBRoot = "SAPDB/";
+		        local $Line;
+		        local $Shortform;
+		        local $DirectoryPath;
+
+		        while (<MAPFILE>) {
+			        if ( s/^\s*([^#][^\W_]+)\s*,\s*([\w\/]+).*/$1,$2/ ) {
+				        $Line = $_;
+				        ( $Shortform, $DirectoryPath ) = split (/,/);
+				        chomp $DirectoryPath;
+				        $SAPDBDirectory{lc($Shortform)} = "$SAPDBRoot$DirectoryPath";
+			        }
+		        }
+
+		        close (MAPFILE);
+	        }
+            else
+            {
+                undef %SAPDBDirectory;
+            }
+        }
+        else
+        {
+            undef %SAPDBDirectory;
+        }
+    }
+
+	if ( defined %SAPDBDirectory )
+	{
+		local $Shortform = $_[0];
+
+		$Shortform =~ s/([^\W_]+)_[\w\.]+/$1/;
+
+		if ( $Shortform ne $_[0] && defined $SAPDBDirectory{lc($Shortform)} ) {
+				$_[0] = ":$SAPDBDirectory{lc($Shortform)}/$_[0]";
+		}
+	}
+}
+
+########################################################################
+# Funktion: _solve_path( $filepath )
+#
+# $filepath : Dateiname
+# Rückgabe  : Pfadliste
+#
+sub _solve_path
+{
+    my $filepath = shift;
+    my @spath;
+    my( $ext, $modpath, $modname );
+
+    if ( $filepath =~ m!^\.[/|\\](.+)! )
+    {
+        local $localpath = cwd();
+        local $dpath = _get_difference_path( $ENV{OWN}, $localpath );
+        if ( defined( $dpath ) )
+        {
+            $filepath = ".".$dpath.$1;
+        }
+        else
+        {
+            $filepath = $localpath."/".$1;
+        }
+    }
+
+    ( $modname, $modpath ) = fileparse( $filepath );
+
+    if ( $modpath =~ m!^(:|\.[/|\\])! ) # $filepath content a index
+    {
+        $modname = $filepath ;
+        $modpath = "";
+    }
+
+    if ( !$modpath ) # kein Pfad
+    {
+		# PTS 1104985 jrg 10.12.1999
+	unless (_is_desc_ext( $modname ))
+	{
+		_MapModuleName( $modname );
+	}
+        local $layer =  _get_layer( $modname ) ;
+        local( $kind, $laypath );
+        if ( $ENV{LAY} )
+        {
+            $laypath = _get_difference_path( $ENV{OWN}, $ENV{LAY} );
+            $laypath = ".".$laypath;
+        }
+
+        if ( _is_desc_ext( $modname ) )
+        {
+			# for search in SRC
+			my $newDescName = _skip_index( $modname );
+			if ( $newDescName =~ /^(.*)\.com$/ )
+			{	$newDescName = $1."/"._skip_index( $modname ); }
+
+            if ( defined( $layer ) )
+            {
+                push @spath, "./sys/desc/".$layer."/"._skip_index( $modname ) ;
+				push @spath, "./sys/src/".$layer."/".$newDescName ;
+            }
+            else
+            {
+                push @spath, "./sys/desc/".$modname ;
+				push @spath, "./sys/src/".$newDescName ;
+            }
+            foreach $kind ( 'fast' , 'quick' , 'slow' )
+            {
+                if ( defined( $layer ) )
+                {
+                    push @spath, "./sys/desc/$kind/".$layer."/"._skip_index( $modname ) ;
+                }
+                else
+                {
+                    push @spath, "./sys/desc/$kind/".$modname ;
+                }
+            }
+        }
+        elsif ( _is_valid_modname( $modname ) )
+        {
+            push @spath, "./sys/src/".$layer."/"._skip_index( $modname ) if $layer;
+        }
+        else
+        {
+            if ( defined( $laypath ) )
+            {
+                push @spath, $laypath."/"._skip_index( $modname ) ;
+            }
+            if ( defined( $layer ) )
+            {
+                push @spath, "./sys/src/".$layer."/"._skip_index( $modname ) ;
+            }
+            if ( $modname !~ /\./ )
+            {
+                foreach $ext ( qw( .mac .shm .lnk .dld .shr .rel .lib .com .jpr ) )
+                {
+                    if ( defined( $layer ) )
+                    {
+                        push @spath, "./sys/desc/".$layer."/"._skip_index( $modname ).$ext ;
+						if ( $ext eq ".com")
+						{ push @spath, "./sys/src/"._skip_index( $modname )."/".
+									_skip_index( $modname ).$ext ;}
+						push @spath, "./sys/src/".$layer."/"._skip_index( $modname ).$ext ;
+
+                    }
+                    else
+                    {
+                        push @spath, "./sys/desc/".$modname.$ext ;
+						if ( $ext eq ".com")
+						{ push @spath, "./sys/src/"._skip_index( $modname )."/".
+									_skip_index( $modname ).$ext ;}
+						push @spath, "./sys/src/"._skip_index( $modname ).$ext ;
+
+                    }
+                }
+                foreach $kind ( 'fast' , 'quick' , 'slow' )
+                {
+                    foreach $ext ( qw( .mac .shm .lnk .dld .shr .rel .lib .com .jpr ) )
+                    {
+                        if ( defined( $layer ) )
+                        {
+                            push @spath, "./sys/desc/$kind/".$layer."/"._skip_index( $modname ).$ext ;
+                        }
+                        else
+                        {
+                            push @spath, "./sys/desc/$kind/".$modname.$ext ;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    elsif ( _is_absolute_path( $modpath ) )
+    {
+        local $dpath;
+        local @vpath = _GetPathList();
+        foreach $vpath ( @vpath )
+        {
+            $dpath = _get_difference_path( $vpath, $filepath );
+            last if defined( $dpath );
+        }
+        if ( defined( $dpath ) )
+        {
+            push @spath, ".".$dpath ;
+        }
+        else
+        {
+            push @spath, $filepath ;
+        }
+
+    }
+    elsif ( # relativer Pfad (speziell)
+             ($modpath =~ m!^((f|fast)|(q|quick)|(s|slow))[/|\\]!)
+           )
+    {
+        $modpath =~ s!^f([/|\\])!fast$1!;
+        $modpath =~ s!^q([/|\\])!quick$1!;
+        $modpath =~ s!^s([/|\\])!slow$1!;
+        if ( _is_desc_ext( $modname ) )
+        {
+            push @spath,"./sys/desc/".$modpath.$modname ;
+        }
+        else
+        {
+            foreach $ext ( qw( .mac .shm .lnk .dld .shr .rel .lib .com .jpr ) )
+            {
+                push @spath,"./sys/desc/".$modpath.$modname.$ext ;
+            }
+        }
+    }
+    else # relativer Pfad (allgemein)
+    {
+        push @spath, "./".$filepath;
+    }
+
+    if ( defined( $laypath ) )
+    {
+        push @spath, $laypath."/"._skip_index( $modname ) ;
+    }
+
+    return @spath;
+}
+
+
+########################################################################
+# Funktion: _get_difference_path( $refpath, $path )
+#
+# $refpath  : Pfad in dem $path enthalten sein könnte
+# $path     : zu testender Pfad
+# Rückgabe  : Pfaddifferenz, 'undef' sonst
+#
+sub _get_difference_path
+{
+    my( $refpath, $path ) = @_;
+    $refpath =~ tr[\\][/]; $path =~ tr[\\][/];
+    return "/" if ( $refpath eq $path );
+	# CTS 1106893
+	my $index = index($path, $refpath);
+	return undef if ( $index != 0 );
+    my $dpath;
+    $dpath = substr( $path, length( $refpath ) );
+	return $dpath;
+}
+
+
+########################################################################
+# Funktion: _GetPathList( )
+#
+# Rückgabe   : Liste von $VMAKE_PATH
+#
+sub _GetPathList
+{
+	local $path = $ENV{VMAKE_PATH};
+	$path =~ s!//$!!; # remove trailing slashes (indicating 'no objects')
+	return split /,/, $path;
+}
+
+
+########################################################################
+# Funktion: _GetBackupPath( $source )
+#
+# $source    : Source, für die der Backup-Pfad gefunden werden soll
+#
+# Rückgabe   :  Backup-Pfad, falls Backups existeren, undef falls die
+#               Source nicht existieren
+sub _GetBackupPath
+{
+    my $source = shift;
+    my ($abs_path, $rel_path);
+    if (($abs_path, $rel_path ) = ICopy::GetFilePath($source, 0, 0, 1) )
+    {
+        local $GRP = (_GetPathList($VMAKE_PATH))[1] if !defined($ENV{'GRP'});
+
+        return "$GRP/backup/".
+            substr($rel_path, 0, index($rel_path, $source)-1);
+    }
+    else
+    {
+        return undef;
+    }
+
+}
+
+########################################################################
+# &gar  (PTS 1102509)
+########################################################################
+# Funktion: checkdir( $file )
+#
+# $file    : Datei mit vollständigem Pfadnamen
+#
+# Rückgabe : 1 bei Erfolg, 0 sonst, $! wird gesetzt
+sub checkdir
+{
+	my $path = shift;
+	my $dir_path = "";
+	# convert \ to /
+	$path =~ s/\\/\//g;
+	# search for directories
+	while ($path =~ /([^\/]*\/)/g)
+    {
+		$dir_path.=$1;
+	    if ( ! -d $dir_path )
+		{
+			return 0 if ( mkdir($dir_path, 0775) == 0 );
+			return 0 if ( chmod (0775, $dir_path) == 0 );
+		}
+	}
+	return 1;
+}
+
+####################################################
+sub make_smbfilename
+{
+	my ($host, $path) = shift =~ /^([\w\.]+):\w:\/\w*\/(.*)/;
+	$path =~ s/\//\\/g;
+	return "\\\\".$host."\\".$path;
+}
+
+####################################################
+
+use Sys::Hostname;
+
+sub make_localfilename
+{
+	my $target = shift;
+	return $target if ($^O =~ /^MsWin/i);
+
+	return $target unless ($target =~ /^([\w\.]+):(.+)/);
+	my ($rem_host, $rem_path) = ($1, $2);
+	return $target unless (hostname =~ /^$rem_host/);
+	return $rem_path;
+}
+
+
+

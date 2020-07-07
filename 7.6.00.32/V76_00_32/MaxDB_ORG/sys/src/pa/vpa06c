@@ -1,0 +1,640 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA06C$
+.tt 2 $$$
+.TT 3 $BurkhardD$INTERNAL FUNTIONS $$2001-05-10$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 08-31-1993
+.sp
+.cp 3
+Version : 1994-04-25
+.sp
+.cp 3
+Release :  7.3    Date : 2001-05-10
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 59 "vpa06c"
+#endif
+#define PRECOMREL30
+#ifdef MSDOS
+#define FCALL _pascal
+#else
+#define FCALL
+#endif
+
+#include "vpa00global.h"
+#include "vpa50Env.h"
+#include "vpa40DBC.h"
+#include "vpa60Stmt.h"
+#include "vpr05IfCom_String.h"
+#include "vpa06.h"
+#include "vpa09.h"
+
+#if defined(__STDC__)
+extern void FCALL p01xcheck (sqlcatype *sqlca, sqlcxatype *sqlxa);
+#else
+extern void FCALL p01xcheck ();
+#endif
+
+/* apmstfc() - API miscellaneous function, set ODBC_FUNCTION code */
+API_RETCODE apmstfc( SQLHENV  henv,
+                     SQLHDBC  hdbc,
+                     SQLHSTMT hstmt,
+                     UWORD    function_code )
+
+{
+    tpa50Env    *env_block_ptr=NULL;
+    tpa40DBC    *dbc_block_ptr=NULL;
+    tpa60Stmt   *stmt_block_ptr=NULL;
+    SQLHENV      lhenv;
+    SQLHDBC      lhdbc;
+    SQLHSTMT     lhstmt;
+    UWORD        special=API_SPEC_NOT;
+    API_RETCODE  api_retcode;
+    BOOL         asyncinit=TRUE;
+
+    API_TRACE(API_TR_ENTRY,"apmstfc",0);
+    API_TRACE(API_TR_UWORD,"function_code",&function_code);
+
+  /* figure out whom to give    */
+  /* error message to!          */
+    lhenv=henv;
+    lhdbc=hdbc;
+    lhstmt=hstmt;
+  
+    api_retcode = API_OK;
+    if (hstmt != SQL_NULL_HSTMT) {
+        stmt_block_ptr = (tpa60Stmt*) hstmt;
+        API_ASSERT_PTR(stmt_block_ptr);
+        if (stmt_block_ptr -> type != API_STMT_TYPE) {
+            API_TRACE(API_TR_MSG, "error - bad stmt handle.",0);
+            api_retcode = API_NOT_OK;
+        }
+        else {
+            if (stmt_block_ptr->reconnect_status == API_TRUE) {
+                switch(function_code) {
+                case SQL_API_SQLFETCH: {}
+                case SQL_API_SQLEXTENDEDFETCH: {}
+                case SQL_API_SQLGETDATA:{}
+                case SQL_API_SQLPARAMDATA:{}
+                case SQL_API_SQLPUTDATA:{
+                    api_retcode = API_TIME_OUT;
+                    stmt_block_ptr->state = API_STMT_ALLOCATED;
+                    stmt_block_ptr->reconnect_status = API_FALSE;
+                    break;
+                }
+                case SQL_API_SQLPREPARE:{}
+                case SQL_API_SQLEXECUTE:{}
+                case SQL_API_SQLEXECDIRECT:{}
+                case SQL_API_SQLCANCEL:{
+                    stmt_block_ptr->reconnect_status = API_FALSE;
+                    break;
+                }	   
+                default:{
+                    break;
+                }
+                }
+            }
+            hdbc = stmt_block_ptr->parent_hdbc;
+            special = stmt_block_ptr->dbc_special.special;
+            asyncinit = pa09IsAsync(stmt_block_ptr, NULL, NULL);
+        }
+    }
+    if (hdbc != SQL_NULL_HDBC) {
+        dbc_block_ptr = (tpa40DBC FAR *) apdlock (hdbc);
+        API_ASSERT_PTR(dbc_block_ptr);
+        if (dbc_block_ptr -> type != API_DBC_TYPE) {
+            API_TRACE(API_TR_MSG, "error - bad dbc handle.",0);
+            api_retcode = API_NOT_OK;
+        }
+        else {
+            henv = dbc_block_ptr->parent_henv;
+        }
+    }
+    if (henv != SQL_NULL_HENV) {
+        env_block_ptr = (tpa50Env FAR *) apdlock (henv);
+        API_ASSERT_PTR(env_block_ptr);
+        if (env_block_ptr -> type != API_ENV_TYPE) {
+            API_TRACE(API_TR_MSG, "error - bad env handle.",0);
+            api_retcode = API_NOT_OK;
+        }
+        else {
+            if (dbc_block_ptr) {
+                dbc_block_ptr->esqblk.odbc_function_code = function_code;
+                API_TRACE(API_TR_UWORD,"esqblk.function_code",
+                          &dbc_block_ptr->esqblk.odbc_function_code);
+            }
+        }
+    }
+    else {
+        API_TRACE(API_TR_MSG,
+                  "error - no valid handles given.",0);
+        api_retcode = API_NOT_OK;
+    }
+
+    if (special != API_SPEC_SQLSETPOS
+        && asyncinit
+        && function_code != SQL_API_SQLERROR
+        && function_code != SQL_API_SQLPARAMDATA)
+        {
+            if (lhstmt!=SQL_NULL_HANDLE) {
+                pa60ResetError( lhstmt );
+            } else if (lhdbc!=SQL_NULL_HANDLE) {
+                pa40ResetError( lhdbc );
+            } else if (lhenv!=SQL_NULL_HANDLE) {
+                pa50ResetError( lhenv );
+            }; /* else */
+            /* apmrter(lhenv, lhdbc, lhstmt); */
+        }; /* if */
+  
+    API_TRACE(API_TR_EXIT,"apmstfc",0);
+    API_TRACE(API_TR_API_RETCODE,"api_retcode",&api_retcode);
+
+    return(api_retcode);
+} /* apmstfc */
+
+
+/* apmastr() - API miscellaneous function, allocate stmt area */
+
+API_RETCODE apmastr ( API_HANDLE *phand,
+                      SDWORD      num_elements)
+{
+    API_HANDLE hand;
+    SDWORD stmt_size;
+    API_RETCODE retcode;
+
+    API_TRACE(API_TR_ENTRY,"apmastr",0);
+    API_TRACE(API_TR_PTR,"phand",&phand);
+    API_TRACE(API_TR_SDWORD,"num_elements",&num_elements);
+
+    stmt_size = num_elements;
+    hand = apdallo( stmt_size);
+    if (hand == 0) {
+        retcode = API_NOT_OK;
+    }
+    else {
+        retcode = API_OK;
+    }
+
+    *phand = hand;
+
+    API_TRACE(API_TR_EXIT,"apmastr",0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    API_TRACE(API_TR_HANDLE,"*phand",phand);
+
+    return(retcode);
+} /* apmastr */
+
+
+/* apmrstr() - API miscellaneous function, resize stmt area */
+
+API_RETCODE apmrstr( API_HANDLE *phand,
+                     UWORD       old_stmt_len,
+                     UWORD       new_stmt_len)
+{
+    API_HANDLE old_hand;
+    API_HANDLE new_hand;
+    DWORD old_stmt_size;
+    DWORD new_stmt_size;
+    UCHAR FAR * old_ptr;
+    UCHAR FAR * new_ptr;
+    API_RETCODE retcode;
+
+    API_TRACE(API_TR_ENTRY,"apmrstr",0);
+    API_TRACE(API_TR_PTR,"phand",&phand);
+    API_TRACE(API_TR_UWORD,"old_stmt_len",&old_stmt_len);
+    API_TRACE(API_TR_UWORD,"new_stmt_len",&new_stmt_len);
+
+    old_stmt_size = old_stmt_len;
+    new_stmt_size = new_stmt_len;
+
+    old_hand = *phand;
+    new_hand = apdallo( (DWORD) new_stmt_size);
+    if (new_hand == 0) {
+        retcode = API_NOT_OK;
+    }
+    else {
+        /* get address of two areas */
+        old_ptr = apdlock(old_hand);
+        API_ASSERT_PTR(old_ptr);
+        new_ptr = apdlock(new_hand);
+        API_ASSERT_PTR(new_ptr);
+
+        /* free the old area */
+        apmfstr(old_hand);
+
+        retcode = API_OK;
+    }
+
+    *phand = new_hand;
+
+    API_TRACE(API_TR_EXIT,"apmrstr",0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    API_TRACE(API_TR_HANDLE,"*phand",phand);
+
+    return(retcode);
+} /* apmrstr */
+
+
+/* apmfstr() - API miscellaneous function, free stmt area */
+
+API_RETCODE apmfstr(API_HANDLE hand)
+{
+    API_RETCODE retcode;
+    
+    API_TRACE(API_TR_MSG,"apmfstr",0);
+    apdfree(hand);
+
+    retcode = API_OK;
+    
+    return(API_OK);
+} /* apmfstr */
+
+
+/* apmlocp gets the parent and locks the child */
+/* if there are not null */
+VOID apmlocp ( SQLHSTMT    *hstmt,
+               tpa60Stmt  **stmt_block_ptr,
+               SQLHDBC     *hdbc,
+               tpa40DBC   **dbc_block_ptr,
+               SQLHENV     *henv,
+               tpa50Env   **env_block_ptr )
+{
+    API_TRACE(API_TR_ENTRY,"apmlocp",0);
+   
+    if ( *hstmt != SQL_NULL_HSTMT ) {
+        API_TRACE(API_TR_HANDLE,"hstmt",hstmt);
+        *stmt_block_ptr = (tpa60Stmt*) *hstmt;
+        API_ASSERT_PTR(*stmt_block_ptr);
+        *hdbc = (*stmt_block_ptr)->parent_hdbc;
+    }
+    if ( *hdbc != SQL_NULL_HDBC ) {  
+        API_TRACE(API_TR_HANDLE,"hdbc",hdbc);
+        *dbc_block_ptr = (tpa40DBC*) *hdbc;
+        API_ASSERT_PTR(*dbc_block_ptr);
+        *henv = (*dbc_block_ptr)->parent_henv;
+    }
+    if ( *henv != SQL_NULL_HENV ) {  
+        API_TRACE(API_TR_HANDLE,"henv",henv);
+        *env_block_ptr = (tpa50Env*) *henv;
+        API_ASSERT_PTR(*env_block_ptr);
+    }
+    API_TRACE(API_TR_EXIT,"apmlocp",0);
+
+   return ;
+} /* apmlocp */
+
+
+/* apmunlp unlock the parents of a child */
+/* if there are not null */
+/* no check if the handle is locked */
+VOID apmunlp ( API_HANDLE hstmt,
+               API_HANDLE hdbc,
+               API_HANDLE henv )
+{
+    API_TRACE(API_TR_ENTRY,"apmunlp",0);
+   
+    if ( hstmt != SQL_NULL_HSTMT ) {
+        API_TRACE(API_TR_HANDLE,"hstmt",&hstmt);
+        apdunlk(hstmt);
+    }
+    if ( hdbc != SQL_NULL_HDBC ) {  
+        API_TRACE(API_TR_HANDLE,"hdbc",&hdbc);
+        apdunlk(hdbc);
+    }
+    if ( henv != SQL_NULL_HENV ) {  
+        API_TRACE(API_TR_HANDLE,"henv",&henv);
+        apdunlk(henv);
+    }
+    API_TRACE(API_TR_EXIT,"apmunlp",0);
+
+   return ;
+} /* apmunlp */
+
+#define ROWSTAT_ALLOC_INCR  20
+
+API_RETCODE pa06AllocRowStatus ( API_HANDLE *phand,
+                                 DWORD num_elements,
+                                 DWORD rowset_size )
+{
+    API_HANDLE      hand = *phand;
+    API_RETCODE     retcode = API_OK;
+    api_row_status *old_rowstat_ptr = (api_row_status*) *phand;
+    api_row_status *rowstat_ptr = NULL;
+    DWORD           size;
+    DWORD           array_size;
+    DWORD           old_array_size;
+  
+    API_TRACE(API_TR_ENTRY,"pa06AllocRowStatus",0);
+    API_TRACE(API_TR_PTR,"phand",&phand);
+    API_TRACE(API_TR_DWORD,"num_elements",&num_elements);
+
+    /* make sure we have rowset_size elements more than num_elements for SQL_ADD
+     * (PTS 1104959) */
+    if (old_rowstat_ptr == NULL
+        || num_elements+rowset_size > old_rowstat_ptr->numentries) {
+        /* allocate new rowstat */
+        array_size = ((num_elements+ROWSTAT_ALLOC_INCR)
+                      * sizeof(api_row_status_entry));
+        size = sizeof(api_row_status) + array_size;
+        hand = apdallo(size);
+        if (hand == NULL) {
+            retcode = API_NOT_OK;
+        } else {
+            rowstat_ptr = (api_row_status*) hand;
+            rowstat_ptr->numentries = num_elements + ROWSTAT_ALLOC_INCR;
+            old_array_size = (old_rowstat_ptr != NULL) ?
+                (old_rowstat_ptr->numentries*sizeof(api_row_status_entry)) : 0;
+            /* keep old content */
+            if (old_array_size > 0) {
+                API_MEMCPY( rowstat_ptr->entry,
+                            old_rowstat_ptr->entry,
+                            old_array_size );
+            };
+            /* init new content */
+            API_MEMSET( rowstat_ptr->entry + old_array_size,
+                        SQL_ROW_SUCCESS,
+                        array_size - old_array_size );
+            retcode = API_OK;
+        }
+        if (old_rowstat_ptr != NULL) {
+            apdfree (old_rowstat_ptr);
+        };
+    };
+    *phand = hand;
+
+    API_TRACE(API_TR_EXIT, "pa06AllocRowStatus", 0);
+    API_TRACE(API_TR_API_RETCODE, "retcode", &retcode);
+    API_TRACE(API_TR_HANDLE, "*phand", phand);
+
+    return(retcode);
+} /* pa06AllocRowStatus */
+
+
+UCHAR FAR *pa06UniqueName( UCHAR FAR *szPrefix, 
+                           UCHAR FAR *szName, 
+                           UWORD cbMaxName, 
+                           UDWORD unique_number )
+{
+    UCHAR szLocalStr[21];
+    UDWORD len1, len2;
+    API_SPRINTF( (char*) szLocalStr, "%lu", unique_number);
+    len1 = (UDWORD) API_STRLEN(szLocalStr);
+    if (cbMaxName > len1 && szName) {
+        len2 = (UDWORD) API_STRLEN(szPrefix);
+        len2 = (len2 > cbMaxName) ? cbMaxName : len2;
+        API_MEMCPY(szName, szPrefix, len2-len1);
+        API_MEMCPY(szName+len2-len1, szLocalStr, len1);
+        szName[len2] = '\0';
+    }
+    else
+        szName = NULL;
+    API_TRACE(API_TR_STRING, "pa06UniqueName", szName);
+    return(szName);
+} /* pa06UniqueName */
+
+
+API_RETCODE pa06InitSQLCA(tpa40DBC FAR *dbc_block_ptr) 
+{
+    sqlcxatype *sqlcxap;
+    sqlcatype *sqlcap;
+    sqltatype *sqltap;
+    sqlratype *sqlrap;
+    sqlgatype *sqlgap;
+    VOID *p;
+    API_RETCODE retcode;
+    tpr01_Precompiledfor pcfor;
+
+    API_TRACE(API_TR_ENTRY, "pa06InitSQLCA", 0);
+    API_TRACE(API_TR_PTR,"sqlcxap",&sqlcxap);
+    sqlcap = &dbc_block_ptr -> esqblk.sqlca;
+    API_TRACE(API_TR_PTR,"sqlcap",&sqlcap);
+    pcfor = 0;
+    p = p03caci(sqlcap, (sqlxatype*)dbc_block_ptr -> esqblk.sqlca.sqlcxap,
+                pcfor);
+    sqlcxap = dbc_block_ptr -> esqblk.sqlca.sqlcxap;
+    if (sqlcxap)
+        API_MEMSET(sqlcxap, 0, sizeof(sqlcxatype));
+    API_TRACE(API_TR_MSG,"p03caci",0);
+    if (p == NULL)
+        retcode = API_NOT_OK;
+    else {
+        retcode = API_OK;
+        dbc_block_ptr->esqblk.sqlareas=p;
+        API_TRACE(API_TR_PTR,"sqlareas",&dbc_block_ptr->esqblk.sqlareas);
+        sqlrap = sqlcap -> sqlrap;
+        sqlrap -> ralang = CPR_LA_ODBC;
+        sqlcxap -> xalang = CPR_LA_ODBC;
+        sqlcap -> sqlargl[1] = ' ';
+        p01xcheck (sqlcap, sqlcxap);
+        API_TRACE(API_TR_MSG, "p01xcheck", 0);     
+        if (sqlcap -> sqldatetime == CPR_DT_EMPTY) 
+            sqlcap -> sqldatetime = CPR_DT_ANSI;
+        if ( sqlcxap->xainit == cpr_is_true ) {
+            sqltap = sqlrap -> rasqltap;
+            API_TRACE(API_TR_PTR, "sqltap", &sqltap);       
+            API_TRACE_LEN(API_TR_STRING, "tatracefn", sqltap->tatracefn, sqlhostnamelengthmax);
+            if (sqltap->tatracefn[0] == ' ') {
+#if defined(WIN32) || defined(WIN)	    
+                sqltap->tatracefn[0] = '\0';
+#else
+                API_TRACE(API_TR_SWORD, "tatracety", &sqltap->tatracety);
+                API_STRCPY(sqltap->tatracefn, "sqltrace.pct");	 
+#endif	 
+            }
+            API_STRCPY(sqlcxap->xaprogn, "SQLODBC");
+            sqlcxap->xaprogc = 7;
+            sqlgap = sqlcap->sqlgap;
+#if defined(WIN32) || defined(WIN)	    
+            sqlgap->gauseropset = cpr_is_false;
+#endif	 
+        }
+    }
+    API_TRACE(API_TR_EXIT, "pa06InitSQLCA", 0);
+    return(retcode);
+} /* pa06InitSQLCA */
+
+
+VOID pa06SetTraceFileName(tpa40DBC FAR *dbc_block_ptr)
+{
+    tpa40DBC *next, *prev;
+    sqlcatype *sqlcap = &dbc_block_ptr->esqblk.sqlca;
+    int found = FALSE;
+
+
+    /* search for other connection with same trace file, get file handel if != 0 */ /* PTS 1120833 */
+    next = (tpa40DBC*) dbc_block_ptr -> next_hdbc;
+    while (!found && next != NULL) {
+        if (!API_STRCMP (dbc_block_ptr->esqblk.tracep->sqlta.tatracefn,
+                         next->esqblk.tracep->sqlta.tatracefn)  &&
+             next->esqblk.tracep->sqlta.tatraceno != 0)  {
+            found = TRUE;
+            dbc_block_ptr->esqblk.tracep->sqlta.tatraceno = next->esqblk.tracep->sqlta.tatraceno;
+        }
+        next = next->next_hdbc;
+    }
+
+
+    prev = (tpa40DBC*) dbc_block_ptr -> prev_hdbc;
+    while (!found && prev != NULL) {
+        if (!API_STRCMP (dbc_block_ptr->esqblk.tracep->sqlta.tatracefn,
+                         prev->esqblk.tracep->sqlta.tatracefn)  &&
+             prev->esqblk.tracep->sqlta.tatraceno != 0)  {
+            found = TRUE;
+            dbc_block_ptr->esqblk.tracep->sqlta.tatraceno = prev->esqblk.tracep->sqlta.tatraceno;
+        }
+        prev = prev->prev_hdbc;
+    }
+} /* pa06SetTracFileName */
+
+
+RETCODE pa06stfcerror(API_RETCODE api_retcode, SQLHSTMT hstmt)
+{
+    RETCODE retcode;
+    API_TRACE(API_TR_API_RETCODE, "pa06stfcerror", &api_retcode);
+    switch(api_retcode) {
+    case API_NOT_OK: {
+        retcode = SQL_INVALID_HANDLE;
+        break;
+    }
+    case API_TIME_OUT: {
+        retcode = SQL_ERROR;
+        pa60PutError( hstmt, API_ODBC_S1T00, NULL);
+        break;
+    }
+    default: {
+        retcode = SQL_ERROR;
+        pa60PutError( hstmt, API_ODBC_S1000, NULL);
+        break;
+
+    }
+    }
+    return(retcode);
+} /* pa06stfcerror */
+
+
+void pa06InitNullParseId( UCHAR *parsid )
+{
+    API_MEMCPY( (UCHAR*) parsid,
+                API_SQLDB_PARSID_NULL,
+                API_SQLDB_PARSID_LEN );
+} /* pa06InitNullParseId */
+
+
+SWORD pa06IsNullParseId( UCHAR *parsid )
+{
+    return (SWORD) (!API_MEMCMP( (UCHAR*) parsid,
+                                 API_SQLDB_PARSID_NULL,
+                                 API_SQLDB_PARSID_LEN) );
+} /* pa06IsNullParseId */
+
+
+/* ODBC 2.x applications get SQL_DATE, SQL_TIME, SQL_TIMESTAMP
+ * ODBC 3.x applications get SQL_TYPE_DATE, SQL_TYPE_TIME, SQL_TYPE_TIMESTAMP
+ * Here the 3.x types are converted to 2.x types if the environment attr.
+ * SQL_ATTR_ODBC_VERSION is SQL_OV_ODBC2 */
+void pa06ConvDateTimeTypes( tpa60Stmt *stmtBlockPtr, SWORD *pType )
+{
+    tpa40DBC *parentDBC;
+    tpa50Env *parentEnv;
+    
+    parentDBC = (tpa40DBC*) pa60GetParentDBC( stmtBlockPtr );
+    if (parentDBC == NULL)
+        return; /* dont handle error here */
+    parentEnv = (tpa50Env*) pa40GetParentEnv( parentDBC );
+    if (parentEnv == NULL)
+        return; /* dont handle error here */
+    
+    if (parentEnv->odbc_version == SQL_OV_ODBC2) {
+        /* convert datetime types */
+        switch (*pType) {
+        case SQL_TYPE_DATE: /* == SQL_C_TYPE_DATE */
+            *pType = SQL_DATE;
+            break;
+        case SQL_TYPE_TIME: /* == SQL_C_TYPE_TIME */
+            *pType = SQL_TIME;
+            break;
+        case SQL_TYPE_TIMESTAMP: /* == SQL_C_TYPE_TIMESTAMP */
+            *pType = SQL_TIMESTAMP;
+            break;
+        default:
+            break;
+        }; /* switch */
+    }; /* if */
+} /* pa06ConvDateTimeTypes */
+
+/* END OF vpa06c */
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

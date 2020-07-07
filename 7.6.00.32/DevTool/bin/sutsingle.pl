@@ -1,0 +1,801 @@
+#!/usr/bin/perl
+# @(#) sutsingle   6.1.1   1994-10-27   kern   admin
+#
+# Eine Liste von Teststromnamen wird vom Standard-Input
+# eingelesen und fuer jedes Element das gewuenschte Programm
+# aufgerufen. Das entstehende Protokoll mit einem als korrekt
+# festgeschriebenen Protokoll verglichen.
+#
+# Aenderungen:
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+use Env;
+use File::Basename;
+use File::Copy;
+use Carp;
+use Cwd;
+use FileHandle;
+use ToolLib;
+use DBTools;
+use Buildprefix;
+use scriptex;
+use Getopt::Std;
+use IO::Handle;
+require "hostname.pl";
+do "$TOOL/bin/sutvars$TOOLEXT";
+
+# forces a flush after every write or print
+$| = 1;
+
+
+unlink ($DbmcliProt);
+unlink ($DbmcliOutput);
+
+
+$USAGE = "usage: sutsingle [-n <node> -R <remote root>] [-stack | -pars] [ -withoutstack ] version program [dbname] teststream.vdnts, ... \n";
+
+undef $opt_s;
+undef $opt_n;
+undef $opt_R;
+undef $opt_p;
+undef $opt_w;
+if (!getopts('s:n:R:p:w:')) {
+  print $USAGE;
+  exit (1);
+}
+
+if  ( @ARGV < 3 ) { print "$USAGE"; exit 1 }
+
+die "teststreams have to named with the extension '.vdnts'"
+    if ( $ARGV[$#ARGV] !~ /.+\.vdnts/ );
+
+chdir($SUT) || die "Can't change to directory $SUT: $!";
+
+Buildprefix::set_buildprefix unless (defined $ENV{BUILDPRAEFIX});
+
+
+$opt_n =~ s/^ *([^ ].*)/$1/ if ( $opt_n );
+$opt_n ? $REMOTENODE = $opt_n : undef $REMOTENODE;
+
+$opt_R =~ s/^ *([^ ].*)/$1/ if ( $opt_R );
+$opt_R ? $REMOTEROOT = $opt_R : undef $REMOTEROOT;
+
+$opt_s ? ($stack_test=1) : undef $stack_test;
+$opt_p ? ($pars_ex_test=1) : undef $pars_ex_test;
+
+$opt_w ? ($withoutstack=1) : undef $withoutstack;
+my $VERSION = shift;
+my $PROGRAM = shift;
+my $DBPROG;
+my $SUTOPTION;
+$PROGRAM .= $PROG_EXT if $PROGRAM !~ /^.+$PROG_EXT$/;
+my $PVERS = substr($VERSION, 0, 1);
+my $PROG = "$DBROOT/pgm/$PROGRAM";
+chomp ( local($local_host) = `hostname` );
+
+$DBNAME = shift
+    if ( $ARGV[0] !~ /.+\.vdnts/i );
+
+croak "ERROR: name of the database is not defined!\n" if !$DBNAME;
+
+$_ = $VERSION;
+CASE:
+{
+    if (/^fast$/i) {
+        $DBPROG = "$DBROOT/pgm/kernel$PROG_EXT";
+        $SUTOPTION = "-fast";
+        last CASE
+    }
+
+    if (/^slow$/i) {
+        $DBPROG = "$DBROOT/pgm/slowknl$PROG_EXT";
+        $SUTOPTION = "-slow";
+        last CASE
+    }
+
+    if (/^quick$/i) {
+        $DBPROG = "$DBROOT/pgm/quickknl$PROG_EXT";
+        $SUTOPTION = "-quick";
+        last CASE
+    }
+    print "$USAGE";
+    print "version: fast|quick|slow\n";
+    exit 1;
+} # CASE
+die "can't find $DBPROG\n"           if ( !$opt_n and !-f $DBPROG );
+die "program $PROG not executable\n" if ( ! -x $PROG   );
+
+$LEVEL = ToolLib::GetConnectLevel();
+
+# enable stack size measurement for release >= 7.5
+if ($withoutstack) {
+    DBTools::PutParam($DBNAME, "SHOW_MAX_STACK_USE", "NO", undef) if ($ENV{RELVER} gt "R74");
+} else {
+    DBTools::PutParam($DBNAME, "SHOW_MAX_STACK_USE", "YES", undef) if ($ENV{RELVER} gt "R74");
+}
+
+
+# ermittle $ProtDir in Abhängigkeit von $VERSION, $DBUNICODE,
+# $DEFCODE und $LEVEL
+
+$ProtDir = lc $VERSION;
+$ProtDir = "lvl_$LEVEL" if ( $LEVEL != 1 );
+if ( $DBUNICODE )
+{
+  if ($RELVER lt "R77")
+  { $ProtDir = "dbuni"}
+  else
+  { $ProtDir = "fast"} ;
+  $ProtDir = "uni"    if ( $DEFCODE   =~ /^unicode$/i );
+  $ProtDir = "xci"    if ( $DBUNICODE =~ /^xci$/i );
+  $ProtDir = "alluni" if ( ( $DBUNICODE =~ /^xci$/i ) && ( $DEFCODE   =~ /^unicode$/i ) );
+}
+$ProtDir = "stack" if $stack_test;
+$ProtDir = "pars_ex" if $pars_ex_test;
+$ProtDir = "$SUT/$ProtDir";
+
+$ENV{SUTOPTION} = $SUTOPTION;
+$ENV{SERVERDB} = $DBNAME;
+
+$DBBIGCMD ? ($Dbbigcmd=1) : ($Dbbigcmd=0);
+
+DBTools::stop_db($DBNAME, undef, $REMOTENODE, $REMOTEROOT);
+
+#   Ermittle ob die Variable DBUNICODE gesetzt ist
+#   und setze danach den XPARAM Parameter. (not for Rel 6.1)
+
+$DEF_CODE = "ASCII";
+
+if ( ! $DBUNICODE )
+{
+    if ($RELVER lt "R77") {
+    DBTools::PutParam($DBNAME, "_UNICODE", "NO", undef, $REMOTENODE, $REMOTEROOT);
+    }
+
+    DBTools::PutParam($DBNAME, "DEFAULT_CODE", "ASCII", undef, $REMOTENODE, $REMOTEROOT);
+}
+else
+{
+    if ($RELVER lt "R77") {
+    DBTools::PutParam($DBNAME, "_UNICODE", "YES", undef, $REMOTENODE, $REMOTEROOT);
+    }
+
+    ( $DEFCODE eq "" ) ? ($DEF_CODE="ASCII") : ($DEF_CODE=$DEFCODE);
+}
+
+#   Ermittle den Namen des Protokolls durch Aufruf des Programmes
+#   und auflisten der dadurch erzeugten Datei.
+
+$CI_PROT = ToolLib::ProtokollName($PROG);
+
+( $TMP eq "" ) ? ($TMPDIR = "/tmp") : ($TMPDIR = $TMP);
+
+# Variablen fuer DBNAME
+$RUNDIR  = DBTools::GetParam( $DBNAME, "RUNDIRECTORY", undef, $REMOTENODE, $REMOTEROOT);
+$OPMSG3  = DBTools::GetParam( $DBNAME, "_KERNELDIAGFILE", undef, $REMOTENODE, $REMOTEROOT);
+$KDUMP   = DBTools::GetParam( $DBNAME, "_KERNELDUMPFILE", undef, $REMOTENODE, $REMOTEROOT);
+$RDUMP   = DBTools::GetParam( $DBNAME, "_RTEDUMPFILE", undef, $REMOTENODE, $REMOTEROOT);
+
+
+$dir = dirname($KDUMP);
+if ( $dir eq "." or $dir eq ".." ) { $DUMP = "$RUNDIR/$KDUMP" } else { $DUMP = $KDUMP }
+if ($RELVER ne "R62")
+{
+    $dir = dirname($RDUMP);
+    if ( $dir eq "." or $dir eq ".." ) { $RDMP = "$RUNDIR/$RDUMP" } else { $RDMP = $RDUMP }
+}
+
+$DIAG = "$RUNDIR/knldiag";
+
+
+DBTools::BCheck($DBNAME, $StdColdUser, $REMOTENODE, $REMOTEROOT);
+
+$DBHIF = $TERM;
+
+print scalar localtime, "\n";
+if  ( $REMOTENODE ) {
+    print " DBNAME  = $REMOTENODE:$DBNAME($REMOTEROOT)";
+} else {
+    print " DBNAME  = $DBNAME";
+}
+print " \tProtDir = ".substr($ProtDir, length($SUT)+1)."\tPID: $$\n";
+
+
+#===================================================================
+# Abarbeiten der Teststroeme
+#===================================================================
+# Die SUTs laufen mit einem vorgefertigten Paramfile
+
+# transsize: 100 datasize: 400 code: ASCII archivesize: 200
+install_paramfile( $DEF_CODE );
+my @TFNS = @ARGV;
+foreach $TFN ( @TFNS )
+{
+
+    $TFN =~ s/\.vdnts//i;
+
+    if ( -f ".stop" ) { print "STOP request"; unlink(".stop" ); last }
+
+    # fuer eine gleichmaessige Ausgabe in 'allsut'
+    my $PTEST = $TFN." "x(14-length($TFN));
+
+    if ( ! -f "$TFN.vdnts" )
+    {
+        open(FILE_OUT, ">>$AllSut");
+        print FILE_OUT "NOT FOUND: $TFN.vdnts\n"; close(FILE_OUT);
+        print "NOT FOUND: $TFN.vdnts\n";
+        next;
+    }
+
+    # Ueberbleibsel des alten Testlaufs entfernen
+    unlink <$RUNDIR/core*>, <*host*>, "shmcore", <*.HOST*>, $CI_PROT;
+    unlink "$ProtDir/$TFN.core",  "$ProtDir/$TFN.dump", "$ProtDir/$TFN.rtedump";
+    unlink "$ProtDir/$TFN.vprot", "$ProtDir/$TFN.prot", "$ProtDir/$TFN.pdiff";
+    unlink "$ProtDir/$TFN.syserr", "$ProtDir/$TFN.interrupt", "$ProtDir/$TFN.rtcerror";
+    unlink <$RMRUNDIR/cokernprotre*>;
+
+    DBTools::PutParam($DBNAME, "_SERVERDB_FOR_SAP", "NO", undef, $REMOTENODE, $REMOTEROOT) if ( $RELVER eq "R72" );
+
+    # Da einige Teststroeme ein spezielles Paramfile benoetigen
+    # wird vor dem eigentlichen Lauf das entsprechende Paramfile
+    # kopiert.
+
+    CASE:
+    {
+    	if ( ($ENV{RELVER} lt "R74" ) || ( ($ENV{RELVER} eq "R74") && ($ENV{CORRECTION_LEVEL} < 4 ) ))
+    	{
+	        if ($TFN =~ /JOIN2TAB|LINKDDL|NIST3|USERTEST/i)
+	        {
+	            install_paramfile( EBCDIC );
+	            last CASE;
+	        }
+	    }
+        if ($TFN =~ /STAV|STAU|UPDSTAT/i)
+        {
+            install_paramfile( ASCII );
+            last CASE;
+        }
+
+        if ( $TFN =~ /SAPR3|RECORD/i)
+        {
+           DBTools::PutParam($DBNAME, "_SERVERDB_FOR_SAP", "YES", undef, $REMOTENODE, $REMOTEROOT) if ($RELVER eq "R72");
+           last CASE;
+        }
+    } #CASE
+
+
+    CASE:
+    {
+        if ( $TFN =~ /^Y.*/ ) { $RESTORE = "YRESTORE"; last CASE; }
+        if ( $TFN =~ /^W.*/ ) { $RESTORE = "WRESTORE"; last CASE; }
+        $RESTORE = "XRESTORE";
+    }
+
+    if ( $Dbbigcmd != 0 )
+    {
+        # Um groessere SQL Kommandos zu erhalten werden durch
+        # das XCI Kommando "BIGCMD <offset>" Blanks vor jedes
+        # SQL  Kommando geschrieben.
+        open(FILE_OUT, ">>$RESTORE.cmd");
+        print FILE_OUT "BIGCMD $DBBIGCMD !\n"; close(FILE_OUT);
+    }
+
+    if ( $DBUNICODE =~ /^xci/i )
+    {
+        if ( $DBLANG ne "" )
+        {
+            # Da der XCI hier garantiert nur Zeichen aus dem ASCII-Subset der
+            # entsprechenden Kodierung schickt, wird ihm mit TERMINAL ASCII
+            # mitgeteilt, dass er bei der Ausgabe von UNICODE-Spalten nur
+            # halb soviel Platz benoetigt, wie der Kern ihm mitteilt.
+            open(FILE_OUT, ">>$RESTORE.cmd");
+            print FILE_OUT "TERMINAL ASCII!\n"; close(FILE_OUT);
+        }
+        else
+        {
+            # Diese Kombination der Umgebungsvariablen sagt aus, dass
+            # der XCI die Auftragsschnittstelle als Unicode-Client
+            # bedienen soll. Das wird ihm durch Aufruf des Kommandos
+            # TERMINAL UNICODE am Anfang eines Testlaufs mitgeteilt.
+            open(FILE_OUT, ">>$RESTORE.cmd");
+            print FILE_OUT "TERMINAL UNICODE!\n"; close(FILE_OUT);
+        }
+    }
+
+
+    if ( $TFN =~ /^ENTRY/i )
+    {
+        unlink "$TFN.ori"; rename("$TFN.vdnts", "$TFN.ori") || warn "Can't rename $TFN.vdnts to $TFN.ori: $!";
+        open(FILE_IN, "<$TFN.ori" ); open(FILE_OUT, ">$TFN.vdnts" );
+        local $dbname = uc($DBNAME);
+        while(<FILE_IN>) {
+            s/<serverdb>/$dbname/g;
+            print FILE_OUT $_;
+        }
+        close(FILE_IN); close(FILE_OUT);
+    }
+
+    print " $PVERS $LEVEL $PTEST ___ ";
+
+    DBTools::start_db($DBNAME, $SUTOPTION, undef, $REMOTENODE, $REMOTEROOT);
+
+    print (scalar localtime);
+
+    # create a watchdog process to avoid endless kernel loops
+    # default time for watchdog set to 30 minutes
+    $MaxSutDuration = $ENV{MAXSUTDURATION} ? $ENV{MAXSUTDURATION} : 2400;
+
+    FORK: {
+	    if ( $pid = fork() ) {
+		    #parent
+	    }
+	    elsif ( defined($pid) ) {
+		    # child
+            sleep $MaxSutDuration ;
+            system("$TOOL/Posix/touch $ProtDir/$TFN.interrupt");
+            DBTools::stopdump_db($DBNAME, $REMOTENODE, $REMOTEROOT) ;
+            exit ;
+	    }
+ 	    else {
+ 		    #weird fork error
+ 		    die "Can't fork: $!\n";
+	    }
+    }
+
+    if ($REMOTENODE) {
+        system("$PROG -d $DBNAME -n $REMOTENODE -b $TFN.vdnts > $NULL");
+    } else {
+        system("$PROG -d $DBNAME -n $local_host -b $TFN.vdnts > $NULL");
+    }
+
+    # get rid of watchdog
+    kill 9, $pid;
+    waitpid $pid, 0;
+
+    # in case of a db core this speeds up the following stop command
+    sleep 1;
+
+    DBTools::stop_db($DBNAME, undef, $REMOTENODE, $REMOTEROOT);
+
+    # Ausgabe der '...' zwischen 'slowci' und 'diff'
+    print " ___ ";
+
+    # get diagfile
+    if ((($RELVER ge "R76") && !(-r $DIAG)) || ($RELVER ge "R77")) {
+        DBTools::GetDiagFile($DBNAME, $StdColdUser, $REMOTENODE, $REMOTEROOT,$DIAG);
+    }
+
+    # touch *.core file for core recognition
+    if ((!$REMOTENODE) && (DBCrash()))
+    {
+        system("$TOOL/Posix/touch $ProtDir/$TFN.core");
+    }
+
+
+    open(FILE_OUT, ">>$CI_PROT");
+    print FILE_OUT " \n";  # .pibm have empty line beyond end
+    close(FILE_OUT);
+
+    if ($ENV{PURIFY}) {
+        copyPurifyLog ($TFN);
+    }
+
+
+    # no stack test for remote sut
+    if ( $stack_test and !$REMOTENODE )
+    {
+
+        system ( "$ENV{INSTROOT}/bin/xkernprot -d $DBNAME ax" );
+
+        unlink "$ProtDir/$TFN.vprot", "$ProtDir/$TFN.s2", "$ProtDir/$TFN.s3", "$ProtDir/$TFN.sort";
+        rename("$DBNAME.prt", "$ProtDir/$TFN.vprot");
+        open(FILE_OUT, ">$ProtDir/$TFN.s2") || die "Can't open $ProtDir/$TFN.s2(output): $!\n";
+        open(FILE_IN, "$ProtDir/$TFN.vprot") || die "Can't open $ProtDir/$TFN.vprot(input): $!\n";
+        while(<FILE_IN>)
+        {
+             if ( /maxstack\s*:\s*(\d+)/ )
+             {
+                $help = $1;
+                $i = $1;
+                if ( length($help) eq 5 )
+                {
+                    $i = "0$1"
+                }
+                else
+                {
+                    if ( length($help) eq 4 )
+                    {
+                        $i = "00$1"
+                    }
+                }
+                print FILE_OUT $i, " ", "$TFN:", $., "\n";
+            }
+        }
+        close(FILE_IN); close(FILE_OUT);
+
+        system("$TOOL/Posix/sort -o $ProtDir/$TFN.s3 -r $ProtDir/$TFN.s2");
+        unlink "$ProtDir/$TFN.s2";
+
+        open(FILE_IN, "$ProtDir/$TFN.s3") || die "Can't open $ProtDir/$TFN.s3(input): $!\n";
+        open(FILE_OUT, ">$ProtDir/$TFN.sort") || die "Can't open $ProtDir/$TFN.sort(output): $!\n";
+        while(<FILE_IN>)
+        {
+            if (41..eof()) { next }
+            print FILE_OUT $_ ;
+        }
+        close(FILE_IN); close(FILE_OUT);
+        unlink "$ProtDir/$TFN.s3";
+        unlink "$ProtDir/$TFN.s2";
+
+        @ARGV = ( $CI_PROT );
+        do "$TOOL/bin/sed_stack$TOOLEXT";
+        if ( $@ ) { die "Error while executing sed_stack:\n", "$@"; exit }
+
+    }
+
+    # Zuruecksetzen des Paramfiles
+    install_paramfile( $DEF_CODE );
+
+
+
+
+    # try to get stack consumption
+    my $usedstack = 0;
+    my $StackUsageExt = "";
+    if  ( ($ENV{RELVER} gt "R74") && ( -r $DIAG ) && (!$withoutstack) ) {
+        open(DIAG, "$DIAG");
+        while(<DIAG>)
+        {
+            if (/.* \[User *\].*used (\d+) bytes on stack/)
+            {
+                $usedstack = $1 if ($1 > $usedstack);
+            }
+        }
+        close(DIAG);
+        if ($usedstack > 0) {
+            $StackUsageExt = " ($usedstack maxstack) ";
+        }
+    }
+
+    #look for rtcerrors in knldiag
+    my $RTCError = "";
+    if ( $ENV{RTCHECK} ) {
+        open(DIAG, "<$DIAG");
+        while (<DIAG>) {
+            if (/.*ERR 19999 RTCERROR.*/) {
+                system("$TOOL/Posix/touch $ProtDir/$TFN.rtcerror");
+                $RTCError = "rtcerr";
+                open(FILE_OUT, ">>$CI_PROT");
+                print FILE_OUT "RTCERROR found\n";
+                close(FILE_OUT);
+                last;
+            }
+        }
+        close(DIAG);
+    }
+
+    if ((-f "$ProtDir/$TFN.core")      ||
+        (-f "$ProtDir/$TFN.interrupt") ||
+        (-f "$ProtDir/$TFN.rtcerror"))
+    {
+        SaveDiagFiles();
+    }
+
+
+    if ( ($Dbbigcmd != 0) or ($DBUNICODE =~ /^xci/i) ) {
+        # jetzt wrid das XCI Kommando "BIGCMD <offset>"
+        # wieder entfernt
+        unlink "$RESTORE.tmp";
+        rename("$RESTORE.cmd", "$RESTORE.tmp") || warn "Can't rename $RESTORE.cmd to $RESTORE.tmp: $!";
+        open(FILE_IN, "<$RESTORE.tmp" ); open(FILE_OUT, ">$RESTORE.cmd" );
+        while(<FILE_IN>) {
+            next if /^(BIGCMD|TERMINAL|UPDSTAT ON)/;
+            next if /UPDSTAT ON/;
+            s/\* if rc/if rc/;
+            print FILE_OUT $_;
+        }
+        close(FILE_IN); close(FILE_OUT);
+        unlink  "$RESTORE.tmp";
+    }
+
+
+    #===============================================================
+    #-------jetzt wird das Protokoll so verbogen, dass moeglichst viele
+    #   der laestigen 'ewigen' Differenzen wegfallen (Datum, Zeit, ...)
+    #===============================================================
+
+    # We do this in a subshell to leave DBNAME undisturbed...
+    @ARGV = ( "$CI_PROT", "$TMPDIR/$TFN.prot" );
+    do "$TOOL/bin/sed_sut$TOOLEXT";
+    if ( $@ ) { die "Error while executing sed_sut:\n", "$@"; exit }
+
+    if  ( $LEVEL != 1 )
+    {
+        #  Aendern des Isolation-Levels auf 1; der urspruengliche I.L.
+        #  ist nur noch anhand der Zeit der letzten Aenderung bzw. an
+        #  der Directory, in der das Protokoll steht, zu erkennen.
+        #  Diese Loesung war leider noetig, da 'diff' kein 'ignore'
+        #  kennt.
+        @ARGV = ( "$LEVEL", "$TMPDIR/$TFN.prot" );
+        do "$TOOL/bin/sed_sut-lvl$TOOLEXT";
+        if ( $@ ) { die "Error while executing sed_sut-lvl:\n", "$@"; exit }
+    }
+
+    if ( $TFN =~ /ENTRY/ )
+    {
+        unlink "$TFN.vdnts";
+        rename "$TFN.ori", "$TFN.vdnts";
+    }
+
+    if ( $DBUNICODE )
+    {
+        # Aendern der Ausgaben, die aufgrund der nur 9 Byte langen
+        # Identifier im 'UNICODE'-Lauf anders sind als im normalen
+        # Lauf
+        @ARGV = ( "$TMPDIR/$TFN.prot" );
+        do "$TOOL/bin/sed_sut-uni$TOOLEXT";
+        if ( $@ ) { die "Error while executing sed_sut-uni:\n", "$@"; exit }
+    }
+
+
+    unlink $CI_PROT;
+
+    # Die Fehlerpositionen werden aus dem Protokoll entfernt.
+    if ( $Dbbigcmd )
+    {
+        @ARGC = ( "$TMPDIR/$TFN.prot", "$TMPDIR/PROT" );
+        do "$TOOL/bin/sed_term$TOOLEXT";
+        if ( $@ ) { die "Error while executing sed_term:\n", "$@"; exit }
+    }
+
+    #   echo "analyze differences"
+
+    $DIFFEXT = "punix";
+    if ( $VERSION =~ /fast|quick/ ) {
+       if ( -s "$TFN.tpunx" ) { $DIFFEXT = "tpunx" }
+    }
+
+    if ( $DBUNICODE =~ /^xci/i and
+         $DBLANG eq "" and
+         $DEF_CODE eq UNICODE and
+         -s "$TFN.cpnix" )
+    {
+        # Unicode-Auftragsschnittstelle mit eigenem Referenzprotokoll...
+        $DIFFEXT = "cpnix";
+    }
+    else
+    {
+       if ( $DBUNICODE =~ /^xci/i and  $DBLANG eq "" and -s "$TFN.cunix" )
+       {
+           # Unicode-Auftragsschnittstelle mit eigenem Referenzprotokoll...
+           $DIFFEXT = "cunix";
+       }
+       else
+       {
+           if ( $DBUNICODE )
+           {
+               if ( $DEF_CODE eq UNICODE )
+               {
+                   if         ( -s "$TFN.upnix" ) { $DIFFEXT = "upnix" }
+                   else
+                        {
+                        if ($RELVER lt "R77")
+                            { if  ( -s "$TFN.uunix" ) { $DIFFEXT = "uunix" } }
+                        }
+               }
+               else
+                    {
+                    if ($RELVER lt "R77")
+                       { if  ( -s "$TFN.uunix" ) { $DIFFEXT = "uunix" } }
+                    }
+           }
+       }
+    }
+
+    if  ( -s "$TFN.$DIFFEXT" )
+    {
+        $DIFFRC = 0;
+        if ( $Dbbigcmd )
+        {
+            @ARGV = ( "$TFN.$DIFFEXT", "$TMPDIR/PUNIX" );
+            do "$TOOL/bin/sed_term$TOOLEXT";
+            if ( $@ ) { die "Error while executing sed_term:\n", "$@"; exit }
+            system("$DIFF $TMPDIR/PUNIX $TMPDIR/PROT > $ProtDir/$TFN.pdiff");
+            $DIFFRC = $?;
+            unlink "$TMPDIR/PUNIX", "$TMPDIR/PROT";
+        }
+        else
+        {
+            $DIFFRC = system("$DIFF $TFN.$DIFFEXT $TMPDIR/$TFN.prot > $ProtDir/$TFN.pdiff");
+        }
+        if ( $DIFFRC == 2 )
+        {
+            open(FILE_OUT, ">>$ProtDir/$TFN.pdiff");
+            print FILE_OUT "DIFF-ERROR HAPPENED\n";
+            close(FILE_OUT);
+        }
+        elsif ( $DIFFRC != 0 )
+        {
+            $pdiff = "$ProtDir/$TFN.pdiff";
+            &runStdUndiff ('STDDIFF.diffscr', $pdiff);
+            if (-s $pdiff) {
+                &runStdUndiff ("$TFN.diffscr", $pdiff);
+            }
+
+            if ( $pars_ex_test ) {
+                &runStdUndiff ("PARS.diffscr", $pdiff);
+            }
+        }
+    }
+    else
+    {
+        open(FILE_OUT, ">$ProtDir/$TFN.pdiff");
+        # kein Protokoll zum Vergleichen da !
+        print FILE_OUT "new test without protocol: $TFN\n";
+        close(FILE_OUT);
+    }
+
+    $Interrupted = "";
+    if  ( -f "$ProtDir/$TFN.interrupt" ) {
+        $Interrupted = " interrupted ";
+    }
+
+
+    if ( -f "$ProtDir/$TFN.core" )
+    {
+        open(FILE_OUT, ">>$AllSut");
+        print FILE_OUT ToolLib::Timestamp(1), "\t$PVERS $LEVEL $PTEST $StackUsageExt core $Interrupted $RTCError\n";
+        close(FILE_OUT);
+
+        rename("$TMPDIR/$TFN.prot", "$ProtDir/$TFN.prot") || warn "Can't rename $TMPDIR/$TFN.prot to $ProtDir/$TFN.prot: $!";
+
+        print " $StackUsageExt core $Interrupted $RTCError\n";
+
+    } else {
+
+        if  ( -s "$ProtDir/$TFN.pdiff" ) {
+
+            # check for syserr
+            $SYSError = "";
+            open(DIFF_FILE,"<$ProtDir/$TFN.pdiff");
+            while (<DIFF_FILE>) {
+                if ( $_ =~ />.*ERROR\s*(-9\d{3}|-602)/ ) {
+                    $SYSError = " syserr ";
+                    last;
+                }
+            }
+            close (DIFF_FILE);
+
+
+            $CHARS = `$TOOL/Posix/wc -c < $ProtDir/$TFN.pdiff`; chomp $CHARS;
+
+            open(FILE_OUT, ">>$AllSut");
+            print FILE_OUT ToolLib::Timestamp(1), "\t$PVERS $LEVEL $PTEST * $CHARS $DIFFEXT $StackUsageExt $Interrupted $RTCError $SYSError\n";
+            close(FILE_OUT);
+
+            print "$StackUsageExt diff  $CHARS characters $Interrupted $RTCError $SYSError\n";
+
+            rename("$TMPDIR/$TFN.prot", "$ProtDir/$TFN.prot") || warn "Can't rename $TMPDIR/$TFN.prot to $ProtDir/$TFN.prot: $!";
+
+        } else {
+
+            open(FILE_OUT, ">>$AllSut");
+            print FILE_OUT ToolLib::Timestamp(1), "\t$PVERS $LEVEL $PTEST $DIFFEXT $StackUsageExt\n";
+            close(FILE_OUT);
+
+            print "ok \n";
+
+            unlink "$ProtDir/$TFN.pdiff", "$TMPDIR/$TFN.prot";
+        }
+    }
+
+
+    if ( ($TFN =~ /VZLCTEST/i) )
+    {
+        DBTools::PutParam($DBNAME, "INSTANCE_TYPE", "OLTP", undef, $REMOTENODE, $REMOTEROOT);
+    }
+
+}
+
+
+undef($SUTOPTION);
+close(FILE_OUT);
+
+
+##################### END OF SUTSINGLE ###########################
+
+##################################################################
+sub install_paramfile {
+    if ( ($RELVER ne "R61") && ($RELVER ne "R80") )
+    {
+        DBTools::PutParam($DBNAME, "DEFAULT_CODE", $_[0], undef, $REMOTENODE, $REMOTEROOT);
+    }
+}
+
+
+##################################################################
+sub DBCrash ()
+{
+    return DBTools::GetParam( $DBNAME, "_DIAG_SEM", undef, $REMOTENODE, $REMOTEROOT);
+}
+
+
+#####################################################
+sub runStdUndiff () {
+
+    my ($diffScript, $protFile) = @_;
+
+    if (-r $diffScript)
+    {
+        $scriptRC = scriptex::script ($diffScript, $protFile);
+        if ($scriptRC != 0)
+        {
+            open PDIFF, ">>$protFile";
+            print PDIFF "script ($diffScript, $protFile) failed with $scriptRC";
+            close PDIFF;
+        }
+    }
+}
+
+#####################################################
+sub copyPurifyLog {
+    my ($sutname) = @_;
+    if (! -d purify) {
+        mkdir purify, 0777;
+    }
+    File::Copy::copy ('purify.log', "purify/$sutname.purlog");
+}
+
+
+
+
+#####################################################
+sub SaveDiagFiles {
+
+    if  ( -r $DIAG ) {
+        open(FILE_OUT, ">>$CI_PROT");
+        print FILE_OUT "save $DIAG\n";
+        open(DIAG, "$DIAG");
+        while(<DIAG>) { print FILE_OUT $_ unless /^\s+$/ }
+        close(DIAG);
+        close(FILE_OUT);
+    }
+
+
+    unlink "$ProtDir/$TFN.dump", "$ProtDir/$TFN.rtedump";
+    if (-f  $DUMP) {
+        rename($DUMP, "$ProtDir/$TFN.dump") || warn "Can't rename $DUMP to $ProtDir/$TFN.dump: $!";
+    }
+    if (-f  $RDMP) {
+        rename($RDMP, "$ProtDir/$TFN.rtedump") || warn "Can't rename $RDMP to $ProtDir/$TFN.rtedump: $!";
+    }
+
+    # im Absturzfall VTRACE ziehen
+    system ( "$ENV{INSTROOT}/bin/xkernprot -d $DBNAME akbx > $NULL" );
+    unlink ("$ProtDir/$TFN.vprot");
+    rename("$DBNAME.prt", "$ProtDir/$TFN.vprot");
+}
+
+
+
+__END__
+

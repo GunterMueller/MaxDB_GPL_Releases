@@ -1,0 +1,307 @@
+#!/usr/bin/perl
+# comppc        *** internal script (called by vmake !)
+#
+# @(#)comppc		1997-11-18
+#
+# translate pascal source module to C source module
+#
+# PCFLAGS       optional pascal compiler flags
+# KEEPFLG       optional keep intermediate files flag
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package comppc;
+use Env;
+use File::Basename;
+use File::Copy;
+use Carp;
+# Get PCFLAGS
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("comppc called with @ARGV\n");
+
+$USAGE = "usage: comppc [-k] [pc-flags] source\n";
+
+#undef $lib;
+#undef $Lib;
+#undef $LIB;
+#undef $include;
+#undef $Include;
+#undef $INCLUDE;
+#undef $LOGINPATH;
+#undef $Os2LibPath;
+#undef $COBDIR;
+#undef $COBCPY;
+#undef $BASEDIR;
+#undef $EDITOR;
+#undef $PROCESSOR_IDENTIFIER;
+#undef $WINDOWID;
+#undef $windir;
+
+$FOR_DEBUG = "";
+$Y         = "";
+$NY        = "";
+$NC        = "";         # if set: No range Check
+$RANGE_CHECK = "";
+
+while ($_ = $ARGV[0], /^[-+]/) {
+    shift;
+    last if /^--$/;
+
+    if (/^-language/)   { next } # ignored
+
+    if (/^-save_sources/)   { next } # ignored
+
+    if (/^-suppress_variant_name/)   { next } # ignored
+
+    if (/^-pdbfile/)   { next } # ignored
+
+    if(/^-OPT=.*/) { next }            # ignored
+
+    if(/^-OPT(SUB|ADD)=.*/) { next }            # ignored
+
+	if (/^-NO$/)   { next }            # ignored
+
+	if (/^-Od$/)   { next }            # ignored
+
+	if (/^-Op$/)   { next }            # ignored
+
+	if (/^-except$/)   { next }        # ignored RTS 1000166
+
+	if (/^-nothread/)   { next }       # ignored CTS 1110865
+
+	if (/^-use_thread/ )   { next }       # ignored
+
+	if (/^-force_pdb_files/ )   { next }       # ignored
+
+	if (/^-default_nothread/ )   { next }   # ignored
+
+	if(/^-NC$/) { $NC = "-NC"; next }  # 'No range Check' for this module
+
+	if(/^-range_check=(.*)$/)
+	{
+		$RANGE_CHECK = $1;
+		$RANGE_CHECK =~ tr/A-Z/a-z/;
+		if ( $RANGE_CHECK !~ /yes|no/)
+		{ die "wrong range_check defintion '$RANGE_CHECK' (only 'yes' or 'no' allowed)\n" }
+		next;
+	}
+
+    if( (/^-g$/) || (/^-optdebug/) )  { $FOR_DEBUG = "1"; next } # CTS 1110663
+
+    if(/^-p$/)  { next }                # ignored
+
+    if(/^-E$/)  { next }                # ignored
+    if(/^-ffloat-store$/) { next }   # ignored compile switch for floating point optimization on linux h.b.
+
+    if(/^-Y$/)  { $Y = "-Y"; next }
+
+    if(/^-NY$/) { $NY = "-NY"; next }
+
+    if(/^-c$/)  { next }                # used implicitly
+
+    if(/^-k$/)  { @KEEPFLG = "-k"; next }
+
+    if(/^-CFLAGS=*/) { next }            # CTS 1103249
+
+    if(/^-.*/)  { push @PCFLAGS, $_; next }
+
+    if(/^\+.*/)  { next }				# ignored
+
+}  #while
+
+if ( @ARGV != 1 ) { print $USAGE; exit 1 }
+
+$SOURCE = $ARGV[0];
+$BASE = basename($SOURCE, (".p"));
+
+if ( $Y and ! $NY ) { push @PCFLAGS, "-Y"; }
+
+# $CURR_VERSION wird von vmake exportiert und darf in
+# der Umgebung nicht gesetzt sein
+if ( $CURR_VERSION =~ /^s/i || $CURR_VERSION =~ /^q/  || $RANGE_CHECK =~ /yes/i )
+{
+    if (  ! $NC && ! ($ENV{'DIAGNOSE'} eq "DIAGNOSE" ) && ($RANGE_CHECK !~ /no/i ) )
+    {
+    	ToolTrace("comppc: set \@PCFLAG -C for range checks\n");
+        push @PCFLAGS, "-C";
+        # range check, if not switched off
+    }
+    $FOR_DEBUG = "1";   # enable debug
+}
+
+#ptoc benutzt $SHELL um $TOOL/bin/pgenc aufzurufen!
+$PCFLAGS = join " ", @PCFLAGS;
+if (defined $RshPtoc && $RshPtoc ne "") {
+my $RshPtocCmd = "cat $SOURCE | rsh $RshPtoc bin/ptocfilter $PCFLAGS $SOURCE > $BASE.c";
+	system ($RshPtocCmd) or croak "Error while executing ".$RshPtocCmd."\n";
+} else {
+    print "$TOOL/pgm/ptoc $PCFLAGS $SOURCE\n" if ($ENV{'NOQUIET'});
+    system("$TOOL/pgm/ptoc $PCFLAGS $SOURCE") == 0
+	   or croak "Error while executing \"$TOOL/pgm/ptoc $PCFLAGS $SOURCE\"\n".
+	   "message: $!\n";
+}
+open(FILE_IN, "<$BASE.c") or croak "Can't open $BASE.c (input): $!\n";
+close(FILE_IN);
+if (defined ($PTOC_TESTDIR)) {
+    # used to created test cases for ptoc
+    if ($CURR_VERSION =~ /^s/) {
+        $ptoc_targetdir = "$PTOC_TESTDIR/slow";
+    }
+    elsif ($CURR_VERSION =~ /^q/) {
+        $ptoc_targetdir = "$PTOC_TESTDIR/quick";
+    }
+    else {
+        $ptoc_targetdir = "$PTOC_TESTDIR/fast";
+    }
+    if ( ! -d $ptoc_targetdir ) {
+    	mkdir ("$ptoc_targetdir", 0775);
+    }
+    copy ("$SOURCE", "$ptoc_targetdir/$SOURCE");
+    copy ("$BASE.c", "$ptoc_targetdir/$BASE.org.c");
+}
+
+#
+# search for a certain ptoc bug (abs = abs)
+#
+open CSOURCE, "$BASE.c";
+my $lineno = 0;
+my $generatedCodeHasErrors  = 0;
+foreach $line (<CSOURCE>) {
+    ++$lineno;
+    if ($line =~ /(ptoc_Var[0-9]+ = ).*\1/) {
+        my @boolchunks = split (/(&&)|(\|\|)/, $line);
+        # bool operators force evaluation, so no problem there
+        foreach my $chunk (@boolchunks) {
+            if ($chunk =~ /(ptoc_Var[0-9]+ = ).*\1/) {
+                my $msgPrefix;
+                if (($RELVER lt "R77") || ($RELVER eq "RTOOL")) {
+                    $msgPrefix = 'Warning';
+                }
+                else {
+                    $msgPrefix = 'Error';
+                    $generatedCodeHasErrors = 1;
+                }
+                print "$msgPrefix:$BASE.c:$lineno: Error in ptoc generated code (2 abs/mod in 1 expression?)\n";
+                print "chunk: $chunk\n";
+            }
+        }
+    }
+}
+if ($generatedCodeHasErrors) {
+    print "errors in ptoc generated code\n";
+    exit 2;
+}
+close CSOURCE;
+
+# Adjust ptoc output: translate s10mv functions to SQLMOVC macro,
+#   but only when last arg is a constant.
+# The macro is in ptoc.h
+
+open(FILE_IN, "<$BASE.c") or croak "Can't open $BASE.c (input): $!\n";
+open(FILE_OUT, "+>$BASE.tmp") or croak "Can't open $BASE.tmp (output): $!\n";
+while(<FILE_IN>) {
+
+    s/s10mv[c0-9]* *(\(.*, *\d* *\) *;)/SQLMOVC $1/;
+	next if /tsp_bufaddr s35add_bufaddr\(\);/;
+	if ($RELVER ne "R61"){
+			next if /tsp_moveobj_ptr s35add_bufaddr\(\);/;
+			next if /tsp_moveobj_ptr s35add_moveobj_ptr\(\);/;
+	}
+	if ($RELVER ge "R74"){
+	    next if /tsp00_BufAddr s35add_bufaddr\(\);/;
+	    next if /tsp00_MoveObjPtr s35add_bufaddr\(\);/;
+	    next if /tsp00_MoveObjPtr s35add_moveobj_ptr\(\);/;
+		next if /tgg00_StEntryAddr s35inc_st\(\);/;
+	}
+
+	next if /s35add_addr1\(\);/;
+	if ($RELVER ne "R61"){
+		next if /tgg_st_entry_addr s35inc_st\(\);/;
+		next if /char s35ge_bufaddr\(\);/;
+		next if /char s35gt_bufaddr\(\);/;
+		next if /char s35le_bufaddr\(\);/;
+		next if /char s35lt_bufaddr\(\);/;
+		next if /short s35op_case\(\);/;
+		next if /int s35func_ptr\(\);/;
+		s/s35func_ptr[ ]*\(\(short \) sql__setrang\((\w*)[ ]*\((.*;)/$1;/g;
+		s/s35func_ptr[ ]*\((\w*)[ ]*\((.*;)/$1;/g;
+		s/([^\w])sizeof[ \t]*\(/$1(long)sizeof(/g;
+		s/unsigned char \*tsp35proc_ptr;/short (\*tsp35proc_ptr) ();/;
+	}
+	next if (/_ptocm\(\);/);
+
+	print FILE_OUT;
+}
+$linecount = $.;
+close FILE_IN; close FILE_OUT;
+unlink "$BASE.c"; rename "$BASE.tmp", "$BASE.c";
+
+if ( $linecount < 3 ) {
+    print "ERROR : $BASE.c is empty ... deleting $BASE.c\nPossible previous pascal syntax error!\n";
+    unlink "$BASE.c"; exit 2;
+}
+
+
+# replace simple set- and arithmetic-operations generated by ptoc,
+# because many compilers are too stupid for optimizing
+if (system("$TOOL/pgm/opt_pt_c COMMENT < $BASE.c >$BASE.tmp") == 0)
+{ unlink "$BASE.c"; rename "$BASE.tmp", "$BASE.c"; }
+else
+{ warn "Error while executing \"$TOOL/pgm/opt_pt_c COMMENT <$BASE.c >$BASE.tmp\"\n"."message: $!\n"; }
+
+open(FILE_OUT, ">>$BASE.c") or croak "Can't open $BASE.c (append output): $!\n";
+open(FILE_IN, "<$SOURCE") or croak "Can't open $SOURCE (input): $!\n";
+while (<FILE_IN>) {
+	print FILE_OUT if m/^#ident|^static char ident_/;
+}
+close FILE_IN;
+
+print FILE_OUT "$SR_ID \"@(#)$MOD_DAT\"$ID_END\n";
+
+{
+# This function forces a reference into the data section, so the AIX, HPUX
+# compiler cannot ignore that section, so we ensure that the 'what' strings
+# become part of the object.
+# CAUTION: This works only for the "static char" type of 'what' string!
+ local $Base = $BASE; $Base =~ tr/-/_/;  $Base =~ tr/\+/_/;
+ print FILE_OUT "extern char * ${Base}_force_data () { return( ident_sr ); }\n";
+}
+
+print FILE_OUT "$PC_ID \"@(#)$BASE ptoc @PCFLAGS\"$ID_END\n";
+close FILE_OUT;
+
+    if ( $Y and !$NY ) {
+		local(@ARGV) = ( "$BASE.c" );
+		do "$TOOL/bin/ptc_glob$TOOLEXT"; # make a file with sizes of global variables
+		if ( $@ ) { die "Error while executing $TOOL/bin/ptc_glob$TOOLEXT: $@"}
+		if ( ! $KEEPFLG ) {
+			unlink "s_$BASE.c", "$BASE.exe";
+		}
+    }
+
+# needed for debugging
+unlink("$BASE.dbg"); copy("$BASE.c", "$BASE.dbg");
+
+
+__END__
+
+Hier kann ein langer Kommentar stehen!

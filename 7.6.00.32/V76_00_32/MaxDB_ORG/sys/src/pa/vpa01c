@@ -1,0 +1,1326 @@
+.CM  SCRIPT , Version - 1.1 , last edited by peter
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 1994-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.TT 1 $SQL$Project Distributed Database System$VPA01C$
+.tt 2 $$$
+.TT 3 $BurkhardD$COMUNICATION WITH ORDER INTERFACE$2001-07-10$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 1994-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+MODULE  : COMUNICATION WITH ORDER INTERFACE
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+.sp
+.cp 3
+Define  :
+
+.CM *-END-* define --------------------------------------
+Use     :
+
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 1993-09-24
+.sp
+.cp 3
+Version : 1994-12-19
+.sp
+Release :  7.3    Date : 2001-07-10
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+/*PRETTY*/
+#ifndef DEBUG
+#line 71 "vpa01c"
+#endif
+/* next moved to vsp001cc */
+#ifdef MSDOS
+#define FCALL _pascal
+#else
+#define FCALL
+#endif
+
+#include "vpa00global.h"
+#include "vpa40DBC.h"
+#include "vpa60Stmt.h"
+#include "vpr05IfCom_String.h"
+#include "vpr01SQL.h"
+#include "vpr03Part.h"
+#include "vpr03Packet.h"
+
+/* PROTOTYPES */
+void p03tvfwritetrace (sqlratype * sqlra, struct SQLERROR * sqlemp);
+
+void FCALL p08vfwritetrace (sqlratype* sqlrap);
+void p08runtimeerror (sqlcatype*, sqlcxatype*, int);
+
+extern FCALL    s26new_part_init (tsp1_packet * packet_ptr,
+                                  tsp1_segment * segm_ptr,
+                                  tsp1_part ** part_ptr);
+
+extern FCALL    s26finish_part (tsp1_packet * packet_ptr,
+                                tsp1_part * part_ptr);
+
+extern FCALL    s26find_part (tsp1_segment * segm_ptr,
+                              char part_kind,
+                              tsp1_part ** part_ptr);
+
+extern tsp00_Int4 FCALL s26partlen (tsp1_part * part_ptr);
+
+/*!**********************************************************************
+  Function:  pa01BuildKeywordW
+
+  description: initializes SQLWCHAR identifiers of keyword_tab (vpa01c)
+
+  arguments: none (keyword_tab is global)
+    
+  return value: none
+  */
+void pa01BuildKeywordW ();
+
+/*!**********************************************************************
+  Function:  pa01BuildTableTypeKeywordW
+
+  description: initializes SQLWCHAR identifiers of table_type_tab (vpa01c)
+
+  arguments: none (table_type_tab is global in vpa01c)
+    
+  return value: none
+  */
+void pa01BuildTableTypeKeywordW ();
+
+/*!**********************************************************************
+  Function:  pa01CompareKeyword
+
+  description: compares given keyword with keyword_tab, sets order_type
+
+  arguments: keyword (in), order_type (out)
+    
+  return value: none
+  */
+void pa01CompareKeyword  (const char*, SDWORD *);
+void pa01CompareKeywordW (const SQLWCHAR*, SDWORD *);
+
+
+
+#define PRECOMREL30
+#include <string.h>
+#include <ctype.h>
+#define PA01_SYMB_UNKNOWN 0
+#define PA01_SYMB_QUOTED  1
+#ifdef MSDOS
+#define FCALL _pascal
+#else
+#define FCALL
+#endif
+
+static api_keyword_tab keyword_tab [ ] = {
+{ API_KEYWORD_SELECT,    "SELECT" ,  API_CMD_DESCRIBE },
+{ API_KEYWORD_INSERT,    "INSERT",   API_CMD_PARSE},
+{ API_KEYWORD_UPDATE,    "UPDATE",   API_CMD_PARSE},
+{ API_KEYWORD_APPEND,    "APPEND",   API_CMD_PARSE},
+{ API_KEYWORD_DELETE,    "DELETE",   API_CMD_PARSE},
+{ API_KEYWORD_CREATE,    "CREATE",   API_CMD_EXECUTE },
+{ API_KEYWORD_DECLARE,   "DECLARE",  API_CMD_DESCRIBE },
+{ API_KEYWORD_OPEN,      "OPEN",     API_CMD_ERROR },
+{ API_KEYWORD_FETCH,     "FETCH",    API_CMD_ERROR },
+{ API_KEYWORD_DROP,      "DROP",     API_CMD_EXECUTE},
+{ API_KEYWORD_PROC,      "{",        API_CMD_PARSE },
+{ API_KEYWORD_PROC,      "--*(",     API_CMD_PARSE },
+{ API_KEYWORD_PROC,      "PROC",     API_CMD_PARSE },
+{ API_KEYWORD_PROC,      "CALL",     API_CMD_PARSE },
+{ API_KEYWORD_SHOW,      "SHOW",     API_CMD_EXECUTE }, /* DESCRIBE ? */
+{ API_KEYWORD_NEXT,      "NEXT",     API_CMD_PARSE },
+{ API_KEYWORD_NOT_FOUND, "",         API_CMD_EXECUTE} 
+};
+
+typedef struct {
+  UCHAR     keyword [ API_MAX_KEYWORD_LEN ];
+  SDWORD    table_type_key;
+  SQLWCHAR  keywordW [ API_MAX_KEYWORD_LEN ];
+} api_table_type_tab;
+
+static api_table_type_tab table_type_tab [ ] = {
+{ "TABLE",		API_TABLE_TABLE},
+{ "VIEW",		API_TABLE_VIEW},
+{ "SYSTEM",		API_TABLE_SYSTEM},
+{ "ALIAS",		API_TABLE_ALIAS},
+{ "SYNONYM",		API_TABLE_SYNONYM},
+{ "SNAPSHOT",		API_TABLE_SNAPSHOT},
+{ "RESULT",		API_TABLE_RESULT},
+{ "UNLOADED",		API_TABLE_UNLOADED},
+{ "SYSTEM TABLE",	API_TABLE_SYSTEMTABLE},
+{ "%",			(SDWORD)API_TABLE_ALL},
+{ "",			API_TABLE_NONE}
+};
+
+
+void sqcldsc (sqlcatype *sqlcca,
+	      sqlgaentry *gae,
+              sqlint2 dbno,
+              sqldatype FAR *da,
+              sqlparsid parsid)
+{  
+  BOOLEAN again;
+  sqlcxatype *sqlcxap=sqlcca->sqlcxap;
+  tpr01_ConDesc *ConDesc = sqlcxap->xaSQLDesc->ConDesc;
+  API_TRACE(API_TR_ENTRY,"sqcldsc",0);
+  API_TRACE(API_TR_WORD, "dbno", &dbno);
+  API_TRACE(API_TR_PTR, "sqlcca", &sqlcca);
+  API_TRACE(API_TR_PTR, "da", &da);
+  API_TRACE(API_TR_PTR, "sqlcxap", &sqlcxap);
+  API_TRACE(API_TR_PTR, "sqlrap", &sqlcca->sqlrap);
+  if (dbno < 1 || dbno > sqlgamax) 
+    p08runtimeerror (sqlcca, sqlcxap, cpr_db_session_not_allowed);
+  else {
+    tpr03_SegmDesc *SegmDesc = ConDesc->SegmDesc;
+    sqlratype *sqlrap = sqlcca->sqlrap;
+    tpr05_StringEncoding PacketEncoding = sqlcxap->xaSQLDesc->PacketEncoding;  
+    API_TRACE(API_TR_PTR, "sqlrap", &sqlrap);
+    sqlrap->raactsession = dbno;
+    p01xtracefilecheck (sqlcca, (sqlxatype*) sqlcxap);
+    again = API_TRUE;
+    ConDesc->Connection->InitPacket(ConDesc, PacketEncoding, sp1m_dbs);
+    SegmDesc = ConDesc->SegmDesc;
+    if (SegmDesc) {
+      tsp1_part *partPtr = pr03SegmentAddPart(SegmDesc, sp1pk_command);
+      tpr_runtime_errors_Enum Err;
+      if (partPtr) {
+        static char szDescribeCMD[sizeof("DESCRIBE ") + sizeof(sqlcca->sqlresn) + 3];
+        tsp00_Int4 cbPartLen = pr03PartGetFreePartSpace(partPtr);
+        tsp00_Int4 Offset = 0;
+
+        if (parsid[CPR_PARS_IDIX] != csp1_p_dialog_call)
+          API_SPRINTF (szDescribeCMD, "DESCRIBE ");
+        else
+          API_SPRINTF (szDescribeCMD, "DESCRIBE \"%s\"", sqlcca->sqlresn);  /* PTS 1121190 */
+
+        Err = pr03PartConverttoPart(partPtr, &Offset, &cbPartLen, PacketEncoding,
+                                    szDescribeCMD, (tsp00_Int4) API_STRLEN(szDescribeCMD),
+                                    sp77encodingAscii);
+        pr03SegmentFinishPart(SegmDesc);
+
+        if (parsid[CPR_PARS_IDIX] != csp1_p_dialog_call)
+            p03cpparsid (sqlrap, gae, (char*) parsid, sqlcca->sqlemp);
+        if (!again)
+          p03cmdtrace(sqlcca->sqlrap, gae, 1, cpr_com_empty, NULL);
+        pr03PacketReqRec(ConDesc, sqlcca->sqlemp);
+        p03returncodeget(sqlcca, (sqlxatype*)sqlcxap);
+        p11shortfieldparameterput (sqlcca, gae, da, again);
+      }
+    }
+  }
+  API_TRACE(API_TR_EXIT,"sqcldsc",0);
+} /* sqcldsc */
+
+
+void sqclsyn (sqlcatype *sqlcca,
+	      sqlgaentry *gae,
+              sqlint2 dbno,
+              tsp00_Int4 stmt_len,
+              char *stmt_ptr)
+{  
+    sqlcxatype *sqlcxap=sqlcca->sqlcxap;
+    API_TRACE(API_TR_ENTRY,"sqclsyn",0);
+    API_TRACE(API_TR_WORD, "dbno", &dbno);
+    API_TRACE(API_TR_PTR, "sqlcca", &sqlcca);
+    API_TRACE(API_TR_PTR, "sqlcxap", &sqlcxap);
+    API_TRACE(API_TR_PTR, "sqlrap", &sqlcca->sqlrap);
+    if (dbno < 1 || dbno > sqlgamax) 
+        p08runtimeerror (sqlcca, sqlcxap, cpr_db_session_not_allowed);
+    else {
+        sqlratype * sqlrap = sqlcca->sqlrap;
+        sqlrap->raactsession = dbno;
+        API_TRACE(API_TR_PTR, "sqlrap", &sqlrap);
+        p01xtracefilecheck (sqlcca, (sqlxatype*) sqlcxap);
+        p03ccmdinit (sqlcxap->xaSQLDesc, sqlcca, gae, sp1m_syntax);
+        p03cputpart (sqlrap, gae, sp1pk_command, stmt_ptr, stmt_len, 
+                     sqlcca->sqlemp); 
+        p03creqrecpacket (sqlrap, gae, sqlcca->sqlemp);
+        p03csqlemptosqlca (sqlcca, sqlcca->sqlemp);
+    }
+    API_TRACE(API_TR_EXIT,"sqclsyn",0);
+} /* sqclsyn */
+
+API_RETCODE pa01chktabtyp (tpr05_String *string,
+                           SDWORD       *tableType)   
+{
+    static   int InitKeywordTabW = 0;
+    API_RETCODE retcode = API_OK;
+    long i, j, len = 0;
+    long startIndex = -1, cmdLen = -1;
+    char *ptr;
+
+    if (InitKeywordTabW == 0) {
+        InitKeywordTabW = 1;
+        pa01BuildTableTypeKeywordW ();
+    }
+    *tableType = API_TABLE_NONE;
+
+    API_TRACE(API_TR_ENTRY, "pa01chktabtyp", 0);
+    if (string->encodingType == sp77encodingUCS2 ||
+        string->encodingType == sp77encodingUCS2Swapped)
+      len = string->cbLen / sizeof (tsp81_UCS2Char);
+    else if (string->encodingType == sp77encodingAscii)
+      len = string->cbLen;
+    else
+      retcode = API_NOT_OK;
+
+    pr05IfCom_String_toupper (string);
+
+    for (i=0; i<=len; i++) {
+      /* end of a command (note: special handling for last char
+         (string is only len chars long, but loop goes up to (len+1) */
+      if (i == len ||
+          pr05IfCom_String_AsciiCharCompare (string, i, "'") == 0 ||
+          pr05IfCom_String_AsciiCharCompare (string, i, ",")  == 0 ||
+          pr05IfCom_String_AsciiCharCompare (string, i, "\0") == 0) {
+        if (startIndex != -1)
+          cmdLen = i - startIndex;
+        else
+          continue;
+      }
+      /* ignore spaces, if first no space char, beginning of command */
+      if (i<len && !pr05IfCom_String_isSpace (string, i))
+        if (startIndex == -1) {
+          startIndex = i;
+          cmdLen     = -1;
+        }
+      /* do we have a complete command? */
+      if (startIndex != -1 && cmdLen != -1) {
+        /* compute position in rawString */
+        if (string->encodingType != sp77encodingAscii) {
+          startIndex *= sizeof (tsp81_UCS2Char);
+          cmdLen     *= sizeof (tsp81_UCS2Char);
+        }
+        ptr = (char*) string->rawString;
+
+        /* check table types, different reference for Ascii and UCS2 */
+        for (j=0; table_type_tab[j].table_type_key != API_TABLE_NONE; j++) {
+          if (string->encodingType == sp77encodingAscii) {
+            if (API_MEMCMP (ptr+startIndex, 
+                            table_type_tab[j].keyword, 
+                            cmdLen) == 0)
+              *tableType |= table_type_tab[j].table_type_key;
+          }
+          else {
+            if (API_MEMCMP (ptr+startIndex, 
+                            table_type_tab[j].keywordW, 
+                            cmdLen) == 0)
+              *tableType |= table_type_tab[j].table_type_key;
+          }
+        }
+        startIndex = -1;
+        cmdLen     = -1;
+      }
+    }
+
+    API_TRACE(API_TR_SDWORD, "table_type", tableType);
+    API_TRACE(API_TR_EXIT, "pa01chktabtyp", 0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    return(retcode);
+} /* pa01chktabtyp */
+
+	  
+API_RETCODE pa01mktabtyp( SDWORD        tableType,
+                          tpr05_String *string)
+{
+    char  string_ptr[512];
+    API_RETCODE retcode = API_OK;
+    unsigned int len, l, str_len = sizeof (string_ptr);
+    BOOL next=FALSE;
+    api_table_type_tab *p;
+    char  *ptr;
+    SDWORD  type;
+
+    API_TRACE(API_TR_ENTRY, "pa01mktabtyp", 0);
+    API_TRACE(API_TR_SDWORD, "table_type", &tableType);
+    API_TRACE(API_TR_SDWORD, "str_len", &string->cbLen);
+    API_TRACE_LEN(API_TR_TPR05STRING, "string_ptr", string, string->cbLen);
+
+    type = tableType;
+    if (type & API_TABLE_SYSTEMTABLE) {      
+        type |= API_TABLE_SYSTEM;
+    }
+    ptr = string_ptr;
+    len = 0;
+    for (p=table_type_tab; p->table_type_key != API_TABLE_NONE && type; p++) {
+        if (p->table_type_key & type) {
+            type ^= p->table_type_key;
+            l = (SWORD)API_STRLEN(p->keyword);
+            len += (l + ((next) ? 3 : 2));
+            if (str_len > len ) {
+                if (next) {
+                    *ptr++ = ',';
+                }
+                *ptr++ = '\'';
+                API_STRCPY(ptr, p->keyword);
+                ptr += l;
+                *ptr++ = '\'';
+                next = TRUE;
+            }	 
+        }
+    }  
+    *ptr = '\0';
+
+    pr05IfCom_String_ClearString (string);
+    if (pr05IfCom_String_strcatP (string, string_ptr, len, sp77encodingAscii)
+        != ok_epr05)
+      retcode = API_NOT_OK;
+
+    API_TRACE(API_TR_STRING, "string_ptr", string_ptr);
+    API_TRACE(API_TR_EXIT, "pa01mktabtyp", 0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    return(retcode);
+} /* pa01mktabtyp */
+
+
+void  pa01anstm ( tpr05_String *SqlStmt,
+                  SDWORD  *order_type)
+{
+    UCHAR  *begp, *endp;
+    SDWORD  i;
+    SDWORD  len;
+    UCHAR   strp[2*(API_MAX_KEYWORD_LEN + 1)];
+  
+    API_TRACE(API_TR_ENTRY,"p01anstm",0);
+
+    if (SqlStmt->encodingType == sp77encodingAscii) {
+        /* skip blanks and leading '(' */
+        begp = (UCHAR *) SqlStmt->rawString;
+        len  = SqlStmt->cbLen;
+        for (i=0; i<len; i++) {
+            if (*begp == '('  ||  isspace(*begp))  /* PTS 1121951 */
+                *begp++;  
+            else
+                break;  
+        }
+        endp=begp;
+        for (; i<len;i++) {
+            if (!isspace(*endp))
+                *endp++;  
+            else
+                break;  
+        }
+    } else {
+        tsp81_UCS2Char       parenthesisOpen, *begpW, *endpW;
+        const tsp77encoding *encoding = sp77nativeUnicodeEncoding ();
+        char                 c;
+        tsp00_Byte           *cc = (tsp00_Byte *) &c;
+        unsigned int         dummy;
+        
+        c = '(';
+        sp81ASCIItoUCS2 ( &parenthesisOpen, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        
+        begpW =(tsp81_UCS2Char *) SqlStmt->rawString;
+        len   = SqlStmt->cbLen / sizeof (tsp81_UCS2Char);
+
+        for (i=0; i<len; i++) {
+            if (begpW->s == parenthesisOpen.s  ||  encoding->isSpace (begpW))
+                *begpW++;  
+            else
+                break;  
+        }
+        endpW = begpW;
+        for (; i<len; i++) {
+            if (!encoding->isSpace (endpW))
+                *endpW++;  
+            else
+                break;  
+        }
+        begp = (UCHAR*) begpW;
+        endp = (UCHAR*) endpW;
+    }
+        
+    len = (SDWORD) ((UCHAR *)endp - (UCHAR *)begp);
+    API_TRACE (API_TR_SDWORD, "len", &len);
+    *order_type = API_CMD_EXECUTE;
+    /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1137053
+       e.g. "select with hint (without space) */
+    if ( len > 0 ) {
+        API_MEMCPY ((UCHAR FAR *)strp, (UCHAR FAR *)begp, len);
+        if (SqlStmt->encodingType == sp77encodingAscii) {
+            strp[len] = 0;
+            aputoup ((UCHAR FAR *)strp);
+            API_TRACE (API_TR_STRING, "strp", strp);
+            /* compare with the keyword table */
+            pa01CompareKeyword ((char*) strp, order_type);
+        } else {
+            strp[len] = strp[len+1] = 0;
+            aputoupW ((tsp81_UCS2Char *)strp);
+            API_TRACE (API_TR_WSTRING, "strp", strp);
+            /* compare with the keyword table */
+            pa01CompareKeywordW ((SQLWCHAR*) strp, order_type);
+        }
+    }
+
+    API_TRACE(API_TR_SDWORD,"order_type",order_type);
+    API_TRACE(API_TR_EXIT,"p01aanstm",0);    
+} /* pa01aanstm */
+
+
+#define PA01_BEGIN_TRANS    1
+#define PA01_COMMIT_TRANS   2
+#define PA01_ROLLBACK_TRANS 3
+#define PA01_COMMIT_ROLLBACK 4
+
+SWORD pa01TransactionSearch (tpr05_String *SqlStmt)
+{
+    SWORD ret = FALSE;
+    UCHAR FAR *ptr;
+    SQLWCHAR  *ptrW;
+    UWORD symb;
+    unsigned int length = SqlStmt->cbLen;
+    UCHAR local_str1[64];
+    UCHAR local_str2[64];   
+    API_TRACE(API_TR_ENTRY, "pa01TransactionSearch", 0);
+
+    local_str1[0] = local_str2[0] = '\0';
+
+    if (SqlStmt->encodingType == sp77encodingAscii) {
+        ptr = pa01NextSymbol ((UCHAR*) SqlStmt->rawString, &length, &symb,
+                              local_str1, sizeof(local_str1));
+        ptr = pa01NextSymbol (ptr, &length, &symb, 
+                              local_str2, sizeof(local_str2));
+    }
+    else if (   SqlStmt->encodingType == sp77encodingUCS2
+             || SqlStmt->encodingType == sp77encodingUCS2Swapped) {
+        ptrW = pa01NextSymbolW ((SQLWCHAR*) SqlStmt->rawString, &length, &symb,
+                                local_str1, sizeof(local_str1),
+                                SqlStmt->encodingType);
+        ptrW = pa01NextSymbolW (ptrW, &length, &symb,
+                                local_str2, sizeof(local_str2),
+                                SqlStmt->encodingType);
+    }
+    else {
+        /* error */
+    }
+    aputoup ((UCHAR FAR *)local_str2);
+    aputoup ((UCHAR FAR *)local_str1);
+    API_TRACE(API_TR_STRING, "local_str2", &local_str2);
+    local_str2[4] = '\0';
+    if (!API_STRCMP(local_str2, "TRAN")) {
+        API_TRACE(API_TR_STRING, "local_str1", &local_str1);
+        if (!ret && !API_STRCMP(local_str1, "COMMIT")) {
+            ret = PA01_COMMIT_TRANS;
+        }
+        if (!ret && !API_STRCMP(local_str1, "BEGIN")) {
+            ret = PA01_BEGIN_TRANS;
+        }
+        if (!ret && !API_STRCMP(local_str1, "ROLLBACK")) {
+            ret = PA01_ROLLBACK_TRANS;
+        }
+    }
+    if (!ret && !API_STRCMP(local_str1, "SUBTRANS")) {
+        if (!ret && !API_STRCMP(local_str2, "BEGI")) {
+            ret = PA01_BEGIN_TRANS;
+        }
+        if (!ret && !API_STRCMP(local_str2, "ROLL")) {
+            ret = PA01_ROLLBACK_TRANS;
+        }
+        local_str2[3] = '\0';
+        if (!ret && !API_STRCMP(local_str2, "END")) {
+            ret = PA01_COMMIT_TRANS;
+        }
+    }
+    if (!ret && !API_STRCMP(local_str1, "COMMIT")) {
+        ret = PA01_COMMIT_ROLLBACK;
+    }
+    if (!ret && !API_STRCMP(local_str1, "ROLLBACK")) {
+        ret = PA01_COMMIT_ROLLBACK;
+    }
+
+    API_TRACE(API_TR_EXIT, "pa01TransactionSearchW", 0);
+    API_TRACE(API_TR_SWORD, "ret", &ret);      
+    return (ret);
+} /* pa01TransactionSearch */
+
+
+API_RETCODE pa01mkstm( tpr05_String *sqlStmt,
+                       tpa60Stmt *stmt_block_ptr,
+                       SDWORD  order_type )
+{
+    API_RETCODE retcode;
+    UDWORD len = sqlStmt->cbLen;
+    API_HANDLE stmt_str_handle;
+    tpr05_String *blockPtrStmt = (tpr05_String*) stmt_block_ptr->stmt_str_handle;
+    tpr05_String *cursorName;  
+   
+    API_TRACE(API_TR_ENTRY, "pa01mkstm", 0);
+    /*    API_TRACE(API_TR_SDWORD, "stmt_len", stmt_len); */
+    API_TRACE(API_TR_SDWORD, "order_type", &order_type);
+    /*    API_TRACE(API_TR_SDWORD,"allocated_stmt_len", 
+          &stmt_block_ptr -> allocated_stmt_len); */
+    retcode = API_OK;
+    if (order_type == API_CMD_DESCRIBE)
+        len += (sizeof(SYS_CMD_DECLARE_CURSOR)
+                + API_ODBC_CURSOR_LEN
+                + sizeof(SYS_CMD_CURSOR_FOR)
+                + sizeof(SYS_CMD_FOR_UPDATE));
+    if ( stmt_block_ptr->stmtopt.cursor_type != SQL_CURSOR_DYNAMIC ) {
+        len += sizeof(SYS_CMD_FOR_REUSE);
+    }
+
+    /* input string determines encoding type */
+    blockPtrStmt->encodingType = sqlStmt->encodingType;
+    if (blockPtrStmt->encodingType != sp77encodingAscii)
+        len *= 2;
+    
+    len += blockPtrStmt->cbLen + 2; /* in case of terminating */
+    
+    API_TRACE(API_TR_SDWORD,"len", &len);
+    if (len > blockPtrStmt->cbMaxLen) {
+        tpr05_String *h = pr05IfCom_String_NewDynString (len,
+                                                         blockPtrStmt->encodingType);
+        if (h == NULL)
+            retcode = API_NOT_OK;
+        else {
+            pr05IfCom_String_DeleteString (blockPtrStmt);
+            stmt_block_ptr->stmt_str_handle = blockPtrStmt = h;
+        }
+    }
+
+    if (retcode == API_OK) {
+        cursorName = stmt_block_ptr->cursor_name;
+        API_TRACE(API_TR_TPR05STRING, "curnam_ptr", cursorName);
+        stmt_str_handle = stmt_block_ptr->stmt_str_handle;
+
+        API_ASSERT_PTR(blockPtrStmt);
+        pr05IfCom_String_ClearString (blockPtrStmt);
+        if (order_type == API_CMD_DESCRIBE) {
+            if (stmt_block_ptr->stmt_type & API_ATTRIB_SELECT_FOR_UPDATE) {
+              blockPtrStmt->cbLen = 
+                sp77sprintfUnicode (blockPtrStmt->encodingType,
+                                    blockPtrStmt->rawString,
+                                    blockPtrStmt->cbMaxLen,
+                                    "%s%'=.*S%s%'=.*S",
+                                    SYS_CMD_DECLARE_CURSOR,
+                                    cursorName->encodingType,
+                                    cursorName->cbLen,
+                                    cursorName->rawString,
+                                    SYS_CMD_CURSOR_FOR,
+                                    sqlStmt->encodingType,
+                                    sqlStmt->cbLen,
+                                    sqlStmt->rawString);
+            }
+            else {
+              pr05IfCom_String_strcat (blockPtrStmt, sqlStmt);
+            }
+
+            if ((stmt_block_ptr->dbc_special.special == API_SPEC_NOT) && 
+                (stmt_block_ptr->stmtopt.concurrency != SQL_CONCUR_READ_ONLY)) {
+                pr05IfCom_String_strcatP (blockPtrStmt, 
+                                          SYS_CMD_FOR_UPDATE,
+                                          sizeof (SYS_CMD_FOR_UPDATE)-1,
+                                          sp77encodingAscii);
+            }
+            if ( stmt_block_ptr->stmtopt.cursor_type      != SQL_SCROLL_FORWARD_ONLY
+                 && stmt_block_ptr->stmtopt.cursor_type   != SQL_CURSOR_DYNAMIC
+                 && ( stmt_block_ptr->stmtopt.cursor_type != SQL_CURSOR_KEYSET_DRIVEN
+                      || stmt_block_ptr->stmtopt.optimize_cursor == SQL_FALSE)) {
+                pr05IfCom_String_strcatP (blockPtrStmt, 
+                                          SYS_CMD_FOR_REUSE,
+                                          sizeof (SYS_CMD_FOR_REUSE)-1,
+                                          sp77encodingAscii);
+            }
+        } else {
+          if (pr05IfCom_String_strcpy (blockPtrStmt, sqlStmt) != ok_epr05)
+              retcode = API_NOT_OK;
+        }  /* order_type == API_CMD_DESCRIBE */
+
+        apdunlk (stmt_str_handle);
+    }
+   
+    API_TRACE(API_TR_EXIT, "pa01mkstm", 0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    return(retcode);
+} /* pa01mkstm */
+
+VOID pa01vfwtrace ( tpa41ESQBlock *api_cb_ptr, UCHAR FAR *trace_str)
+{
+    sqlcatype *sqlccap;
+    sqlcxatype *sqlcxap;
+#ifdef PRECOMREL30   
+    sqlratype *sqlrap;
+#endif
+    sqltatype *sqltap;
+    SWORD len;
+    API_TRACE(API_TR_ENTRY, "pa01vfwtrace", 0);
+    sqlccap = &api_cb_ptr -> sqlca;
+    sqlcxap = sqlccap -> sqlcxap;
+#ifdef PRECOMREL30  
+    sqlrap = sqlccap->sqlrap;  
+    sqltap = sqlrap -> rasqltap;
+#else  
+    sqltap = sqlccap -> sqltap;
+#endif   
+    if (trace_str != NULL) {
+        len = (SWORD)API_STRLEN(trace_str);      
+        sqltap -> tastr80l = (SWORD) ((len > sizeof(sqltap->tastr80)) ?
+                                      sizeof(sqltap->tastr80) : len);
+        API_MEMCPY(sqltap->tastr80, trace_str, len);
+        p08vfwritetrace (sqlrap);
+    }
+    API_TRACE(API_TR_EXIT, "pa01vfwtrace", 0);
+} /* pa01vfwtrace */
+
+
+VOID pa01trsqerr ( tpa41ESQBlock *api_cb_ptr)
+{
+    UCHAR local_str[90];
+    int len;
+    API_TRACE(API_TR_ENTRY, "pa01trsqerr", 0);
+    if (api_cb_ptr -> esq_sql_code != 0) {
+        len = API_SPRINTF( (char*) local_str, "SQLCODE: %d ",
+                           api_cb_ptr->esq_sql_code);
+        API_STRNCAT( local_str,
+                     api_cb_ptr->sql_err_text,
+                     sizeof(local_str)-len-1);
+    }
+    pa01vfwtrace (api_cb_ptr, local_str);
+    API_TRACE(API_TR_EXIT, "pa01trsqerr", 0);
+} /* pa01trsqerr */
+
+
+int issep(UCHAR c)
+{
+    switch(c) {
+    case '\'':{}
+    case '"':{}
+    case ',':{}
+    case '{':{}
+    case '}':{}
+    case '(':{}
+    case ')': {
+        return(1);
+    }
+    default: {
+        return(0);
+    }
+    }
+} /* issep */
+
+int issepW (tsp81_UCS2Char *cW)
+{
+    static tsp81_UCS2Char apostroph, quote, comma,
+                          bracketOpen, bracketClose,
+                          parenthesisOpen, parenthesisClose;
+    static int init = 0;
+
+    if (init = 0) {
+        const tsp77encoding *encoding = sp77nativeUnicodeEncoding ();
+        char c;
+        tsp00_Byte           *cc = (tsp00_Byte *) &c;
+        unsigned int dummy;
+
+        init = 1;
+        
+        c = '\'';
+        sp81ASCIItoUCS2 ( &apostroph, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = '"';
+        sp81ASCIItoUCS2 ( &quote, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = ',';
+        sp81ASCIItoUCS2 ( &comma, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = '{';
+        sp81ASCIItoUCS2 ( &bracketOpen, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = '}';
+        sp81ASCIItoUCS2 ( &bracketClose, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = '(';
+        sp81ASCIItoUCS2 ( &parenthesisOpen, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = ')';
+        sp81ASCIItoUCS2 ( &parenthesisClose, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+    }
+
+
+    if (cW->s == apostroph.s || cW->s == quote.s || cW->s == comma.s
+        || cW->s == bracketOpen.s || cW->s == bracketClose.s
+        || cW->s == parenthesisOpen.s || cW->s == parenthesisClose.s)
+        return(1);
+    else
+        return(0);
+} /* issepW */
+
+
+UCHAR FAR *pa01NextSymbol( UCHAR  *strp,
+                           unsigned int *length,
+                           UWORD  *symb,
+                           UCHAR  *out_str,
+                           UDWORD  out_length_max)
+{
+    UCHAR FAR *p, *s;
+    UDWORD size;
+    *symb = PA01_SYMB_UNKNOWN;
+    size = 0;
+    s = NULL;
+    if (strp) {
+      /*        for (p = strp; *p != '\0'; p++) { */
+      for (p = strp; p < strp+*length; p++) { 
+            if (!isspace(*p))
+                break;
+        }
+      /*        if (*p != '\0') { */
+        if (p < strp+*length) {
+            for (s = p+1; s < strp+*length; s++) {
+                if (isspace(*s) || issep(*s)) {
+                    break;
+                }
+            }	 
+        }
+        else {
+            s = p;
+        }
+        if (p < strp+*length && issep(*p)) {	 
+            s = p+1;
+        }
+        size = (UDWORD) (s-p);
+        /* quoted string ? */
+        if (p < strp+*length && (*p == '"' || *p == '\'')) {
+            UCHAR c;
+            c = *p;
+            p++;
+            for (s=p; s < strp+*length; s++)
+                {
+                    if (*s == c) {
+                        if (*(s+1) == c) {
+                            s++;
+                            continue;	   
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                }
+            size = (UDWORD) (s-p);
+            if (*s == c)
+                *symb = PA01_SYMB_QUOTED;
+        }
+        API_TRACE(API_TR_UWORD, "size", &size);
+        if (size > 0) {
+            if (out_str != NULL) {
+                size = (size >= out_length_max) ? out_length_max-1 : size;
+                memcpy(out_str, p, (int)size);
+                out_str[size] = '\0';
+                if (*symb)
+                    s++;
+            }
+        }
+        else 
+            s = NULL;
+    }
+    *length -= size;
+    API_TRACE(API_TR_STRING, "pa01NextSymbol", out_str);
+    return (s);
+} /* pa01NextSymbol */
+
+/* length is length in bytes. *strp is therefore casted to char* (in for loops) */
+SQLWCHAR *pa01NextSymbolW (SQLWCHAR  *strp,
+                           unsigned int *length,
+                           UWORD     *symb,
+                           SQLCHAR   *out_str,
+                           UDWORD     out_length_max,
+                           const tsp77encoding *encoding)
+{
+    tsp81_UCS2Char *p, *s;
+    UDWORD size;
+    unsigned int    dummy;
+    static tsp81_UCS2Char apostroph, quote, comma,
+                          bracketOpen, bracketClose,
+                          parenthesisOpen, parenthesisClose,
+                          terminator;
+    static int init = 0;
+
+    if (init = 0) {
+        const tsp77encoding *encoding = sp77nativeUnicodeEncoding ();
+        char c;
+        tsp00_Byte *cc = (tsp00_Byte *) &c;
+        unsigned int dummy;
+        
+        init = 1;
+        c = '\'';
+        sp81ASCIItoUCS2 ( &apostroph, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = '"';
+        sp81ASCIItoUCS2 ( &quote, 1,
+                          encoding == sp77encodingUCS2Swapped,
+                          &dummy, cc, 1);
+        c = ',';
+        
+    }
+
+    if (*length == 0) {
+      out_str = '\0';
+      s = (tsp81_UCS2Char*) strp;
+      goto exit;
+    }
+
+    terminator.c[0] = terminator.c[1] = 0;
+
+    *symb = PA01_SYMB_UNKNOWN;
+    size = 0;
+    s = NULL;
+    if (strp) {
+        for (p = (tsp81_UCS2Char*) strp; (char*)p < ((char*)strp)+*length; p++) {
+            if (!encoding->isSpace (p))
+                break;
+        }
+        if (p->s != terminator.s) {
+            for (s = p+1; (char*)s < ((char*)strp)+*length; s++) {
+                if (encoding->isSpace (s) || issepW (s)) {
+                    break;
+                }
+            }	 
+        }
+        else {
+            s = p;
+        }
+        if (issepW (p)) {	 
+            s = p+1;
+        }
+        size = (UDWORD) (s-p);
+        /* quoted string ? */
+        if (p->s == quote.s || p->s == apostroph.s) {
+            tsp81_UCS2Char *c = p;
+            p++;
+            for (s=p; (char*)s < ((char*)strp)+*length; s++)
+                {
+                    if (s->s == c->s) {
+                        if ((s+1)->s == c->s) {
+                            s++;
+                            continue;	   
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                }
+            size = (UDWORD) ((char*) s - (char*) p);    /* size in bytes */
+            if (s->s == c->s)
+                *symb = PA01_SYMB_QUOTED;
+        }
+        API_TRACE(API_TR_UWORD, "size", &size);
+        if (size > 0) {
+            if (out_str != NULL) {
+                size = (size >= out_length_max) ? out_length_max-1 : size;
+
+                sp81UCS2toASCII (out_str, out_length_max, &dummy,
+                                 p, size,
+                                 sp77nativeUnicodeEncoding () == sp77encodingUCS2Swapped);
+                out_str[size] = '\0';
+                if (*symb)
+                    s++;
+            }
+        }
+        else 
+            s = NULL;
+    }
+    *length -= size * sizeof (tsp81_UCS2Char);
+
+    exit:
+    API_TRACE(API_TR_STRING, "pa01NextSymbolW", out_str);
+    return ((SQLWCHAR*) s);
+} /* pa01NextSymbolW */
+
+
+typedef struct {
+    void* gapatchptr;
+    tpa40DBC FAR *dbc_block_ptr;
+} pa01patchptr;
+
+
+VOID pa01SqlRelease(VOID)
+{
+    tpa40DBC *dbc_block_ptr =
+        ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+    if (dbc_block_ptr) {
+        sqlgatype *sqlgap = dbc_block_ptr->esqblk.sqlca.sqlgap;
+        sqlratype *sqlrap = dbc_block_ptr->esqblk.sqlca.sqlrap;
+
+        struct SQLERROR *sqlemp = dbc_block_ptr->esqblk.sqlca.sqlemp;
+        /*        p03sqlrelease (sqlrap, sqlgap, sqlgap->gaentry[0], sqlemp); */
+        p03sqlrelease (sqlrap, sqlgap, dbc_block_ptr->ConDesc->ga, sqlemp);
+        API_TRACE( API_TR_DWORD, "pa01SqlRelease",
+                   &dbc_block_ptr->ConDesc->ga->gareference);
+    }
+} /* pa01SqlRelease */
+
+#define PA01DATASOURCESTR "DATASOURCE: "
+VOID pa01TraceSession(tsp00_Int2 comtype)
+{
+    tpa40DBC FAR * dbc_block_ptr =
+        ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+    if (dbc_block_ptr) {
+        struct SQLERROR errmsg;
+        sqlratype *sqlrap = dbc_block_ptr->esqblk.sqlca.sqlrap;
+        sqltatype *tap    = sqlrap->rasqltap;
+        sqlint2   *t80l   = &sqlrap->rasqltap->tastr80l;
+
+        p03initsqlem (&errmsg);
+        switch (comtype) {
+        case (cpr_com_sql_conn): {
+          *t80l = (sqlint2) sp77sprintfUnicode(sp77encodingUTF8, tap->tastr80, sizeof(tap->tastr80), "DATASOURCE: %'=.*S", dbc_block_ptr->dsname->encodingType, dbc_block_ptr->dsname->cbLen, dbc_block_ptr->dsname->rawString);
+            p03tvfwritetrace (sqlrap, &errmsg);
+            *t80l = (sqlint2) sp77sprintfUnicode(sp77encodingUTF8, tap->tastr80, sizeof(tap->tastr80), "SESSION   : %ld;    ", dbc_block_ptr->ConDesc->ga->gareference);
+            break;
+        }
+        case (cpr_com_sql): {
+            *t80l = 0;
+            if (dbc_block_ptr->ConDesc->ga->gareference > 1) {
+              *t80l = (sqlint2) sp77sprintfUnicode(sp77encodingUTF8, tap->tastr80, sizeof(tap->tastr80), "S%ld:", dbc_block_ptr->ConDesc->ga->gareference);
+            }
+            break;
+        }
+        case (cpr_com_commit_release): {}
+        case (cpr_com_rollback_release): {
+            *t80l = 0;
+            p03tvfwritetrace (sqlrap, &errmsg);
+              *t80l = (sqlint2) sp77sprintfUnicode(sp77encodingUTF8, tap->tastr80, sizeof(tap->tastr80), "S%ld: DISCONNECT ", dbc_block_ptr->ConDesc->ga->gareference);
+            *t80l = (sqlint2) API_STRLEN(tap->tastr80);
+            p03tvfwritetrace (sqlrap, &errmsg);
+            break;
+        }
+        }
+    }
+} /* pa01TraceSession */
+
+
+VOID pa01GetService(tsp00_Service *service)
+{
+    tpa40DBC FAR * dbc_block_ptr =
+        ((pa09AsyncLocals*)pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+    if (dbc_block_ptr)
+        *service = (unsigned char) dbc_block_ptr->utility.service;
+    else
+        *service = sql_user;
+} /* pa01GetService */
+
+UWORD pa01GetUnicodeCatalog ()
+{
+    return ((pa09AsyncLocals*)pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr->unicode_catalog;
+} /* pa01GetUnicodeCatalog */
+
+const tsp77encoding * pa01GetPacketEncoding ()
+{
+    return ((pa09AsyncLocals*)pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr->unicode_catalog == 0 ?
+      sp77encodingAscii : sp77encodingUCS2Native;
+} /* pa01GetPacketEncoding */
+
+VOID pa01GetMesscode(unsigned short *m_type)
+{
+    tpa40DBC FAR * dbc_block_ptr =
+        ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+    if (dbc_block_ptr) {
+        switch(dbc_block_ptr->utility.service) {
+        case(sql_utility):{
+            tpa60Stmt *stmt_block_ptr =
+                ((pa09AsyncLocals*)pa09GetTLS(PA09TLS_ASYNC))->stmt_block_ptr;
+            if (stmt_block_ptr) {
+                switch(*m_type) {
+                case sp1m_dbs:{
+                    if (stmt_block_ptr->stmtopt.message_code != sp1m_nil)
+                        *m_type = stmt_block_ptr->stmtopt.message_code;
+                    break;
+                }
+                }
+            }
+            else
+                if (*m_type == sp1m_dbs) {
+                    *m_type = sp1m_utility;
+                }
+            break;
+        }
+        }
+        API_TRACE( API_TR_DWORD, "reference",
+                   &dbc_block_ptr->ConDesc->ga->gareference);
+    }
+    API_TRACE(API_TR_UCHAR, "pa01GetMesscode", m_type);
+} /* pa01GetMesscode */
+
+
+/* Set autocommitflag in segment header if autocommit connect option is true
+ * and mess_type is not getval
+ */
+void pa01SetAutocommitFlag( tsp1_segment_ptr first_segm_ptr )
+{
+    tpa40DBC FAR * dbc_block_ptr;
+    if (first_segm_ptr->sp1s_segm_header.sp1c_mess_type != sp1m_getval) {
+        dbc_block_ptr =
+            ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+            if (dbc_block_ptr
+                && !pa40UseOldAutocommit( dbc_block_ptr )) {
+                if (dbc_block_ptr->set_autocommit_flag) {
+                    first_segm_ptr->variant.C_1.sp1s_segm_header_F.variant.C_1
+                        .sp1c_commit_immediately_F = 1;
+                }; /* if */
+            }; /* if */
+    }; /* if */
+} /* pa01SetAutocommitFlag */
+
+
+/* Set producer in segment header if producer connect option is set.
+ */
+
+void pa01SetProducer( tsp1_segment_ptr first_segm_ptr )
+{
+  tpa40DBC FAR * dbc_block_ptr;
+  dbc_block_ptr =
+    ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+  if (dbc_block_ptr)
+    first_segm_ptr->variant.C_1.sp1s_segm_header_F.variant.C_1
+      .sp1c_producer_F = (unsigned char) dbc_block_ptr->utility.sp1c_producer;
+} /* pa01SetProducer */
+
+
+tsp00_Int2 pa01UtilityConnect(void)
+{
+    tpa40DBC FAR * dbc_block_ptr =
+        ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;  
+    if (dbc_block_ptr && dbc_block_ptr->utility.utility_session) {
+        API_TRACE( API_TR_DWORD, "pa01UtilityConnect",
+                   &dbc_block_ptr->ConDesc->ga->gareference);
+        return(TRUE);
+    }
+    return(FALSE);
+} /* pa01UtilityConnect */
+
+
+sqlgatype *pa01SqlgaAddr(void)
+{
+    sqlgatype *ptr=NULL;
+    tpa40DBC  *dbc_block_ptr =
+        ((pa09AsyncLocals*) pa09GetTLS(PA09TLS_ASYNC))->dbc_block_ptr;
+    if (dbc_block_ptr) {
+        ptr = dbc_block_ptr->esqblk.sqlca.sqlgap;
+    }
+    API_TRACE(API_TR_PTR, "pa01SqlgaAddr", &ptr);
+    return(ptr);
+} /* pa01SqlgaAddr */
+
+
+#define  SP4XU_SQL_DBLANG  11
+#define PUTBIT(b,i)             \
+        { b [ ( unsigned ) i / 8 ] |=  ( 1 << (( unsigned ) i % 8 )); }
+
+void pa01sqlarg3( tsp04_XuserRecord  *prcUserParams,
+                  tsp00_Pw            acPassword,
+                  tsp4_args_options  *prcArgsOptions,
+                  tsp4_xuserset       aucXuserType,
+                  tsp00_ErrText       acErrorText,
+                  tsp00_BoolAddr      pbOk            )
+{
+    /* do NOT call sqlarg3 PTS 1105577 */
+    /* override most of the arguments PTS 1104559 */
+    memset ( prcUserParams -> xu_serverdb, ' ', sizeof ( tsp00_DbName ));
+    memset ( prcUserParams -> xu_servernode, ' ', sizeof ( tsp00_NodeId ));
+    memset ( prcUserParams -> xu_user,     ' ',  sizeof ( tsp00_KnlIdentifier ));
+    memset ( prcUserParams -> xu_password, '\0', sizeof ( tsp00_CryptPw ));
+    memset ( prcUserParams -> xu_sqlmode,  ' ',  sizeof ( tsp4_sqlmode_name ));
+    prcUserParams -> xu_cachelimit = - 1 ;
+    prcUserParams -> xu_timeout    = - 1 ;
+    prcUserParams -> xu_isolation  = - 1 ;
+    memset ( acPassword,  ' ',  sizeof ( tsp00_Pw ));
+    memset ( aucXuserType, '\0', sizeof ( tsp4_xuserset ));
+    PUTBIT ( aucXuserType, SP4XU_SQL_DBLANG );
+    memset ( acErrorText, ' ', sizeof ( tsp00_ErrText ));
+    memset ( prcArgsOptions -> variant.C_sp4co_sql_pc_runtime.opt_rtracefile_F,
+             ' ',
+             sizeof ( prcArgsOptions
+                      -> variant.C_sp4co_sql_pc_runtime.opt_rtracefile_F ));
+
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rtrace_F      = 0;
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rprof_F       = 0;
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rmfetch_F     = 1;
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rstmt_cnt_F   = 0;
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rtime_limit_F = 0;
+    prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_rfiller_F     = 0;
+
+    prcArgsOptions ->variant.C_sp4co_sql_pc_runtime.opt_rnotracetime_F = FALSE;
+    prcArgsOptions ->variant.C_sp4co_sql_pc_runtime.opt_rtraceswitch_F = FALSE;
+    prcArgsOptions ->variant.C_sp4co_sql_pc_runtime.opt_rnosdf_F       = FALSE;
+    prcArgsOptions ->variant.C_sp4co_sql_pc_runtime.opt_rfiller1_F     = FALSE;
+
+    memset ( prcArgsOptions->variant.C_sp4co_sql_pc_runtime.opt_ruser_args_F, ' ',
+             sizeof ( prcArgsOptions
+                      ->variant.C_sp4co_sql_pc_runtime.opt_ruser_args_F ));
+} /* pa01sqlarg3 */
+
+
+/* pa01BuildKeywordW - init global keyword_tab with SQLWCHAR identifiers */
+void pa01BuildKeywordW ()
+{
+    unsigned int i, len, dummy;
+    const tsp77encoding *nativeEncoding = sp77nativeUnicodeEncoding ();
+
+    for (i=0; keyword_tab[i].entry != API_KEYWORD_NOT_FOUND; i++ )  {
+        len = (unsigned int) API_STRLEN (keyword_tab[i].keyword);
+        sp81ASCIItoUCS2 ((tsp81_UCS2Char*) keyword_tab[i].keywordW, 
+                         API_MAX_KEYWORD_LEN,
+                         nativeEncoding == sp77encodingUCS2Swapped, &dummy,
+                         keyword_tab[i].keyword, len);
+    }
+}  /* pa01BuildKeywordW */
+
+
+/* pa01BuildTableTypeKeywordW - init global table_type_tab 
+   with SQLWCHAR identifiers */
+void pa01BuildTableTypeKeywordW ()
+{
+    unsigned int i, len, dummy;
+    const tsp77encoding *nativeEncoding = sp77nativeUnicodeEncoding ();
+
+    for (i=0; table_type_tab[i].table_type_key != API_TABLE_NONE; i++ )  {
+        len = (unsigned int) API_STRLEN (table_type_tab[i].keyword);
+        sp81ASCIItoUCS2 ((tsp81_UCS2Char*) table_type_tab[i].keywordW, 
+                         API_MAX_KEYWORD_LEN,
+                         nativeEncoding == sp77encodingUCS2Swapped, &dummy,
+                         table_type_tab[i].keyword, len);
+    }
+}  /* pa01BuildTableTypeKeywordW */
+
+/*!**********************************************************************
+  Function:  pa01CompareKeyword
+
+  description: compares given keyword with keyword_tab, sets order_type
+
+  arguments: keyword (in), order_type (out)
+    
+  return value: none
+  */
+void pa01CompareKeyword (const char *strp, SDWORD *order_type)
+{
+    unsigned int i, len1, len2;
+
+    /* compare with the keyword table */
+    for (i=0; keyword_tab [ i ]. entry != API_KEYWORD_NOT_FOUND; i++ ) {
+        len1 = (unsigned int) API_STRLEN(keyword_tab [ i ]. keyword);
+        len2 = (unsigned int) API_STRLEN(strp);
+        len1 = len1 < len2 ? len1 : len2;
+        if ( API_MEMCMP (keyword_tab [ i ]. keyword, strp, len1) == 0 ) {
+            API_TRACE (API_TR_STRING, "keyword", keyword_tab[ i ].keyword);
+            *order_type = keyword_tab [ i ]. order_type_key;
+            break;
+        }
+    }
+}
+
+/*!**********************************************************************
+  Function:  pa01CompareKeywordW
+
+  description: compares given UCS2 keyword with keyword_tab, sets order_type
+
+  arguments: keyword (in), order_type (out)
+    
+  return value: none
+  */
+void pa01CompareKeywordW (const SQLWCHAR *strp, SDWORD *order_type)
+{
+    static   int InitKeywordTabW = 0;
+    unsigned int i, len1, len2;          /* PTS 1121951 */
+
+    if (InitKeywordTabW == 0) {
+        InitKeywordTabW = 1;
+        pa01BuildKeywordW ();
+    }
+    
+    /* compare with the keyword table */
+    for (i=0; keyword_tab [ i ]. entry != API_KEYWORD_NOT_FOUND; i++ ) {
+        len1 = sizeof (SQLWCHAR) * sp81UCS2strlen ((tsp81_UCS2Char*)(keyword_tab [ i ]. keywordW));
+        len2 = sizeof (SQLWCHAR) * sp81UCS2strlen ((tsp81_UCS2Char*) strp);
+        len1 = len1 < len2 ? len1 : len2;
+        if ( API_MEMCMP (keyword_tab [ i ]. keywordW, strp, len1) == 0 ) {
+            API_TRACE (API_TR_STRING, "keyword", keyword_tab[ i ].keyword);
+            *order_type = keyword_tab [ i ]. order_type_key;
+            break;
+        }
+    }
+}
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+*-PRETTY-*  statements    :          1
+*-PRETTY-*  lines of code :          1        PRETTY  3.09 
+*-PRETTY-*  lines in file :         86         1992-11-23 
+.PA 

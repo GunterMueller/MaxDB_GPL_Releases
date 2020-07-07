@@ -1,0 +1,366 @@
+#!/usr/bin/perl
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+package OSRTE;
+
+use Exporter;
+
+@ISA = ('Exporter');
+@EXPORT = ('%OSRTE');
+
+sub init_osrte {
+	*get_osrte =
+	$^O =~ /aix/     ? *get_osrte_aix :
+	$^O =~ /dec_osf/ ? *get_osrte_decosf :
+	$^O =~ /hpux/    ? *get_osrte_hpux :
+	$^O =~ /linux/   ? *get_osrte_linux :
+	$^O =~ /solaris/ ? *get_osrte_solaris :
+	$^O =~ /svr4/ ? *get_osrte_reliant :
+	*get_osrte_default;
+
+	%OSRTE = get_osrte ();
+}
+
+sub get_osrte_default {
+	return ();
+}
+
+sub get_osrte_linux {
+	my %OSRTE;
+
+	if ($ENV{'COMPILER'} =~ /^ICC/)
+	{
+		#get version of C compiler
+		open (INPUT, "icc -V 2>&1 |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /Version/);
+		}
+		close (INPUT);
+		$OSRTE{'CC'} = $_;
+
+		#get version of C++ compiler
+		open (INPUT, "icpc -V 2>&1 |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /Version/);
+		}
+		close (INPUT);
+		$OSRTE{'CPLUSPLUS'} = $_;
+	}
+	else
+	{
+		#get version of C compiler
+		open (INPUT, "cc -v 2>&1 |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /gcc version/);
+		}
+		close (INPUT);
+		$OSRTE{'CC'} = $_;
+
+		#get version of C++ compiler
+		open (INPUT, "c++ -v 2>&1 |");
+		while (<INPUT>) {
+			chomp;
+			last if ($_ =~ /gcc version/);
+		}
+		close (INPUT);
+		$OSRTE{'CPLUSPLUS'} = $_;
+	}
+
+	#get version of operating system and runtime
+	chomp (my $OsVers = `uname -r`);
+	$OsVers =~ /([\d\.]+)/;
+	$OsVers = $1;
+
+	open (INPUT, "strings /lib/libc.so.6 2>&1 |");
+	while (<INPUT>) {
+		chomp;
+		last if ($_ =~ /^GNU C Library(.)*version/);
+	}
+	close (INPUT);
+	$_ =~ /version ([\d\.]+)/;
+	$OSRTE{'OS'} = "Linux ".$OsVers." GLIBC ".$1;
+
+	#get architecture name
+	$OSRTE{'ARCH'} =
+	$ENV{'MACH'} eq 'ALPHA'      ? 'ALPHA 64 Bit' :
+	$ENV{'MACH'} eq 'IA64'       ? 'IA64 64 Bit' :
+	$ENV{'MACH'} eq 'X86_64'     ? 'X86-64 64 Bit' :
+	$ENV{'MACH'} eq 'I386'       ? 'i586 64 Bit' :
+	$ENV{'MACH'} eq 'S390X'      ? 'S390 64 Bit' :
+	$ENV{'MACH'} eq 'SDBonPPC64' ? 'PPC 64 Bit' :
+	undef;
+
+	die "unknown linux platform\n" unless defined ($OSRTE{'ARCH'});
+
+	return %OSRTE;
+}
+
+sub get_osrte_solaris {
+	my %OSRTE;
+
+	#get version of C compiler
+	open (INPUT, "cc -V 2>&1 |");
+	$_ = <INPUT>;
+	chomp;
+	close (INPUT);
+	$_ =~ /WorkShop Compilers ([\d.]+)/g;
+	$OSRTE{'CC'} = $_;
+
+	#get version of C++ compiler
+	open (INPUT, "CC -V 2>&1 |");
+	$_ = <INPUT>;
+	chomp;
+	close (INPUT);
+	$_ =~ /WorkShop Compilers ([\d.]+)/g;
+	$OSRTE{'CPLUSPLUS'} = $_;
+
+	#get version of operating system and runtime
+	chomp (my $OsVer = `uname -r`);
+	$OSRTE{'OS'} =
+	$OsVer eq '5.8'   ? 'Solaris 8' :
+	$OsVer eq '5.7'   ? 'Solaris 7' :
+	$OsVer eq '5.7'   ? 'Solaris 2.6' :
+    	$OsVer eq '5.5.1' ? 'Solaris 2.5.1' :
+	$OsVer eq '5.4'   ? 'Solaris 2.4' :
+	'Solaris';
+
+	#get architecture name
+	$OSRTE{'ARCH'} =
+	defined $ENV{'BIT64'} ? "SPARC-V9 64 Bit" : "SPARC 32 Bit";
+
+	return %OSRTE;
+}
+
+sub get_osrte_reliant {
+	my %OSRTE;
+	my $cc;
+	my $cplusplus;
+
+	open (INPUT, "pkginfo -l -c application |");
+	while (chomp ($_ = <INPUT>)) {
+		if ($_ =~ /PKGINST:\s*CDSDEV/)
+		{
+			while (chomp($_ = <INPUT>))
+			{
+				if ($_ =~ /NAME:\s*(.*)\s*$/)
+				{ $Name=$1}
+				if ($_ =~ /VERSION:\s*(\S*)\s*$/)
+				{ $Version=$1}
+				if ($_ =~ /LOAD:\s*(\S*)\s*$/)
+				{ $Load=$1; last; }
+			}
+			$OSRTE{'CC'} = "$Name $Version$Load";
+		}
+		else
+		{
+			if ($_ =~ /PKGINST:\s*CDS\+\+DEV/)
+			{
+				while (chomp($_ = <INPUT>))
+				{
+					if ($_ =~ /NAME:\s*(.*)\s*$/)
+					{ $Name=$1}
+					if ($_ =~ /VERSION:\s*(\S*)\s*$/)
+					{ $Version=$1}
+					if ($_ =~ /LOAD:\s*(\S*)\s*$/)
+					{ $Load=$1; last; }
+				}
+				$OSRTE{'CPLUSPLUS'} = "$Name $Version$Load";
+			}
+		}
+	}
+	close (INPUT);
+
+	#get version of operating system and runtime
+	chomp (my $OSVer = `uname -svr`);
+	$OSRTE{'OS'} = $OSVer;
+
+	#get architecture name
+	$OSRTE{'ARCH'} =
+	defined $ENV{'BIT64'} ? "Mips 64 Bit" : "Mips 32 Bit";
+
+	return %OSRTE;
+}
+
+
+sub get_osrte_decosf {
+	my %OSRTE;
+
+	#get version of C compiler
+        open (INPUT, "cc -V 2>&1 |");
+        $_ = <INPUT>;
+        chomp;
+	close (INPUT);
+	if ($_ =~ /DEC C V(\d)\.(\d+)-(\d+)/g) {
+	    $OSRTE{'CC'} = $_;
+	}
+	if ($_ =~ /Compaq C V(\d)\.(\d+)-(\d+)/g) {
+	    $OSRTE{'CC'} = $_;
+	}
+
+	#get version of C++ compiler
+	open (INPUT, "cxx -V 2>&1 |");
+	$_ = <INPUT>;
+        chomp;
+	close (INPUT);
+	if ($_ =~ /DIGITAL C\+\+ V(\d)\.(\d+)-(\d+)/g) {
+		$OSRTE{'CPLUSPLUS'} = $_;
+	}
+	if ($_ =~ /Compaq C\+\+ V(\d)\.(\d+)-(\d+)/g) {
+		$OSRTE{'CPLUSPLUS'} = $_;
+	}
+
+	#get version of operating system and runtime
+	chomp (my $OsVer = `uname -v`);
+	chomp (my $OsRel = `uname -r`);
+
+	$OSRTE{'OS'} =
+	$OsRel eq 'V4.0' && $OsVer == 576 ? 'Digital Unix V4.0 B' :
+	$OsRel eq 'V4.0' && $OsVer == 878 ? 'Compaq Tru64 Unix V4.0 D' :
+	'Compaq True64 Unix '.$OsRel;
+
+	#get architecture name
+	$OSRTE{'ARCH'} = "ALPHA 64 Bit";
+
+	return %OSRTE;
+}
+
+sub get_osrte_hpux {
+	my %OSRTE;
+	my $tmp_base = "tmp";
+	my $tmp_c = $tmp_base.".c";
+	my $tmp_cc = $tmp_base.".cc";
+	my $tmp_o = $tmp_base.".o";
+
+	#get version of C compiler
+	open (OUTPUT, "> ".$tmp_c);
+	print OUTPUT "int i;\n";
+	close (OUTPUT);
+
+	open (INPUT, "cc -V -c ".$tmp_c." 2>&1 |");
+	while ($_ = <INPUT>) {
+		chomp;
+		last if ($_ =~ /^ccom:/);
+	}
+	close (INPUT);
+	$OSRTE{'CC'} = $_;
+
+	unlink $tmp_c;
+	unlink $tmp_o;
+
+	#get version of C++ compiler
+	open (OUTPUT, "> ".$tmp_cc);
+	print OUTPUT "int i;\n";
+	close (OUTPUT);
+
+	open (INPUT, "aCC -V -c ".$tmp_cc." 2>&1 |");
+	while ($_ = <INPUT>) {
+		chomp;
+		last if ($_ =~ /^aCC:/);
+	}
+	close (INPUT);
+	$OSRTE{'CPLUSPLUS'} = $_;
+
+	unlink $tmp_cc;
+	unlink $tmp_o;
+
+	#get version of operating system and runtime
+	chomp (my $OsVers = `uname -srv`);
+	$OSRTE{'OS'} = $OsVers;
+
+	#get architecture name
+	$OSRTE{'ARCH'} =
+	$ENV{'MACH'} eq 'HP_IA64' ? "HP ia64 64 Bit" :
+	$ENV{'MACH'} eq 'PA20W'   ? "HP9000 PA2.0 64 Bit" :
+	$ENV{'MACH'} eq 'PA11'    ? "HP9000 PA1.1 32 Bit" :
+	$ENV{'MACH'} eq 'HP9'     ? "HP9000 PA1.0 32 Bit" :
+	defined $ENV{'BIT64'}     ? "HP 64 Bit" :
+	"HP 32 Bit";
+
+	return %OSRTE;
+}
+sub get_osrte_aix {
+	my %OSRTE;
+	my $cc;
+	my $cplusplus;
+
+	#get version of C compiler
+	#get version of C++ compiler
+	open (INPUT, "lslpp -L *.cmp 2>&1 |");
+	while (chomp ($_ = <INPUT>)) {
+		if ($_ =~ /(\w+\.cmp)\s+([\d\.]+)\s+\w\s+(.+)/) {
+			$cc = $cplusplus = $3." ".$1." ".$2;
+			last;
+		}
+	}
+	close (INPUT);
+
+	unless 	(defined $cc) {
+		open (INPUT, "lslpp -L vac.C 2>&1 |");
+		while (chomp ($_ = <INPUT>)) {
+			if ($_ =~ /(vac.C)\s+([\d\.]+)\s+\w\s+(.+)/) {
+				$cc = $3." ".$1." ".$2;
+				last;
+			}
+		}
+		close (INPUT);
+	}
+
+	unless 	(defined $cplusplus) {
+		open (INPUT, "lslpp -L vacpp.cmp.C 2>&1 |");
+		while (chomp ($_ = <INPUT>)) {
+			if ($_ =~ /(vacpp.cmp.C)\s+([\d\.]+)\s+\w\s+(.+)/) {
+				$cplusplus = $3." ".$1." ".$2;
+				last;
+			}
+		}
+		close (INPUT);
+	}
+	$OSRTE{'CC'} = $cc;
+	$OSRTE{'CPLUSPLUS'} = $cplusplus;
+
+	#get version of operating system and runtime
+	my $rte = defined $ENV{'BIT64'} ? "64bit" : "mp";
+
+	open (INPUT, "lslpp -L bos.".$rte." 2>&1 |");
+	while ($_ = <INPUT>) {
+		chomp;
+		if ($_ =~ /(bos\.$rte)\s+([\d\.]+)\s+\w\s+(.+)/) {
+			$_ = $3." ".$1." ".$2;
+			last;
+		}
+	}
+	close (INPUT);
+	$OSRTE{'OS'} = $_;
+
+	#get architecture name
+	$OSRTE{'ARCH'} = defined $ENV{'BIT64'} ? "RS/6000 64 Bit" :
+	"RS/6000 32 Bit";
+
+	return %OSRTE;
+}
+
+init_osrte ();
+
+1;

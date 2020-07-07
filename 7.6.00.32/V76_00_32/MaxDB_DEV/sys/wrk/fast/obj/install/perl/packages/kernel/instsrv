@@ -1,0 +1,1033 @@
+#!/usr/bin/perl
+#
+# $Header: //sapdb/V76/c_00/b_32/sys/src/install/perl/packages/kernel/instsrv#1 $
+# $DateTime: 2006/07/06 16:50:32 $
+# $Change: 130190 $
+#
+# Desc:
+
+import SAPDB::Install::StdIO;
+import SAPDB::Install::System;
+import SAPDB::Install::System::Unix;
+import SAPDB::Install::Registry;
+import SAPDB::Install::Tools;
+import SAPDB::Install::Values;
+import SAPDB::Install::Misc;
+import SAPDB::Install::Trace;
+import SAPDB::Install::Migrate::DBRegistrations;
+
+
+$deppath{'name'}='dependent path';
+#$deppath{'mode'}=0775;  => use default now (0555)
+$deppath{'opt'}='depend=s';
+$deppath{'list'}='kernel.lst';
+@installdirs;
+push @pathes,\%deppath;
+
+if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+	require SAPDB::Install::Portable::Helper;
+	import SAPDB::Install::Portable::Helper;
+	$deppath{'default'} = getAbsPath ('§PACKVERS');
+}
+else{
+	$deppath{'default'} = getSysProgPath().'/sdb/§PACKVERS';
+}
+
+
+
+if($SAPDB::Install::StartInstall::opt_INSTANCE){
+	$usage= " -d <DB Instance>] [-u <user>,<password>]";
+	$usage_desc= "\t-d <DB Instance>\t\texisting instance\n".
+                     "\t-u <user>,<password>\t\tdatabase manager operator of DB instance\n";
+}
+else{
+	$usage= " [-depend <Dependent Program Path>]";
+	$usage_desc = "\t-depend <Dependent Program Path>\tdirectory for release dependent programs\n";
+
+}
+
+@paths=(\%deppath);
+$main_path=\%deppath;
+if($SAPDB::Install::StartInstall::opt_INSTANCE){
+	@opts=('d=s','u=s');
+}
+else{
+	@opts=();
+}
+
+
+sub preinstall{
+	($indep_data,$indep_prog) = readIndepPath();
+	$indep_prog !~ /\S/ and $indep_prog = $SAPDB::Install::Values::indep_prog_path;
+	$indep_data !~ /\S/ and $indep_data = $SAPDB::Install::Values::indep_data_path;
+	$packobj->IgnoreBusyFiles(['pgm/dbmsrv']) unless ($^O  =~ /mswin/i);
+}
+
+
+sub postprepare{
+
+	$SAPDB::Install::Values::liveCachePath = $deppath{'value'};
+
+	return 1 if $^O =~ /mswin/i;
+
+	my ($base_path,$base_version) = $packobj->RegData->Registry->getInstallPathes('Base');
+
+	if ( defined $base_version and
+		 release2num ($base_version) < release2num ('7.5.00.00') ){
+
+		# test directories in which registrations create files
+		my @nodes = (
+				{
+					'path' => "$indep_data/config",
+					'access' => 'rwx'
+				},
+				{
+					'path' => "$indep_data/config/Databases.ini",
+					'access' => 'rw'
+				},
+								{
+					'path' => "$indep_data/config/Installations.ini",
+					'access' => 'r'
+				}
+
+		);
+
+		my $access_ok = 1;
+		foreach $ref_node (@nodes){
+			my %node = %$ref_node;
+			my @errbuf = ();
+			-l $node{'path'} and $node{'path'} = readlink($node{'path'});
+			-e $node{'path'} or next;
+			my $rc = access ($node{'path'},$packobj->User,$node{'access'},\@errbuf);
+			defined $rc or print2stderr("error executing access(): $!\n") and diesoft($diemsg);
+			$rc and TraceMsg("user has \"".$node{'access'}."\" access to \"".$node{'path'}."\"\n",3,\$DEBUG) and next;
+			print2stderr('user '.$packobj->User." need \"".$node{'access'}."\" access to fs node \"".$node{'path'}."\": ".join(' ',@errbuf)."\n");
+			$access_ok=0;
+		}
+
+		$access_ok or diesoft($diemsg);
+
+	}
+
+	#
+	# test access of database kernel dir as software owner
+	#
+	my $dir = $deppath{'value'};
+	if (-d $dir) {
+		# set owner and group of root directory
+		chown ($packobj->UID, $packobj->GID, $dir) == 1 or
+		print2stderr ("cannot change owner and group of $dir\n") and
+		print2stderr ("set owner and group of $dir to ".$packobj->User.":".$packobj->Group."\n") and
+		print2stderr ("and restart installation\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+		chmod (0555, $dir) == 1 or
+		print2stderr ("cannot set mode of $dir\n") and
+		print2stderr ("set mode of $dir to 0555\n") and
+		print2stderr ("and restart installation\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+		# check access of parent directories
+		unless (uaccess ($packobj->User, $dir) == 0) {
+			$SAPDB::Install::Values::log->SetMsg ("user ".$packobj->User." cannot access directory $dir\n");
+			$SAPDB::Install::Values::log->SetMsg ("modify permissions of parent directories\n");
+
+			my @ancestors =	SAPDB::Install::System::Unix::Dir::getancestors ($dir);
+			foreach my $dir (@ancestors) {
+				next if (-l $dir);
+
+				my ($dev, $ino, $mode) = stat ($dir);
+				$SAPDB::Install::Values::log->SetMsg ("mode of $dir is ".sprintmode ($mode)."\n");
+				next if (($mode & 0111) == 0111);
+
+				$SAPDB::Install::Values::log->SetMsg ("chmod $dir ugo+x\n");
+				chmod (($mode & 07777) | 00111, $dir);
+			}
+		}
+
+		uaccess ($packobj->User, $dir) == 0 or
+		print2stderr ("user ".$packobj->User." cannot access directory $dir\n") and
+		print2stderr ("please check permissions of all parent directories of $dir\n") and
+		print2stderr ("and restart installation\n") and
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+	return 1;
+}
+
+
+sub postinstall{
+
+	# delete all depending instance data during a pure software installation
+	unless($SAPDB::Install::StartInstall::opt_INSTANCE or $SAPDB::Install::Config::IsInstanceUpdate){
+		my %instances = getInstances();
+		my $path = $deppath{'value'};
+		normalizePath(\$path);
+		foreach my $instance_name (keys(%instances)){
+			my $dbroot = $instances{$instance_name};
+			normalizePath(\$dbroot);
+			if($dbroot eq $path){
+				if($packobj->RegData->Registry->existInstanceData($instance_name)){
+					$SAPDB::Install::StartInstall::instRegistry->removeInstanceData($instance_name);
+					$SAPDB::Install::Values::log->SetMsg("MSG: remove instance data from earlier instance update of instance \"$instance_name\"\n");
+					$SAPDB::Install::Values::log->SetMsg("MSG: next instance update of instance \"$instance_name\" will start with instance check!\n");
+				}
+			}
+		}
+	}
+
+	unless ($^O =~ /mswin/i){
+		my ($indep_data,$indep_prog) = readIndepPath();
+		eval{
+			checkIniLock ($indep_data.'/config/Databases.ini_lock');
+			checkIniLock ($SAPDB::Install::Values::ini_path.'_lock');
+		};
+	}
+
+	my @demofiles = ('doc/FirstSteps/index.html', 'doc/FirstSteps/Perl/HowToPerl.html',
+					  'doc/FirstSteps/Python/HowToPython.html','doc/FirstSteps/ODBC/HowToODBC.html',
+					  'doc/FirstSteps/Java/HowToJava.html');
+
+	if($^O=~/mswin/i){
+		$exe='.exe';
+		push @demofiles,('misc/create_demo_db.cmd','misc/drop_demo_db.cmd','doc/FirstSteps/maxdbenv.cmd');
+
+	}
+	else{
+		$exe='';
+		push @demofiles, ('misc/create_demo_db.sh','misc/drop_demo_db.sh','doc/FirstSteps/maxdbenv.sh');
+	}
+
+	foreach my $file (@demofiles){
+		my $longfile="$deppath{'value'}/$file";
+		if(-f $longfile){
+			my @statbuf = stat($longfile);
+			open(FD,$longfile) or $SAPDB::Install::Values::log->SetMsg("WRN:cannot open demo database script file \"$longfile\"\n") and next;
+			my @newfile; # array of newlines for file
+			while(my $line = <FD>){
+				chomp($line);
+				my $path=$deppath{'value'};
+				$^O=~/mswin/i and $path=~s/\//\\/g;
+				$line=~s/\$DEP/$path/g;
+				$path=$indep_prog;
+				$^O=~/mswin/i and $path=~s/\//\\/g;
+				$line=~s/\$INDEP/$path/g;
+				$line=~s/\$IND/$path/g;
+				push(@newfile,$line);
+			}
+			close(FD);
+			open(FD,">$longfile") or $SAPDB::Install::Values::log->SetMsg("WRN:cannot create new demo database script file \"$longfile\"\n") and next;
+			foreach my $line (@newfile){
+				print FD "$line\n";
+			}
+			close(FD);
+			utime($statbuf[9],$statbuf[9],$longfile);
+			$SAPDB::Install::Values::log->SetMsg("MSG: file \"$longfile\" modified by installer\n")
+		}
+		else{
+			$SAPDB::Install::Values::log->SetMsg("MSG: to modify file \"$longfile\" not installed\n");
+		}
+
+	}
+	$packobj->RegData->updateMd5Sum(@demofiles); # register new checksums for modified files
+    my @unsupprogs=( #old programs which will be deleted in update case if exist
+		"bin/x_cons$exe",
+		"bin/xpu$exe",
+		"bin/x_wizard$exe",
+		"bin/x_wiztrc$exe",
+		"bin/xbackup$exe",
+		"bin/xrestore$exe",
+		"sap/x_wiz$exe",
+		"sap/x_wizstop$exe",
+		"sap/x_analys$exe"
+	);
+	my @winobj=(
+		'pgm/sqlrun.dll'
+	);
+	my @uxobj;
+	my @oldshobj;    #old shared objects which will be deleted in update case if exist
+	if($^O=~/mswin/i){
+		@oldshobj=@winobj
+	}
+	else{
+		@oldshobj=@uxobj
+	}
+	if($deppath{'update'}){
+		#in update case delete all unsupported programs
+		foreach my $file (@unsupprogs){
+			$longfile="$deppath{'value'}/$file";
+			if(-f $longfile){
+				if(unlink($longfile)){$SAPDB::Install::Values::log->SetMsg("MSG: delete unsupported program \"$longfile\"\n");}
+				else{print2stdout("cannot delete unsupported program \"$longfile\"\n");}
+			}
+		}
+		#delete some old shard objects
+		foreach my $so (@oldshobj){
+			$longso="$deppath{'value'}/$so";
+			if(-f $longso){
+				if(unlink($longso)){$SAPDB::Install::Values::log->SetMsg("MSG: delete old shared object \"$longso\"\n");}
+				else{print2stdout("cannot delete old shared object \"$longso\" - maybe busy, please remove it manually\n");}
+			}
+		}
+	}
+	my $dir = "$deppath{'value'}/wrk";
+	unless(-d $dir){
+				deltree($dir);
+	}
+
+	unless($^O=~/mswin/i){
+		foreach my $file ("$deppath{'value'}/pgm/dbmverifypw"){
+			chown(0,$packobj->GID,$file) or print2stderr("cannot change owner to \"root\" for file \"$file\" - please doit manually\n");
+			chmod(04550,$file) or print2stderr("cannot set sbit for file \"$file\" - please doit manually\n");
+		}
+	}
+
+	# install sdbstarter
+	unless ($^O =~ /mswin/i){
+		chmod (0500, $deppath{'value'}.'/pgm/starter');
+		chown (0, $packobj->GID, $deppath{'value'}.'/pgm/starter/sdbstarter');
+		chmod (04510, $deppath{'value'}.'/pgm/starter/sdbstarter');
+	}
+
+	#
+	#	18.09.2002
+	#	in update case there are problems with python name space (Windows only)
+	#	with an old compiled module (generated by python)
+	#
+	#	solution: delete LOADER.pyc
+	#
+	#	change 15.10.2002 change directory misc -> env && delete also LOADER.py
+	#
+
+	if($^O =~ /mswin/i){
+		foreach my $file ($deppath{'value'}.'/env/LOADER.py',$deppath{'value'}.'/env/LOADER.pyc'){
+			if(-f $file){
+				unless(unlink($file)){
+					print2stderr("ERR: cannot delete \"$file\": $!\n");
+					print2stderr("please do it manually after installation\n");
+				}
+			}
+		}
+	}
+
+	#
+	#	delete his and log file of lcinit script in program directory
+	#
+
+	foreach my $file ('lcinit.log','lcinit.his','adatmp','adatmp2'){
+		my $fullpath = $deppath{'value'}.'/'.$file;
+		-f $fullpath and unlink($fullpath);
+	}
+
+	#
+	#	migrate all instances owned by this kernel package to new registration
+	#
+
+	migrateDBRegistrations($deppath{'value'}) unless($^O =~ /mswin/i);
+
+}
+
+
+sub check_dbmcli{
+	my ($outtext)=@_;
+	if($outtext=~/OK/s){
+		return 1;
+	}
+	else{
+		return 0;
+	}
+}
+
+
+sub registerWin{
+	my $dep_prog = $deppath{'value'};
+
+	$dep_prog = getRealPathName ($dep_prog);
+
+
+	if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+		my $rel_path = 	getRelPath ($dep_prog);
+		$dep_prog = $rel_path if (defined $rel_path);
+	}
+	else{
+		my $dbmsrvctl_out;
+		my $grab_output = sub {
+			($dbmsrvctl_out) = @_;
+			return 1;
+		};
+		if(callsystem("\"$dep_prog\\bin\\dbmsrvctl.exe\" start",$grab_output) != 0){
+			print2stderr("dbmsrvctl start failed: $dbmsrvctl_out\n");
+			diesoft ($diemsg);
+		}
+	}
+
+	my $prog_path = getRealPathName ($indep_prog);
+	my $callstring="\"$prog_path\\pgm\\dbmcli.exe\" -R \"$dep_prog\" inst_reg -k \\\"$dep_prog\\\"";
+	callsystem($callstring,\&check_dbmcli);
+}
+
+sub registerUX{
+	my $dep_prog = $deppath{'value'};
+
+	if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+		my $rel_path = 	getRelPath ($dep_prog);
+		$dep_prog = $rel_path if (defined $rel_path);
+	}
+	else{
+		my $dbmsrvctl_out;
+		my $grab_output = sub {
+			($dbmsrvctl_out) = @_;
+			return 1;
+		};
+		if(callsystem("$dep_prog/bin/dbmsrvctl start",$grab_output) != 0){
+			print2stderr("dbmsrvctl start failed: $dbmsrvctl_out\n");
+			diesoft ($diemsg);
+		}
+	}
+
+    callsystem("$indep_prog/bin/dbmcli -R $dep_prog inst_reg -k $dep_prog",\&check_dbmcli);
+
+	my $inifile = $indep_data.'/config/Installations.ini';
+	if (-f $inifile) {
+		chmod (0444, $inifile);
+		chown ($packobj->UID,$packobj->GID,$inifile);
+	}
+}
+
+*register =	$^O =~ /^MsWin/i ? \&registerWin : \&registerUX;
+
+
+sub unregisterWin{
+	($indep_data,$indep_prog) = readIndepPath();
+	print2stdout('unregister '.$regpackobj->Name.' '.$regpackobj->Version."\n");
+	my $path = getRealPathName ($regpackobj->Path);
+
+	if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+		my $relpath = getRelPath ($path);
+		if (defined $relpath){
+			$path = $relpath;
+		}
+	}
+
+	sub checkfunc{
+		return 1; # ignore all errors while callsystem
+	}
+	*func=\&checkfunc;
+
+	{
+		my $prog_path = getRealPathName ($indep_prog);
+		my $callstring="\"$prog_path\\pgm\\dbmcli.exe\" -R \"$path\" inst_unreg";
+		callsystem($callstring,*func,1);
+    }
+}
+
+sub unregisterUX{
+	($indep_data,$indep_prog) = readIndepPath();
+	print2stdout('unregister '.$regpackobj->Name.' '.$regpackobj->Version."\n");
+	my $dep_prog=$regpackobj->Path;
+	my $regpath = $dep_prog;
+
+	if (exists $SAPDB::Install::Config{'SDB_PORTABLE_ROOT'}){
+		my $relpath = getRelPath ($regpath);
+		if (defined $relpath){
+			$regpath = $relpath;
+		}
+	}
+
+	sub checkfunc{
+		return 1;
+	}
+
+	*func=\&checkfunc;
+	callsystem("$indep_prog/bin/dbmcli -R $regpath inst_unreg",*func,1);
+	callsystem("$dep_prog/bin/dbmsrvctl stop",*func,1);
+
+	my $inifile = $indep_data.'/config/Installations.ini';
+	if (-f $inifile) {
+		chmod (0444, $inifile);
+	}
+}
+
+*unregister = $^O =~ /^MsWin/i ? \&unregisterWin : \&unregisterUX;
+
+sub preunpack{
+	if($^O !~ /mswin/i and $packobj->Update){
+		my $ps = SAPDB::Install::ProcState->new();
+		if(defined $ps){
+			my $pids = $ps->WhoUsesModule($deppath{'value'}.'/pgm/dbmsrv');
+			if(defined $pids){
+				foreach my $pid (@$pids){
+					$SAPDB::Install::Values::log->SetMsg("MSG: killing dbmsrv [pid = $pid]\n");
+					$ps->Terminate($pid);
+				}
+			}
+		}
+	}
+	return 1;
+}
+
+
+
+sub preuninstall{
+	my %dbroots = getInstances();
+	my $found=0;
+	my @instances_with_data = $regpackobj->Registry->getExistingInstanceNames();
+	my @registered_instances = keys(%dbroots);
+
+	my @removableInstanceData = minus(\@instances_with_data,\@registered_instances);
+
+	foreach my $instance (@removableInstanceData){
+		$regpackobj->Registry->removeInstanceData($instance);
+	}
+
+	foreach my $DB	(keys(%dbroots)){
+		if(normalizePath($dbroots{$DB}) eq normalizePath($regpackobj->Path)){
+			print2stderr("found instance $DB \n");
+			$found=1;
+		}
+	}
+
+	if($found){
+		print2stderr("cannot remove package \"".$regpackobj->Name."\": first you have to remove all instances\n");
+		diesoft('fatal error');
+	}
+}
+
+
+sub postuninstall{
+
+	# remove file Registry.dcom
+	my $regcomp_file = $regpackobj->Path."/wrk/Registry.dcom";
+	if(-l $regcomp_file){
+		my $filename = readlink($regcomp_file);
+		-f $filename && unlink($filename) || print2stderr("cannot remove file \"$filename\"\n");
+		unlink($regcomp_file) || print2stderr("cannot remove link \"$regcomp_file\"\n");
+	}
+	else{
+		-f $regcomp_file && (unlink($regcomp_file) || print2stderr("cannot remove file \"$regcomp_file\"\n"));
+	}
+
+
+	# remove python byte code
+	foreach my $python_path ($regpackobj->Path.'/lib/python2.3',$regpackobj->Path.'/lib/python1.5',
+							$regpackobj->Path.'/env',$regpackobj->Path.'/misc',$regpackobj->Path.'/demo'){
+		if (-d $python_path){
+			foreach (grep {/\.pyc$/} find($python_path,'f')){
+				unlink || print2stderr("cannot remove file \"$_\"\n");
+			}
+		}
+
+	}
+
+	# remove files generated executing lcinit
+	foreach (grep {/^lcinit|^load.prt$|^adatmp|^readme/i} find($regpackobj->Path,'f')){
+			unlink || print2stderr("cannot remove file \"$_\"\n");
+	}
+
+
+	return @undeleted_files;
+}
+
+
+sub verify{
+	my %releases = getInstalledReleases();
+	my ($found,$version_ok) = (0,0);
+	foreach my $instroot (keys(%releases)){
+		if(normalizePath($regpackobj->Path) eq normalizePath($instroot)){
+			$found = 1;
+			if(release2num($releases{$instroot}) == release2num($regpackobj->Version)){
+				$version_ok = 1;
+			}
+			else{
+				$SAPDB::Install::Values::log->SetMsg("version dont match: ".$regpackobj->Version." != ".$releases{$instroot}."\n");
+			}
+			last;
+		}
+	}
+	$SAPDB::Install::Values::log->SetMsg("registration not found\n") unless $found;
+	return ($found && $version_ok);
+}
+
+
+
+
+
+import SAPDB::Install::InstanceCheck;
+
+
+
+$instance_name;
+$dbroot;
+$control_user;
+$control_passwrd;
+
+$indbin; #<indep_prog_path>/bin
+$xsrv_running;
+$xsrv_run_at_start_time;
+$xsrv_lasterrmsg;
+$x_ping_max_tries = 3;
+$xsrv_updatable;
+$xsrv_force_stop = 0;
+
+
+sub checkxserver{
+	my $text = @_;
+	my $info = xserverInfo({'max_ping' => $x_ping_max_tries});
+	#foreach my $key (keys(%$info)){
+	#	print ">>>>> $key = ".$info->{$key}."\n";
+	#}
+	$xsrv_running = $info->{'is_running'};
+	$xsrv_lasterrmsg = $info->{'lasterr'};
+	if($xsrv_running){
+		$xsrv_updatable = 1 if($info->{'is_updatable'} );
+	}
+	return 1;
+}
+
+
+
+sub checkdbmcli{
+		my ($text)=@_;
+		$text=~/^OK/ and return 1; #ok
+		return 0;
+}
+
+my $printbuffer;
+
+sub logprint{
+		my ($newstring)=@_;
+		$printbuffer=$printbuffer.$newstring;
+		if($newstring=~/\n$/g){
+			$SAPDB::Install::Values::log->SetMsg("$printbuffer");
+			$printbuffer='';
+		}
+}
+
+sub outprint{
+		my ($newstring)=@_;
+		$printbuffer=$printbuffer.$newstring;
+		if($newstring=~/\n$/g){
+			print2stdout("$printbuffer");
+			$printbuffer='';
+		}
+}
+
+
+sub checkInstance{
+	local *instRegistry = \$SAPDB::Install::StartInstall::instRegistry;
+	print2stdout("beginning to check sap db instances\n");
+
+	my ($indep_data,$indep_prog)=readIndepPath();
+	unless($indep_data and $indep_prog){
+		print2stderr("cannot find db instance - there are no valid independent data path\n");
+		diesoft($diemsg);
+	}
+
+	unless ($^O =~ /mswin/i){
+		eval{
+			checkIniLock ($indep_data.'/config/Databases.ini_lock');
+			checkIniLock ($SAPDB::Install::Values::ini_path.'_lock');
+		};
+	}
+
+
+	unless($^O =~ /mswin/i){
+		my ($base_path,$base_version) = $instRegistry->getInstallPathes('Base');
+		if(release2num($base_version) < release2num('7.5.00.00')){
+			$xsrv_force_stop = 1;
+		}
+	}
+
+	$indbin="$indep_prog/bin";
+	my $xserver = "$indbin/x_server";
+	$^O=~/mswin/i and $xserver="\"$xserver\"" and $xserver=~s/\//\\/g;
+	$SAPDB::Install::StartInstall::log->LogPath("$indep_data/wrk");
+	my %dbroots=getInstances();
+	my %releases=getInstalledReleases();
+	if($^O=~/mswin/i){
+		# change capital letters with original
+		foreach my $dbinstance (keys(%dbroots)){
+			foreach my $instroot (keys(%releases)){
+				if($dbroots{$dbinstance}=~/^$instroot$/i){
+					$dbroots{$dbinstance}=$instroot;
+				}
+			}
+		}
+	}
+
+	my $db=$SAPDB::Install::StartInstall::opt_d;
+	if($dbroots{$db}){
+		$instance_name=$db;
+		$dbroot=$dbroots{$db};
+		$SAPDB::Install::StartInstall::opt_depend=$dbroots{$db};
+	}
+	else{
+		if($db){
+			print2stderr("$db: no such instance\n");
+			$SAPDB::Install::StartInstall::opt_b and diesoft($SAPDB::Install::Values::diemsg);
+		}
+		if($SAPDB::Install::StartInstall::opt_b){
+			print2stderr("run in batchmode - db instance unknown\n");
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+
+		my @dbs = keys(%dbroots);
+
+		my @showdbs;
+		foreach my $db (@dbs){
+			push @showdbs,[$db,"\"$dbroots{$db}\"",$releases{$dbroots{$db}}];
+		}
+
+		my $index=ask4any(\@showdbs,'instance','update',$SAPDB::Install::StartInstall::opt_b);
+
+		if($index != -1){
+			$instance_name=$dbs[$index];
+			$SAPDB::Install::StartInstall::opt_d = $dbs[$index];
+			$dbroot=$dbroots{$instance_name};
+		}
+		else{
+			print2stderr("no instance\n");
+			diesoft($SAPDB::Install::Values::diemsg);
+
+		}
+	}
+
+	my $instance_count=0;
+	foreach my $db_path (values(%dbroots)){
+		if($db_path eq $dbroot){
+			$instance_count++;
+		}
+	}
+	if($instance_count > 1){
+		print2stderr("no instance update supported - there are more than one instance based on installation in \"$dbroot\"\n");
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+	elsif($instance_count == 0){
+		print2stderr("instance \"$instance_name\" not found\n");
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	my $control_user_passwrd=$SAPDB::Install::StartInstall::opt_u;
+	$control_user_passwrd=~/^(.*),(.*)$/ and $control_user=$1 and $control_passwrd=$2;
+
+	unless($control_user){
+		if($SAPDB::Install::StartInstall::opt_b){
+			print2stderr("run in batchmode - database manager operators name unknown\n");
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+		while(1){
+			print2stdout("please enter database manager operators name: ");
+			$control_user=readstdin();
+			$control_user and last;
+		}
+	}
+	unless($control_passwrd){
+		if($SAPDB::Install::StartInstall::opt_b){
+			print2stderr("run in batchmode - database manager operators password unknown\n");
+			diesoft($SAPDB::Install::Values::diemsg);
+		}
+		while(1){
+			print2stdout("please enter database manager operators password: ");
+			$control_passwrd=readstdin(1); # 1 -> silent mode
+			$control_passwrd and last;
+		}
+	}
+
+	local *mainpath= $packobj->MainPath;
+	$mainpath{'value'}=$dbroot;
+	$SAPDB::Install::StartInstall::opt_depend=$dbroot;
+	$SAPDB::Install::StartInstall::opt_d=$instance_name;
+
+	my %instance_data;
+
+	if(defined $instRegistry && $instRegistry->existInstanceData($instance_name)){
+		%instance_data = $instRegistry->getInstanceData($instance_name);
+		if(defined %instance_data && exists $instance_data{'INSTANCE_CHECK_OK'} &&
+			 $instance_data{'INSTANCE_CHECK_OK'} && defined $instance_data{'SOFTWARE_OK'}){
+			unless($instance_data{'SOFTWARE_OK'} && ! $instRegistry->existPackage($packobj->Name,$dbroot,1)){
+				$instance_data{'TARGET_RELEASE'} eq $packobj->Version or print2stderr("can finish instance update only with package ".$packobj->Name." $instance_data{'TARGET_RELEASE'}\n") and diesoft($SAPDB::Install::Values::diemsg);
+				defined $instance_data{'MIGRATION_STRATEGY'} or print2stderr("no migration strategy found - dont know what to do next\n") and diesoft($SAPDB::Install::Values::diemsg);
+				print2stdout("last instance check for $instance_name ok!\n");
+
+				checkxserver();
+				if($xsrv_running and not $instance_data{'SOFTWARE_OK'} and ($^O =~ /mswin/i or $xsrv_force_stop or not $xsrv_updatable)){
+					if($SAPDB::Install::StartInstall::opt_b){
+						print2stderr("x_server is running - please stop it and start SDBUPD again!\n");
+						diesoft($diemsg);
+					}
+					print2stdout("x_server is running, stop it now (y/n)? ");
+					if(readstdin() =~ /^y$/i){
+						callsystem("$xserver stop",\&checkxserver);
+						if($xsrv_running){
+							print2stderr("cannot stop x_server\n");
+							print2stderr("$xsrv_lasterrmsg\n");
+							diesoft($SAPDB::Install::Values::diemsg);
+						}
+					}
+					else{
+						print2stderr("cannot finish update while x_server is running\n");
+						diesoft($diemsg);
+					}
+				}
+
+				print2stdout("continue with next step...\n");
+				if($regdata{'Type'} ne 'LVC'){
+					$SAPDB::Install::Values::product = 'MaxDB Server';
+				}
+				return 1;
+			}
+
+			print2stderr("instance data inside install registry is not consistent - maybe caused by a crashed pure software installation after broken instance update\n");
+			print2stdout("start new instance update\n");
+		}
+	}
+	else{
+		defined $instRegistry || print2stderr("InstallRegistry not defined\n") && diesoft($SAPDB::Install::Values::diemsg);
+
+	}
+
+
+	if(defined %instance_data && exists $instance_data{'INSTANCE_CHECK_OK'} && !$instance_data{'INSTANCE_CHECK_OK'}){
+		print2stdout("resume broken instance check\n");
+	}
+	elsif(defined %instance_data && exists $instance_data{'SOFTWARE_OK'} && !defined $instance_data{'SOFTWARE_OK'}){
+		print2stdout("resume broken instance update\n");
+	}
+	else{
+		# start at zero point - no successful instance check detected
+		print2stdout("start new instance update\n");
+	}
+
+	#checkinstance
+
+	checkxserver();
+	if($xsrv_running){
+		$xsrv_run_at_start_time = 1;
+	}
+	else{
+		$xsrv_run_at_start_time = 0;
+		my @statbuf;
+		@statbuf = stat($xserver) unless($^O =~ /mswin/i);
+		callsystem("$xserver start",\&checkxserver,1);
+		unless($xsrv_running){
+			print2stderr("cannot start x_server\n");
+			print2stderr("$xsrv_lasterrmsg\n");
+			diesoft($diemsg);
+		}
+	}
+
+	local $instance = SAPDB::Install::Instance->new ();
+	unless($instance && $instance_name){print2stderr("failure creating dbmsessionobj\n");}
+	$instance->{msg0}=\&outprint;
+	$instance->{msg1}=\&logprint;
+	my $release = $packobj->Version;
+	$release =~ s/.\d*$//;  # remove patch level
+
+	my $apo_release = $SAPDB::Install::Values::APO_release;
+
+	$apo_release =~ s/\.(\d+)$/\ Build\ $1/;
+
+
+	#
+	#	check APO COM version
+	#
+
+	if(	defined %instance_data and
+		exists $instance_data{'APO_TARGET_RELEASE'} and
+		$instance_data{'APO_TARGET_RELEASE'} =~ /\S/ and
+		$apo_release =~ /\S/ and
+		$instance_data{'APO_TARGET_RELEASE'} ne $apo_release){
+		print2stderr("cannot resume update: wrong APO COM version [$apo_release vs. ".
+						$instance_data{'APO_TARGET_RELEASE'}."] \n");
+		diesoft($diemsg);
+
+	}
+
+	$instance->session (
+	'apo_target_release' => $apo_release,
+	'dbname' => $instance_name,
+    'dbhost' => 'localhost',
+	'userpwd' => "$control_user,$control_passwrd",
+	'target_release' => $release,
+	'additional' => $instance_data{'ADDITIONAL'},
+	'logpos' => $instance_data{'LOGPOS'},
+	'backup_logpos' => $instance_data{'BACKUP_LOGPOS'},
+	'default_code' => $instance_data{'DEFAULT_CODE'},
+	'mcod' => $instance_data{'MCOD'},
+	'lcowner' => $instance_data{'LCOWNER'}
+	) or
+	print2stderr("cannot establish database instance session\n") and
+	diesoft($SAPDB::Install::Values::diemsg);
+
+
+	$instance->prepare();
+
+	# reset instance_data
+
+	my $starting_release = $releases{$dbroot};
+	unless($starting_release =~ /\S/){
+		$starting_release = $instance->{'starting_release'};
+	}
+
+	my %new_instance_data = (
+			'APO_STARTING_RELEASE' => $instance->{'apo_starting_release'},
+			'APO_TARGET_RELEASE' => $apo_release,
+			'TYPE' => $instance->{'instancetype'},
+			'MIGRATION_STRATEGY' => $instance->{'migration_strategy'},
+			'STARTING_RELEASE' => $starting_release,
+			'TARGET_RELEASE' => $packobj->Version,
+			'INSTANCE_CHECK_OK' => ($instance->get_errorstate () eq 'OK' ? 1 : 0),
+			'ADDITIONAL' => $instance->{'additional'},
+			'LOGPOS' => $instance->{'logpos'},
+			'BACKUP_LOGPOS' => $instance->{'backup_logpos'},
+			'DEFAULT_CODE' => $instance->{'default_code'},
+			'MCOD' => $instance->{'mcod'},
+			'LCOWNER' => $instance->{'lcowner'}
+	);
+
+
+	# flush instance data into registry
+
+	$instRegistry->setInstanceData($instance_name,\%new_instance_data);
+	$instRegistry->DenyWrite(0);
+	$instRegistry->dump;
+	$instRegistry->DenyWrite(1);
+
+	if($instance->get_errorstate () ne 'OK'){
+		$instance->disconnect() if $instance->can ('disconnect');
+		print2stderr("MaxDB instance \"$instance_name\" not ready to update\n");
+		print2stderr($instance->{msgtxt}."\n");
+		callsystem("$xserver stop",\&checkxserver) unless $xsrv_run_at_start_time;
+		if(not $xsrv_run_at_start_time and $xsrv_running){
+			print2stderr("cannot stop x_server\n");
+			print2stderr("$xsrv_lasterrmsg\n");
+		}
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	if($instance->{'instancetype'} ne 'LVC'){
+		$SAPDB::Install::Values::product = 'MaxDB Server';
+	}
+
+	my $other_running_instances = $instance->get_running_instances();
+
+	if(defined $other_running_instances && $#{@$other_running_instances} >= 0){
+		foreach my $running_instance (@$other_running_instances){
+			print2stdout("instance \"$running_instance\" is running\n");
+		}
+		if($xsrv_run_at_start_time and ($^O =~ /mswin/i or $xsrv_force_stop or not $xsrv_updatable)){
+			$instance->disconnect() if $instance->can ('disconnect');
+			print2stderr("cannot update instance \"$instance_name\" while x_server and other instances are running\n");
+			print2stdout("please stop x_server or other running instances and start instance update again\n");
+			diesoft($diemsg);
+		}
+	}
+
+	#shutdown
+	if($instance->shutdown()){
+		$instance->disconnect() if $instance->can ('disconnect');
+		print2stderr("cannot stop db instance \"$instance_name\"\n");
+		callsystem("$xserver stop",\&checkxserver) unless $xsrv_run_at_start_time;
+		if(not $xsrv_run_at_start_time and $xsrv_running){
+			print2stderr("cannot stop x_server\n");
+			print2stderr("$xsrv_lasterrmsg\n");
+		}
+		diesoft($SAPDB::Install::Values::diemsg);
+	}
+
+	$instance->disconnect() if $instance->can ('disconnect');
+	if($^O =~ /mswin/i or $xsrv_force_stop or not $xsrv_updatable){
+		callsystem("$xserver stop",\&checkxserver);
+		if($xsrv_running){
+				print2stderr("cannot stop x_server\n");
+				print2stderr("$xsrv_lasterrmsg\n");
+				diesoft($SAPDB::Install::Values::diemsg);
+		}
+	}
+
+	print2stdout("checking SAP DB instance \"$instance_name\" successfully ".SAPDB::Install::StdIO::timeStamp()."\n");
+	return 1;
+
+}
+
+sub startInstance{
+	my $xserver = "$indbin/x_server";
+	$^O=~/mswin/i and $xserver="\"$xserver\"" and $xserver=~s/\//\\/g;
+	checkxserver();
+	unless($xsrv_running){
+		my @statbuf;
+		@statbuf = stat($xserver) unless($^O =~ /mswin/i);
+		callsystem("$xserver start",\&checkxserver,1);
+		unless($xsrv_running){
+					print2stderr("cannot start x_server\n");
+					print2stderr("$xsrv_lasterrmsg\n");
+					diesoft($diemsg);
+		}
+	}
+	local *instRegistry = \$SAPDB::Install::StartInstall::instRegistry;
+	defined $instRegistry || print2stderr("install registry not defined!\n") && diesoft($SAPDB::Install::Values::diemsg);
+	my %instance_data = $instRegistry->getInstanceData($instance_name);
+	defined %instance_data || print2stderr("fatal error: instance data not defined!\n") && diesoft($SAPDB::Install::Values::diemsg);
+
+	my $instance = SAPDB::Install::Instance->new ();
+	unless(defined $instance){print2err("failure creating dbmsessionobj\n");}
+	$instance->{msg0}=\&outprint;
+	$instance->{msg1}=\&logprint;
+	my $release = $packobj->Version;
+
+	$release =~ s/.\d*$//;  # remove patch level
+
+	$instance->chvolperm($instance_name, $instance_data{'STARTING_RELEASE'}, $release);
+
+	$instance->get_errorstate () ne 'OK' and
+	print2stderr("cannot finish instance update for \"$instance_name\"\n") and
+	print2stderr($instance->{msgtxt}."\n") and
+	diesoft($SAPDB::Install::Values::diemsg);
+
+	$instance->session (
+	'apo_target_release' => $instance_data{'APO_TARGET_RELEASE'},
+	'apo_starting_release' => $instance_data{'APO_STARTING_RELEASE'},
+	'dbname' => $instance_name,
+	'dbhost' => 'localhost',
+	'userpwd' => "$control_user,$control_passwrd",
+	'target_release' => $release,
+	'instancetype' => $instance_data{'TYPE'},
+	'starting_release' => $instance_data{'STARTING_RELEASE'},
+	'migration_strategy' => $instance_data{'MIGRATION_STRATEGY'},
+	'default_code' => $instance_data{'DEFAULT_CODE'},
+	'mcod' => $instance_data{'MCOD'},
+	'lcowner' => $instance_data{'LCOWNER'}
+                           ) or
+	print2stderr("cannot establish database instance session\n") and
+	diesoft($SAPDB::Install::Values::diemsg);
+
+	$instance->finalize();
+
+	$instance->get_errorstate () ne 'OK' and
+	print2stderr("cannot finish instance update for \"$instance_name\"\n") and
+	print2stderr($instance->{msgtxt}."\n") and
+	diesoft($SAPDB::Install::Values::diemsg);
+
+	if($instance->get_keep_instance_data){
+		print2stdout("preparing restart \"$instance_name\" finished successfully ".SAPDB::Install::StdIO::timeStamp()."\n")
+	}
+	else{
+		$instRegistry->removeInstanceData($instance_name);
+		print2stdout("MaxDB instance \"$instance_name\" updated successfully ".SAPDB::Install::StdIO::timeStamp()."\n");
+	}
+
+}
+
+
+sub framestart{
+	unless($SAPDB::Install::StartInstall::opt_INSTANCE){
+		return 1;
+	}
+	checkInstance();
+}
+
+sub framestop{
+	unless($SAPDB::Install::StartInstall::opt_INSTANCE){
+		return 1;
+	}
+	startInstance();
+}
+
+1;

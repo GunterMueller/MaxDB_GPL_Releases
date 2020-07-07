@@ -1,0 +1,3638 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 2000-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-11-21
+*****************************************************
+modname : VAK507
+changed : 2000-11-01
+module  : Executing_finish
+ 
+Author  : ElkeZ
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : Module, which outputs the resuult, destroys
+          mess-buffer and so on.
+ 
+Define  :
+ 
+        PROCEDURE
+              a507last_command_part (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    VAR change_rec : tak_changerecord;
+                    VAR parsk      : tak_parskey;
+                    VAR resnam     : tsp00_KnlIdentifier;
+                    VAR w_link     : boolean;
+                    qbufp          : tak_sysbufferaddress;
+                    VAR ssr_rec    : tak71_select_strat_rec;
+                    pos            : integer;
+                    mtype          : tgg00_MessType;
+                    m2type         : tgg00_MessType2;
+                    output_wanted  : boolean);
+ 
+        PROCEDURE
+              a507select_part (
+                    VAR acv        : tak_all_command_glob;
+                    pos            : integer;
+                    qbufp          : tak_sysbufferaddress;
+                    VAR parsk      : tak_parskey;
+                    VAR dmli       : tak_dml_info;
+                    VAR ssr_rec    : tak71_select_strat_rec);
+ 
+        PROCEDURE
+              a507_putval (
+                    VAR acv               : tak_all_command_glob;
+                    startpos              : integer;
+                    intern_call           : boolean;
+                    last_longdesc         : boolean;
+                    VAR not_finished_long : tsp00_LongDescriptor);
+ 
+        PROCEDURE
+              a507_literal (
+                    VAR acv             : tak_all_command_glob;
+                    VAR longliteralrec  : tak_longliteral_rec;
+                    useliteralbuf       : boolean);
+ 
+        FUNCTION
+              a507optim_select_fetch (
+                    VAR acv   : tak_all_command_glob;
+                    VAR dmli  : tak_dml_info;
+                    prepare   : boolean;
+                    info_byte : tsp00_Uint1;
+                    loop_cnt  : integer) : boolean;
+ 
+        PROCEDURE
+              a507selfetch_handling (VAR acv : tak_all_command_glob;
+                    VAR dmli         : tak_dml_info;
+                    VAR ssr_rec      : tak71_select_strat_rec;
+                    build_resultset  : boolean;
+                    only_execute     : boolean;
+                    pos              : integer;
+                    qbufp            : tak_sysbufferaddress;
+                    infolen          : tsp00_Int4;
+                    VAR iresstate    : tak_sresstate;
+                    VAR parsk        : tak_parskey;
+                    VAR _ke1         : tgg00_SysInfoKey;
+                    VAR select_fetch : tak_select_fetch_type;
+                    VAR reskeyp      : tak_sysbufferaddress;
+                    VAR cntresults   : tsp00_Int4;
+                    VAR e            : tgg00_BasisError);
+ 
+.CM *-END-* define --------------------------------------
+ 
+***********************************************************
+ 
+ 
+ 
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01sysnullkey      : tgg00_SysInfoKey;
+              a01diag_monitor_on : boolean;
+              a01diag_analyze_on : boolean;
+ 
+        FUNCTION
+              a01aligned_cmd_len (len : tsp00_Int4) : tsp00_Int4;
+ 
+        FUNCTION
+              a01swap_int2 (old : tsp00_Int2) : tsp00_Int2;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06init_curr_retpart (VAR acv : tak_all_command_glob);
+ 
+        PROCEDURE
+              a06finish_curr_retpart (
+                    VAR acv   : tak_all_command_glob;
+                    part_kind : tsp1_part_kind;
+                    arg_count : tsp00_Int2);
+ 
+        PROCEDURE
+              a06retpart_move (
+                    VAR acv     : tak_all_command_glob;
+                    moveobj_ptr : tsp00_MoveObjPtr;
+                    move_len    : tsp00_Int4);
+ 
+        PROCEDURE
+              a06a_mblock_init (
+                    VAR acv      : tak_all_command_glob;
+                    mtype        : tgg00_MessType;
+                    m2type       : tgg00_MessType2;
+                    VAR tree     : tgg00_FileId);
+ 
+        PROCEDURE
+              a06rsend_mess_buf (
+                    VAR acv     : tak_all_command_glob;
+                    VAR mbuf    : tgg00_MessBlock;
+                    return_req  : boolean;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06reset_currpart (VAR acv : tak_all_command_glob);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv : tak_all_command_glob;
+                    b_err   : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+        PROCEDURE
+              a07_hex_uni_error (
+                    VAR acv     : tak_all_command_glob;
+                    uni_err     : tsp8_uni_error;
+                    err_code    : tsp00_Int4;
+                    to_unicode  : boolean;
+                    bytestr     : tsp00_MoveObjPtr;
+                    len         : tsp00_Int4 );
+ 
+        PROCEDURE
+              a07ak_system_error (
+                    VAR acv  : tak_all_command_glob;
+                    modul_no : integer;
+                    id       : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_BD_procedure_interface : VAK09;
+ 
+        PROCEDURE
+              a09activate_lock (
+                    VAR t      : tgg00_TransContext;
+                    stack_addr : tgg00_StackListPtr;
+                    stack_max  : tsp00_Int2;
+                    VAR b_err  : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10key_del  (
+                    VAR acv        : tak_all_command_glob;
+                    VAR syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv       : tak_all_command_glob;
+                    VAR syspoint  : tak_sysbufferaddress;
+                    VAR b_err     : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_nil_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    syslen       : tsp00_Int4;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10rel_sysinfo (syspointer : tak_sysbufferaddress);
+ 
+        PROCEDURE
+              a10repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10cpy_result (
+                    VAR acv         : tak_all_command_glob;
+                    VAR pars_syskey : tgg00_SysInfoKey;
+                    VAR res_syskey  : tgg00_SysInfoKey;
+                    rescnt          : tsp00_Int4;
+                    VAR b_err       : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_copy_catalog_rec (
+                    VAR acv         : tak_all_command_glob;
+                    VAR old_key     : tgg00_SysInfoKey;
+                    del_old_rec     : boolean;
+                    VAR new_key     : tgg00_SysInfoKey;
+                    new_segment_id  : tsp00_C2;
+                    add_new_rec     : boolean;
+                    VAR b_err       : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : VAK101;
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        FUNCTION
+              a101_GetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tsp00_Int4;
+ 
+        PROCEDURE
+              a101_GetTempFileInstance(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+        PROCEDURE
+              a101_ExistsGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SequenceWrapper : VAK104;
+ 
+        FUNCTION
+              ak104_GetReference_MS (
+                    sequence     : tsp00_MoveObjPtr) : tsp00_MoveObjPtr;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_Comment : VAK26;
+ 
+        PROCEDURE
+              a26add_comment (
+                    VAR acv       : tak_all_command_glob;
+                    VAR long_desc : tak_long_descriptor);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_Sink : VAK34;
+ 
+        PROCEDURE
+              a34AbapRead (VAR acv : tak_all_command_glob;
+                    VAR descriptor : tgg01_StreamDescriptor;
+                    VAR e          : tsp00_Int2);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_complex : VAK502;
+ 
+        PROCEDURE
+              a502destroy_file (VAR acv : tak_all_command_glob;
+                    VAR tree         : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Long-Support-Getval: VAK508;
+ 
+        PROCEDURE
+              a508_unlock_lock_lcolumnid (
+                    VAR acv        : tak_all_command_glob;
+                    ld_descriptor  : tgg00_Surrogate;
+                    mtype          : tgg00_MessType;
+                    lock_excl      : boolean);
+ 
+        PROCEDURE
+              a508_lget_long_columns (
+                    VAR acv             : tak_all_command_glob;
+                    VAR change_rec      : tak_changerecord;
+                    VAR lcol_lock       : boolean;
+                    rec_cnt             : integer;
+                    rec_len             : integer;
+                    startpos            : integer);
+ 
+        FUNCTION
+              a508_lcol_found (
+                    VAR acv        : tak_all_command_glob;
+                    VAR change_rec : tak_changerecord) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Pseudo_fieldmap : VAK509;
+ 
+        FUNCTION
+              a509get_one_value (map_ptr : tsp00_MoveObjPtr;
+                    value_no       : tsp00_Int2;
+                    VAR value_ptr  : tsp00_MoveObjPtr;
+                    VAR value_len  : tsp00_Int4;
+                    VAR is_null    : boolean;
+                    VAR is_default : boolean) : boolean;
+ 
+        FUNCTION
+              a509value_cnt (map_ptr : tsp00_MoveObjPtr) : tsp00_Int2;
+ 
+        FUNCTION
+              a509append_value (map_ptr : tsp00_MoveObjPtr;
+                    databuffer_ptr    : tsp00_MoveObjPtr;
+                    databuffer_length : tsp00_Int4;
+                    value_pos         : tsp00_Int4) : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              diagnose analyze : VAK544;
+ 
+        PROCEDURE
+              a544get_cmdid(
+                    VAR acv     : tak_all_command_glob;
+                    VAR parskey : tak_parskey;
+                    VAR cmdid   : tgg00_Surrogate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Syntax : VAK60;
+ 
+        PROCEDURE
+              a60_change_results (
+                    VAR acv        : tak_all_command_glob;
+                    VAR data       : tsp00_MoveObj;
+                    VAR change_rec : tak_changerecord;
+                    startpos       : integer;
+                    curr_resreclen : integer);
+ 
+        PROCEDURE
+              a60_put_result (
+                    VAR acv    : tak_all_command_glob;
+                    VAR mblock : tgg00_MessBlock;
+                    spos       : integer);
+ 
+        PROCEDURE
+              a60rescount (
+                    VAR acv  : tak_all_command_glob;
+                    rescount : tsp00_Int4);
+ 
+        PROCEDURE
+              a60resnum (
+                    VAR acv     : tak_all_command_glob;
+                    VAR moveobj : tsp00_Buf;
+                    startpos    : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Part2_Select_Expression : VAK67;
+ 
+        PROCEDURE
+              a67_fetchkeys (
+                    VAR acv   : tak_all_command_glob;
+                    ppoint    : tak_sysbufferaddress;
+                    recmaxlen : integer;
+                    invmaxlen : integer);
+ 
+        PROCEDURE
+              a67_keyspecs (
+                    VAR reskeyrec : tak_sysbufferaddress;
+                    primlen     : integer;
+                    invlen      : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy : VAK70;
+ 
+        VAR
+              a70glob_fetch_strats      : tgg07_StratEnumSet;
+ 
+        PROCEDURE
+              a70_keylengths (
+                    VAR acv     : tak_all_command_glob;
+                    strategy    : tgg07_StratEnum;
+                    primkeylen  : integer;
+                    invkeylen   : tsp00_Int2;
+                    res_primlen : integer;
+                    VAR primlen : integer;
+                    VAR invlen  : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Fetch_Without_Resulttable : VAK74;
+ 
+        PROCEDURE
+              a74_copy_twokeys (
+                    VAR acv     : tak_all_command_glob;
+                    VAR keysbuf : tak_res_keysbuf;
+                    VAR source  : tak_two_keyspecs;
+                    VAR dest    : tak_two_keyspecs;
+                    res_stat    : tak_sresstate);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_stringcol_copy_trunc_expand : VKB43;
+ 
+        PROCEDURE
+              k43CopyLongColumn (
+                    mtrans           : tgg00_TransContextPtr;
+                    VAR mheader      : tgg00_MessBufHeader;
+                    VAR sourceTabid  : tgg00_Surrogate;
+                    VAR sourceLongId : tgg00_Surrogate;
+                    VAR destTabid    : tgg00_Surrogate;
+                    VAR destLongId   : tgg00_Surrogate;
+                    createFile       : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+        PROCEDURE
+              b01empty_file (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_7 : VBD07;
+ 
+        PROCEDURE
+              b07cnext_record (
+                    VAR t          : tgg00_TransContext;
+                    VAR file_id    : tgg00_FileId;
+                    VAR rk         : tgg00_Lkey;
+                    VAR set_result : tgg00_BdSetResultRecord;
+                    VAR tree_pos   : tgg00_FilePos;
+                    VAR b          : tsp00_MoveObj);
+ 
+      ------------------------------ 
+ 
+        FROM
+              task_temp_data_cache : VBD21;
+ 
+        PROCEDURE
+              b21mp_rows_fetched_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    rows_fetched : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01code                : tgg04_CodeGlobals;
+              g01nil_long_qual       : tgg00_LongQual;
+              g01nil_stack_desc      : tgg00_StackDesc;
+              g01unicode             : boolean;
+              gg01_useselectfetch    : boolean;
+ 
+        PROCEDURE
+              g01mblock_init (
+                    VAR source_trans : tgg00_TransContext;
+                    mess_type  : tgg00_MessType;
+                    mess2_type : tgg00_MessType2;
+                    VAR mblock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove (
+                    source_upb  : tsp00_Int4;
+                    destin_upb  : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    source_pos  : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    destin_pos  : tsp00_Int4;
+                    length      : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        PROCEDURE
+              g04build_temp_tree_id (VAR curr : tgg00_FileId;
+                    VAR t : tgg00_TransContext);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_allocator_interface : VGG941;
+ 
+        PROCEDURE
+              gg941Deallocate(VAR TransContext : tgg00_TransContext;
+                    VAR p : tsp00_Addr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-20: VSP20;
+ 
+        PROCEDURE
+              s20int4_to_buf_swap (
+                    val        : tsp00_Int4;
+                    sourceswap : tsp00_SwapKind;
+                    VAR dest   : tsp00_Int4;
+                    di         : tsp00_Int4;
+                    destswap   : tsp00_SwapKind);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Packet_handling : VSP26;
+ 
+        PROCEDURE
+              s26first_segment_init (packet_ptr : tsp1_packet_ptr;
+                    segm_kind                   : tsp1_segment_kind;
+                    VAR first_segm_ptr          : tsp1_segment_ptr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40g4int (
+                    VAR buf  : tsp00_ResNum;
+                    pos      : tsp00_Int4;
+                    VAR dest : tsp00_Int4;
+                    VAR res  : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              PUT-Conversions : VSP41;
+ 
+        PROCEDURE
+              s41plint (
+                    VAR buf : tsp00_ResNum;
+                    pos     : tsp00_Int4;
+                    len     : integer;
+                    frac    : integer;
+                    source  : tsp00_Int4;
+                    VAR res : tsp00_NumError);
+&       IFDEF TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01refinfoindex (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    idx   : tgg00_RefInfoIndex);
+ 
+        PROCEDURE
+              t01strat_enum (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    strat : tgg07_StratEnum);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01surrogate (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    VAR tabid : tgg00_Surrogate);
+ 
+        PROCEDURE
+              t01long_qual (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR long_qual : tgg00_LongQual);
+ 
+        PROCEDURE
+              t01treeid (
+                    layer      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    VAR treeid : tgg00_FileId);
+ 
+        PROCEDURE
+              t01moveobj (
+                    debug       : tgg00_Debug;
+                    VAR moveobj : tsp00_MoveObj;
+                    startpos    : tsp00_Int4;
+                    endpos      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR m         : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+&       ENDIF
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE-Extension-80: VSP80;
+ 
+        PROCEDURE
+              s80uni_trans
+                    (src_ptr        : tsp00_MoveObjPtr;
+                    src_len         : tsp00_Int4;
+                    src_codeset     : tsp00_Int2;
+                    dest_ptr        : tsp00_MoveObjPtr;
+                    VAR dest_len    : tsp00_Int4;
+                    dest_codeset    : tsp00_Int2;
+                    trans_options   : tsp8_uni_opt_set;
+                    VAR rc          : tsp8_uni_error;
+                    VAR err_char_no : tsp00_Int4);
+ 
+.CM *-END-* use -----------------------------------------
+ 
+.sp;.cp 3
+ 
+Synonym :
+ 
+        FUNCTION
+              ak104_GetReference_MS;
+ 
+              tak104_MemorySequence tsp00_MoveObjPtr
+ 
+        PROCEDURE
+              a60resnum;
+ 
+              tsp00_MoveObj tsp00_Buf
+ 
+        PROCEDURE
+              s20int4_to_buf_swap;
+ 
+              tsp00_MoveObj tsp00_Int4
+ 
+        PROCEDURE
+              s40g4int;
+ 
+              tsp00_MoveObj tsp00_ResNum
+ 
+        PROCEDURE
+              s41plint;
+ 
+              tsp00_MoveObj tsp00_ResNum
+ 
+.CM *-END-* synonym -------------------------------------
+ 
+***********************************************************
+ 
+ 
+ 
+Description:
+ 
+ 
+ 
+A507SELECT_PART
+ 
+-------------------------
+ 
+ 
+ 
+This procedure is called at the very end of the execution of a set
+ 
+select.  In it, the system-information records are formed that have
+ 
+as keys the result-set names (and no longer the parse id as after
+ 
+parsing), the number of results found or the keys at which the fetch must
+ 
+begin, etc.
+ 
+ 
+ 
+The system information containing all information records relevant for the
+ 
+FETCH, is retrieved.  Space is requested in the cache for this information
+ 
+with the result-set name as key.  The new information is filled
+ 
+with the values of the old information.  The number of results found is
+ 
+taken from part1 of the message buffer.
+ 
+ 
+ 
+If a result set was built, the tree description (tree_id) is taken
+ 
+over so that it can be used for the FETCH and it is not necessary to
+ 
+pass via the file directory.
+ 
+ 
+ 
+If no result set was built, the start keys and stop keys are transferred.
+ 
+ 
+ 
+Res_resstate contains information on whether, for this select, a result set
+ 
+has been built, whether a temporary inversion file
+ 
+(intersect/merge) has been generated and whether an inversion must be
+ 
+used for the search (required for a differentiation in the FETCH
+ 
+(VAK74/VKB75)).  The other information is used to recognize which files
+ 
+must be deleted if the result set is closed.
+ 
+ 
+ 
+This system information is stored.
+ 
+ 
+ 
+If a SELECT was specified via a join view with FOR UPDATE, the keys of
+ 
+all underlying base records must be stored at the time of each FETCH
+ 
+for the subsequent CURRENT OF.  Whereas a key (single-table select with
+ 
+FOR UPDATE) still fits in the 'normal' system-information record
+ 
+(ereskey, slinkage = '00'), the maximum of 16 keys for a join select must
+ 
+be placed in an extra information record (ereskey, slinkage = '01').
+ 
+The old record is again fetched, space is made for the new record,
+ 
+the old is copied to the new and the new is stored.
+ 
+ 
+ 
+Qbufp contains an address in the cache that originates from
+ 
+A53_STRATEGY_SEARCH and that points to a system-information record
+ 
+containing the message buffer
+ 
+necessary for the FETCH (applied to a result set that has not been built).
+ 
+This system information is now stored.
+ 
+ 
+ 
+Last of all, the base records for the result set (description of the
+ 
+columns, type eresult) are copied and stored under the result-set
+ 
+name.
+ 
+ 
+ 
+The array in which the current result sets are listed stores
+ 
+information on the fact that the SELECT was successfully executed, which
+ 
+parse id it had (each FETCH knows the parse id of the SELECT to which it
+ 
+belongs and can execute checks accordingly), the resstate (see above)
+ 
+and the number of base records (for deleting).
+ 
+ 
+ 
+If an error occurs, the system-information records generated up
+ 
+until the time of the error must be deleted.  For this purpose,
+ 
+the value cntokbuf has been incremented within this procedure.  It
+ 
+specifies the types of system information that have already been stored.
+ 
+ 
+ 
+A507LAST_COMMAND_PART
+ 
+-------------------------
+ 
+ 
+ 
+This procedure is called when the last mess buffer of a command has
+ 
+been processed.
+ 
+ 
+ 
+If it was a set select that was the last in a series (not the physical
+ 
+layout of a complicated view), A50_SELECT_PART is called (see that section)
+ 
+in order to complete the system information for the result set.
+ 
+ 
+ 
+If it was a single-record select, the result located in part2 must
+ 
+be entered after the result count (= 1) in the SQL_PACKET.
+ 
+ 
+ 
+For other commands, the result count located in part1 of the mess
+ 
+buffer is analyzed and either converted to error 100 or shifted to the
+ 
+part2 of the SQL_PACKET.  If there is no result count in the mess
+ 
+buffer, a 1 is written directly to the SQL_PACKET
+ 
+(insert, single update, etc ].
+ 
+ 
+ 
+.CM *-END-* description ---------------------------------
+ 
+***********************************************************
+ 
+.CM -lll-
+ 
+Code    :
+ 
+ 
+CONST
+      c_del_old_rec      = true (* a10_copy_catalog_rec *);
+      c_add_new_rec      = true (* a10_copy_catalog_rec *);
+      c_after_select     = true (* ak507store_reskey_rec *);
+      c_lock_excl        = true (* a508_unlock_lock_lcolumnid *);
+      c_trans_to_uni     = true;   (* a07_hex_uni_err *)
+      c_unicode_wid      = 2;      (* a07_hex_uni_err *)
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507putval (
+            VAR acv       : tak_all_command_glob;
+            VAR long_desc : tak_long_descriptor);
+ 
+VAR
+      lock_column : boolean;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    WITH acv, long_desc, desc DO
+        IF  ld_copy in lds_state
+        THEN
+            BEGIN
+            k43CopyLongColumn (acv.a_mblock.mb_trns, acv.a_mblock.mb_header,
+                  lds_copyTabid, lds_copyLongId,
+                  lds_tabid, lds_descriptor, ld_first_insert in lds_state);
+            IF  acv.a_mblock.mb_trns^.trError_gg00 <> e_ok
+            THEN
+                a07_b_put_error (acv, acv.a_mblock.mb_trns^.trError_gg00, 1);
+            (*ENDIF*) 
+            END
+        ELSE
+            IF  ld_stream in lds_state
+            THEN
+                ak507StreamPutVal (acv, long_desc)
+            ELSE
+                BEGIN
+                IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                    g01code.kernel_swap)
+                THEN
+                    BEGIN
+                    s20int4_to_buf_swap (ld_vallen,
+                          a_out_packet^.sp1_header.sp1h_mess_swap,
+                          ld_vallen, 1, g01code.kernel_swap);
+                    s20int4_to_buf_swap (ld_valpos,
+                          a_out_packet^.sp1_header.sp1h_mess_swap,
+                          ld_valpos, 1, g01code.kernel_swap);
+                    s20int4_to_buf_swap (ld_intern_pos,
+                          a_out_packet^.sp1_header.sp1h_mess_swap,
+                          ld_intern_pos, 1, g01code.kernel_swap);
+                    END;
+                (*ENDIF*) 
+                IF  (ld_unicode in ld_infoset) AND (ld_vallen MOD 2 <> 0)
+                    AND
+                    (ld_valmode in [vm_alldata, vm_datapart, vm_lastdata])
+                THEN
+                    a07_b_put_error (acv, e_st_invalid_length, 0)
+                ELSE
+                    BEGIN
+&                   ifdef trace
+                    t01int4 (ak_sem, 'ld_valmode  ', ord(ld_valmode));
+                    t01int4 (ak_sem, 'ld_vallen   ', ld_vallen);
+                    t01int4 (ak_sem, 'ld_valpos   ', ld_valpos);
+                    t01int4 (ak_sem, 'ld_use_toasc',
+                          ord(ld_use_toascii in ld_state));
+                    t01int4 (ak_sem, 'ld_swap_ucs2',
+                          ord(ld_use_ucs_2_swap in ld_state));
+                    t01int4 (ak_sem, 'ld_short_sco',
+                          ord(ld_short_scol in ld_state));
+&                   endif
+                    (* PTS 1113190 E.Z. *)
+                    lock_column :=
+                          (ld_with_lock IN ld_infoset) AND
+                          (ld_valmode in [vm_datapart, vm_alldata]);
+                    IF  lock_column
+                    THEN
+                        a508_unlock_lock_lcolumnid (acv,
+                              long_desc.lds_descriptor,
+                              m_lock, c_lock_excl);
+                    (*ENDIF*) 
+                    IF  ld_valmode in [vm_alldata, vm_datapart, vm_lastdata]
+                    THEN
+                        BEGIN
+                        ak507put_val (acv, long_desc);
+                        IF  lock_column
+                        THEN
+                            a508_unlock_lock_lcolumnid (acv,
+                                  long_desc.lds_descriptor,
+                                  m_unlock, c_lock_excl);
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                        g01code.kernel_swap)
+                    THEN
+                        BEGIN
+                        s20int4_to_buf_swap (ld_vallen, g01code.kernel_swap,
+                              ld_vallen, 1,
+                              a_out_packet^.sp1_header.sp1h_mess_swap);
+                        s20int4_to_buf_swap (ld_valpos, g01code.kernel_swap,
+                              ld_valpos, 1,
+                              a_out_packet^.sp1_header.sp1h_mess_swap);
+                        (* PTS 1115845 E.Z. *)
+                        s20int4_to_buf_swap (ld_intern_pos, g01code.kernel_swap,
+                              ld_intern_pos, 1,
+                              a_out_packet^.sp1_header.sp1h_mess_swap);
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507StreamPutVal (
+            VAR acv       : tak_all_command_glob;
+            VAR long_desc : tak_long_descriptor);
+ 
+VAR
+      reset      : boolean;
+      dataPtr    : tsp00_MoveObjPtr;
+      outPacket  : tsp1_packet_ptr;
+      inPacket   : tsp1_packet_ptr;
+      retSegm    : tsp1_segment_ptr;
+      pDataPart  : tsp1_part_ptr;
+      e          : tgg00_BasisError;
+      swapInt    : tsp00_Int4;
+      descriptor : tgg01_StreamDescriptor;
+      longDesc   : tak_long_descriptor;
+ 
+BEGIN
+&ifdef TRACE
+dataPtr := @long_desc;
+t01moveobj (ak_sem, dataPtr^, 1, sizeof(long_desc));
+t01int4    (ak_sem, 'ld_valind   ', long_desc.desc.ld_valind);
+&endif
+outPacket        := acv.a_out_packet;
+inPacket         := acv.a_in_packet;
+dataPtr          := acv.a_data_ptr;
+retSegm          := acv.a_return_segm;
+pDataPart        := acv.a_data_part;
+acv.a_out_packet := acv.a_client_out_packet;
+s26first_segment_init (acv.a_out_packet, sp1sk_return, acv.a_return_segm);
+WITH acv.a_return_segm^ DO
+    BEGIN
+    sp1r_returncode := 0;
+    sp1r_errorpos   := 0;
+    END;
+(*ENDWITH*) 
+longDesc                    := long_desc;
+longDesc.desc.ld_intern_pos := 1;
+reset                       := true;
+REPEAT
+    descriptor.sdCount := 1;
+    descriptor.sdDesc[1].osdResetStream := reset;
+    descriptor.sdDesc[1].osdHandle      := NIL;
+    IF  acv.a_client_out_packet^.sp1_header.sp1h_mess_swap <> g01code.kernel_swap
+    THEN
+        BEGIN
+        swapInt := a01swap_int2 (long_desc.desc.ld_valind);
+        s20int4_to_buf_swap (swapInt, g01code.kernel_swap, descriptor.sdDesc[1].osdStreamId, 1,
+              acv.a_client_out_packet^.sp1_header.sp1h_mess_swap);
+        END
+    ELSE
+        descriptor.sdDesc[1].osdStreamId := long_desc.desc.ld_valind;
+    (*ENDIF*) 
+    descriptor.sdDesc[1].osdHiddenDesc  := NIL;
+    a34AbapRead (acv, descriptor, e);
+    IF  e = e_ok
+    THEN
+        BEGIN
+        acv.a_data_ptr              := @descriptor.sdDesc[1].osdBufPtr^;
+        longDesc.desc.ld_vallen     := descriptor.sdDesc[1].osdBufSize;
+        longDesc.desc.ld_valpos     := 1;
+        IF  descriptor.sdDesc[1].osdEndOfStream
+        THEN
+            longDesc.desc.ld_valmode := vm_lastdata;
+        (*ENDIF*) 
+        ak507put_val (acv, longDesc);
+        END;
+    (*ENDIF*) 
+    reset := false;
+UNTIL
+    (descriptor.sdDesc[1].osdEndOfStream) OR (e <> e_ok) OR (acv.a_returncode <> 0);
+(*ENDREPEAT*) 
+acv.a_out_packet  := outPacket;
+acv.a_in_packet   := inPacket;
+acv.a_return_segm := retSegm;
+acv.a_data_ptr    := dataPtr;
+acv.a_data_part   := pDataPart;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507put_val (
+            VAR acv       : tak_all_command_glob;
+            VAR long_desc : tak_long_descriptor);
+ 
+VAR
+      b_err        : tgg00_BasisError;
+      offset       : tsp00_Int4;
+      curr_buf_pos : tsp00_Int4;
+      aux_qual     : tgg00_QualBuf;
+      mblock       : tgg00_MessBlock;
+      e            : tsp8_uni_error;
+      err_char_no  : tsp00_Int4;
+      outlen       : tsp00_Int4;
+ 
+BEGIN
+WITH acv, long_desc, desc DO
+    BEGIN
+    IF  a_return_segm^.sp1r_function_code > csp1_masscmd_fc_offset
+    THEN
+        offset := a_data_part^.sp1p_buf_len - a_data_length
+    ELSE
+        offset := 0;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4    (ak_sem, 'ld_valpos   ', ld_valpos);
+    t01int4    (ak_sem, 'ld_vallen   ', ld_vallen);
+    t01int4    (ak_sem, 'offset      ', offset);
+    t01int4    (ak_sem, 'a_input_data', a_input_data_pos);
+&   endif
+    IF  a_input_data_pos < ld_valpos - offset + ld_vallen
+    THEN
+        a_input_data_pos := ld_valpos - offset + ld_vallen;
+&   ifdef trace
+    (*ENDIF*) 
+    t01int4    (ak_sem, 'a_input_data', a_input_data_pos);
+&   endif
+    IF  ld_is_comment in lds_infoset
+    THEN
+        BEGIN
+        IF  NOT g01unicode
+        THEN
+            IF  a_out_packet^.sp1_header.sp1h_mess_code = csp_unicode
+            THEN
+                ld_state := ld_state + [ ld_use_toascii ];
+            (*ENDIF*) 
+        (*ENDIF*) 
+        a26add_comment (acv, long_desc);
+        END
+    ELSE
+        BEGIN
+        IF  a_returncode = 0
+        THEN
+            REPEAT
+                curr_buf_pos := ld_valpos - offset;
+                IF  ld_without_shortcol IN ld_infoset
+                THEN
+                    g01mblock_init (a_transinf.tri_trans, m_column, mm_new_write,
+                          mblock)
+                ELSE
+                    g01mblock_init (a_transinf.tri_trans, m_column, mm_write,
+                          mblock);
+                (*ENDIF*) 
+                WITH mblock DO
+                    BEGIN
+                    mb_struct    := mbs_long;
+                    mb_qual      := @aux_qual;
+                    mb_qual_size := sizeof (aux_qual);
+                    WITH mb_qual^ DO
+                        BEGIN
+                        mstack_desc    := g01nil_stack_desc;
+                        mtree          := b01niltree_id;
+                        mtree.fileHandling_gg00 := a_transinf.tri_global_state;
+                        ml_long_qual   := g01nil_long_qual;
+                        END;
+                    (*ENDWITH*) 
+                    mb_qual_len  := MB_PART1_HEAD_MXGG00 +
+                          sizeof (mb_qual^.ml_long_qual);
+                    IF  ld_vallen = 0
+                    THEN
+                        BEGIN
+                        (* may happen with ODBC *)
+                        IF  ld_valpos = 0
+                        THEN
+                            mb_data  := @a_data_ptr^ [1]
+                        ELSE
+                            mb_data  := @a_data_ptr^ [ld_valpos - offset];
+                        (*ENDIF*) 
+                        mb_data_len  := ld_vallen;
+                        (* a_data_part^.sp1p_buf_size - curr_buf_pos + 1; *)
+                        mb_data_size := 0;
+                        END
+                    ELSE
+                        (* PTS 1105838 E.Z. *)
+                        IF  (ld_use_toascii in ld_state)
+                        THEN
+                            BEGIN
+                            outlen := ld_vallen;
+                            s80uni_trans (@(a_data_ptr^[ld_valpos-offset]), ld_vallen,
+                                  a_out_packet^.sp1_header.sp1h_mess_code,
+                                  @(a_data_ptr^[ld_valpos-offset]), outlen,
+                                  csp_ascii, [ ], e, err_char_no);
+                            (* PTS 1107986 E.Z. *)
+                            IF  e = uni_ok
+                            THEN
+                                BEGIN
+                                ld_vallen            := outlen;
+                                mb_data      := @(a_data_ptr^[ld_valpos-offset]);
+                                mb_data_len  := outlen;
+                                mb_data_size := outlen;
+                                END
+                            (* PTS 1107986 E.Z. *)
+                            ELSE
+                                BEGIN
+                                a07_hex_uni_error (acv, e,
+                                      err_char_no, NOT c_trans_to_uni,
+                                      @(a_data_ptr^[ld_valpos-offset+err_char_no-1]),
+                                      c_unicode_wid);
+&                               ifdef TRACE
+                                t01moveobj (ak_sem, a_data_ptr^, ld_valpos-offset,
+                                      ld_valpos-offset+ld_vallen-1);
+&                               endif
+                                END;
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            (* PTS 1105838 E.Z. *)
+                            IF  (ld_use_ucs_2_swap in ld_state)
+                            THEN
+                                BEGIN
+                                outlen := ld_vallen;
+                                s80uni_trans (@(a_data_ptr^[ld_valpos-offset]), ld_vallen,
+                                      csp_unicode_swap,
+                                      @(a_data_ptr^[ld_valpos-offset]), outlen,
+                                      csp_unicode, [ ], e, err_char_no);
+                                (* PTS 1107986 E.Z. *)
+                                IF  e = uni_ok
+                                THEN
+                                    BEGIN
+                                    ld_vallen            := outlen;
+                                    mb_data      := @(a_data_ptr^[ld_valpos-offset]);
+                                    mb_data_len  := outlen;
+                                    mb_data_size := outlen;
+                                    END
+                                (* PTS 1107986 E.Z. *)
+                                ELSE
+                                    BEGIN
+                                    a07_hex_uni_error (acv, e,
+                                          err_char_no, NOT c_trans_to_uni,
+                                          @(a_data_ptr^[ld_valpos-offset+err_char_no-1]),
+                                          c_unicode_wid);
+&                                   ifdef TRACE
+                                    t01moveobj (ak_sem, a_data_ptr^, ld_valpos-offset,
+                                          ld_valpos-offset+ld_vallen-1);
+&                                   endif
+                                    END;
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                BEGIN
+                                mb_data      := @a_data_ptr^ [ld_valpos - offset];
+                                mb_data_len  := ld_vallen;
+                                (* a_data_part^.sp1p_buf_size - curr_buf_pos + 1; *)
+                                mb_data_size := a_data_part^.sp1p_buf_size -
+                                      curr_buf_pos + 1;
+                                END;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                (* PTS 1107986 E.Z. *)
+                IF  a_returncode = 0
+                THEN
+                    BEGIN
+                    WITH mblock, mb_qual^, ml_long_qual, mb_data^ DO
+                        BEGIN
+                        mb_qual_len := mb_qual_len + sizeof (mb_qual^.ml_long_qual);
+                        mb_qual^.ml_long_qual := g01nil_long_qual;
+                        mtree.fileType_gg00  := [ftsPerm_egg00, ftsConcurrent_egg00];
+                        mtree.fileTabId_gg00 := ld_descriptor;
+                        (* PTS 1113190 E.Z. *)
+                        lq_lock_tabid   := long_desc.lds_tabid;
+                        (* PTS 1105838 E.Z. *)
+                        lq_long_in_file := NOT (ld_short_scol in ld_state);
+                        IF  ld_short_scol in ld_state
+                        THEN
+                            mtree.fileTfn_gg00 := tfnShortScol_egg00
+                        ELSE
+                            mtree.fileTfn_gg00 := tfnColumn_egg00;
+                        (*ENDIF*) 
+                        IF  ld_first_insert IN ld_state
+                        THEN
+                            lq_first_insert := true
+                        ELSE
+                            lq_first_insert := false;
+                        (*ENDIF*) 
+                        ld_state := ld_state - [ld_first_insert];
+                        lq_pos := ld_intern_pos;
+                        IF  ld_intern_pos = -1
+                        THEN
+                            ld_intern_pos := 1;
+                        (*ENDIF*) 
+                        lq_data_offset := 0;
+                        IF  ld_vallen > mb_data_size
+                        THEN
+                            lq_len := mb_data_size
+                        ELSE
+                            lq_len := ld_vallen;
+                        (*ENDIF*) 
+                        mb_data_len   := lq_len;
+                        ld_intern_pos := ld_intern_pos + lq_len;
+                        ld_valpos     := ld_valpos + lq_len;
+                        ld_vallen     := ld_vallen - lq_len;
+                        lq_trunc_req  := ((ld_valmode in [vm_alldata, vm_lastdata]) AND
+                              (ld_vallen = 0));
+&                       ifdef TRACE
+                        t01long_qual (ak_sem, 'putv l_qual ', ml_long_qual);
+&                       endif
+                        END;
+                    (*ENDWITH*) 
+                    a06rsend_mess_buf (acv, mblock,
+                          cak_return_req, b_err);
+                    IF  b_err <> e_ok
+                    THEN
+                        a07_b_put_error (acv, b_err, 1)
+                    ELSE
+                        IF  mblock.mb_type = m_return_result
+                        THEN
+                            BEGIN
+                            ld_intern_pos := mblock.mb_qual^.ml_long_qual.lq_pos;
+                            (* PTS 1105838 E.Z. *)
+                            IF  mblock.mb_qual^.ml_long_qual.lq_long_in_file
+                            THEN
+                                ld_state := ld_state - [ ld_short_scol ]
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            UNTIL
+                (ld_vallen = 0) OR (mblock.mb_data_size = 0) OR
+                (a_returncode <> 0);
+            (*ENDREPEAT*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a507last_command_part (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            VAR change_rec : tak_changerecord;
+            VAR parsk      : tak_parskey;
+            VAR resnam     : tsp00_KnlIdentifier;
+            VAR w_link     : boolean;
+            qbufp          : tak_sysbufferaddress;
+            VAR ssr_rec    : tak71_select_strat_rec;
+            pos            : integer;
+            mtype          : tgg00_MessType;
+            m2type         : tgg00_MessType2;
+            output_wanted  : boolean);
+ 
+VAR
+      s_select     : boolean;
+      lcol_lock    : boolean;
+      one_rescount : tsp00_Int4;
+      num_err      : tsp00_NumError;
+ 
+BEGIN
+WITH acv DO
+    BEGIN
+    IF  (dmli.d_sparr.px[ 1 ]^.sparsinfo.p_select) AND
+        (a_intern_select_cnt = a_max_intern_select)
+    THEN
+        BEGIN
+        IF  (NOT dmli.d_sparr.px[ 1 ]^.sparsinfo.p_single)
+        THEN
+            a_result_name := resnam;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (dmli.d_sparr.px[ 1 ]^.sparsinfo.p_select AND
+        NOT (dmli.d_sparr.px[ 1 ]^.sparsinfo.p_single) AND
+        (parsk.p_kind <> m_insert_select) AND
+        (parsk.p_kind <> m_select_row))
+    THEN
+        BEGIN
+        s_select := true;
+        IF  (a_intern_select_cnt = a_max_intern_select)
+        THEN
+            a507select_part (acv, pos, qbufp, parsk, dmli, ssr_rec)
+        (*ENDIF*) 
+        END
+    ELSE
+        s_select := false;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4 (ak_sem, 's_select    ', ord (s_select));
+    t01int4 (ak_sem, 'mselect_loop', dmli.d_mselect_loop_cnt);
+    t01int4 (ak_sem, 'mselect_resc', dmli.d_mselect_rescnt);
+&   endif
+    IF  (output_wanted AND
+        dmli.d_sparr.px[ 1 ]^.sparsinfo.p_select AND
+        dmli.d_sparr.px[ 1 ]^.sparsinfo.p_single)
+    THEN
+        IF  ((dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_all) AND
+            (* no MSELECT INTO *)
+            (dmli.d_mselect_rescnt <= 1))
+        THEN
+            BEGIN
+            a60rescount (acv, 1);
+            a_long_desc_pos := 0;
+            IF  change_rec.cr_colcount > 0
+            THEN
+                a60_change_results (acv, a_mblock.mb_data^.mbp_buf,
+                      change_rec, 0, acv.a_mblock.mb_data_len);
+            (*ENDIF*) 
+            IF  parsk.p_kind = m_select_row
+            THEN
+                pos := cgg_rec_key_offset + RESCNT_MXGG04
+            ELSE
+                pos := cgg_rec_key_offset + acv.a_mblock.mb_data^.mbp_keylen;
+            (*ENDIF*) 
+            a60_put_result (acv, acv.a_mblock, pos);
+            IF  (a_long_desc_pos > 0) AND
+                (a_returncode = 0)
+            THEN
+                BEGIN
+&               ifdef TRACE
+                t01int4 (ak_sem, 'pos         ', pos);
+&               endif
+                lcol_lock := true;
+                (* PTS 1116801 E.Z. *)
+                a508_lget_long_columns (acv, change_rec,
+                      lcol_lock, 1, mxsp_long_desc, - pos);
+                IF  acv.a_longdemand_data <> NIL
+                THEN
+                    gg941Deallocate(acv.a_transinf.tri_trans, acv.a_longdemand_data);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  a_returncode = 0
+            THEN
+                a06finish_curr_retpart (acv, sp1pk_data, 1)
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            (* MSELECT INTO *)
+            a_long_desc_pos := 0;
+            IF  change_rec.cr_colcount > 0
+            THEN
+                a60_change_results (acv, a_mblock.mb_data^.mbp_buf,
+                      change_rec, 0, acv.a_mblock.mb_data_len);
+            (*ENDIF*) 
+            pos := cgg_rec_key_offset +
+                  acv.a_mblock.mb_data^.mbp_keylen + 1;
+            a06retpart_move (acv, @a_mblock.mb_data^.mbp_buf [ pos ],
+                  dmli.d_sparr.px[ 1 ]^.sparsinfo.p_resinfolen);
+            IF  (a_returncode = 0) AND
+                ((dmli.d_mselect_loop_cnt = cgg04_last_of_this) OR
+                ( dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_all) OR
+                ( dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_this) OR
+                ( dmli.d_mselect_loop_cnt = cgg04_last_of_all))
+            THEN
+                a06finish_curr_retpart (acv, sp1pk_data,
+                      a_curr_retpart^.sp1p_buf_len DIV
+                      dmli.d_sparr.px[ 1 ]^.sparsinfo.p_resinfolen);
+            (* do not use dmli.d_mselect_rescnt       *)
+            (* it only counts real (NOT NULL) results *)
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+    ELSE
+        IF  (acv.a_qualified_jv_upd = no_jv_upd) AND
+            ((dmli.d_mselect_loop_cnt = cgg04_last_of_this) OR
+            ( dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_all) OR
+            ( dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_this) OR
+            ( dmli.d_mselect_loop_cnt = cgg04_last_of_all))
+        THEN
+            WITH a_mblock DO
+                BEGIN
+                IF  mb_qual_len  > 0
+                THEN
+                    IF  (( (
+                        ((mtype = m_insert_select) AND
+                        ( a_sqlmode <> sqlm_oracle)) OR
+                        ((mtype in [ m_update, m_delete ]) AND
+                        (m2type in [ mm_qual, mm_empty ]))) OR
+                        s_select) AND
+                        (mb_qual^.mr_resnum = csp_rescnt_zero))
+                    THEN
+                        BEGIN
+                        w_link := false;
+                        a07_b_put_error (acv, e_row_not_found, 1)
+                        END
+                    ELSE
+                        BEGIN
+                        IF  (a_sqlmode = sqlm_oracle) AND s_select
+                        THEN
+                            a60rescount (acv, 0)
+                        ELSE
+                            a60resnum (acv, a_mblock.mb_qual^.buf,
+                                  MB_PART1_HEAD_MXGG00 + 1);
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                ELSE
+                    a60rescount (acv, 1);
+                (*ENDIF*) 
+                END
+            (*ENDWITH*) 
+        ELSE
+            WITH a_mblock DO
+                IF  mb_qual_len  > 0
+                THEN
+                    BEGIN
+                    IF  NOT( (a_sqlmode = sqlm_oracle) AND s_select)
+                    THEN
+                        BEGIN
+                        one_rescount := 0;
+                        s40g4int (acv.a_mblock.mb_qual^.mr_resnum, 2,
+                              one_rescount, num_err);
+                        a_mass_all_rescount := a_mass_all_rescount + one_rescount;
+                        END
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    a_mass_all_rescount := a_mass_all_rescount + 1;
+                (*ENDIF*) 
+            (*ENDWITH*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    (* PTS 1104055 E.Z. *)
+    IF  a_parsing_again
+    THEN
+        ak507unlock_sys_share (acv);
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(* PTS 1104055 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507unlock_sys_share (VAR acv : tak_all_command_glob);
+ 
+VAR
+      e : tgg00_BasisError;
+ 
+BEGIN
+a06a_mblock_init (acv, m_unlock, mm_table, b01niltree_id);
+acv.a_mblock.mb_qual^.mlock_cnt := 0;
+a06rsend_mess_buf (acv, acv.a_mblock, NOT cak_return_req, e);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507one_long_putval (
+            VAR acv               : tak_all_command_glob;
+            VAR long_desc         : tak_long_descriptor;
+            VAR tempFileId        : tgg00_FileId;
+            VAR with_file         : boolean);
+ 
+VAR
+      _b_err               : tgg00_BasisError;
+      _act_cnt             : integer;
+      _data_pos            : tsp00_Int4;
+      _set_result          : tgg00_BdSetResultRecord;
+      _firstres            : boolean;
+      _tree_pos            : tgg00_FilePos;
+      _bd_lkey             : tgg00_Lkey;
+      _count1              : tsp00_Int4;
+      _cnt                 : integer;
+      _long_surrogate      : tgg00_Surrogate;
+      _start_long_desc     : tak_long_descriptor;
+      _long_number         : integer;
+      _org_ld_state        : tsp00_LdState;
+      _ldinternpos         : tsp00_Int4;
+      _ldvallen            : tsp00_Int4;
+      _ldvalpos            : tsp00_Int4;
+ 
+BEGIN
+WITH acv, a_data_part^ DO
+    BEGIN
+    _data_pos := a_input_data_pos;
+    IF  NOT with_file
+    THEN
+        BEGIN
+        ak507putval (acv, long_desc)
+        END
+    ELSE
+        BEGIN
+        _set_result.bd_key_check_len := 0;
+        _set_result.bd_max_rec_cnt   := MAX_INT2_SP00;
+        _set_result.bd_max_fill_len  := acv.a_mblock.mb_data_size;
+        _set_result.bd_next          := true;
+        _bd_lkey.len := 0;
+        _firstres := true;
+        _b_err    := e_buffer_limit;
+        _tree_pos.tpsPno_gg00 := NIL_PAGE_NO_GG00;
+        _long_surrogate  := long_desc.desc.ld_descriptor;
+        IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+            g01code.kernel_swap)
+        THEN
+            s20int4_to_buf_swap (long_desc.desc.ld_intern_pos,
+                  a_out_packet^.sp1_header.sp1h_mess_swap,
+                  _ldinternpos, 1, g01code.kernel_swap)
+        ELSE
+            _ldinternpos := long_desc.desc.ld_intern_pos;
+        (*ENDIF*) 
+        IF  _ldinternpos = -1
+        THEN
+            BEGIN
+            long_desc.desc.ld_intern_pos := 1;
+            _ldinternpos                 := 1;
+            IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                g01code.kernel_swap)
+            THEN
+                s20int4_to_buf_swap (long_desc.desc.ld_intern_pos, g01code.kernel_swap,
+                      long_desc.desc.ld_intern_pos, 1,
+                      a_out_packet^.sp1_header.sp1h_mess_swap);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        _start_long_desc := long_desc;
+        _org_ld_state    := long_desc.desc.ld_state;
+        WHILE ((acv.a_returncode = 0) AND
+              (_b_err = e_buffer_limit)) DO
+            BEGIN
+            b07cnext_record (acv.a_transinf.tri_trans,
+                  tempFileId, _bd_lkey,
+                  _set_result, _tree_pos, acv.a_mblock.mb_data^.mbp_buf);
+            IF  acv.a_transinf.tri_trans.trError_gg00 = e_key_not_found
+            THEN
+                _b_err := e_ok
+            ELSE
+                _b_err := acv.a_transinf.tri_trans.trError_gg00;
+            (*ENDIF*) 
+            IF  ((_b_err <> e_ok)           AND
+                ( _b_err <> e_buffer_limit) AND
+                ( _b_err <> e_no_next_record))
+            THEN
+                a07_b_put_error (acv, _b_err, 1)
+            ELSE
+                BEGIN
+                _set_result.bd_next := false;
+                _long_number := 0;
+                IF  (_bd_lkey.len = 0) AND (_b_err = e_no_next_record)
+                THEN (* insert or key_update *)
+                    BEGIN
+                    with_file := false;
+                    ak507putval (acv, long_desc);
+                    END
+                ELSE
+                    BEGIN
+                    IF  _firstres
+                    THEN
+                        BEGIN
+                        (* find out which long is given now *)
+                        _cnt := (acv.a_mblock.mb_data^.mbp_reclen - cgg_rec_key_offset - INT4_MXSP00)
+                              DIV SURROGATE_MXGG00;
+                        _count1 := 1;
+                        REPEAT
+                            SAPDB_PascalMove ('VAK507',   1,    
+                                  acv.a_mblock.mb_data_size, sizeof (_long_surrogate),
+                                  @acv.a_mblock.mb_data^.mbp_buf[cgg_rec_key_offset + INT4_MXSP00 + 2
+                                  + (_count1-1)*(SURROGATE_MXGG00+1)], 1,
+                                  @_long_surrogate, 1, SURROGATE_MXGG00,
+                                  a_returncode);
+                            IF  long_desc.desc.ld_descriptor = _long_surrogate
+                            THEN
+                                BEGIN
+                                _long_number := _count1;
+                                END
+                            ELSE
+                                _count1 := succ(_count1);
+                            (*ENDIF*) 
+                        UNTIL
+                            (_long_number <> 0) OR (a_returncode <> 0) OR (_count1 > _cnt);
+                        (*ENDREPEAT*) 
+                        IF  _long_number = 0
+                        THEN
+                            a07ak_system_error (acv, 507, 5)
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                (* write the _long_Number's long for all records *)
+                _act_cnt := 1;
+                WHILE _act_cnt <= _set_result.bd_rec_cnt DO
+                    BEGIN
+                    a_input_data_pos := _data_pos;
+                    long_desc := _start_long_desc;
+                    SAPDB_PascalMove ('VAK507',   2,    
+                          acv.a_mblock.mb_data_size, sizeof (long_desc.desc.ld_descriptor),
+                          @acv.a_mblock.mb_data^.mbp_buf,
+                          (_act_cnt-1) * acv.a_mblock.mb_data^.mbp_reclen +
+                          cgg_rec_key_offset + INT4_MXSP00
+                          + (_long_number-1)*(1 + SURROGATE_MXGG00) + 2,
+                          @long_desc.desc.ld_descriptor, 1, SURROGATE_MXGG00,
+                          a_returncode);
+                    IF  (ld_without_shortcol in long_desc.desc.ld_infoset) AND
+                        (_ldinternpos = 1) AND
+                        (acv.a_mblock.mb_data^.mbp_buf[
+                        (_act_cnt-1) * acv.a_mblock.mb_data^.mbp_reclen +
+                        cgg_rec_key_offset + INT4_MXSP00
+                        + (_long_number-1)*(1 + SURROGATE_MXGG00) + 1] = chr(true))
+                    THEN
+                        BEGIN
+                        long_desc.desc.ld_intern_pos := -1;
+                        IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                            g01code.kernel_swap)
+                        THEN
+                            s20int4_to_buf_swap (long_desc.desc.ld_intern_pos, g01code.kernel_swap,
+                                  long_desc.desc.ld_intern_pos, 1,
+                                  a_out_packet^.sp1_header.sp1h_mess_swap);
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    ak507putval (acv, long_desc);
+                    _act_cnt := succ(_act_cnt);
+                    IF  _firstres
+                    THEN
+                        BEGIN
+                        _firstres := false;
+                        IF  ld_use_ucs_2_swap in _start_long_desc.desc.ld_state
+                        THEN
+                            _start_long_desc.desc.ld_state :=
+                                  _start_long_desc.desc.ld_state - [ld_use_ucs_2_swap]
+                        ELSE
+                            IF  (ld_use_toascii in _start_long_desc.desc.ld_state)
+                            THEN
+                                BEGIN
+                                _start_long_desc.desc.ld_state :=
+                                      _start_long_desc.desc.ld_state - [ld_use_toascii];
+                                IF  a_out_packet^.sp1_header.sp1h_mess_code >= csp_unicode_swap
+                                THEN
+                                    WITH _start_long_desc.desc DO
+                                        BEGIN
+                                        IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                                            g01code.kernel_swap)
+                                        THEN
+                                            s20int4_to_buf_swap (ld_vallen,
+                                                  a_out_packet^.sp1_header.sp1h_mess_swap,
+                                                  ld_vallen, 1, g01code.kernel_swap);
+                                        (*ENDIF*) 
+                                        ld_vallen := ld_vallen DIV 2;
+                                        IF  (a_out_packet^.sp1_header.sp1h_mess_swap <>
+                                            g01code.kernel_swap)
+                                        THEN
+                                            s20int4_to_buf_swap (ld_vallen, g01code.kernel_swap,
+                                                  ld_vallen, 1, a_out_packet^.sp1_header.sp1h_mess_swap);
+                                        (*ENDIF*) 
+                                        END
+                                    (*ENDWITH*) 
+                                (*ENDIF*) 
+                                END
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END
+                (*ENDWHILE*) 
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        long_desc.desc.ld_descriptor := _long_surrogate;
+&       ifdef TRACE
+        IF  ld_use_toascii in _org_ld_state
+        THEN
+            t01int4 (ak_sem, 'use_toascii ', 1)
+        ELSE
+            t01int4 (ak_sem, 'use_toascii ', 0);
+        (*ENDIF*) 
+&       endif
+        IF  ld_use_ucs_2_swap in _org_ld_state
+        THEN
+            long_desc.desc.ld_state :=
+                  long_desc.desc.ld_state + [ld_use_ucs_2_swap]
+        ELSE
+            IF  ld_use_toascii in _org_ld_state
+            THEN
+                BEGIN
+                long_desc.desc.ld_state :=
+                      long_desc.desc.ld_state + [ld_use_toascii];
+&               ifdef TRACE
+                t01int4 (ak_sem, 'ldvallen 1  ', _start_long_desc.desc.ld_vallen);
+&               endif
+                IF  (a_out_packet^.sp1_header.sp1h_mess_swap <> g01code.kernel_swap)
+                THEN
+                    s20int4_to_buf_swap (_start_long_desc.desc.ld_vallen,
+                          a_out_packet^.sp1_header.sp1h_mess_swap,
+                          _ldvallen, 1, g01code.kernel_swap)
+                ELSE
+                    _ldvallen := _start_long_desc.desc.ld_vallen;
+                (*ENDIF*) 
+                IF  (a_out_packet^.sp1_header.sp1h_mess_swap <> g01code.kernel_swap)
+                THEN
+                    s20int4_to_buf_swap (_start_long_desc.desc.ld_valpos,
+                          a_out_packet^.sp1_header.sp1h_mess_swap,
+                          _ldvalpos, 1, g01code.kernel_swap)
+                ELSE
+                    _ldvalpos := _start_long_desc.desc.ld_valpos;
+                (*ENDIF*) 
+&               ifdef TRACE
+                t01int4 (ak_sem, 'data_pos    ', _data_pos);
+                t01int4 (ak_sem, 'ldvallen 2  ', _ldvallen);
+                t01int4 (ak_sem, 'ldvalpos    ', _ldvalpos);
+                t01int4 (ak_sem, 'input_data_p', a_input_data_pos);
+&               endif
+                IF  _ldvalpos + _ldvallen = a_input_data_pos
+                THEN
+                    a_input_data_pos := _ldvalpos + 2 * _ldvallen;
+&               ifdef TRACE
+                (*ENDIF*) 
+                t01int4 (ak_sem, 'input_data_p', a_input_data_pos);
+&               endif
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a507_putval (
+            VAR acv               : tak_all_command_glob;
+            startpos              : integer;
+            intern_call           : boolean;
+            last_longdesc         : boolean;
+            VAR not_finished_long : tsp00_LongDescriptor);
+ 
+VAR
+      _act_cnt             : integer;
+      _long_desc           : tak_long_descriptor;
+      _desc_len            : integer;
+      _pos                 : integer;
+      _value_ptr           : tsp00_MoveObjPtr;
+      _value_len           : tsp00_Int4;
+      _is_null             : boolean;
+      _is_default          : boolean;
+      _with_file           : boolean;
+      _defbyte             : tsp00_C1;
+      _tempFileId          : tgg00_FileId;
+ 
+BEGIN
+WITH acv, a_data_part^ DO
+    BEGIN
+&   ifdef TRACE
+    t01moveobj (ak_sem, a_data_ptr^, 1, a_data_length);
+    t01int4 (ak_sem, 'startpos    ', startpos);
+    t01int4 (ak_sem, 'longcol_cnt ', sp1p_arg_count);
+&   endif
+    IF  NOT intern_call
+    THEN
+        a_input_data_pos := 1;
+    (*ENDIF*) 
+    _desc_len := sizeof(_long_desc.desc);
+    _pos     := startpos;
+    _act_cnt := 1;
+    _with_file := true;
+    _value_ptr := NIL;
+    _value_len := 0;
+    g04build_temp_tree_id (_tempFileId, acv.a_transinf.tri_trans);
+    _tempFileId.fileTfnTemp_gg00 := ttfnlongsurrogates_egg00;
+    a101_ExistsGroupedTempFile (acv.a_transinf.tri_trans, _tempFileId);
+    IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+    THEN
+        _with_file := false;
+    (*ENDIF*) 
+    WHILE ((a_returncode = 0) AND (_act_cnt <= sp1p_arg_count)) DO
+        BEGIN
+        IF  a_variable_input
+        THEN
+            BEGIN
+            IF  (a509value_cnt (a_input_data_map) < startpos + _act_cnt - 1) AND
+                (a_data_part^.sp1p_part_kind = sp1pk_longdata)
+            THEN
+                IF  NOT a509append_value (a_input_data_map, a_data_ptr, a_data_length,
+                    a_input_data_pos)
+                THEN
+                    a07ak_system_error (acv, 507, 3);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  NOT a509get_one_value (a_input_data_map, startpos + _act_cnt - 1,
+                _value_ptr, _value_len, _is_null, _is_default)
+            THEN
+                a07ak_system_error (acv, 507, 4)
+            ELSE
+                SAPDB_PascalMove ('VAK507',   3,    
+                      a_data_length, sizeof (_long_desc.desc),
+                      @_value_ptr^, 1, @_long_desc.desc, 1, _value_len,
+                      a_returncode);
+            (*ENDIF*) 
+            END
+        ELSE
+            SAPDB_PascalMove ('VAK507',   4,    
+                  a_data_length, sizeof (_long_desc.desc),
+                  @a_data_ptr^, _pos + 1, @_long_desc.desc, 1, _desc_len,
+                  a_returncode);
+        (*ENDIF*) 
+        IF  a_returncode = 0
+        THEN
+            IF  _long_desc.desc.ld_valmode = vm_last_putval
+            THEN
+                BEGIN
+                a_input_data_pos    := _pos + _desc_len + 1;
+                a_execute_trigger   := ld_ex_trigger in _long_desc.desc.ld_infoset;
+                a_in_internal_subtr := true;
+                IF  _with_file
+                THEN
+                    a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, _tempFileId);
+                (*ENDIF*) 
+                END
+            ELSE
+                IF  _long_desc.desc.ld_valmode = vm_error
+                THEN
+                    BEGIN
+                    _act_cnt := sp1p_arg_count;
+                    a_in_internal_subtr := true;
+                    a_part_rollback := true;
+                    END
+                ELSE
+                    BEGIN
+                    ak507one_long_putval (acv, _long_desc, _tempFileId, _with_file);
+                    IF  a_variable_input
+                    THEN
+                        SAPDB_PascalMove ('VAK507',   5,    
+                              sizeof (_long_desc.desc), a_data_length,
+                              @_long_desc.desc, 1,
+                              @_value_ptr^, 1, _value_len,
+                              a_returncode)
+                    ELSE
+                        SAPDB_PascalMove ('VAK507',   6,    
+                              sizeof (_long_desc.desc), a_data_length,
+                              @_long_desc.desc, 1,
+                              @a_data_ptr^, _pos + 1, _desc_len,
+                              a_returncode);
+                    (*ENDIF*) 
+                    IF  (_long_desc.desc.ld_valmode = vm_datapart) OR
+                        (_long_desc.desc.ld_valmode = vm_nodata)
+                    THEN
+                        BEGIN
+                        IF  intern_call
+                        THEN
+                            not_finished_long := _long_desc.desc
+                        ELSE
+                            BEGIN
+                            _defbyte[ 1 ] := csp_defined_byte;
+                            a06retpart_move (acv, @_defbyte, sizeof(_defbyte));
+                            a06retpart_move (acv, @_long_desc.desc, _desc_len);
+                            END;
+                        (*ENDIF*) 
+                        _act_cnt := sp1p_arg_count;
+                        END
+                    ELSE
+                        IF  _with_file                                      AND
+                            last_longdesc                                   AND
+                            ( _act_cnt = sp1p_arg_count)                    AND
+                            ((_long_desc.desc.ld_valmode = vm_alldata) OR
+                            ( _long_desc.desc.ld_valmode = vm_lastdata))
+                        THEN
+                            a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, _tempFileId);
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        _pos := acv.a_input_data_pos;
+        _act_cnt := succ(_act_cnt)
+        END;
+    (*ENDWHILE*) 
+    IF  ((a_returncode <> 0) OR a_part_rollback)
+    THEN
+        BEGIN
+        a_part_rollback     := true;
+        a_in_internal_subtr := true;
+        IF  _with_file
+        THEN
+            a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, _tempFileId);
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  NOT intern_call AND (a_curr_retpart <> NIL)
+        THEN
+            IF  a_curr_retpart^.sp1p_buf_len > 0
+            THEN
+                a06finish_curr_retpart (acv, sp1pk_longdata, 1);
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507fetchkeys (
+            VAR acv   : tak_all_command_glob;
+            ppoint    : tak_sysbufferaddress;
+            recmaxlen : integer;
+            invmaxlen : integer);
+ 
+BEGIN
+WITH acv, a_mblock, ppoint^.sreskey, mb_qual^.mf_desc DO
+    BEGIN
+&   ifdef TRACE
+    t01int4 (ak_sem, 'recmaxlen   ', recmaxlen);
+    t01int4 (ak_sem, 'invmaxlen   ', invmaxlen);
+&   endif
+    res_searched_pages := m_searched_pages;
+    (* h.b. PTS 1001394
+          PTS 1001817 E.Z. *)
+    WITH res_startkeys.reckeyspec DO
+        BEGIN
+        ks_len := m_start.len;
+        IF  ks_len > recmaxlen
+        THEN
+            ks_len := recmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',   7,    
+              sizeof(m_start.k), sizeof(res_keysbuf),
+              @m_start.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    WITH res_nextkeys.reckeyspec DO
+        BEGIN
+        ks_len := m_startkeys.reckey.len;
+        IF  ks_len > recmaxlen
+        THEN
+            ks_len := recmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',   8,    
+              sizeof(m_startkeys.reckey.k), sizeof(res_keysbuf),
+              @m_startkeys.reckey.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    WITH res_stopkeys.reckeyspec DO
+        BEGIN
+        ks_len := m_stopkeys.reckey.len;
+        IF  ks_len > recmaxlen
+        THEN
+            ks_len := recmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',   9,    
+              sizeof(m_stopkeys.reckey.k), sizeof(res_keysbuf),
+              @m_stopkeys.reckey.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    WITH res_startkeys.listkeyspec DO
+        BEGIN
+        ks_len := m_firstkeys.listkey.len;
+        IF  ks_len > invmaxlen
+        THEN
+            ks_len := invmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',  10,    
+              sizeof(m_firstkeys.listkey.k), sizeof(res_keysbuf),
+              @m_firstkeys.listkey.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    WITH res_nextkeys.listkeyspec DO
+        BEGIN
+        ks_len := m_startkeys.listkey.len;
+        IF  ks_len > invmaxlen
+        THEN
+            ks_len := invmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',  11,    
+              sizeof(m_startkeys.listkey.k), sizeof(res_keysbuf),
+              @m_startkeys.listkey.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    WITH res_stopkeys.listkeyspec DO
+        BEGIN
+        ks_len := m_stopkeys.listkey.len;
+        IF  ks_len > invmaxlen
+        THEN
+            ks_len := invmaxlen;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VAK507',  12,    
+              sizeof(m_stopkeys.listkey.k), sizeof(res_keysbuf),
+              @m_stopkeys.listkey.k, 1,
+              @res_keysbuf, ks_pos, ks_len,
+              a_returncode);
+        END;
+    (*ENDWITH*) 
+    res_treeids.file_id := m_fns1;
+    res_treeids.inv_id  := m_fns2;
+    a74_copy_twokeys (acv, res_keysbuf, res_nextkeys, res_prevkeys,
+          res_resstate);
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak507store_reskey_rec (
+            VAR acv        : tak_all_command_glob;
+            pos            : integer;
+            VAR parsk      : tak_parskey;
+            VAR dmli       : tak_dml_info;
+            VAR ssr_rec    : tak71_select_strat_rec;
+            VAR newkey     : tgg00_SysInfoKey;
+            VAR iresstate  : tak_sresstate;
+            after_select   : boolean;
+            fetched_records: integer;
+            VAR cntresults : tsp00_Int4;
+            VAR e          : tgg00_BasisError);
+ 
+VAR
+      _strat_changed   : boolean;
+      _recordlen       : integer;
+      _movelen         : integer;
+      _primlen         : integer;
+      _invlen          : integer;
+      _re              : tsp00_NumError;
+      _newp            : tak_sysbufferaddress;
+      _oldp            : tak_sysbufferaddress;
+      _ke              : tgg00_SysInfoKey;
+      _strategy        : tgg07_StratEnum;
+ 
+BEGIN
+IF  dmli.d_repl_reskey
+THEN
+    BEGIN
+    newkey         := a01sysnullkey;
+    newkey.stempid := a101_GetTempFileIndex (acv,
+          acv.a_resname_addr[ pos ]^.sresname.restreeid);
+    newkey.sentrytyp := cak_ereskey;
+    a10get_sysinfo (acv, newkey, d_fix, _oldp, e);
+    IF  e = e_ok
+    THEN
+        BEGIN
+        s40g4int (acv.a_mblock.mb_qual^.mr_resnum, 2,
+              _oldp^.sreskey.res_actres, _re);
+        a10repl_sysinfo (acv, _oldp, e)
+        END;
+    (*ENDIF*) 
+    IF  e <> e_ok
+    THEN
+        a07_b_put_error (acv, e, 1);
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    _strategy  := ssr_rec.ssr_old_strategynum;
+&   ifdef TRACE
+    t01strat_enum( ak_sem, 'old_strategy', ssr_rec.ssr_old_strategynum );
+&   endif
+    _strat_changed := false;
+    _primlen   := 0;
+    _invlen    := 0;
+    _recordlen := 0;
+    IF  ((acv.a_init_ex_kind <> only_executing) AND (acv.a_ex_kind <> only_executing))
+    THEN
+        BEGIN
+        newkey         := a01sysnullkey;
+        newkey.stempid := a101_GetTempFileIndex (acv,
+              acv.a_resname_addr[ pos ]^.sresname.restreeid);
+        newkey.sentrytyp := cak_ereskey;
+        a10get_sysinfo (acv, newkey, d_fix, _newp, e);
+        IF  e <> e_ok
+        THEN
+            a07_b_put_error (acv, e, 1)
+        ELSE
+            BEGIN
+            _primlen := _newp^.sreskey.res_startkeys.listkeyspec.ks_pos -
+                  _newp^.sreskey.res_startkeys.reckeyspec.ks_pos;
+            _invlen := _newp^.sreskey.res_stopkeys.reckeyspec.ks_pos -
+                  _newp^.sreskey.res_startkeys.listkeyspec.ks_pos;
+            END
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        _ke := a01sysnullkey;
+        _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+        SAPDB_PascalForcedMove (sizeof (parsk), sizeof (_ke.sauthid),
+              @parsk, 1, @_ke.sauthid, 2, mxak_parskey);
+        _ke.sauthid[ mxak_parskey+1 ] := chr(0);
+        _ke.sentrytyp  := cak_ereskey;
+        newkey         := a01sysnullkey;
+        newkey.stempid := a101_GetTempFileIndex (acv,
+              acv.a_resname_addr[ pos ]^.sresname.restreeid);
+        acv.a_curr_res_id := newkey.stempid;
+        a10get_sysinfo (acv, _ke, d_fix, _oldp, e);
+        IF  e <> e_ok
+        THEN
+            a07_b_put_error (acv, e, 1)
+        ELSE
+            BEGIN
+            newkey.sentrytyp := cak_ereskey;
+            _recordlen := _oldp^.b_sl;
+            IF  ( _strategy = strat_undecided )
+                OR
+                (* no keys in res_keysbuf ! *)
+                (_recordlen <= sizeof (_oldp^.sreskey) -
+                sizeof (_oldp^.sreskey.res_keysbuf) +
+                4 + _oldp^.sreskey.res_change.cr_colcount * mxak_change_colinfo)
+            THEN
+                BEGIN
+                _strategy := ssr_rec.ssr_new_strategynum;
+                a70_keylengths (acv, _strategy, _oldp^.sreskey.res_primkeylen,
+                      ssr_rec.ssr_invlen, _oldp^.sreskey.res_keylen, _primlen,
+                      _invlen);
+                _strategy  := ssr_rec.ssr_old_strategynum;
+                _recordlen := mxak_res_keysbuf_offset +
+                      4 + _oldp^.sreskey.res_change.cr_colcount * mxak_change_colinfo +
+                      4 * _primlen + 4 * _invlen + _oldp^.sreskey.res_updkey.ks_len;
+                (* PTS 1108845 E.Z. *)
+                _strat_changed := true;
+                END
+            ELSE
+                IF  ( _strategy in a70glob_fetch_strats) AND
+                    (acv.a_mblock.mb_qual^.mr_res_build)
+                    (* _strategy was changed from fetch- to build-strategy *)
+                THEN
+                    BEGIN
+                    (* every build-strategy has to use res_keylen *)
+                    a70_keylengths (acv, strat_key_range, _oldp^.sreskey.res_primkeylen,
+                          ssr_rec.ssr_invlen, _oldp^.sreskey.res_keylen,
+                          _primlen, _invlen);
+                    _recordlen := mxak_res_keysbuf_offset +
+                          4 + _oldp^.sreskey.res_change.cr_colcount * mxak_change_colinfo +
+                          4 * _primlen + 4 * _invlen +
+                          _oldp^.sreskey.res_updkey.ks_len;
+                    _strat_changed := true;
+                    END
+                ELSE
+                    BEGIN
+                    _primlen := _oldp^.sreskey.res_startkeys.listkeyspec.ks_pos -
+                          _oldp^.sreskey.res_startkeys.reckeyspec.ks_pos;
+                    _invlen := _oldp^.sreskey.res_stopkeys.reckeyspec.ks_pos -
+                          _oldp^.sreskey.res_startkeys.listkeyspec.ks_pos
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            a10_nil_get_sysinfo (acv,
+                  newkey, d_release, _recordlen, _newp, e);
+            IF  e <> e_ok
+            THEN
+                a07_b_put_error (acv, e, 1)
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  e = e_ok
+        THEN
+            BEGIN
+            IF  _oldp^.b_sl > _recordlen
+            THEN
+                _movelen := _recordlen
+            ELSE
+                _movelen := _oldp^.b_sl;
+            (*ENDIF*) 
+            SAPDB_PascalMove ('VAK507',  13,    
+                  sizeof (_oldp^.sreskey), sizeof (_newp^.sreskey),
+                  @_oldp^.sreskey, cak_sysbufferoffset + 1,
+                  @_newp^.sreskey, cak_sysbufferoffset + 1,
+                  _movelen-cak_sysbufferoffset, e);
+            IF  e = e_ok
+            THEN
+                BEGIN
+                (* PTS 1108845 E.Z. *)
+                IF  _strat_changed
+                THEN
+                    BEGIN
+                    a67_keyspecs (_newp, _primlen, _invlen);
+                    _newp^.sreskey.res_dist_optim     := dmli.d_dist_optim;
+                    _newp^.sreskey.res_reverse_access := ssr_rec.ssr_reverse_access;
+                    END;
+&               ifdef TRACE
+                (*ENDIF*) 
+                t01int4 (ak_sem, 'r_limit_offs', _newp^.sreskey.res_limit_offset);
+                t01int4 (ak_sem, 'd_limit_offs', dmli.d_limit_offset);
+                t01int4 (ak_sem, 'r_upper_limt', _newp^.sreskey.res_upper_limit);
+                t01int4 (ak_sem, 'd_upper_limt', dmli.d_upper_limit);
+                t01int4 (ak_sem, 'r_rowno     ', _newp^.sreskey.res_rowno);
+                t01int4 (ak_sem, 'd_rowno     ', dmli.d_rowno);
+&               endif
+                IF  (_newp^.sreskey.res_limit_offset = cgg04_rowno_given_as_parameter) OR
+                    (_newp^.sreskey.res_upper_limit = cgg04_rowno_given_as_parameter)
+                THEN
+                    BEGIN
+                    IF  _newp^.sreskey.res_limit_offset = cgg04_rowno_given_as_parameter
+                    THEN
+                        _newp^.sreskey.res_limit_offset := dmli.d_limit_offset;
+                    (*ENDIF*) 
+                    IF  _newp^.sreskey.res_upper_limit = cgg04_rowno_given_as_parameter
+                    THEN
+                        _newp^.sreskey.res_upper_limit := dmli.d_upper_limit;
+                    (*ENDIF*) 
+                    IF  _newp^.sreskey.res_limit_offset <> cgg04_no_rowno_predicate
+                    THEN
+                        _newp^.sreskey.res_upper_limit :=
+                              _newp^.sreskey.res_limit_offset + _newp^.sreskey.res_upper_limit;
+&                   ifdef TRACE
+                    (*ENDIF*) 
+                    t01int4 (ak_sem, 'r_limit_offs', _newp^.sreskey.res_limit_offset);
+                    t01int4 (ak_sem, 'r_upper_limt', _newp^.sreskey.res_upper_limit);
+&                   endif
+                    END;
+                (*ENDIF*) 
+                IF  _newp^.sreskey.res_rowno = cgg04_rowno_given_as_parameter
+                THEN
+                    _newp^.sreskey.res_rowno := dmli.d_rowno
+                ELSE
+                    IF  (_newp^.sreskey.res_rowno = cgg04_no_rowno_predicate) AND
+                        (_newp^.sreskey.res_upper_limit <> cgg04_no_rowno_predicate)
+                    THEN
+                        _newp^.sreskey.res_rowno := _newp^.sreskey.res_upper_limit;
+&                   ifdef TRACE
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                t01int4 (ak_sem, 'r_upper_limt', _newp^.sreskey.res_upper_limit);
+                t01int4 (ak_sem, 'r_rowno     ', _newp^.sreskey.res_rowno);
+&               endif
+                IF  acv.a_union_cnt > 0
+                THEN
+                    _newp^.sreskey.res_build := true
+                ELSE
+                    IF  acv.a_mblock.mb_qual^.mr_res_build
+                    THEN
+                        _newp^.sreskey.res_build := true
+                    ELSE
+                        _newp^.sreskey.res_build := false;
+                    (*ENDIF*) 
+                (*ENDIF*) 
+                (* used, if strat=fieldin, although it was fe_eval_strat*)
+&               ifdef trace
+                t01int4 (ak_sem, 'd_strat_info', ord (dmli.d_strat_info));
+                t01refinfoindex (ak_sem, 'r_strat_info', _newp^.sreskey.res_strat_info);
+                t01int4 (ak_sem, 'd_qual_kind ', ord (dmli.d_qual_kind));
+&               endif
+                _newp^.sreskey.res_qual_kind := dmli.d_qual_kind;
+                IF  (dmli.d_strat_info <> ir_v_acc) AND
+                    (_newp^.sreskey.res_strat_info = ir_v_acc)
+                THEN
+                    _newp^.sreskey.res_strat_info := dmli.d_strat_info;
+                (*ENDIF*) 
+                WITH acv.a_mblock, mb_qual^ DO
+                    BEGIN
+&                   IFDEF TRACE
+                    t01messblock (ak_sem, 'MBLOCK 507se', acv.a_mblock);
+                    t01treeid    (ak_sem, 'mr_restree  ', mr_restree);
+                    IF  (acv.a_unionrec_ptr <> NIL) AND (acv.a_union_cnt > 0)
+                    THEN
+                        t01treeid (ak_sem, 'ures_tree   ',
+                              acv.a_unionrec_ptr^.sunionrec.ures_tree);
+&                   ENDIF
+                    (*ENDIF*) 
+                    s40g4int (mr_resnum, 2,
+                          _newp^.sreskey.res_actres, _re);
+                    cntresults := _newp^.sreskey.res_actres;
+                    IF  _newp^.sreskey.res_build
+                    THEN
+                        BEGIN
+                        _newp^.sreskey.res_restree := mr_restree;
+                        IF  _newp^.sreskey.res_updkey.ks_len = 1
+                            (* 1 byte for warn2 *)
+                        THEN
+                            IF  NOT (warn2_null_in_builtin_func
+                                in acv.a_transinf.tri_trans.trWarning_gg00)
+                            THEN
+                                _newp^.sreskey.res_updkey.ks_len := 0;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                        acv.a_resname_addr[ pos ]^.sresname.
+                              restreeid := _newp^.sreskey.res_restree;
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDWITH*) 
+                END
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  e = e_ok
+    THEN
+        BEGIN
+        IF  NOT _newp^.sreskey.res_build
+        THEN
+            BEGIN
+            IF  after_select
+            THEN
+                a67_fetchkeys (acv, _newp, _primlen, _invlen)
+            ELSE
+                BEGIN
+                (* the first x results are fetched *)
+                ak507fetchkeys (acv, _newp, _primlen, _invlen);
+                END;
+            (*ENDIF*) 
+            WITH _newp^.sreskey DO
+                acv.a_resname_addr[ pos ]^.sresname.resimpl_upd_stat :=
+                      ((res_searched_pages > cak68_updstat_minpages) AND
+                      (res_searched_pages > res_known_pages * cak68_updstat_factor));
+            (*ENDWITH*) 
+            END;
+        (*ENDIF*) 
+        IF  fetched_records > 0
+        THEN
+            BEGIN
+            _newp^.sreskey.res_nextpos := fetched_records;
+            _newp^.sreskey.res_prevpos := fetched_records;
+            END;
+        (*ENDIF*) 
+        iresstate := _newp^.sreskey.res_resstate;
+        IF  ((acv.a_init_ex_kind <> only_executing) AND (acv.a_ex_kind <> only_executing))
+        THEN
+            BEGIN
+            a10repl_sysinfo (acv, _newp, e);
+            IF  e <> e_ok
+            THEN
+                a07_b_put_error (acv, e, 1);
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            iresstate := iresstate + [ rs_result ] - [ rs_noresult ]
+                  - [ rs_intinvnoresult ] - [ rs_useinv ];
+            _strategy := ssr_rec.ssr_new_strategynum;
+            IF  ( _strategy in a70glob_fetch_strats ) OR
+                ( _strategy = strat_no_result )
+            THEN
+                BEGIN
+                iresstate := iresstate - [ rs_result ];
+                CASE _strategy OF
+                    strat_inv_range_fetch :
+                        iresstate := iresstate +
+                              [ rs_noresult ] + [ rs_useinv ];
+                    strat_inv_range_merge_fetch :
+                        iresstate := iresstate +
+                              [ rs_intinvnoresult ] + [ rs_useinv ];
+                    strat_key_equal_fetch,
+                    strat_no_result,
+                    strat_key_range_fetch:
+                        iresstate := iresstate + [ rs_noresult ];
+                    END;
+                (*ENDCASE*) 
+                END;
+            (*ENDIF*) 
+            _newp^.sreskey.res_resstate := iresstate;
+            _newp^.sreskey.res_fullen := _recordlen;
+            _newp^.b_sl := _recordlen;
+            _newp^.b_kl := _oldp^.b_kl;
+            a10add_sysinfo (acv, _newp, e);
+            IF  e = e_ok
+            THEN
+                BEGIN
+                WITH acv.a_resname_addr[ pos ]^.sresname,
+                     _oldp^.sreskey DO
+                    BEGIN
+                    resparsinfobyte   := res_parsinfob;
+                    resdatetimeformat := res_pars_dt_format;
+                    resunlocktabid    := res_unlocktab;
+                    resdecresdel      := res_decresdel;
+                    IF  a01diag_analyze_on
+                    THEN
+                        a544get_cmdid (acv, parsk, resanalyze_cmdid);
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                a10rel_sysinfo (_oldp);
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      a507optim_select_fetch (
+            VAR acv   : tak_all_command_glob;
+            VAR dmli  : tak_dml_info;
+            prepare   : boolean;
+            info_byte : tsp00_Uint1;
+            loop_cnt  : integer) : boolean;
+ 
+BEGIN
+WITH acv DO
+    a507optim_select_fetch :=
+          NOT (sp1co_selfetch_off in a_cmd_segment_header.sp1c_command_options)
+          AND
+          (a_init_ex_kind in [only_executing, parsing_executing])
+          AND
+          ((loop_cnt = cgg04_last_of_all) OR (loop_cnt = cgg04_first_and_only_of_all))
+          AND
+          (
+          (a_check_scrollableoption               AND
+          gg01_useselectfetch                     AND
+          NOT (sp1co_scrollable_cursor_on in
+          a_cmd_segment_header.sp1c_command_options))   OR
+          ((NOT a_check_scrollableoption)         AND
+          prepare                                 AND
+          ( a_sqlmode = sqlm_oracle ))
+          )
+          AND
+          ((info_byte = csp1_p_mselect_found )          OR
+          (* ( info_byte = csp1_p_reuse_mselect_found )    OR *)
+          ( info_byte = csp1_p_mass_select_found )      (* OR
+          ( info_byte = csp1_p_reuse_mass_select_found ) *) )
+          AND
+          ( a_comp_type <> at_unknown )
+          AND
+          ( dmli.d_limit_offset = cgg04_no_rowno_predicate )
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a507selfetch_handling (VAR acv : tak_all_command_glob;
+            VAR dmli         : tak_dml_info;
+            VAR ssr_rec      : tak71_select_strat_rec;
+            build_resultset  : boolean;
+            only_execute     : boolean;
+            pos              : integer;
+            qbufp            : tak_sysbufferaddress;
+            infolen          : tsp00_Int4;
+            VAR iresstate    : tak_sresstate;
+            VAR parsk        : tak_parskey;
+            VAR _ke1         : tgg00_SysInfoKey;
+            VAR select_fetch : tak_select_fetch_type;
+            VAR reskeyp      : tak_sysbufferaddress;
+            VAR cntresults   : tsp00_Int4;
+            VAR e            : tgg00_BasisError);
+ 
+VAR
+      _re                  : tsp00_NumError;
+      _foundrecs           : integer;
+      _act_cnt             : integer;
+      _wanted_result_cnt   : tsp00_Int4;
+      _set_result          : tgg00_BdSetResultRecord;
+      _firstres            : boolean;
+      _direct_retpart_move : boolean;
+      _i                   : integer;
+      _start               : tsp00_Int4;
+      _tree_pos            : tgg00_FilePos;
+      _lcol_found          : boolean;
+      _lcol_lock           : boolean;
+      _bd_lkey             : tgg00_Lkey;
+      _unused_leng         : integer;
+      _count1              : tsp00_Int4; (* PTS 1119719 *)
+      _count2              : integer;
+      _cnt                 : integer;
+      _l                   : tsp00_Int2;
+      _resname_bytes       : tsp00_Int2;
+      _fetch_desc          : tgg00_FetchDesc;
+      _m_mb_data           : tgg00_DataPartPtr;
+      _m_mb_data_size      : tsp00_Int4;
+ 
+BEGIN
+&ifdef TRACE
+t01int4 (ak_sem, 'SELFET start', 1);
+&endif
+_wanted_result_cnt := MAX_INT2_SP00;
+IF  (acv.a_rescount_part <> NIL) AND
+    (acv.a_rescount_part^.sp1p_buf [ 1 ]  = csp_defined_byte)
+THEN
+    BEGIN
+    s40g4int (acv.a_rescount_part^.sp1p_resnum, 2, _wanted_result_cnt, _re);
+    IF  _re <> num_ok
+    THEN
+        _wanted_result_cnt := MAX_INT2_SP00;
+    (*ENDIF*) 
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01int4 (ak_sem, 'wanted_res_c', _wanted_result_cnt);
+t01bool (ak_sem, 'build_result', build_resultset);
+&endif
+IF  (dmli.d_rowno > 0) AND
+    (dmli.d_rowno < _wanted_result_cnt)
+THEN
+    _wanted_result_cnt := dmli.d_rowno;
+&ifdef TRACE
+(*ENDIF*) 
+t01int4 (ak_sem, 'wanted_res_c', _wanted_result_cnt);
+&endif
+IF  acv.a_mblock.mb_qual^.mr_resnum = csp_rescnt_zero
+THEN
+    BEGIN
+    select_fetch := sft_select_all_results;
+    IF  only_execute
+    THEN
+        BEGIN
+        a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+              acv.a_mblock.mb_qual^.mr_restree);
+        a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans,
+              acv.a_mblock.mb_qual^.mr_restree);
+        IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+        THEN
+            a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1);
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  build_resultset
+        THEN
+            iresstate := [ rs_result ];
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        a10get_sysinfo (acv, _ke1, d_fix, reskeyp, e);
+        IF  e <> e_ok
+        THEN
+            a07_b_put_error (acv, e, 1)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    IF  build_resultset
+    THEN
+        BEGIN
+        _count2 := 0;
+        _cnt    := 0;
+        iresstate := [ rs_result ];
+        select_fetch := sft_select_all_results;
+        s40g4int (acv.a_mblock.mb_qual^.mr_resnum, 2, cntresults, _re);
+        (* PTS 1103437 E.Z. *)
+        IF  acv.a_mass_all_rescount > 0
+        THEN
+            cntresults := cntresults + acv.a_mass_all_rescount;
+        (*ENDIF*) 
+        IF  (dmli.d_rowno > 0) AND
+            (dmli.d_rowno < cntresults)
+        THEN
+            cntresults := dmli.d_rowno;
+        (*ENDIF*) 
+        _lcol_found := false;
+        a09activate_lock (acv.a_transinf.tri_trans, acv.a_work_st_addr,
+              acv.a_work_st_max, e);
+        IF  e = e_rollback_wanted
+        THEN
+            BEGIN
+            acv.a_rollback_info := [ trans_rollback, new_trans ];
+            e := e_work_rolled_back
+            END;
+        (*ENDIF*) 
+        IF  e <> e_ok
+        THEN
+            a07_b_put_error (acv, e, 1);
+        (*ENDIF*) 
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            IF  only_execute AND (acv.a_sqlmode = sqlm_oracle)
+            THEN
+                BEGIN
+                _resname_bytes := 0;
+                a60rescount (acv, 0);
+                END
+            ELSE
+                _resname_bytes := sizeof(tsp1_part_header) +
+                      a01aligned_cmd_len (sizeof(acv.a_resultnum) );
+            (*ENDIF*) 
+            IF  acv.a_curr_retpart = NIL
+            THEN
+                a06init_curr_retpart (acv);
+            (*ENDIF*) 
+            e       := e_ok;
+            IF  g01unicode
+            THEN
+                _resname_bytes := _resname_bytes + sizeof(tsp1_part_header) +
+                      a01aligned_cmd_len (sizeof(tsp00_KnlIdentifier) DIV 2 *
+                      acv.a_max_codewidth)
+            ELSE
+                _resname_bytes := _resname_bytes + sizeof(tsp1_part_header) +
+                      a01aligned_cmd_len (sizeof(tsp00_KnlIdentifier));
+            (*ENDIF*) 
+            acv.a_curr_retpart^.sp1p_buf_size :=
+                  acv.a_curr_retpart^.sp1p_buf_size - _resname_bytes;
+            _unused_leng := acv.a_curr_retpart^.sp1p_buf_size;
+            _l := infolen;
+&           ifdef TRACE
+            t01int4 (ak_sem, 'unused_leng ', _unused_leng);
+            t01int4 (ak_sem, 'l           ', _l);
+&           endif
+            _count1 := _unused_leng DIV _l;
+            IF  _wanted_result_cnt < _count1
+            THEN
+                _count1 := _wanted_result_cnt;
+            (*ENDIF*) 
+            IF  _count1 < cntresults
+            THEN
+                BEGIN
+                (* not all results will fit into command segment *)
+                ak507store_reskey_rec (acv, pos, parsk, dmli,
+                      ssr_rec, _ke1, iresstate, c_after_select, _count1, cntresults, e);
+                select_fetch := sft_select_some_results;
+                END;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                a10get_sysinfo (acv, _ke1, d_fix, reskeyp, e);
+                IF  e <> e_ok
+                THEN
+                    a07_b_put_error (acv, e, 1)
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            a101_GetTempFileInstance (acv.a_transinf.tri_trans,
+                  acv.a_mblock.mb_qual^.mr_restree);
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                IF  (reskeyp^.sreskey.res_change.cr_colcount > 0)
+                THEN
+                    _lcol_found := a508_lcol_found (acv,
+                          reskeyp^.sreskey.res_change);
+                (*ENDIF*) 
+                _set_result.bd_key_check_len := 0;
+                _set_result.bd_max_rec_cnt   := 1;
+                _set_result.bd_max_fill_len  := acv.a_mblock.mb_data_size;
+                _set_result.bd_next          := true;
+                _bd_lkey.len := 0;
+                _firstres := true;
+                e    := e_buffer_limit;
+                _count2         := 0;
+                _tree_pos.tpsPno_gg00 := NIL_PAGE_NO_GG00;
+                WHILE ((acv.a_returncode = 0) AND
+                      (_count2 < _count1) AND
+                      (e = e_buffer_limit)) DO
+                    BEGIN
+                    _set_result.bd_max_rec_cnt := _count1-_count2;
+                    b07cnext_record (acv.a_transinf.tri_trans,
+                          acv.a_mblock.mb_qual^.mr_restree, _bd_lkey,
+                          _set_result, _tree_pos, acv.a_mblock.mb_data^.mbp_buf);
+                    IF  acv.a_transinf.tri_trans.trError_gg00 = e_key_not_found
+                    THEN
+                        e := e_ok
+                    ELSE
+                        e := acv.a_transinf.tri_trans.trError_gg00;
+                    (*ENDIF*) 
+                    IF  ((e <> e_ok)           AND
+                        ( e <> e_buffer_limit) AND
+                        ( e <> e_no_next_record))
+                    THEN
+                        a07_b_put_error (acv, e, 1)
+                    ELSE
+                        BEGIN
+                        _set_result.bd_next := false;
+                        _cnt := _set_result.bd_rec_cnt;
+                        IF  (_firstres AND (_cnt > 0))
+                        THEN
+                            IF  reskeyp^.sreskey.res_keylen <> acv.a_mblock.mb_data^.mbp_keylen
+                            THEN
+                                a07_b_put_error (acv, e_too_long_key, 1)
+                            ELSE
+                                IF  reskeyp^.sreskey.res_reclen <> acv.a_mblock.mb_data^.mbp_reclen
+                                THEN
+                                    a07_b_put_error (acv, e_too_long_record, 1);
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                        _firstres                := false;
+                        _start := 1;
+                        IF  _unused_leng < acv.a_curr_retpart^.
+                            sp1p_buf_len + (_cnt * _l)
+                        THEN
+                            a07_b_put_error (acv, e_stack_overflow, 1);
+                        (*ENDIF*) 
+                        _count2      := _count2+_cnt;
+                        IF  acv.a_returncode = 0
+                        THEN
+                            BEGIN
+                            FOR _i := 1 TO _cnt DO
+                                BEGIN
+                                a60_change_results (acv,
+                                      acv.a_mblock.mb_data^.mbp_buf,
+                                      reskeyp^.sreskey.res_change,
+                                      _start - 1,
+                                      _l + cgg_rec_key_offset +
+                                      reskeyp^.sreskey.res_keylen);
+                                a06retpart_move (acv,
+                                      @acv.a_mblock.mb_data^.
+                                      mbp_buf [_start +
+                                      cgg_rec_key_offset +
+                                      reskeyp^.sreskey.res_keylen],
+                                      _l);
+                                IF  (_i = _cnt) AND
+                                    (_count1 < cntresults)
+                                THEN
+                                    BEGIN
+                                    reskeyp^.sreskey.res_bof := false;
+                                    SAPDB_PascalMove ('VAK507',  14,    
+                                          acv.a_mblock.mb_data_size,
+                                          sizeof(reskeyp^.sreskey.res_keysbuf),
+                                          @acv.a_mblock.mb_data^.mbp_buf,
+                                          _start + cgg_rec_key_offset,
+                                          @reskeyp^.sreskey.res_keysbuf,
+                                          reskeyp^.sreskey.res_nextkeys.reckeyspec.ks_pos,
+                                          reskeyp^.sreskey.res_keylen,
+                                          acv.a_returncode);
+                                    reskeyp^.sreskey.res_nextkeys.reckeyspec.ks_len :=
+                                          reskeyp^.sreskey. res_keylen;
+                                    SAPDB_PascalMove ('VAK507',  15,    
+                                          acv.a_mblock.mb_data_size,
+                                          sizeof(reskeyp^.sreskey.res_keysbuf),
+                                          @acv.a_mblock.mb_data^.mbp_buf,
+                                          _start + cgg_rec_key_offset,
+                                          @reskeyp^.sreskey.res_keysbuf,
+                                          reskeyp^.sreskey.res_prevkeys.reckeyspec.ks_pos,
+                                          reskeyp^.sreskey.res_keylen,
+                                          acv.a_returncode);
+                                    reskeyp^.sreskey.res_prevkeys.reckeyspec.ks_len :=
+                                          reskeyp^.sreskey.res_keylen;
+                                    a10repl_sysinfo (acv, reskeyp, e)
+                                    END;
+                                (*ENDIF*) 
+                                _start := _start+reskeyp^.sreskey.res_reclen
+                                END
+                            (*ENDFOR*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDWHILE*) 
+                IF  e = e_no_next_record
+                THEN
+                    BEGIN
+                    IF  (_count2 > 0)
+                    THEN
+                        e := e_ok
+                    ELSE
+                        a07_b_put_error (acv, e_row_not_found, 1)
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            IF  _lcol_found
+            THEN
+                BEGIN
+                IF  _cnt > 0
+                THEN
+                    BEGIN
+                    _fetch_desc := acv.a_mblock.mb_qual^.mf_desc;
+                    _lcol_lock := true;
+                    a508_lget_long_columns (acv, reskeyp^.sreskey.res_change,
+                          _lcol_lock, _count2,
+                          _l, - (reskeyp^.sreskey.res_keylen + cgg_rec_key_offset));
+                    acv.a_mblock.mb_qual^.mf_desc := _fetch_desc;
+                    END;
+                (*ENDIF*) 
+                acv.a_long_desc_pos := 0;
+                END;
+            (*ENDIF*) 
+            acv.a_curr_retpart^.sp1p_buf_size :=
+                  acv.a_curr_retpart^.sp1p_buf_size + _resname_bytes;
+            IF  _count1 < cntresults
+            THEN
+                BEGIN
+                (* PTS 1109575 E.Z. *)
+                IF  reskeyp <> NIL
+                THEN
+                    BEGIN
+                    a10repl_sysinfo (acv, reskeyp, e);
+                    IF  e <> e_ok
+                    THEN
+                        a07_b_put_error (acv, e, 1);
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            ELSE
+                IF  only_execute
+                THEN
+                    BEGIN
+                    a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans,
+                          acv.a_mblock.mb_qual^.mr_restree);
+                    IF  acv.a_transinf.tri_trans.trError_gg00 <> e_ok
+                    THEN
+                        a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1)
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            IF  (_count2 = cntresults)
+            THEN
+                acv.a_curr_retpart^.sp1p_attributes := [ sp1pa_last_packet ];
+            (*ENDIF*) 
+            a06finish_curr_retpart (acv, sp1pk_data, _count2);
+            IF  a01diag_monitor_on OR a01diag_analyze_on
+            THEN
+                b21mp_rows_fetched_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+                      _count2);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        e := e_ok;
+        _ke1.slinkage[2] := chr(csp_maxint1);
+        END
+    ELSE
+        BEGIN
+        (* NOT build_resultset *)
+        select_fetch := sft_select_all_results;
+        _lcol_found := false;
+        _act_cnt    := 0;
+        WITH qbufp^.smessblock.mbr_mess_block,
+             acv.a_mblock.mb_qual^.mf_desc DO
+            BEGIN
+            _direct_retpart_move :=
+                  (m_keylen + cgg_rec_key_offset -
+                  (mb_st^[mb_qual^.mqual_pos].elen_var - 1) = 0);
+            e := e_ok;
+            _foundrecs := 0;
+            _resname_bytes := sizeof(tsp1_part_header) +
+                  a01aligned_cmd_len (sizeof(acv.a_resultnum) );
+            IF  acv.a_curr_retpart = NIL
+            THEN
+                a06init_curr_retpart (acv);
+            (*ENDIF*) 
+            IF  g01unicode
+            THEN
+                _resname_bytes := _resname_bytes +
+                      sizeof(tsp1_part_header) +
+                      a01aligned_cmd_len (sizeof(tsp00_KnlIdentifier) DIV 2 *
+                      acv.a_max_codewidth)
+            ELSE
+                _resname_bytes := _resname_bytes +
+                      sizeof(tsp1_part_header) +
+                      a01aligned_cmd_len (sizeof(tsp00_KnlIdentifier));
+            (*ENDIF*) 
+            acv.a_curr_retpart^.sp1p_buf_size :=
+                  acv.a_curr_retpart^.sp1p_buf_size - _resname_bytes;
+            _cnt := acv.a_curr_retpart^.sp1p_buf_size DIV m_leng;
+            a10get_sysinfo (acv, _ke1, d_fix, reskeyp, e);
+            IF  e <> e_ok
+            THEN
+                a07_b_put_error (acv, e, 1)
+            ELSE
+                (* PTS 1106648 E.Z. *)
+                BEGIN
+                IF  (reskeyp^.sreskey.res_change.cr_colcount > 0)
+                THEN
+                    _lcol_found := a508_lcol_found (acv,
+                          reskeyp^.sreskey.res_change);
+                (*ENDIF*) 
+                _cnt := (acv.a_curr_retpart^.sp1p_buf_size -
+                      (reskeyp^.sreskey.res_reclen -
+                      reskeyp^.sreskey.res_length))
+                      DIV m_leng;
+                END;
+            (*ENDIF*) 
+            IF  _wanted_result_cnt < _cnt
+            THEN
+                _cnt := _wanted_result_cnt;
+&           ifdef TRACE
+            (*ENDIF*) 
+            t01int4 (ak_sem, '_cnt        ', _cnt);
+&           endif
+            _m_mb_data      := acv.a_mblock.mb_data;
+            _m_mb_data_size := acv.a_mblock.mb_data_size;
+            IF  acv.a_returncode = 0
+            THEN
+                REPEAT
+                    acv.a_mblock.mb_type                 := m_fetch;
+                    IF  (ssr_rec.ssr_old_strategynum = strat_key_equal_fetch)
+                        OR
+                        ((ssr_rec.ssr_old_strategynum = strat_undecided) AND
+                        (ssr_rec.ssr_new_strategynum = strat_key_equal_fetch))
+                    THEN
+                        acv.a_mblock.mb_type2 := mm_direct
+                    ELSE
+                        BEGIN
+                        IF  ( _foundrecs = 0 )
+                        THEN
+                            (* important for 'distinct optimization'!   *)
+                            (* we are on BOF of virtual cursor          *)
+                            (* compare with a74search_fetch()           *)
+                            acv.a_mblock.mb_type2 := mm_first
+                        ELSE
+                            acv.a_mblock.mb_type2 := mm_next;
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    acv.a_mblock.mb_qual^.mfirst_free    :=
+                          acv.a_mblock.mb_qual^.mstrat_pos;
+                    acv.a_mblock.mb_qual^.mst_optimize_pos := 0;
+                    acv.a_mblock.mb_st                   := mb_st;
+                    acv.a_mblock.mb_st_size              := mb_st_size;
+                    acv.a_mblock.mb_struct               := mbs_stack_addr;
+                    acv.a_mblock.mb_qual^.mst_addr       := mb_st;
+                    acv.a_mblock.mb_data_len             := mb_data_len;
+                    FOR _i := 0 TO cgg_idx_max_valuefieldlist DO
+                        IF  (mb_fieldlists[_i] <> NIL)
+                        THEN
+                            acv.a_mblock.mb_fieldlists[_i] := ak104_GetReference_MS(mb_fieldlists[_i]);
+                        (*IF  _direct_retpart_move*)
+                        (*THEN*)
+                        (*BEGIN*)
+                        (*ENDIF*) 
+                    (*ENDFOR*) 
+                    acv.a_mblock.mb_data := @acv.a_curr_retpart^.sp1p_buf[
+                          acv.a_curr_retpart^.sp1p_buf_len + 1];
+                    acv.a_mblock.mb_data_size := acv.a_curr_retpart^.sp1p_buf_size -
+                          acv.a_curr_retpart^.sp1p_buf_len;
+                    m_data := mb_data;
+                    m_fns1.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+                    IF  hsConsistentLock_egg00 in m_fns1.fileHandling_gg00
+                    THEN
+                        m_fns1.fileHandling_gg00 := m_fns1.fileHandling_gg00 +
+                              [ hsCollisionTest_egg00 ] - [ hsConsistentLock_egg00 ];
+                    (*ENDIF*) 
+                    IF  (hsPermLock_egg00 in m_fns1.fileHandling_gg00) AND
+                        NOT (hsIntentExcl_egg00 in m_fns1.fileHandling_gg00)
+                    THEN
+                        m_fns1.fileHandling_gg00 := m_fns1.fileHandling_gg00
+                              + [ hsWithoutLock_egg00 ];
+                    (* h.b. PTS 1000801 *)
+                    (* h.b. PTS 1104018 *)
+                    (*ENDIF*) 
+                    m_rescnt := reskeyp^.sreskey.res_nextpos;
+                    (* h.b. PTS 1001537 *)
+                    (* h.b. PTS 1104018 *)
+                    m_rowno  := reskeyp^.sreskey.res_rowno;
+                    IF  dmli.d_rowno <> cgg04_no_rowno_predicate
+                    THEN
+                        m_rowno := dmli.d_rowno;
+                    (*ENDIF*) 
+                    m_cnt    := _cnt - _foundrecs;
+                    _act_cnt  := m_cnt;
+&                   ifdef trace
+                    t01int4 (ak_sem, 'm_cnt       ', m_cnt);
+                    t01int4 (ak_sem, 'm_rescnt    ', m_rescnt);
+                    t01int4 (ak_sem, 'm_rowno     ', m_rowno);
+&                   endif
+                    a06rsend_mess_buf (acv, acv.a_mblock,
+                          cak_return_req, e);
+                    IF  e <> e_ok
+                    THEN
+                        IF  e = e_key_not_found
+                        THEN
+                            mb_trns^.trError_gg00 := e_ok
+                        ELSE
+                            IF  (mb_trns^.trError_gg00 = e_no_next_invkey) OR
+                                (mb_trns^.trError_gg00 = e_no_next_record) OR
+                                (mb_trns^.trError_gg00 = e_no_prev_invkey) OR
+                                (mb_trns^.trError_gg00 = e_no_prev_record)
+                            THEN
+                                mb_trns^.trError_gg00 := e_no_next_record
+                            ELSE
+                                BEGIN
+                                mb_trns^.trError_gg00 := e;
+                                a07_b_put_error (acv, mb_trns^.trError_gg00, 1);
+                                END;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    IF  mb_trns^.trError_gg00 = e_ok
+                    THEN
+                        IF  m_cnt = 0
+                        THEN
+                            mb_trns^.trError_gg00 := e_no_next_record;
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                    IF  mb_trns^.trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        IF  _direct_retpart_move
+                        THEN
+                            BEGIN
+                            acv.a_curr_retpart^.sp1p_buf_len :=
+                                  acv.a_curr_retpart^.sp1p_buf_len +
+                                  acv.a_mblock.mb_data_len;
+                            acv.a_curr_retpart^.sp1p_arg_count :=
+                                  acv.a_curr_retpart^.sp1p_arg_count + m_cnt;
+                            END
+                        ELSE
+                            a06retpart_move (acv,
+                                  @acv.a_mblock.mb_data^.mbp_buf,
+                                  m_cnt * m_leng);
+                        (*ENDIF*) 
+                        IF  reskeyp^.sreskey.res_change.cr_colcount > 0
+                        THEN
+                            FOR _i := 1 TO m_cnt DO
+                                a60_change_results (acv,
+                                      acv.a_mblock.mb_data^.mbp_buf,
+                                      reskeyp^.sreskey.res_change,
+                                      (_i-1) * m_leng-m_keylen-cgg_rec_key_offset,
+                                      cgg_rec_key_offset+m_keylen+m_leng);
+                            (*ENDFOR*) 
+                        (*ENDIF*) 
+                        _foundrecs := _foundrecs + m_cnt;
+                        END;
+                    (*ENDIF*) 
+                UNTIL
+                    (_foundrecs = _cnt) OR
+                    (_act_cnt > acv.a_mblock.mb_qual^.mf_desc.m_cnt) OR
+                    (acv.a_returncode <> 0) OR
+                    (mb_trns^.trError_gg00 = e_no_next_record);
+                (*ENDREPEAT*) 
+            (*ENDIF*) 
+            acv.a_mblock.mb_data      := _m_mb_data;
+            acv.a_mblock.mb_data_size := _m_mb_data_size;
+            IF  _foundrecs = 0
+            THEN
+                acv.a_mblock.mb_qual^.mr_resnum := csp_rescnt_zero;
+            (*ENDIF*) 
+            IF  acv.a_returncode = 0
+            THEN
+                BEGIN
+                acv.a_curr_retpart^.sp1p_buf_len := _foundrecs * m_leng;
+                IF  _lcol_found
+                THEN
+                    BEGIN
+                    IF  _foundrecs > 0
+                    THEN
+                        BEGIN
+                        _fetch_desc := acv.a_mblock.mb_qual^.mf_desc;
+                        _lcol_lock := true;
+                        a508_lget_long_columns (acv, reskeyp^.sreskey.res_change,
+                              _lcol_lock, _foundrecs,
+                              m_leng, - (reskeyp^.sreskey.res_keylen + cgg_rec_key_offset));
+                        acv.a_mblock.mb_qual^.mf_desc := _fetch_desc;
+                        END;
+                    (*ENDIF*) 
+                    acv.a_long_desc_pos := 0;
+                    END;
+                (*ENDIF*) 
+                acv.a_curr_retpart^.sp1p_buf_size :=
+                      acv.a_curr_retpart^.sp1p_buf_size + _resname_bytes;
+                IF  (mb_trns^.trError_gg00 = e_no_next_record) OR
+                    (_act_cnt > acv.a_mblock.mb_qual^.mf_desc.m_cnt) OR
+                    (_foundrecs = acv.a_mblock.mb_qual^.mf_desc.m_rowno)
+                THEN
+                    BEGIN
+                    acv.a_curr_retpart^.sp1p_attributes :=
+                          [ sp1pa_last_packet ];
+                    WITH acv.a_resname_addr[ pos ]^.sresname DO
+                        IF  ((m_searched_pages >
+                            cak68_updstat_minpages) AND
+                            (m_searched_pages > reskeyp^.sreskey.res_known_pages
+                            * cak68_updstat_factor))
+                        THEN
+                            resimpl_upd_stat := true;
+                        (*ENDIF*) 
+                    (*ENDWITH*) 
+                    IF  (ssr_rec.ssr_new_strategynum = strat_inv_range_merge_fetch) AND
+                        (a101_IsExtendedTempFile (acv,
+                        acv.a_mblock.mb_qual^.mf_desc.m_fns2)) AND
+                        (a101_GetExtendedTempFileType (acv,
+                        acv.a_mblock.mb_qual^.mf_desc.m_fns2)
+                        = ttfnTempInv_egg00)
+                    THEN
+                        BEGIN
+                        a502destroy_file (acv, acv.a_mblock.mb_qual^.mf_desc.m_fns2);
+                        IF  acv.a_transinf.tri_trans.trError_gg00 = e_file_not_found
+                        THEN
+                            acv.a_transinf.tri_trans.trError_gg00 := e_ok
+                        ELSE
+                            a07_b_put_error (acv, acv.a_transinf.tri_trans.trError_gg00, 1);
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  acv.a_sqlmode <> sqlm_oracle
+                    THEN
+                        s41plint (acv.a_mblock.mb_qual^.mr_resnum, 2, 10, 0, _foundrecs, _re);
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    BEGIN
+                    (* not all results fit in one *)
+                    (* command segment            *)
+                    select_fetch := sft_select_some_results;
+                    ak507store_reskey_rec (acv, pos, parsk, dmli,
+                          ssr_rec, _ke1, iresstate, NOT c_after_select, _foundrecs, cntresults, e);
+                    IF  acv.a_returncode = 0
+                    THEN
+                        BEGIN
+                        a10get_sysinfo (acv, _ke1, d_fix, reskeyp, e);
+                        IF  e <> e_ok
+                        THEN
+                            a07_b_put_error (acv, e, 1)
+                        ELSE
+                            BEGIN
+                            reskeyp^.sreskey.res_bof := false;
+                            a10repl_sysinfo (acv, reskeyp, e)
+                            END
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  _foundrecs = 0
+                THEN
+                    a06reset_currpart (acv)
+                ELSE
+                    BEGIN
+                    a06finish_curr_retpart (acv, sp1pk_data, _foundrecs);
+                    a60rescount (acv, -1);
+                    END;
+                (*ENDIF*) 
+                IF  a01diag_monitor_on OR a01diag_analyze_on
+                THEN
+                    b21mp_rows_fetched_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00, _foundrecs);
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDWITH*) 
+        END
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a507select_part (
+            VAR acv        : tak_all_command_glob;
+            pos            : integer;
+            qbufp          : tak_sysbufferaddress;
+            VAR parsk      : tak_parskey;
+            VAR dmli       : tak_dml_info;
+            VAR ssr_rec    : tak71_select_strat_rec);
+ 
+VAR
+      _e                   : tgg00_BasisError;
+      _build               : boolean;
+      _select_fetch        : tak_select_fetch_type;
+      _cntresults          : tsp00_Int4;
+      _iresstate           : tak_sresstate;
+      _reskeyp             : tak_sysbufferaddress;
+      _ke1                 : tgg00_SysInfoKey;
+      _ke                  : tgg00_SysInfoKey;
+      _initial_parsk       : tak_parskey;
+ 
+BEGIN
+IF  acv.a_returncode = 0
+THEN
+    BEGIN
+    _e := e_ok;
+    _select_fetch := sft_normal_select;
+    _cntresults   := 0;
+&   ifdef TRACE
+    t01int4 (ak_sem, 'union_cnt   ', acv.a_union_cnt);
+    t01int4 (ak_sem, 'res_build   ', ord(acv.a_mblock.mb_qual^.mr_res_build));
+    t01int4 (ak_sem, 'comp_type   ', ord(acv.a_comp_type));
+    t01int4 (ak_sem, 'comp_vers[1]', ord(acv.a_comp_vers[4]));
+    t01int4 (ak_sem, 'comp_vers[2]', ord(acv.a_comp_vers[5]));
+    t01int4 (ak_sem, 'prepare     ',
+          ord(dmli.d_sparr.px[ 1 ]^.sparsinfo.p_prepare));
+    t01int4 (ak_sem, 'is_select   ',
+          ord(dmli.d_sparr.px[ 1 ]^.sparsinfo.p_precomp_info_byte =
+          csp1_p_mass_select_found));
+    t01int4 (ak_sem, 'execute     ',
+          ord(acv.a_init_ex_kind = only_executing));
+&   endif
+    _build := ((acv.a_union_cnt > 0) OR
+          acv.a_mblock.mb_qual^.mr_res_build);
+&   ifdef TRACE
+    t01int4 (ak_sem, 'build       ', ord(_build));
+&   endif
+    _ke1 := a01sysnullkey;
+    _ke1.sauthid[ 1 ] := cak_tempinfo_byte;
+    SAPDB_PascalForcedMove (sizeof (parsk), sizeof (_ke1.sauthid),
+          @parsk, 1, @_ke1.sauthid, 2, mxak_parskey);
+    _ke1.sauthid[ mxak_parskey+1 ] := chr(0);
+    _ke1.sentrytyp := cak_ereskey;
+    _reskeyp := NIL;
+    a10get_sysinfo (acv, _ke1, d_release, _reskeyp, _e);
+    IF  _e <> e_ok
+    THEN
+        a07_b_put_error (acv, _e, 1);
+    (*ENDIF*) 
+    IF  acv.a_initial_segment_header.sp1c_mess_type = sp1m_execute
+    THEN
+        _initial_parsk := dmli.d_initial_ex_parskey
+    ELSE
+        _initial_parsk := parsk;
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        IF  dmli.d_limit_offset = cgg04_no_rowno_predicate
+        THEN
+            dmli.d_limit_offset := _reskeyp^.sreskey.res_limit_offset;
+        (*ENDIF*) 
+        IF  dmli.d_upper_limit = cgg04_no_rowno_predicate
+        THEN
+            dmli.d_upper_limit := _reskeyp^.sreskey.res_upper_limit;
+        (*ENDIF*) 
+        IF  dmli.d_rowno = cgg04_no_rowno_predicate
+        THEN
+            dmli.d_rowno := _reskeyp^.sreskey.res_rowno;
+        (*ENDIF*) 
+        IF  dmli.d_rowno = cgg04_no_rowno_predicate
+        THEN
+            dmli.d_rowno := dmli.d_upper_limit;
+        (*ENDIF*) 
+        IF  (dmli.d_sparr.px[ 1 ] <> NIL) AND
+            a507optim_select_fetch (acv, dmli,
+            dmli.d_sparr.px[ 1 ]^.sparsinfo.p_prepare,
+            dmli.d_sparr.px[ 1 ]^.sparsinfo.p_precomp_info_byte,
+            dmli.d_mselect_loop_cnt)
+        THEN
+            a507selfetch_handling (acv, dmli, ssr_rec, _build,
+                  (acv.a_init_ex_kind = only_executing), pos, qbufp,
+                  dmli.d_sparr.px[ 1 ]^.sparsinfo.p_resinfolen,_iresstate,
+                  parsk, _ke1, _select_fetch, _reskeyp, _cntresults, _e)
+        ELSE
+            ak507store_reskey_rec (acv, pos, parsk, dmli, ssr_rec,
+                  _ke1, _iresstate, c_after_select, -1, _cntresults, _e);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  NOT dmli.d_repl_reskey
+    THEN
+        BEGIN
+        IF  (_select_fetch <> sft_select_all_results) OR
+            ((acv.a_init_ex_kind <> only_executing) AND (acv.a_ex_kind = only_executing))
+        THEN
+            BEGIN
+            IF  _e = e_ok
+            THEN
+                BEGIN
+                _ke := a01sysnullkey;
+                _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+                SAPDB_PascalForcedMove (sizeof (parsk), sizeof (_ke.sauthid),
+                      @parsk, 1, @_ke.sauthid, 2, mxak_parskey);
+                _ke.sauthid[ mxak_parskey+1 ] := chr(0);
+                _ke.sentrytyp  := cak_eresult;
+                _ke1 := a01sysnullkey;
+                _ke1.stempid   := a101_GetTempFileIndex (acv,
+                      acv.a_resname_addr[ pos ]^.sresname.restreeid);
+                _ke1.sentrytyp := cak_eresult;
+                _ke.slinkage   := cak_init_linkage;
+                _ke1.slinkage  := cak_init_linkage;
+                a10cpy_result (acv, _ke, _ke1, _cntresults, _e)
+                END;
+            (*ENDIF*) 
+            IF  (_e = e_ok) AND NOT _build
+            THEN
+                a10add_sysinfo (acv, qbufp, _e)
+            ELSE
+                IF  qbufp <> NIL
+                THEN
+                    a10key_del (acv, qbufp);
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  _select_fetch = sft_select_all_results
+        THEN
+            BEGIN
+            acv.a_intern_warnings :=
+                  acv.a_intern_warnings + [sp1iw_warn0_resultset_closed];
+            (* PTS 1109575 E.Z. *)
+            IF  (_reskeyp <> NIL)
+            THEN
+                IF  acv.a_init_ex_kind = only_executing
+                THEN
+                    WITH acv.a_resname_addr[ pos ]^.sresname DO
+                        BEGIN
+                        resparsinfobyte   := _reskeyp^.sreskey.res_parsinfob;
+                        resdatetimeformat := _reskeyp^.sreskey.res_pars_dt_format;
+                        resunlocktabid    := _reskeyp^.sreskey.res_unlocktab;
+                        resdecresdel      := _reskeyp^.sreskey.res_decresdel;
+                        IF  a01diag_analyze_on
+                        THEN
+                            a544get_cmdid (acv, parsk, resanalyze_cmdid);
+                        (*ENDIF*) 
+                        a10rel_sysinfo (_reskeyp);
+                        _ke1.slinkage[2] := chr(csp_maxint1);
+                        END
+                    (*ENDWITH*) 
+                ELSE
+                    BEGIN
+                    _ke := a01sysnullkey;
+                    _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+                    SAPDB_PascalForcedMove (sizeof (parsk), sizeof (_ke.sauthid),
+                          @parsk, 1, @_ke.sauthid, 2, mxak_parskey);
+                    _ke.sauthid[ mxak_parskey+1 ] := chr(0);
+                    _ke.sentrytyp  := cak_ereskey;
+                    _ke1 := a01sysnullkey;
+                    _ke1.stempid   := a101_GetTempFileIndex (acv,
+                          acv.a_resname_addr[ pos ]^.sresname.restreeid);
+                    _ke1.sentrytyp := cak_ereskey;
+                    a10_copy_catalog_rec (acv, _ke, NOT c_del_old_rec, _ke1, cak00_local_segment_id,
+                          c_add_new_rec, _e);
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  qbufp <> NIL
+            THEN
+                a10key_del (acv, qbufp);
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  _e <> e_ok
+        THEN
+            a07_b_put_error (acv, _e, 1);
+        (*ENDIF*) 
+        IF  acv.a_returncode = 0
+        THEN
+            BEGIN
+            acv.a_resname_addr[ pos ]^.sresname.resexecuted   := true;
+            (* PTS 1000216 E.Z. *)
+            acv.a_resname_addr[ pos ]^.sresname.reseparsk       := _initial_parsk;
+            acv.a_resname_addr[ pos ]^.sresname.resstate        := _iresstate;
+            acv.a_resname_addr[ pos ]^.sresname.resmaxlinkage   := ord (_ke1.slinkage[2]);
+            acv.a_resname_addr[ pos ]^.sresname.resselect_fetch := _select_fetch;
+            IF  acv.a_check_scrollableoption
+            THEN
+                IF  sp1co_scrollable_cursor_on in
+                    acv.a_cmd_segment_header.sp1c_command_options
+                THEN
+                    acv.a_resname_addr[ pos ]^.sresname.resscrollable := true
+                ELSE
+                    acv.a_resname_addr[ pos ]^.sresname.resscrollable := false
+                (*ENDIF*) 
+            ELSE
+                acv.a_resname_addr[ pos ]^.sresname.resscrollable     := true;
+            (*ENDIF*) 
+            END
+        ELSE
+            acv.a_part_rollback := true; (* rollback cache entries *)
+        (*ENDIF*) 
+        END
+    (* PTS 1001114 E.Z. *)
+    ELSE
+        IF  acv.a_returncode = 0
+        THEN
+            acv.a_resname_addr[ pos ]^.sresname.resselect_fetch := _select_fetch;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(* PTS 1116801 E.Z. *)
+(*------------------------------*) 
+ 
+PROCEDURE
+      a507_literal (
+            VAR acv             : tak_all_command_glob;
+            VAR longliteralrec  : tak_longliteral_rec;
+            useliteralbuf       : boolean);
+ 
+VAR
+      b_err        : tgg00_BasisError;
+      aux_qual     : tgg00_QualBuf;
+      aux_data     : tsp00_Buf;
+      mblock       : tgg00_MessBlock;
+      current_long : integer;
+      mvObjPtr     : tsp00_MoveObjPtr;
+ 
+BEGIN
+b_err := e_ok;
+WITH acv, longliteralrec DO
+    BEGIN
+&   ifdef TRACE
+    t01surrogate (ak_sem, 'littabid    ', littabid);
+    FOR current_long := 1 TO litcolcount DO
+        WITH litcoldesc [current_long] DO
+            BEGIN
+            t01int4 (ak_sem, 'colddesc i  ', current_long);
+            t01surrogate (ak_sem, 'llclongid   ', llclongid);
+            t01int4 (ak_sem, 'llc_data_len', llcdatalen);
+            t01int4 (ak_sem, 'llc_data_pos', llcdatapos);
+            END;
+        (*ENDWITH*) 
+    (*ENDFOR*) 
+    t01int4 (ak_sem, 'litsize     ', litsize);
+    t01moveobj (ak_sem, litdataptr^, 1, litlen);
+&   endif
+    current_long := 1;
+    WHILE (a_returncode = 0) AND
+          (litcolcount >= current_long) DO
+        WITH litcoldesc [ current_long] DO
+            BEGIN
+            IF  llcdatapos <> -1
+            THEN
+                BEGIN
+                (* insert the long literal into the column *)
+                IF  (a_returncode = 0)
+                THEN
+                    BEGIN
+                    IF  llwith_shortcol
+                    THEN
+                        g01mblock_init (a_transinf.tri_trans, m_column, mm_write,
+                              mblock)
+                    ELSE
+                        g01mblock_init (a_transinf.tri_trans, m_column, mm_new_write,
+                              mblock);
+                    (*ENDIF*) 
+                    WITH mblock DO
+                        BEGIN
+                        mb_qual        := @aux_qual;
+                        mb_qual_size   := sizeof (aux_qual);
+                        mb_qual_len    := 0;
+                        mvObjPtr       := litdataptr;
+                        mb_data        := @mvObjPtr^[litcoldesc [ current_long].llcdatapos];
+                        mb_data_size   := litcoldesc [ current_long].llcdatalen;
+                        WITH mb_qual^, ml_long_qual, mb_data^ DO
+                            BEGIN
+                            mb_data_len := llcdatalen;
+                            IF  a_returncode = 0
+                            THEN
+                                BEGIN
+                                mb_qual_len  := MB_PART1_HEAD_MXGG00 +
+                                      sizeof (mb_qual^.ml_long_qual);
+                                mb_struct      := mbs_long;
+                                mstack_desc    := g01nil_stack_desc;
+                                mtree          := b01niltree_id;
+                                WITH litcoldesc [ current_long] DO
+                                    mtree.fileTabId_gg00 := llclongid;
+                                (*ENDWITH*) 
+                                mtree.fileHandling_gg00 := a_transinf.tri_global_state;
+                                (* PTS 1113190 E.Z. *)
+                                mtree.fileType_gg00 := [ftsPerm_egg00, ftsConcurrent_egg00];
+                                mtree.fileTfn_gg00  := tfnShortScol_egg00;
+                                ml_long_qual   := g01nil_long_qual;
+                                mb_qual_len    := mb_qual_len +
+                                      sizeof (mb_qual^.ml_long_qual);
+                                lq_lock_tabid   := littabid;
+                                lq_first_insert := true; (* PTS 1122366 M.Ki *)
+                                IF  llwith_shortcol
+                                THEN
+                                    BEGIN
+                                    lq_long_in_file := false;
+                                    lq_pos          := 1;
+                                    END
+                                ELSE
+                                    BEGIN
+                                    lq_long_in_file := true;
+                                    lq_pos          := -1;
+                                    END;
+                                (*ENDIF*) 
+                                lq_trunc_req    := true;
+                                lq_data_offset  := 0;
+                                lq_len          := mb_data_len;
+                                END;
+                            (*ENDIF*) 
+                            a06rsend_mess_buf (acv, mblock,
+                                  cak_return_req, b_err);
+                            IF  b_err <> e_ok
+                            THEN
+                                a07_b_put_error (acv, b_err, 1);
+                            (*ENDIF*) 
+                            END;
+                        (*ENDWITH*) 
+                        END;
+                    (*ENDWITH*) 
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            current_long := succ (current_long);
+            END
+        (*ENDWITH*) 
+    (*ENDWHILE*) 
+    END;
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

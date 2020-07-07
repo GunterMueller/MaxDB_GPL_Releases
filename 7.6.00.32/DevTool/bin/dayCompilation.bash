@@ -1,0 +1,162 @@
+#!/bin/bash
+
+Usage()
+{
+  echo "Syntax:dayCompilation Release [64]"
+  echo "Complete day compilation for specifc release"
+  exit 0
+}
+
+if [ $# -lt 1 ]; then
+ Usage
+fi
+
+User=cron
+Release=$1
+shift
+
+. $TOOL/bin/SetupMachineEnv.bash ${Release}
+
+#---------------------------------------------------
+#
+# OWN depends on 32/64 support and actual release
+#
+# RR (i.e. 72,73,74,80) leads to
+#   /rel/RR i.e. /rel/73
+#      32Bit if 64Bit is not supported (DEC)
+#      64Bit if 32Bit is not supported (LINUX)
+#   /rel/RR_32
+#      32Bit if 64Bit is supported too
+#   /rel/RR_64
+#      64Bit if 32Bit is supported too
+#
+if [ "$BIT32Supported" = "NO" -o "$BIT64Supported" = "NO" ]; then
+    OWN=/rel/${Release}
+else
+    if [ "x$1" = "x64" ]; then
+        OWN=/rel/${Release}_64
+    else
+        OWN=/rel/${Release}_32
+    fi
+fi
+
+#
+# Coding reacts on BIT64 Environment variable set (even if value is 0...)
+# So for 32Bit compilation unset BIT64 is needed
+#
+if [ "x$1" = "x64" ]; then
+     BIT64=1
+     export BIT64
+     Use64Bit="64"
+else
+     unset BIT64
+     Use64Bit=""
+fi
+
+Pid=$$
+LoginTime=`date`
+
+TERM=vt100
+export TERM
+
+giveup()
+{
+	exit 0;
+}
+
+trap "giveup" EXIT HUP INT QUIT TERM PIPE
+
+TST=
+echo OWN = $OWN
+LOG=$OWN/currentLogin
+if [ -f $LOG ]; then
+ echo "remuser on `hostname` busy."
+ cat $LOG
+ exit 0
+fi
+
+cleanup()
+{
+        rm $LOG
+        exit 0
+}
+
+/bin/echo "Current User=${User} Pid=${Pid} logged in at ${LoginTime}" >$LOG
+trap "cleanup" EXIT HUP INT QUIT TERM PIPE
+
+/bin/echo "Command:$0 $Release $Use64Bit" >>$LOG
+
+DBROOT=$OWN/usr
+DEV_STUDIO=$Release
+PYTHONPATH=$TOOL/lib/Python
+PERL5LIB=$TOOL/bin:$TOOL/lib/perl5:$OWN/usr/misc
+
+export OWN DBROOT PYTHONPATH DEV_STUDIO PERL5LIB
+
+#-----------------------------------------------------------------
+#
+# Create the most actual develop iprofile for this release
+#
+cd $OWN
+cp /rel/Skeleton .iprofile.skel
+IgmeRelease="`echo $Release | cut -c1`.`echo $Release | cut -c2`"
+IgmeVersion="`$TOOL/bin/igme -l | cut -c1-15 | grep develop | grep "^$IgmeRelease" | sort -n | tail -1`"
+$TOOL/bin/igme -f .iprofile $IgmeVersion
+#-----------------------------------------------------------------
+
+if [ -d $TOOL ]; then
+
+    if [ -r $OWN/.iprofile ]; then
+      . $OWN/.iprofile
+
+      if [ -f $HOME/.vdnvars ]; then
+          . $HOME/.vdnvars
+      else
+          echo "can't find .vdnvars "
+      fi
+
+      TOOLVARS=$TOOL/bin/toolvars.pl export TOOLVARS
+
+      DBTERM=vt100_hp
+      export DBTERM
+
+      umask 0002
+
+      cd $OWN
+      echo
+      echo "==================================================================="
+      echo ---  `uname -a`  ---
+      echo "==================================================================="
+
+    else
+        echo "can't read .iprofile"
+    fi
+else
+    echo "can't find $TOOL"
+fi
+
+echo "--------------"
+echo "Doing iclear to clear tmp directories"
+iclear
+echo "--------------"
+echo "Doing imf all"
+imf all
+echo " ---------------"
+echo "Doing ims slowknl"
+ims slowknl
+echo  "----------------"
+echo "Doing imq quickknl"
+imq quickknl
+
+if [ "$BIT64" = "1" -a "$BIT32Supported" = "YES" ]; then
+   echo  "----------------"
+   echo "Doing imf -32 all32"
+   imf -32 all32
+fi
+
+echo "------------------------------"
+echo Compilation $OWN $Mode finished `date`
+echo "------------------------------"
+
+exit 0
+

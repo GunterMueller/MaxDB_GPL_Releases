@@ -1,0 +1,41 @@
+#!/usr/bin/perl
+# @(#)SAPDBHosts
+# only use to set the host names for sources and services
+#
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+use Env;
+
+if ($ENV{SAPDB_MAKE_LOCATION} eq "WDF")
+{
+$SAPDB_PROFILE_HOST="PWDFM017";     # release profiles
+$SAPDB_USER_HOST="PWDFM017";        # user data
+}
+elsif ($ENV{SAPDB_MAKE_LOCATION} eq "KLN")
+{
+$SAPDB_PROFILE_HOST="P47368";     # release profiles
+$SAPDB_USER_HOST="p47368";        # user data
+}
+else
+{
+$SAPDB_PROFILE_HOST="p30883";     # release profiles
+$SAPDB_USER_HOST="p30883";        # user data
+}

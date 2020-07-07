@@ -1,0 +1,294 @@
+.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA09TC$
+.tt 2 $$$
+.TT 3 $BurkhardD$THREAD HANDLING$1999-11-08$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+#ifndef DEBUG
+#line 20 "vpa09tc"
+#endif
+#ifndef WIN32
+typedef void *LPVOID;
+#endif
+
+#include "heo07.h"
+
+#include "vpa00global.h"
+#include "vpa40DBC.h"
+#include "vpa60Stmt.h"
+
+LPVOID pa09GetTLS(DWORD index);
+VOID pa09FreeTLS();
+
+#define PA07TLS_TRACE (0)
+LPVOID pa07InitTraceValues();
+
+#define PA09TLS_ASYNC (1)
+typedef struct {
+  DWORD recursive;
+  tpa60Stmt *stmt_block_ptr;
+  tpa40DBC  *dbc_block_ptr;
+} pa09AsyncLocals;
+
+LPVOID pa09InitAsyncValues();
+
+#define PA09TLS_INDEXLAST PA09TLS_ASYNC
+
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 10-28-1996
+.sp
+.cp 3
+Version : 1996-10-28
+.sp
+.cp 3
+Release :      Date : 1999-11-08
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 87 "vpa09tc"
+#endif
+
+typedef struct {
+   LPVOID *p[PA09TLS_INDEXLAST+1];
+} pa09ThreadLocals;
+
+pa09ThreadLocals pa09ThreadValues;
+
+tsp00_Int4 pa09TlsIndex=0;
+static int TlsInit = FALSE;
+DWORD pa09ThreadCount=0;
+DWORD pa09Multithreaded=TRUE;
+
+void pa09InitMultiThreading (tsp00_ErrTextc errTxt, teo07_ThreadErr *ok)
+{
+  static int first = TRUE;
+  teo07_Thread     thisThread;
+
+  if (first == TRUE) {
+    sqlinit_multithreading (&thisThread, errTxt, ok);
+    first = FALSE;
+  }
+}
+
+LPVOID pa09GetTLS(DWORD index)
+{
+    LPVOID            lpVI;
+    pa09ThreadLocals *lpV;
+    tsp00_ErrTextc    errtext;
+    teo07_ThreadErr   notok;
+    
+#ifdef ASYNCENABLED   
+    if (!TlsInit) {           /* PTS 1120833 */
+/* initialize multithreading (Windows see vpa30wc) PTS 1121003 
+   http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1124459 */
+        sqlcreatetls( &pa09TlsIndex, errtext, &notok);
+        TlsInit = TRUE;
+        if (notok) {
+            if (notok == THR_NOT_IMPLEMENTED_EO07)
+                pa09Multithreaded = FALSE;
+            else {
+                UCHAR szTmp[255];
+                
+                API_SPRINTF( (char*) szTmp, "sqlcreatetls [%s]", errtext);
+                API_EXIT_MSG(szTmp);
+            }
+        }
+    }
+    if (pa09Multithreaded)
+        lpV = sqlgettls(pa09TlsIndex);
+    else
+        lpV = &pa09ThreadValues;
+    if (!lpV) {
+        UCHAR ok;
+        sqlallocat( sizeof(pa09ThreadLocals), (UCHAR**) &lpV, &ok);
+        if (ok) {       
+            API_MEMSET(lpV, 0, sizeof(pa09ThreadLocals));
+            sqlsettls( pa09TlsIndex, lpV, errtext, &notok);
+            if (notok) {
+                UCHAR FAR szTmp[255];
+                API_SPRINTF( (char*) szTmp, "sqlsettls [%s]", errtext);
+                API_EXIT_MSG("sqlsettls");
+            }
+            pa09ThreadCount++;
+        }
+    }
+#else 
+    lpV = &pa09ThreadValues;
+#endif   
+    lpVI = lpV->p[index];
+    if (!lpVI) {
+        switch(index) {
+        case (PA07TLS_TRACE) : {
+            lpVI = pa07InitTraceValues();
+            break;
+        }
+        case (PA09TLS_ASYNC) : {
+            lpVI = pa09InitAsyncValues();
+            break;
+        }
+        }
+        lpV->p[index] = lpVI;
+    }
+    return(lpVI);
+} /* pa09GetTLS */
+
+
+#ifdef ASYNCENABLED
+VOID pa09FreeTLS()
+{
+    int               i;
+    tsp00_ErrTextc    errtext;
+    teo07_ThreadErr   notok;
+    pa09ThreadLocals *lpV;
+    
+//    if (pa09TlsIndex == 0)
+    if (!TlsInit)
+        return;
+    lpV = (pa09ThreadLocals FAR *)sqlgettls(pa09TlsIndex);
+    if (lpV) {
+        sqlsettls(pa09TlsIndex, NULL, errtext, &notok);
+#ifdef WIN32
+        if (!IsBadReadPtr(lpV, sizeof(pa09ThreadLocals))) {
+#endif
+            for(i=0; i < sizeof(pa09ThreadLocals)/sizeof(LPVOID); i++) {
+                if(lpV->p[i]) 
+                    sqlfree( (UCHAR*) lpV->p[i]);
+            }
+            sqlfree((UCHAR*) lpV);
+#ifdef WIN32
+        }
+#endif
+        pa09ThreadCount--;
+    }
+    if (pa09ThreadCount == 0) {
+        sqldestroytls( pa09TlsIndex, errtext, &notok);
+        pa09TlsIndex = 0;
+        TlsInit = FALSE;
+    }
+    return;
+} /* pa09FreeTLS */
+#else
+pa09AsyncLocals  pa09AsyncValues;
+#endif
+
+LPVOID pa09InitAsyncValues()
+{
+    pa09AsyncLocals *lpV;
+    UCHAR            ok;
+    
+#ifdef ASYNCENABLED
+    sqlallocat( sizeof(pa09AsyncLocals), (UCHAR**) &lpV, &ok);
+    if (ok) {
+        API_MEMSET(lpV, 0, sizeof(pa09AsyncLocals));
+    }
+    else
+        lpV = NULL;
+#else
+    lpV = &pa09AsyncValues;
+#endif
+    return(lpV);
+} /* pa09InitAsyncValues */
+
+#ifdef ASYNCENABLED
+teo07_Mutex pa09CritSec=0;
+
+
+VOID pa09ProtectThread()
+{
+    if(!pa09CritSec) {
+        sqlcreatemutex(&pa09CritSec);
+    }
+    sqlbeginmutex(&pa09CritSec);   
+} /* pa09ProtectThread */
+
+
+VOID pa09UnProtectThread()
+{
+    sqlendmutex(&pa09CritSec);
+} /* pa09UnProtectThread */
+
+
+void pa09DeleteCriticalSection()
+{
+    if(pa09CritSec) {
+        sqldestroymutex(&pa09CritSec);
+        pa09CritSec = NULL;
+    }
+} /* pa09DeleteCriticalSection */
+#endif
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

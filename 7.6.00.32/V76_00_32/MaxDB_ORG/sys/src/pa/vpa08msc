@@ -1,0 +1,1888 @@
+s.ad 8
+.bm 8
+.fm 4
+.bt $Copyright (c) 2000-2005 SAP AG$$Page %$
+.tm 12
+.hm 6
+.hs 3
+.tt 1 $SQL$Project Distributed Database System$VPA08MSC$
+.tt 2 $$$
+.tt 3 $BurkhardD$MISCELLANEOUS FUNCTONS$$2001-06-26$
+***********************************************************
+.nf
+
+.nf
+
+.nf
+
+    ========== licence begin  GPL
+    Copyright (c) 2000-2005 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+
+
+.fo
+
+
+.fo
+Module  :
+=========
+.sp
+Purpose :
+.CM *-END-* purpose -------------------------------------
+Define  :
+#ifndef DEBUG
+#line 21 "vpa08msc"
+#endif
+
+#include "vpa40DBC.h"
+
+#include "vpr05IfCom_String.h"
+#include "hsp78_0.h"
+
+typedef struct ComboBoxListStruct {
+   UCHAR Item[19];
+   SDWORD ItemID;
+   SWORD Default;
+} pa08ComboBoxListType;
+
+/* Prototypes */
+API_RETCODE pa08FromListGetString(pa08ComboBoxListType *pList, SDWORD cbValue, UCHAR FAR *szOutStr, SWORD cbOutStrMax);
+API_RETCODE pa08FromListGetInt4(pa08ComboBoxListType *pList, SQLWCHAR *szInStr, SDWORD *cbValue);
+API_RETCODE pa08GetDSNOptions (tpa40DBC      *dbc_ptr, 
+                               tpr05_String  *profileStr,
+                               const tsp77encoding *encodingType);
+BOOL pa08GetODBCProfile (UCHAR FAR *section,
+                         UCHAR FAR *entry,
+                         UCHAR FAR *profstr_ptr,
+                         SWORD profstr_max,
+                         SWORD FAR *profstr_len,
+                         SWORD FAR *default_dsn,
+                         tpr05_String *profileStr);
+BOOL pa08GetODBCProfileW (SQLWCHAR FAR *section,
+                          SQLCHAR  FAR *entry,
+                          SQLWCHAR FAR *profstr_ptr,
+                          SWORD profstr_max,
+                          SWORD FAR *profstr_len,
+                          SWORD FAR *default_dsn,
+                          SQLWCHAR FAR *szProfileStr);
+
+SWORD pa08GetProfileString (UCHAR FAR *lpszSection,
+                            UCHAR FAR *lpszEntry,
+                            UCHAR FAR *lpszDefault,
+                            UCHAR FAR *lpszReturnBuffer,
+                            SDWORD cbReturnBuffer,
+                            UCHAR FAR *szProfileStr);
+SWORD pa08GetProfileStringW ( SQLWCHAR *lpszSection, 
+                              SQLWCHAR *lpszEntry, 
+                              SQLWCHAR *lpszDefault,
+                              SQLWCHAR *lpszReturnBuffer, 
+                              SDWORD cbReturnBuffer, 
+                              SQLWCHAR *szProfileStr);
+
+UCHAR FAR* pa08compare(UCHAR FAR *s, UCHAR FAR *szString, char c);
+VOID pa08DefaultConnection(tpa40DBC FAR * dbc_ptr);
+
+SWORD pa08GetProfileString_Tpr05String(UCHAR FAR *lpszSection, UCHAR FAR *lpszEntry, UCHAR FAR *lpszDefault, tpr05_String *lpszReturnStr, UCHAR FAR *szProfileStr);
+tsp81_UCS2Char* pa08compareW (tsp81_UCS2Char *s, tsp81_UCS2Char *szString, tsp81_UCS2Char *c);
+
+void pa08UnqoutedStringtoUpper (tpr05_String *);
+void pa08rmspace_tpr05String   (tpr05_String *);
+
+
+
+.CM *-END-* define --------------------------------------
+Use     :
+.CM *-END-* use -----------------------------------------
+Synonym :
+.CM *-END-* synonym -------------------------------------
+.sp;.cp 3
+Author  : BurkhardD
+.sp
+.cp 3
+Created : 1993-09-13
+.sp
+.cp 3
+Version : 1994-04-25
+.sp
+.cp 3
+Release :  7.3    Date : 2001-06-26
+.sp
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.CM -lll-
+Code    :
+#ifndef DEBUG
+#line 78 "vpa08msc"
+#endif
+
+static UCHAR FAR pa08odbcinifile[] = "odbc.ini";
+static UCHAR FAR pa08defaultentry[] = "DEFAULT";
+
+#ifdef WIN32
+#include <odbcinst.h>
+#else
+/* from vpa07c */
+#define SQLGetPrivateProfileString  GetPrivateProfileString
+#define SQLGetPrivateProfileStringW  GetPrivateProfileStringW
+SWORD GetPrivateProfileString(UCHAR FAR *lpszSection, UCHAR FAR *lpszEntry, UCHAR FAR *lpszDefault,
+UCHAR FAR *lpszReturnBuffer, SWORD cbReturnBuffer, UCHAR FAR *lpszFileName);
+#endif
+extern SDWORD pa07blockmodus;
+
+#include <ctype.h>
+void s45r4tos (SFLOAT val, char *buf, int pos, int len, 
+int *rlen, char *res);
+void s45r8tos (SDOUBLE val, char *buf, int pos, int len, 
+int *rlen, char *res);
+#ifdef SCO
+char *API_ECVT(double value, size_t ndigit, int *decpt, int *sign);
+#endif
+
+UCHAR FAR *PA08_FN_DEFAULTCONNECTION = { (UCHAR*) "pa08DefaultConnection" };
+
+#define SQL_AUTOCOMMIT_OFF 0UL
+#define SQL_AUTOCOMMIT_ON  1UL
+#define SQL_AUTOCOMMIT_DEFAULT SQL_AUTOCOMMIT_ON
+
+UCHAR FAR *PA07_SQLMODE_ORACLE   = { (UCHAR*) "ORACLE" };
+UCHAR FAR *PA07_SQLMODE_INTERNAL = { (UCHAR*) "INTERNAL" };
+UCHAR FAR *PA07_SQLMODE_SAPR3    = { (UCHAR*) "SAPR3" };
+UCHAR FAR *PA07_SQLMODE_ANSI     = { (UCHAR*) "ANSI" };
+UCHAR FAR *PA07_SQLMODE_DB2      = { (UCHAR*) "DB2" };
+
+pa08ComboBoxListType pa07SQLModeList[] = {
+{"INTERNAL", CPR_KIND_INTERNAL,  TRUE},
+{"DB2",      CPR_KIND_DB2,    FALSE},
+{"ANSI",     CPR_KIND_ANSI,   FALSE},
+{"ORACLE",   CPR_KIND_ORACLE, FALSE},
+{"",         0,               FALSE}
+};
+
+pa08ComboBoxListType pa07IsolationLevelList[] = {
+{"Uncommitted",  SQL_TXN_READ_UNCOMMITTED, FALSE},
+{"Committed",    SQL_TXN_READ_COMMITTED, TRUE},
+{"Repeatable",   SQL_TXN_REPEATABLE_READ, FALSE},
+{"Serializable", SQL_TXN_SERIALIZABLE, FALSE},
+{"",             0, FALSE}
+};
+
+pa08ComboBoxListType pa07TruncationList[] = {
+{"SQL_NO_TOTAL", API_SQL_NO_TOTAL,     TRUE},
+{"LONG_MAX",     API_LONG_MAX,         FALSE},
+{"cbValueMax",   API_VALUEMAX,         FALSE},
+{"cbValueMax+1", API_VALUEMAX_PLUSONE, FALSE},
+{"",             0,                    FALSE}
+};
+
+pa08ComboBoxListType pa07EncryptionList[] = {
+{"OFF", SQL_ATTR_ENCRYPT_OFF, TRUE},
+{"SSL", SQL_ATTR_ENCRYPT_SSL, FALSE},
+{"",    0,                    FALSE}
+};
+
+API_RETCODE apucpar( tpr05_String *string,
+                     /*                     UCHAR *dsname_ptr,
+                                            SDWORD dsname_max_len,*/
+                     tpr05_String *dsnameStr,
+                     tpr05_String *userStr,
+                     tpr05_String *passwStr,
+/*                    UCHAR *userid_ptr,
+                     SDWORD userid_max_len, 
+                     UCHAR *passwd_ptr,
+                     SDWORD passwd_max_len,   */
+                     UCHAR *serverdb_ptr,
+                     SDWORD serverdb_max_len,
+                     UCHAR *servernode_ptr,
+                     SDWORD servernode_max_len,
+                     UCHAR *driverName_ptr,                /* PTS 1108230 */
+                     SDWORD driverName_max_len) 
+{
+    UCHAR *string_ptr     = (UCHAR*) string->rawString;
+    UCHAR *userid_ptr     = (UCHAR*) userStr->rawString;
+    SDWORD userid_max_len = userStr->cbMaxLen;
+    UCHAR *passwd_ptr     = (UCHAR*) passwStr->rawString;
+    SDWORD passwd_max_len = passwStr->cbMaxLen;
+
+    tpr05_String *serverdbStr, *servernodeStr;
+    tpr05_String *drivernameStr;
+    tsp00_Uint4 destBytesWritten, srcBytesParsed;
+    
+    API_RETCODE api_retcode = API_OK;
+    API_TRACE(API_TR_ENTRY,"apucpar",0);
+
+
+/*     if (string->encodingType != sp77encodingAscii) */
+/*       return API_NOT_OK; */
+
+    dsnameStr->cbLen = 
+      pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_DSN, (UCHAR*) "",
+                                        dsnameStr, string_ptr);
+    userStr->cbLen = 
+      pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_DRIVERCONN_USERID,
+                                        (UCHAR FAR *) "", userStr, string_ptr);  
+
+    {
+#ifndef SAPDB_FAST
+        SWORD trace_status=api_trace_status;
+        api_trace_status = 2;      
+#endif
+        passwStr->cbLen =
+          pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_DRIVERCONN_PASSWD,
+                                            (UCHAR*) "", passwStr, string_ptr);
+#ifndef SAPDB_FAST
+        api_trace_status=trace_status;
+#endif
+    }
+
+    serverdbStr = pr05IfCom_String_NewDynString
+                    (9 * dsnameStr->encodingType->fixedCharacterSize,
+                     dsnameStr->encodingType);
+/*     pr05IfCom_String_strcatP (serverdbStr, serverdb_ptr, API_STRLEN (serverdb_ptr), */
+/*                               sp77encodingAscii); */
+
+    servernodeStr = pr05IfCom_String_NewDynString
+                      (servernode_max_len * dsnameStr->encodingType->fixedCharacterSize,
+                       dsnameStr->encodingType);
+/*     pr05IfCom_String_strcatP (servernodeStr, servernode_ptr, API_STRLEN (servernode_ptr), */
+/*                               sp77encodingAscii); */
+
+    serverdbStr->cbLen = 
+      pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_SERVERDB, (UCHAR*) "",
+                                        serverdbStr, string_ptr);
+    if (serverdbStr->cbLen == 0) {
+      serverdbStr->cbLen = 
+        pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_SERVERDB2, (UCHAR*) "",
+                                          serverdbStr, string_ptr);  
+    }
+
+    servernodeStr->cbLen = 
+      pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_SERVERNODE, (UCHAR*) "",
+                                        servernodeStr, string_ptr);  
+
+    if (servernodeStr->cbLen == 0) {
+      servernodeStr->cbLen = 
+        pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_SERVERNODE2, (UCHAR*) "",
+                                          servernodeStr, string_ptr);  
+    }
+
+    /*
+    pa08GetProfileString (NULL, (UCHAR*) API_SEC_SERVERDB, (UCHAR*) "",
+                          serverdb_ptr, serverdb_max_len, string_ptr);
+    pa08GetProfileString (NULL, (UCHAR*) API_SEC_SERVERNODE, (UCHAR*) "",
+                          servernode_ptr, servernode_max_len, string_ptr);  
+    */
+
+    sp78convertString (sp77encodingAscii,
+                       serverdb_ptr, serverdb_max_len,
+                       &destBytesWritten,
+                       TRUE,
+                       serverdbStr->encodingType,
+                       serverdbStr->rawString, serverdbStr->cbLen,
+                       &srcBytesParsed);
+    sp78convertString (sp77encodingAscii,
+                       servernode_ptr, servernode_max_len,
+                       &destBytesWritten,
+                       TRUE,
+                       servernodeStr->encodingType,
+                       servernodeStr->rawString, servernodeStr->cbLen,
+                       &srcBytesParsed);
+
+    pr05IfCom_String_DeleteString (serverdbStr);
+    pr05IfCom_String_DeleteString (servernodeStr);
+
+    /* PTS 1108230 */
+    drivernameStr = pr05IfCom_String_NewDynString
+                    (driverName_max_len * dsnameStr->encodingType->fixedCharacterSize,
+                     dsnameStr->encodingType);
+    drivernameStr->cbLen = 
+      pa08GetProfileString_Tpr05String (NULL, (UCHAR*) API_SEC_DRIVERNAME, (UCHAR*) "",
+                                        drivernameStr, string_ptr);  
+    if (drivernameStr->cbLen > 0)
+    {
+      int offs = 0;
+      /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1136245 */
+      if (drivernameStr->encodingType == sp77encodingAscii) {
+        if (drivernameStr->rawString[0] == '{')
+          offs = 1;
+      } else {
+        UCHAR c;
+        tsp81_UCS2Char bracketOpen;
+        unsigned int   dummy;
+
+        c = '{';
+        sp81ASCIItoUCS2 ( &bracketOpen, 1,
+                          drivernameStr->encodingType == sp77encodingUCS2Swapped,
+                          &dummy, &c, 1);
+
+        if (((tsp81_UCS2Char*) drivernameStr->rawString)->s == bracketOpen.s)
+          offs = drivernameStr->encodingType->fixedCharacterSize;
+      }
+
+
+      sp78convertString (sp77encodingAscii,
+                         driverName_ptr, driverName_max_len,
+                         &destBytesWritten,
+                         TRUE,
+                         drivernameStr->encodingType,
+                         &drivernameStr->rawString[offs], drivernameStr->cbLen-(offs*2),
+                         &srcBytesParsed);
+    }
+      pr05IfCom_String_DeleteString (drivernameStr);
+    /*    
+    API_TRACE(API_TR_STRING, "dsname", dsname_ptr);
+    API_TRACE(API_TR_STRING, "userid", userid_ptr);
+    API_TRACE(API_TR_STRING, "servernode", servernode_ptr);
+    API_TRACE(API_TR_STRING, "serverdb", serverdb_ptr);
+    API_TRACE(API_TR_STRING, "driverName", driverName_ptr);
+    API_TRACE(API_TR_EXIT, "apucpar", 0);
+    API_TRACE(API_TR_API_RETCODE,"api_retcode",&api_retcode);
+    */
+    return(api_retcode);
+} /* apucpar */
+
+
+
+#define     ADD_DRIVERCONN_STRING(API_DRIVERCONN, string) \
+    if (string != NULL && api_retcode == API_OK) { \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN, \
+                                          sizeof (API_DRIVERCONN)-1, \
+                                          sp77encodingAscii); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN_EQUAL, \
+                                          sizeof (API_DRIVERCONN_EQUAL)-1, \
+                                          sp77encodingAscii); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcat (returnStr, string); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN_SEPERATOR, \
+                                          sizeof (API_DRIVERCONN_SEPERATOR)-1, \
+                                          sp77encodingAscii); \
+        else \
+          api_retcode = API_NOT_OK; \
+    }
+
+#define     ADD_DRIVERCONN_ASC_STRING(API_DRIVERCONN, string) \
+    if (string != NULL && api_retcode == API_OK) { \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN, \
+                                          sizeof (API_DRIVERCONN)-1, \
+                                          sp77encodingAscii); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN_EQUAL, \
+                                          sizeof (API_DRIVERCONN_EQUAL)-1, \
+                                          sp77encodingAscii); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          (char*) string, \
+                                          (tsp00_Uint4) API_STRLEN (string), \
+                                          sp77encodingAscii); \
+        if (err == ok_epr05) \
+          err = pr05IfCom_String_strcatP (returnStr, \
+                                          API_DRIVERCONN_SEPERATOR, \
+                                          sizeof (API_DRIVERCONN_SEPERATOR)-1, \
+                                          sp77encodingAscii); \
+        else \
+          api_retcode = API_NOT_OK; \
+    }
+
+
+/* pa08MakeConnectString () - makes a connect string for SQLDriverConnect and
+   SQLBrowseConnect. If flag browse_conn is set, the connect string will not
+   contain empty settings (e.g.: browse_conn = TRUE:   "DSN=ABC;UID=;" 
+                                 browse_conn = FALSE:  "DSN=ABC;" 
+*/
+API_RETCODE pa08MakeConnectString ( tpr05_String *returnStr,
+                                    tpr05_String *dsname,
+                                    tpr05_String *userid,
+                                    tpr05_String *passwd,
+                                    UCHAR *serverdb,
+                                    UCHAR *servernode,
+                                    UCHAR *drivername,
+                                    int   browse_conn)
+{
+    /* this function builds the   */
+    /* output connect string as   */
+    /* described on page 250 of   */
+    /* the ODBC book section on   */
+    /* the SQLBrowseConnect       */
+
+    RETCODE              api_retcode = API_OK;
+    tpr05_StringError    err         = ok_epr05;
+    UCHAR l_drivername[API_DATA_SOURCE_MAX_LEN+2];
+
+    API_TRACE (API_TR_ENTRY, "pa08MakeConnectString", 0);
+
+    /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1136245 */
+    if (drivername != NULL) {
+      char hasSemikolon = FALSE;
+      unsigned int i;
+
+      for (i=0; i<API_STRLEN (drivername); i++)
+        if (drivername[i] == ';')
+          hasSemikolon = TRUE;
+
+      if (hasSemikolon) {
+        l_drivername[0] = '{';
+        API_STRNCPY (l_drivername+1, drivername, API_DATA_SOURCE_MAX_LEN);
+        API_STRCAT (l_drivername, "}");
+      } else
+        API_STRNCPY (l_drivername, drivername, API_DATA_SOURCE_MAX_LEN);
+
+    }
+
+    pr05IfCom_String_ClearString (returnStr);
+    if (dsname && dsname->cbLen > 0)
+      ADD_DRIVERCONN_STRING (API_DRIVERCONN_DSNAME, dsname);
+    if (userid && (!browse_conn || userid->cbLen > 0))
+      ADD_DRIVERCONN_STRING (API_DRIVERCONN_USERID, userid);
+    if (passwd && (!browse_conn || passwd->cbLen > 0))
+      ADD_DRIVERCONN_STRING (API_DRIVERCONN_PASSWD, passwd);
+    if (serverdb && (!browse_conn || API_STRLEN (serverdb) > 0))
+      ADD_DRIVERCONN_ASC_STRING (API_DRIVERCONN_SERVERDB, serverdb);
+    if (servernode && (!browse_conn || API_STRLEN (servernode) > 0))
+      ADD_DRIVERCONN_ASC_STRING (API_DRIVERCONN_SERVERNODE, servernode);
+    if (drivername && API_STRLEN (drivername) > 0)
+      ADD_DRIVERCONN_ASC_STRING (API_DRIVERCONN_DRIVERNAME, l_drivername);
+   
+    API_TRACE(API_TR_EXIT, "pa08MakeConnectString", 0);
+    return(api_retcode);
+} /* pa08MakeConnectString */
+
+
+BOOL pa08GetODBCProfile( UCHAR  *section, 
+                         UCHAR  *entry, 
+                         UCHAR  *profstr_ptr,
+                         SWORD  profstr_max,
+                         SWORD *profstr_len,
+                         SWORD *default_dsn,
+                         tpr05_String  *profileStr)
+{
+    UCHAR *szProfileStr;
+    BOOL retcode=TRUE;
+
+    if (profileStr && profileStr->encodingType != sp77encodingAscii) {
+      pa08GetODBCProfileW ((SQLWCHAR*) section, entry, 
+                           (SQLWCHAR*) profstr_ptr, profstr_max,
+                           profstr_len, default_dsn, 
+                           (SQLWCHAR*) profileStr->rawString);
+      goto exit;
+    }
+    else
+      szProfileStr = profileStr == NULL ? NULL : (UCHAR*) profileStr->rawString;
+
+    if (profstr_ptr && profstr_max > 1) {
+        API_STRCPY(profstr_ptr, "?");
+        *profstr_len = (SWORD)API_STRLEN(profstr_ptr);		       
+    }
+    if (section != NULL && (section[0] != '\0' || szProfileStr)) {
+        if (!szProfileStr) {
+            SQLGetPrivateProfileString( section, entry, (UCHAR*) "?",
+                                        (UCHAR*) profstr_ptr, profstr_max,
+                                        (UCHAR*) pa08odbcinifile);
+        }
+        else {
+            pa08GetProfileString(NULL, entry, (UCHAR*) "?",
+                                 (UCHAR*) profstr_ptr, profstr_max,
+                                 szProfileStr);
+        }
+        API_TRACE(API_TR_STRING, "profstr_ptr", profstr_ptr);
+        if (API_STRLEN(profstr_ptr) == 1 && *profstr_ptr == '?') {
+            if (!szProfileStr) {
+                SQLGetPrivateProfileString((UCHAR*) pa08defaultentry,
+                                           (UCHAR*) entry, (UCHAR*) "?",
+                                           (UCHAR*) profstr_ptr, profstr_max,
+                                           (UCHAR*) pa08odbcinifile);
+            }
+            else {
+                pa08GetProfileString(NULL, (UCHAR*) entry,
+                                     (UCHAR*) "?", (UCHAR*) profstr_ptr,
+                                     profstr_max, szProfileStr);
+            }
+            if (API_STRLEN(profstr_ptr) == 1 && *profstr_ptr == '?') 
+                retcode = FALSE;    	
+            else *default_dsn=API_TRUE;
+        }
+        if (retcode) 
+            *profstr_len = (SWORD)API_STRLEN(profstr_ptr);		       
+    }
+
+ exit:
+    API_TRACE(API_TR_SWORD, "pa08GetODBCProfile", &retcode);
+    return(retcode);
+} /* pa08GetODBCProfile */
+
+BOOL pa08GetODBCProfileW( SQLWCHAR  *section, 
+                          SQLCHAR   *entry, 
+                          SQLWCHAR  *profstr_ptr,
+                          SWORD  profstr_max,
+                          SWORD *profstr_len,
+                          SWORD *default_dsn,
+                          SQLWCHAR  *szProfileStr)
+{
+    BOOL retcode=TRUE;
+    SQLWCHAR entryW[64];
+    SQLWCHAR inifileW[64];
+    SQLWCHAR defaultW[64];
+    tsp81_UCS2Char questionmark[2];
+    tsp81_UCS2Char *profStr = (tsp81_UCS2Char*) profstr_ptr;
+    tsp00_Uint4 destBytesWritten, srcBytesParsed;
+
+    /* convert entry to Unicode */
+    sp78convertString (sp77encodingUCS2Native,
+                       entryW, sizeof (entryW),
+                       &destBytesWritten,
+                       TRUE,
+                       sp77encodingAscii,
+                       entry,  (tsp00_Uint4) API_STRLEN (entry),
+                       &srcBytesParsed);
+
+    sp78convertBuffer (sp77encodingUCS2Native,
+                       questionmark, sizeof(questionmark),
+                       &destBytesWritten,
+                       sp77encodingAscii,
+                       "?", sizeof ("?"),
+                       &srcBytesParsed);
+
+    sp78convertString (sp77encodingUCS2Native,
+                       inifileW, sizeof(inifileW),
+                       &destBytesWritten,
+                       TRUE,
+                       sp77encodingAscii,
+                       pa08odbcinifile, (tsp00_Uint4) API_STRLEN(pa08odbcinifile),
+                       &srcBytesParsed);
+                       
+    sp78convertString (sp77encodingUCS2Native,
+                       defaultW, sizeof(defaultW),
+                       &destBytesWritten,
+                       TRUE,
+                       sp77encodingAscii,
+                       pa08defaultentry, (tsp00_Uint4) API_STRLEN(pa08defaultentry),
+                       &srcBytesParsed);
+
+    if (profstr_ptr && profstr_max > 1) {
+        sp81UCS2strcpy (profStr, questionmark);
+        *profstr_len = (SWORD)sp81UCS2strlen (profStr);
+    }
+    if (section != NULL && (((tsp81_UCS2Char*)section)->s != 0 || szProfileStr)) {
+        if (!szProfileStr) {
+            SQLGetPrivateProfileStringW (section, entryW, questionmark,
+                                        profstr_ptr, profstr_max / sizeof(SQLWCHAR),
+                                        inifileW);
+        }
+        else {
+            pa08GetProfileStringW (NULL, entryW, (SQLWCHAR*) questionmark,
+                                   profstr_ptr, profstr_max,
+                                   szProfileStr);
+        }
+        API_TRACE(API_TR_STRING, "profstr_ptr", profstr_ptr);
+        if (sp81UCS2strlen (profStr) == 1 && profStr->s == questionmark[0].s) {
+            if (!szProfileStr) {
+                SQLGetPrivateProfileStringW (defaultW, entryW, questionmark,
+                                             profstr_ptr, profstr_max / sizeof(SQLWCHAR),
+                                             inifileW);
+            }
+            else {
+                pa08GetProfileStringW (NULL, entryW,
+                                       (SQLWCHAR*) questionmark, profstr_ptr,
+                                       profstr_max, szProfileStr);
+            }
+            if (sp81UCS2strlen(profStr) == 1 && 
+                profStr->s == questionmark[0].s)
+              retcode = FALSE;
+            else *default_dsn=API_TRUE;
+        }
+        if (retcode) 
+            *profstr_len = (SWORD)sp81UCS2strlen (profStr);		       
+    }
+    API_TRACE(API_TR_SWORD, "pa08GetODBCProfile", &retcode);
+    return(retcode);
+} /* pa08GetODBCProfileW */
+
+
+#ifndef SQLSP32
+API_RETCODE pa08GetDSNOptions (tpa40DBC      *dbc_ptr, 
+                               tpr05_String  *profileStr,
+                               const tsp77encoding *encodingType)
+{
+    char *parm_ptr = NULL;
+    UCHAR profstr[FILENAME_MAX > sizeof(tsp00_VFilename) ? FILENAME_MAX : sizeof(tsp00_VFilename)];
+    SQLWCHAR section[512];
+    SQLWCHAR *profileStrW = NULL;
+    SQLWCHAR profileStringBufferW[512];
+    SWORD len;
+    BOOL ret;
+    SWORD deflt_dsn=API_FALSE;
+    API_RETCODE retcode;
+    UCHAR *servernode = NULL;
+    tsp00_Uint4 destBytesWritten, srcBytesParsed;
+    tsp81_UCS2Char questionmark, yW;
+    UCHAR c;
+    unsigned int dummy;
+
+    sp78convertString (sp77encodingUCS2Native,
+                       &questionmark, sizeof(questionmark),
+                       &destBytesWritten,
+                       TRUE,
+                       sp77encodingAscii,
+                       "?", 1,
+                       &srcBytesParsed);
+
+    c = 'Y';
+    sp81ASCIItoUCS2 ( &yW, 1,
+                      encodingType == sp77encodingUCS2Swapped,
+                      &dummy, &c, 1);
+    
+    retcode = API_OK;
+    API_TRACE(API_TR_ENTRY,"pa08GetDSNOptions",0);
+
+    /* append always terminator */
+    API_MEMCPY (section, encodingType->charTable->terminator.bytes,
+                encodingType->charTable->terminator.byteCount);
+
+    /* if necessary, convert all ASCII to Unicode */
+    if (dbc_ptr->dsname->rawString != NULL)
+        sp78convertString (sp77encodingUCS2Native,
+                           section, sizeof (section),
+                           &destBytesWritten,
+                           TRUE,
+                           dbc_ptr->dsname->encodingType,
+                           dbc_ptr->dsname->rawString,
+                           dbc_ptr->dsname->cbLen,
+                           &srcBytesParsed);
+
+    if (profileStr != NULL) {
+      sp78convertString (sp77encodingUCS2Native,
+                         profileStringBufferW, sizeof (profileStringBufferW),
+                         &destBytesWritten,
+                         TRUE,
+                         profileStr->encodingType,
+                         profileStr->rawString,
+                         profileStr->cbLen,
+                         &srcBytesParsed);
+      profileStrW = profileStringBufferW;
+    }
+          
+
+    if (dbc_ptr->constmtopt.sqlmode == CPR_KIND_EMPTY) {
+        SDWORD sqlmode = CPR_KIND_INTERNAL;
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_SQLMODE,
+                                   (SQLWCHAR*) profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+            API_TRACE(API_TR_STRING, "sqlmode", profstr);
+            aputoupW ((tsp81_UCS2Char*) profstr);
+            retcode = pa08FromListGetInt4 (pa07SQLModeList, (SQLWCHAR*)profstr, &sqlmode);
+            if (retcode == API_OK) 
+                dbc_ptr->constmtopt.sqlmode = (SWORD)sqlmode;
+        }
+    }
+   
+    if (dbc_ptr->utility.component == COMP_ODBC) {
+        UDWORD component = COMP_ODBC;
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_COMPONENT,
+                                   (SQLWCHAR*) profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+            char buffer[20];
+            tsp00_Uint4 destBytesWritten, srcBytesParsed;
+
+            sp78convertString (sp77encodingAscii,
+                               buffer, sizeof (buffer),
+                               &destBytesWritten,
+                               TRUE,
+                               sp77encodingUCS2Native,
+                               profstr,  sp81UCS2strlen ((tsp81_UCS2Char*)profstr) * sizeof (tsp81_UCS2Char),
+                               &srcBytesParsed);
+          
+            component = atol (buffer);
+            if (errno == ERANGE) {
+                errno = 0;
+                component = COMP_ODBC;
+            }
+        }
+        dbc_ptr->utility.component = (UWORD)component;
+    }
+   
+    if (dbc_ptr->utility.service == sql_user) {
+        UDWORD service = sql_user;
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_SERVICE,
+                                   (SQLWCHAR*) profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+            char buffer[20];
+            tsp00_Uint4 destBytesWritten, srcBytesParsed;
+
+            sp78convertString (sp77encodingAscii,
+                               buffer, sizeof (buffer),
+                               &destBytesWritten,
+                               TRUE,
+                               sp77encodingUCS2Native,
+                               profstr,  sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                               &srcBytesParsed);
+
+            service = atol (buffer);
+            if (errno == ERANGE) {
+                errno = 0;
+                service = sql_user;
+            }
+        }
+        dbc_ptr->utility.service = (UWORD)service;
+    }
+   
+    /* -------  Get Longvarchar truncation behavior -------- */
+    if (retcode == API_OK) {
+        SDWORD lvctrunc = API_SQL_NO_TOTAL;
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_LONVARTRUNCATION,
+                                   (SQLWCHAR*) profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+            API_RETCODE api_retcode;
+            api_retcode = pa08FromListGetInt4( pa07TruncationList, (SQLWCHAR*)profstr, &lvctrunc);
+            if (api_retcode == API_NO_DATA_FOUND) {
+                char buffer[20];
+                tsp00_Uint4 destBytesWritten, srcBytesParsed;
+                SDWORD l;
+
+                sp78convertString (sp77encodingAscii,
+                                   buffer, sizeof (buffer),
+                                   &destBytesWritten,
+                                   TRUE,
+                                   sp77encodingUCS2Native,
+                                   profstr,  sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                                   &srcBytesParsed);
+                l = atol (buffer);
+                if (errno == ERANGE) {
+                    errno = 0;
+                }
+                else 
+                    lvctrunc = l;
+            }
+            API_TRACE(API_TR_SDWORD, "lvctrunc", &lvctrunc);
+        }
+        dbc_ptr->lvctrunc = lvctrunc;
+    }	
+   
+    /* -------  Get IsolationLevel -------- */
+    if (retcode == API_OK && dbc_ptr->isolevel == API_SQL_TXN_EMPTY) {
+        SDWORD isolevel = SQL_TXN_READ_COMMITTED;
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_ISOLATIONLEVEL,
+                                   (SQLWCHAR*) profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+            API_RETCODE api_retcode;
+            api_retcode = pa08FromListGetInt4( pa07IsolationLevelList, (SQLWCHAR*)profstr, &isolevel);
+            if (api_retcode == API_NO_DATA_FOUND) {
+                char buffer[20];
+                tsp00_Uint4 destBytesWritten, srcBytesParsed;
+                SDWORD l;
+
+                sp78convertString (sp77encodingAscii,
+                                   buffer, sizeof (buffer),
+                                   &destBytesWritten,
+                                   TRUE,
+                                   sp77encodingUCS2Native,
+                                   profstr,  sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                                   &srcBytesParsed);
+                l = atol (buffer);
+                if (errno == ERANGE) {
+                    errno = 0;
+                }
+                else 
+                    isolevel = l;
+            }
+            API_TRACE(API_TR_SDWORD, "isolevel", &isolevel);
+            dbc_ptr->defisolevel = dbc_ptr->isolevel = isolevel;
+        }
+    }	
+   
+    /* -------  Get TraceFileName -------- */
+    if (retcode == API_OK) {
+        sqltatype *sqltap;
+        sqltap = dbc_ptr->esqblk.sqlca.sqlrap->rasqltap;
+        if (sqltap->tatracefn[0] == '\0'
+            || sqltap->tatracety == CPR_TRACE_EMPTY) {
+            ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_SQLTRACEFILE,
+                                       (SQLWCHAR*) profstr, sizeof(profstr),
+                                       &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+            if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+                tsp00_Uint4 dummy1, dummy2;
+
+                sqlcxatype *sqlxap = dbc_ptr->esqblk.sqlca.sqlcxap;
+                /* precompiler trace file name still ASCII, but UTF8 may work also */
+                sp78convertString (sp77encodingUTF8,
+                                   sqltap->tatracefn, sizeof (sqltap->tatracefn)-1, &dummy1,
+                                   TRUE,
+                                   sp77encodingUCS2Native,
+                                   profstr, sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                                   &dummy2);
+
+                sqltap->tatrout = CPR_TRACE_LONG;
+                sqltap->tatracety = CPR_TRACE_LONG;
+            }
+        }
+    }	
+      
+    /* -------  Get Comments on Catalogfunctions -------- */
+    ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_CATALOGCOMMENTS,
+                               (SQLWCHAR*) profstr, sizeof(profstr),
+                               &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+    API_TRACE(API_TR_STRING, API_SEC_CATALOGCOMMENTS, profstr);
+    sp81UCS2ToUpper (*(tsp00_Uint2*) profstr);
+    if (((tsp81_UCS2Char*)profstr)->s == yW.s)       /* character Y */
+        dbc_ptr->catalogcomments = TRUE;
+    else
+        dbc_ptr->catalogcomments = FALSE;
+   
+    /* -------  Get Activestatements -------- */
+    ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_ACTIVESTATEMENTS,
+                               (SQLWCHAR*) profstr, sizeof(profstr),
+                               &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+    API_TRACE(API_TR_STRING, API_SEC_ACTIVESTATEMENTS, profstr);
+    dbc_ptr->activestatements = API_ACTIVESTATEMENTS;
+    if (((tsp81_UCS2Char*)profstr)->s != questionmark.s) {
+        char buffer[20];
+        tsp00_Uint4 destBytesWritten, srcBytesParsed;
+        SWORD i;
+
+        sp78convertString (sp77encodingAscii,
+                           buffer, sizeof (buffer),
+                           &destBytesWritten,
+                           TRUE,
+                           sp77encodingUCS2Native,
+                           profstr,  sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                           &srcBytesParsed);
+        
+        i = (SWORD)atoi (buffer);
+        if (errno == ERANGE)
+            errno = 0;
+        else
+            if (i >= 0)
+                dbc_ptr->activestatements = i;
+    }	
+
+    dbc_ptr->casesensitive = 1;
+   
+    ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_MAXBLOCKSIZE,
+                               (SQLWCHAR*) profstr, sizeof(profstr),
+                               &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+    if (((tsp81_UCS2Char*)profstr)->s != questionmark.s)
+        dbc_ptr->blocksize = SHRT_MAX;
+    else {
+        UDWORD blksz;
+        char buffer[20];
+        tsp00_Uint4 destBytesWritten, srcBytesParsed;
+
+        sp78convertString (sp77encodingAscii,
+                           buffer, sizeof (buffer),
+                           &destBytesWritten,
+                           TRUE,
+                           sp77encodingUCS2Native,
+                           profstr, sp81UCS2strlen ((tsp81_UCS2Char*) profstr) * sizeof (tsp81_UCS2Char),
+                           &srcBytesParsed);
+
+        blksz = atol (buffer);
+        if (errno == ERANGE) {
+            errno = 0;
+            blksz = SHRT_MAX;
+        } 
+        else {
+            if (blksz <= 0)
+                blksz = 1000;
+            if (blksz > SHRT_MAX)
+                blksz = SHRT_MAX;
+        }
+        dbc_ptr->blocksize = blksz;
+    }
+    /* encryption http://pts:1080/webpts?wptsdetail=yes&ErrorType=1&ErrorID=1133247 */
+    ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_ENCRYPT,
+                               (SQLWCHAR*) profstr, sizeof(profstr),
+                               &len, &deflt_dsn, (SQLWCHAR*) profileStrW);
+    aputoupW ((tsp81_UCS2Char*) profstr);
+    {
+      API_RETCODE api_retcode;
+      SDWORD encrypt = SQL_ATTR_ENCRYPT_OFF;
+
+      api_retcode = pa08FromListGetInt4 (pa07EncryptionList, (SQLWCHAR*)profstr, &encrypt);
+      if (api_retcode == API_OK) {
+        static BOOL checkSSL = TRUE;
+        static BOOL SSLavailable = FALSE;
+
+        if (checkSSL) {
+          tsp00_ErrTextc  errtxt;
+          checkSSL = FALSE;
+          SSLavailable = SqlSSLAvailable (errtxt);
+        }
+        if (SSLavailable == FALSE)
+          encrypt = SQL_ATTR_ENCRYPT_OFF;
+
+        dbc_ptr->encrypt = (char) encrypt;
+      }
+    }
+
+#ifdef WIN   
+    if (retcode == API_OK) {
+        ret = pa08GetODBCProfileW (section, (UCHAR*) API_SEC_BLOCKMODUS,
+                                   profstr, sizeof(profstr),
+                                   &len, &deflt_dsn, profileStrW);
+        API_TRACE(API_TR_STRING, API_SEC_BLOCKMODUS, profstr);
+        if (((tsp81_UCS2Char*)profstr)->s != questionmark.s)
+            pa07blockmodus = 1;
+        else {
+            char buffer[20];
+            tsp00_Uint4 destBytesWritten, srcBytesParsed;
+            UDWORD l=1;
+
+            sp78convertString (sp77encodingAscii,
+                               buffer, sizeof (buffer),
+                               &destBytesWritten,
+                               TRUE,
+                               sp77encodingUCS2Native,
+                               profstr, sp81UCS2strlen (profstr) * sizeof (tsp81_UCS2Char),
+                               &srcBytesParsed);
+
+            l = atol (buffer);
+            if (l > 4)
+                l = 0;
+            pa07blockmodus = l;
+        }
+    }
+    API_TRACE(API_TR_SDWORD, "blockmodus", &pa07blockmodus);
+#endif   
+    API_TRACE(API_TR_SWORD, "sqlmode", &dbc_ptr->constmtopt.sqlmode);
+    API_TRACE(API_TR_SDWORD, "lvctrunc", &dbc_ptr->lvctrunc);
+    API_TRACE(API_TR_UDWORD, "blocksize", &dbc_ptr->blocksize);
+    API_TRACE(API_TR_UWORD,"activestatements", &dbc_ptr->activestatements);
+    API_TRACE(API_TR_UDWORD,"autocommit", &dbc_ptr->autocommit);
+    /* don't overwrite existing serverdb, server_node */
+    if ((dbc_ptr->serverdb[0] == '\0' || dbc_ptr->serverdb[0] == '?')
+        && (dbc_ptr->allocServerNodeLen == 0
+            || dbc_ptr->servernode[0] == '\0'
+            || dbc_ptr->servernode[0] == '?')) {
+      /*
+        UCHAR sectionA[512];
+
+        sp78convertString (sp77encodingAscii,
+                           sectionA, sizeof (sectionA),
+                           &destBytesWritten,
+                           TRUE,
+                           dbc_ptr->dsname->encodingType,
+                           dbc_ptr->dsname->rawString,
+                           dbc_ptr->dsname->cbLen,
+                           &srcBytesParsed);
+      */
+        servernode = apdallo( API_MAX_SERVERNODE_LEN );
+        if (!servernode) {
+            /* memory allocation failure */
+            return API_NOT_OK;
+        };
+        servernode[0] = '\0';
+        /* retcode = apdgdbn( sectionA,  /(UCHAR*) dbc_ptr->dsname->rawString, */
+        /*        retcode = apdgdbn( (UCHAR*) dbc_ptr->dsname->rawString, */
+        /*                          (SWORD) dbc_ptr->dsname->cbLen, */
+        retcode = apdgdbn (dbc_ptr->dsname,
+                          dbc_ptr->serverdb, sizeof(dbc_ptr->serverdb),
+                          servernode, min( API_MAX_SERVERNODE_LEN, SHRT_MAX ) );
+        pa40SetServerNode( dbc_ptr, servernode );
+        apdfree( servernode );
+        servernode = NULL;
+    };
+    API_TRACE(API_TR_STRING,"serverdb",dbc_ptr->serverdb);
+    API_TRACE(API_TR_STRING,"servernode",dbc_ptr->servernode);
+    API_TRACE(API_TR_EXIT,"pa08GetDSNOptions",0);
+    API_TRACE(API_TR_API_RETCODE,"retcode",&retcode);
+    return(retcode);
+} /* pa08GetDSNOptions */
+#endif
+
+VOID pa08DefaultConnection(tpa40DBC* dbc_ptr)
+{
+    API_TRACE(API_TR_ENTRY, PA08_FN_DEFAULTCONNECTION, 0);
+    if (dbc_ptr->constmtopt.sqlmode == CPR_KIND_EMPTY)
+        dbc_ptr->constmtopt.sqlmode = CPR_KIND_INTERNAL;
+    if (dbc_ptr->isolevel == API_SQL_TXN_EMPTY)
+        dbc_ptr->defisolevel = dbc_ptr->isolevel = SQL_TXN_READ_COMMITTED;   
+    API_TRACE(API_TR_EXIT, PA08_FN_DEFAULTCONNECTION, 0);
+    return;
+} /* pa08DefaultConnection */
+
+/* aputoup() - convert a C string to all upper case */
+
+VOID aputoup( UCHAR* string_ptr )
+{
+    UWORD i;
+
+    if (string_ptr != NULL) {
+        for (i=0; i < (UWORD)API_STRLEN(string_ptr); i++) {
+            *(string_ptr + i) = (UCHAR)toupper( *(string_ptr + i) );
+        }
+
+    }
+
+    return;
+} /* aputoup */
+
+/* aputoupW() - convert a UCS2 String to upper case */
+VOID aputoupW ( tsp81_UCS2Char* string_ptr )
+{
+  tsp00_Int4 count = sizeof (tsp81_UCS2Char) * sp81UCS2strlen (string_ptr);
+
+  if (sp77nativeUnicodeEncoding () == sp77encodingUCS2Swapped)
+    sp81UCS2SwappedStringToupper (string_ptr, count);
+  else
+    sp81UCS2StringToupper (string_ptr, count);
+
+} /* aputoupW */
+
+
+/* apustoup() - convert a special identifier to upper case */
+/* destroys the trailing and pending double quotes */
+VOID apustoup( UCHAR* string_ptr )
+{
+    UCHAR*ptr;
+#ifndef WIN  
+    UWORD i;
+#endif
+    if (string_ptr != NULL) {
+        ptr = string_ptr;
+        if (*ptr == '"') {
+            for (;*ptr != '\0';ptr++) {
+                *ptr = *(ptr+1);
+                if (*(ptr) == '"') {
+                    if (*(ptr-1) == '\\') {
+                        *ptr = *(ptr+1);
+                    }
+                    else {
+                        *(ptr) = '\0';
+                        break;
+                    }
+                }
+            }
+        } 
+        else {
+#ifdef WIN       
+            ptr = AnsiUpper( ptr );
+#else 
+            for (i=0; i < (UWORD)API_STRLEN(ptr); i++) {
+                *(ptr + i) = (UCHAR)toupper( *(ptr + i) );
+            }
+#endif   
+        }
+        API_TRACE(API_TR_STRING, "apustoup", string_ptr);
+    }
+    return;
+} /* apustoup */
+
+/* pa08RemoveQuotesASCII removes trailing and ending quotes ('"') from
+   tpr05_String.  Encoding type ASCII is precondition. cbLen will
+   NOT be changed. Contained '\"' are not affected. Ending qoutes are
+   replaced by '\0'.*/
+void pa08RemoveQuotesASCII (tpr05_String *string)
+{
+    unsigned int i, n = string->cbLen;
+    UCHAR        *ptr = (UCHAR*) string->rawString;
+    
+    API_TRACE (API_TR_ENTRY, "pa08RemoveQuotesASCII", 0);
+
+    /* string starts with '"' */
+    string->cbLen--;
+    for (i=1; i<n; i++, ptr++) {
+        *ptr = *(ptr+1);
+        if (*ptr == '"' && *(ptr-1) != '\\')  {  /* ignore '\"' */
+            string->cbLen--;
+            *ptr = '\0';                         /* ending '"' -> '\0' */
+        }
+    }
+    *ptr = '\0';             /* last character to \0 for sure */
+
+    API_TRACE (API_TR_EXIT, "pa08RemoveQuotesASCII", 0);
+}
+
+/* pa08RemoveQuotesUCS2 removes trailing and ending quotes ('"') from
+   tpr05_String.  Encoding type UCS2 is precondition. cbLen will
+   NOT be changed. Contained '\"' are not affected. Ending qoutes are
+   replaced by '\0'.*/
+void pa08RemoveQuotesUCS2 (tpr05_String *string)
+{
+    unsigned int            i, n = string->cbLen;
+    tsp81_UCS2Char *ptr = (tsp81_UCS2Char*) string->rawString;
+    const tsp77encoding *nativeEncoding = sp77nativeUnicodeEncoding ();
+    UCHAR          c1 = '"', c2 = '\\';
+    tsp81_UCS2Char quote, backslash, UCS2terminator;
+    unsigned int   dummy;
+
+
+    API_TRACE (API_TR_ENTRY, "pa08RemoveQuotesUCS2", 0);
+    
+    sp81ASCIItoUCS2 (&quote, 1,     nativeEncoding == sp77encodingUCS2Swapped,
+                     &dummy, &c1, 1);
+    sp81ASCIItoUCS2 (&backslash, 1, nativeEncoding == sp77encodingUCS2Swapped,
+                     &dummy, &c2, 1);
+    UCS2terminator.c[0] = UCS2terminator.c[1] = 0;
+    
+    /* string starts with '"', cbLen is in bytes */
+    string->cbLen -= sizeof (tsp81_UCS2Char);
+    for (i=1; i<n / sizeof (tsp81_UCS2Char); i++, ptr++) {
+        *ptr = *(ptr+1);
+        if (ptr->s == quote.s && (ptr-1)->s != backslash.s) { /* ignore '\"' */
+            string->cbLen -= sizeof (tsp81_UCS2Char);
+            ptr->s = UCS2terminator.s;       /* ending '"' -> '\0' */
+        }
+    }
+    ptr->s = UCS2terminator.s;       /* last character to \0 for sure */
+    
+    API_TRACE (API_TR_EXIT, "pa08RemoveQuotesUCS2", 0);
+}
+
+/* pa08UnqoutedStringtoUpper () - convert a tpr05 string to upper */
+/* if string has trailing and pending double quotes, double qoutes
+   are removed and string will NOT be uppered.
+   cbLen will not be changed */
+VOID pa08UnqoutedStringtoUpper (tpr05_String *string )
+{
+    int done = FALSE;
+
+    API_TRACE (API_TR_ENTRY, "pa08UnqoutedStringtoUpper", 0);
+
+    if (string == NULL || string->rawString == NULL || string->cbLen == 0)
+        goto exit;
+
+    API_TRACE (API_TR_TPR05STRING, "string", string);
+    
+    /* ASCII */    
+    if (string->encodingType == sp77encodingAscii) {
+        if (string->rawString[0] == '"')  {
+            pa08RemoveQuotesASCII (string);
+            done = TRUE;
+        }
+    }                
+    /* UCS2 */
+    else {
+        const tsp77encoding *nativeEncoding = sp77nativeUnicodeEncoding ();
+
+        if (string->encodingType == nativeEncoding)  {
+            UCHAR          c = '"';
+            tsp81_UCS2Char quote;
+            unsigned int   dummy;
+            
+            sp81ASCIItoUCS2 (&quote, 1, nativeEncoding == sp77encodingUCS2Swapped,
+                             &dummy, &c, 1);
+
+            if (((tsp81_UCS2Char*) string->rawString)[0].s == quote.s) {
+                pa08RemoveQuotesUCS2 (string);
+                done = TRUE;
+            }
+        }
+    }
+
+    if (!done)
+        pr05IfCom_String_toupper (string);
+    
+ exit:        
+    API_TRACE (API_TR_EXIT, "pa08UnqoutedStringtoUpper", 0);
+
+}        
+
+
+
+#define OLD
+VOID pa08flt(UCHAR*string_ptr, SDOUBLE number, UWORD format)
+{
+    UCHAR buffer [50] ;
+#ifdef OLD  
+    UCHAR *local_ptr;               /* NOT apointer */
+    int i;
+    int dec;
+    SWORD e_dec;
+    int sign;
+    UWORD used;
+    UCHAR c;
+    int ndigit;
+#endif  
+#ifdef NEW
+    SWORD res=0;
+    int len;
+#endif  
+
+    API_TRACE(API_TR_ENTRY,"pa08flt",0);
+    API_TRACE(API_TR_PTR,"string_ptr",&string_ptr);
+    API_TRACE(API_TR_PTR,"number",&number);
+    API_TRACE(API_TR_UWORD,"format",&format);
+
+#ifdef OLD  
+    if (number == 0) {              /* special case */
+        API_STRCPY( (UCHAR*) buffer, (UCHAR*) "0.00000000000000000");
+        /*						      123456789012345678*/
+    }
+    else {
+        switch(format) {
+        case (SQL_REAL): {
+            ndigit = API_REAL_PREC;
+            break;
+        }
+        case (SQL_DOUBLE): {
+            ndigit = API_FLOAT_PREC;
+            break;
+        }
+        case (SQL_FLOAT): {}
+        default: {
+            ndigit = API_FLOAT_PREC;
+            break;
+        }
+        }
+        API_TRACE(API_TR_SDOUBLE,"number", &number);
+        local_ptr = (UCHAR*) API_ECVT(number, ndigit, &dec, &sign);
+        API_TRACE(API_TR_STRING,"local_ptr",local_ptr);
+        API_TRACE(API_TR_SWORD,"dec",&dec);
+        API_TRACE(API_TR_SWORD,"sign",&sign);
+        if (dec > ndigit || dec < -(ndigit-1) ) {	 /* "wild" number */
+            if ((dec - 1) < 0) {
+                c = '-';
+                e_dec = - (SWORD)(dec - 1);
+            }
+            else {
+                c = '+';
+                e_dec = (SWORD)(dec - 1);
+            }
+
+            if (sign == 0) {
+                /* not negative */
+                API_SPRINTF( (char*) buffer, "%c.%se%c%2.2d",
+                             *local_ptr, (UCHAR*) local_ptr+1, c, e_dec);
+            }
+            else {
+                /* negative */
+                API_SPRINTF( (char*) buffer, "-%c.%se%c%2.2d",
+                             *local_ptr, (UCHAR*) local_ptr+1, c, e_dec);
+            }
+        }
+        else { /* "normal" number */
+            API_MEMSET((UCHAR*) buffer,0,sizeof(buffer));
+            if (sign == 0) {
+                used = 0;
+            }
+            else {
+                buffer [0] = '-';
+                used = 1;
+            }
+
+            if (dec > 0) {
+                for (i=0; i < dec; i++) {
+                    buffer [used] = *(local_ptr + i);
+                    used++;
+                }
+                if (dec < ndigit)
+                    buffer [used++] = '.';
+                for (i = dec; i < (SWORD)API_STRLEN((UCHAR*) local_ptr); i++) {
+                    buffer [used] = *(local_ptr + i);
+                    used++;
+                }
+            }
+            else {
+                buffer [used++] = '.';
+                for (i=0; i < (dec * -1); i ++) {
+                    buffer [used] = '0';
+                    used++;
+                }
+                for (i=0; i < (SWORD)API_STRLEN((UCHAR*) local_ptr); i++) {
+                    buffer [used] = *(local_ptr + i);
+                    used++;
+                }
+            }
+        } /* of if "normal number " */
+    } /* of if number == 0 */  
+    API_STRCPY((UCHAR*) string_ptr, (UCHAR*) buffer);
+#endif
+#ifdef NEW
+    switch(format) {
+    case (SQL_REAL): {
+        s45r4tos((SFLOAT)number, buffer, 1, sizeof(buffer), &len, (char*)&res);
+        break;
+    }
+    case (SQL_DOUBLE): {
+        s45r8tos(number, buffer, 1, sizeof(buffer), &len, (char*)&res);
+        break;
+    }
+    case (SQL_FLOAT): {}
+    default: {
+        s45r8tos(number, buffer, 1, sizeof(buffer), &len, (char*)&res);
+        break;
+    }
+    }
+    API_TRACE(API_TR_SWORD, "len", &len);
+    API_TRACE(API_TR_SWORD, "res", &res);
+    API_MEMCPY((UCHAR*) string_ptr, (UCHAR*) buffer, len);
+    *(string_ptr+len) = 0;
+#endif
+    API_TRACE(API_TR_EXIT,"pa08flt",0);
+    API_TRACE(API_TR_STRING,"*string_ptr",string_ptr);
+
+    return;
+} /* pa08flt */
+
+/* This function returns the string witch ItemId is equal to cbValue */
+/* API_NO_DATA_FOUND is returned if cbValue was not found */
+/* API_OK is returned if it's found in list. */
+/* API_TRUNCATE is returned if found but szOutStr was to small to copy the */
+/* full string. Only cbOutStrMax-1 chars are copied */
+/* if szOutStr is NULL and cbValue was found than API_OK will be returned */
+/* API_NOT_OK is returned if pList is NULL */
+
+API_RETCODE pa08FromListGetString( pa08ComboBoxListType *pList,
+                                   SDWORD                cbValue,
+                                   UCHAR                *szOutStr,
+                                   SWORD                 cbOutStrMax)
+{
+    API_RETCODE api_retcode = API_NO_DATA_FOUND;
+    pa08ComboBoxListType *p;
+    if (pList) {
+        for(p = pList; p->Item[0] != '\0'; p++) {
+            if (cbValue == p->ItemID) {	    
+                if ((SDWORD)API_STRLEN(p->Item) > cbOutStrMax-1 && szOutStr) {
+                    api_retcode = API_TRUNCATE;	       
+                }
+                else
+                    api_retcode = API_OK;
+                if (szOutStr)
+                    API_STRNCPY(szOutStr, p->Item, (int)(cbValue-1));
+                break;
+            }
+        }
+    }
+    else {
+        api_retcode = API_NOT_OK;
+    }
+    return(api_retcode);
+} /* pa08FromListGetString */
+
+
+/* This function returns the ItemId witch Item is equal to szInStr */
+/* API_NO_DATA_FOUND is returned if szInStr was not found */
+/* API_OK is returned if the szInStr was found *cbValue is set to the ItemId */
+/* if cbValue is NULL only API_OK is returned */
+/* if szInStr is a NULL pointer the function use *cbValue to check the ItemId */
+/* if both or pList are NULL the function returns API_NOT_OK */
+API_RETCODE pa08FromListGetInt4(pa08ComboBoxListType *pList, SQLWCHAR *szInStrW, SDWORD *cbValue)
+{
+    UCHAR szInStr[64];
+    tsp00_Uint4 destBytesWritten, srcBytesParsed;
+    API_RETCODE api_retcode = API_NO_DATA_FOUND;
+    pa08ComboBoxListType *p;
+
+    sp78convertString (sp77encodingAscii,
+                       szInStr, sizeof (szInStr),
+                       &destBytesWritten,
+                       TRUE,
+                       sp77encodingUCS2Native,
+                       szInStrW, sp81UCS2strlen ((tsp81_UCS2Char*) szInStrW) * sizeof (tsp81_UCS2Char),
+                       &srcBytesParsed);
+    
+    API_TRACE(API_TR_ENTRY, "pa08FromListGetInt4", 0);
+    if (pList && ( szInStr || cbValue)) {
+        p = pList;
+        if (szInStr) {
+            API_TRACE(API_TR_STRING, "szInStr", szInStr);
+            /* set cbValue if szIntStr is present in list */
+            for(; p->Item[0] != '\0'; p++) {
+                API_TRACE(API_TR_STRING, "Item", p->Item);
+                if (!API_STRCMP(szInStr, p->Item)) {	    
+                    api_retcode = API_OK;
+                    if (cbValue)
+                        *cbValue = p->ItemID;
+                    break;
+                }
+            }
+        }
+        else {
+            /* return API_OK if cbValue is present in list */
+            for(; p->Item[0] != '\0'; p++) {
+                if (p->ItemID == *cbValue) {
+                    api_retcode = API_OK;
+                    break;
+                }	
+            }
+        }	
+    }
+    else
+        api_retcode = API_NOT_OK;
+    API_TRACE(API_TR_EXIT, "pa08FromListGetInt4", 0);
+    API_TRACE(API_TR_SDWORD, "cbValue", cbValue);
+    API_TRACE(API_TR_API_RETCODE, "api_retcode", &api_retcode);
+    return(api_retcode);
+} /* pa08FromListGetInt4 */
+
+
+void pa08rmspace(UCHAR*s, int n)
+{
+    UCHAR*p;
+    if (s && n > 0) {
+        for(p=s+n-1; p >= s; p--) {
+            if (isspace(*p)) 
+                *p = '\0';
+            else
+                break;
+            }
+    }
+} /* pa08rmspace */
+
+void pa08rmspaceASCII (tpr05_String *string)
+{
+    UCHAR *p;
+    UCHAR *str = (UCHAR*) string->rawString;
+    if (str && string->cbLen > 0) {
+        for (p=str + string->cbLen - 1; p >= str; p--)  {
+            if (isspace(*p) || *p == '\0')
+                *p = '\0';
+            else
+                break;
+        }
+    }
+} /* pa08rmspaceASCII */
+
+void pa08rmspaceUCS2 (tpr05_String *string)
+{
+    tsp81_UCS2Char *p;
+    tsp81_UCS2Char *str = (tsp81_UCS2Char*) string->rawString;
+    tsp81_UCS2Char  UCS2terminator;
+    const tsp77encoding *nativeEncoding = sp77nativeUnicodeEncoding ();
+
+    UCS2terminator.c[0] = UCS2terminator.c[1] = 0;
+
+    if (str != NULL && string->cbLen > 0) {
+        for (p=str + string->cbLen/sizeof(tsp81_UCS2Char) - 1; p >= str; p--)  {
+            if (nativeEncoding->isSpace (p) || p->s == UCS2terminator.s)
+                p->s = UCS2terminator.s;
+            else
+                break;
+        }
+    }
+} /* pa08rmspaceUCS2 */
+
+void pa08rmspace_tpr05String (tpr05_String *string)
+{
+    if (string == NULL || string->rawString == NULL || string->cbLen == 0)
+        return;
+
+    if (string->encodingType == sp77encodingAscii) 
+        pa08rmspaceASCII (string);
+
+    if (string->encodingType == sp77nativeUnicodeEncoding ()) 
+        pa08rmspaceUCS2 (string);
+} /* pa08rmspace_tpr05String */
+
+
+/* wrapper for tpr05String: first only ASCII */
+SWORD pa08GetProfileString_Tpr05String
+                          (UCHAR *lpszSection, 
+                           UCHAR *lpszEntry, 
+                           UCHAR *lpszDefault,
+                           tpr05_String *lpszReturnStr, 
+                           UCHAR *szProfileStr)
+{
+    if (lpszReturnStr->encodingType == sp77encodingAscii) 
+      return (pa08GetProfileString (lpszSection, lpszEntry, lpszDefault,
+                                    (UCHAR*) lpszReturnStr->rawString,
+                                    lpszReturnStr->cbMaxLen, szProfileStr));
+    else {
+        SQLWCHAR entryW[64];
+        SQLWCHAR lpszDefaultW[64];
+        tsp00_Uint4 destBytesWritten, srcBytesParsed;
+
+        /* convert entry to Unicode */
+        sp78convertString (sp77encodingUCS2Native,
+                           entryW, sizeof (entryW),
+                           &destBytesWritten,
+                           TRUE,
+                           sp77encodingAscii,
+                           lpszEntry,  (tsp00_Uint4) API_STRLEN (lpszEntry),
+                           &srcBytesParsed);
+
+        /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1129369 */
+        /* convert entry to Unicode */
+        sp78convertString (sp77encodingUCS2Native,
+                           lpszDefaultW, sizeof (lpszDefaultW),
+                           &destBytesWritten,
+                           TRUE,
+                           sp77encodingAscii,
+                           lpszDefaultW,  (tsp00_Uint4) API_STRLEN (lpszDefault),
+                           &srcBytesParsed);
+
+        return (pa08GetProfileStringW ((SQLWCHAR*) lpszSection, entryW, 
+                                       (SQLWCHAR*) lpszDefaultW,
+                                       (SQLWCHAR*) lpszReturnStr->rawString,
+                                       lpszReturnStr->cbMaxLen, 
+                                       (SQLWCHAR*) szProfileStr));
+    }
+}
+
+SWORD pa08GetProfileString(UCHAR *lpszSection, 
+                           UCHAR *lpszEntry, 
+                           UCHAR *lpszDefault,
+                           UCHAR *lpszReturnBuffer, 
+                           SDWORD cbReturnBuffer, 
+                           UCHAR *szProfileStr)
+{
+    UCHAR szUpper[18];
+    UCHAR szLine[1024];
+    SDWORD l;
+    BOOL found=FALSE;
+    SWORD ret = FALSE;
+    API_TRACE(API_TR_ENTRY, "pa08GetProfileString", 0);
+    API_TRACE(API_TR_STRING, "lpszSection", lpszSection);
+    API_TRACE(API_TR_STRING, "lpszEntry", lpszEntry);
+    API_TRACE(API_TR_STRING, "lpszDefault", lpszDefault);
+    API_TRACE(API_TR_PTR, "lpszReturnBuffer", &lpszReturnBuffer);
+    API_TRACE(API_TR_SDWORD, "cbReturnBuffer", &cbReturnBuffer);
+    if (lpszDefault && cbReturnBuffer >= 0 && szProfileStr) {
+        UCHAR *s, *s1, *x;
+        UDWORD len;
+        if (lpszSection) {
+            API_STRNCPY(szUpper, lpszSection, sizeof(szUpper)-1);
+            aputoup(szUpper);
+            found = FALSE;
+        }
+        else {
+            if (lpszEntry) {
+                API_STRNCPY(szUpper, lpszEntry, sizeof(szUpper)-1);
+                aputoup(szUpper);
+            }
+        }
+        l = 0;
+        s1 = szProfileStr;
+        while (s1) {
+            s = (UCHAR*) API_STRCHR(s1, ';');
+            if (s) 
+                len = (UDWORD) (s - s1);
+            else
+                len = sizeof(szLine)-1;
+            /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1131075 */
+            if (len > sizeof(szLine))
+                len = sizeof(szLine);
+            API_STRNCPY(szLine, s1, len);
+            szLine[len] = '\0';
+            s1 = (s) ? s+1 : NULL;
+            s = szLine;
+            /* remove trailing spaces and cr nl */
+            for(x = s + API_STRLEN(s)-1; x > s; x--) {
+                if (isspace(*x)) *x = '\0';
+                else break;
+            }
+            /* remove leading spaces */
+            while(isspace(*s)) s++;
+            switch(*s) {
+            case '\0': {
+                goto end_while;
+            }
+            case '[': {
+                if (found) {
+                    goto end_while;
+                }
+                else {
+                    s++;
+                    if (lpszSection) {
+                        if (pa08compare(s, szUpper, ']')) {
+                            if (lpszEntry) {
+                                API_STRNCPY(szUpper, lpszEntry,
+                                            sizeof(szUpper)-1);
+                                aputoup(szUpper);
+                                API_TRACE(API_TR_STRING, "found", s);
+                                s += API_STRLEN(szUpper);
+                            }
+                            API_STRNCPY(lpszReturnBuffer, lpszDefault,
+                                        cbReturnBuffer);
+                            found = TRUE;
+                        }
+                    }
+                    else {
+                        s1 = (UCHAR*) API_STRCHR(s, ']');
+                    }		  
+                }
+                break;
+            }
+            default: {
+                if (found || !lpszSection) {		     
+                    UCHAR *p;
+                    if (lpszEntry) {
+                        if (p=pa08compare(s, szUpper, '=')) {
+                            while(isspace(*p)) p++;
+                            API_STRNCPY(lpszReturnBuffer, p, cbReturnBuffer);
+                            API_TRACE(API_TR_STRING, "entry",
+                                      lpszReturnBuffer);
+                            found = TRUE;
+                            goto end_while;
+                        }
+                    }
+                    else {
+                        if (lpszSection) {
+                            found = TRUE;
+                            if (l < (SWORD)(cbReturnBuffer-1)) {
+                                if (l == 0)
+                                    API_STRCPY(lpszReturnBuffer, "");
+                                API_STRNCAT(lpszReturnBuffer, s,
+                                            (int)(cbReturnBuffer-1)-l);
+                                l = (SWORD)API_STRLEN(lpszReturnBuffer);
+                            }
+                            else
+                                goto end_while;
+                        }
+                    }		
+                }
+                break;
+            }
+            }
+        }
+    end_while:	 
+        if (!found && lpszReturnBuffer != NULL)
+            API_STRNCPY(lpszReturnBuffer, lpszDefault, cbReturnBuffer);
+        if (lpszReturnBuffer != NULL)
+            ret = (SWORD) API_STRLEN(lpszReturnBuffer);
+    }
+    API_TRACE(API_TR_EXIT, "pa08GetProfileString", 0);
+    API_TRACE(API_TR_STRING, "lpszReturnBuffer", lpszReturnBuffer);
+    API_TRACE(API_TR_SWORD, "ret", &ret);
+    return(ret);
+} /* pa08GetProfileString */
+
+SWORD pa08GetProfileStringW ( SQLWCHAR *lpszSection, 
+                              SQLWCHAR  *lpszEntry, 
+                              SQLWCHAR *lpszDefault,
+                              SQLWCHAR *lpszReturnBuffer, 
+                              SDWORD cbReturnBuffer, 
+                              SQLWCHAR *szProfileStr)
+{
+    tsp81_UCS2Char szUpper[18];
+    tsp81_UCS2Char szLine[1024];
+
+    UCHAR                c;
+    tsp81_UCS2Char       semicolon, bracketOpen, bracketClose, equal;
+    tsp81_UCS2Char       UCS2terminator;
+    const tsp77encoding *encoding = sp77nativeUnicodeEncoding ();
+    unsigned int         dummy;
+    int                  charSize = encoding->fixedCharacterSize;
+    
+    SDWORD l;
+    BOOL found = FALSE;
+    SWORD ret = FALSE;
+    API_TRACE(API_TR_ENTRY, "pa08GetProfileStringW", 0);
+    API_TRACE(API_TR_WSTRING, "lpszSection", lpszSection);
+    API_TRACE(API_TR_WSTRING, "lpszEntry", lpszEntry);
+    API_TRACE(API_TR_WSTRING, "lpszDefault", lpszDefault);
+    API_TRACE(API_TR_PTR, "lpszReturnBuffer", &lpszReturnBuffer);
+    API_TRACE(API_TR_SDWORD, "cbReturnBuffer", &cbReturnBuffer);
+
+    UCS2terminator.s = 0;
+    c = ';';
+    sp81ASCIItoUCS2 ( &semicolon, 1,
+                      encoding == sp77encodingUCS2Swapped,
+                      &dummy, &c, 1);
+    c = '[';
+    sp81ASCIItoUCS2 ( &bracketOpen, 1,
+                      encoding == sp77encodingUCS2Swapped,
+                      &dummy, &c, 1);
+    c = ']';
+    sp81ASCIItoUCS2 ( &bracketClose, 1,
+                      encoding == sp77encodingUCS2Swapped,
+                      &dummy, &c, 1);
+    c = '=';
+    sp81ASCIItoUCS2 ( &equal, 1,
+                      encoding == sp77encodingUCS2Swapped,
+                      &dummy, &c, 1);
+    
+    if (lpszDefault && szProfileStr
+        && lpszReturnBuffer && cbReturnBuffer > 0) {
+        tsp81_UCS2Char *s, *s1, *x;
+        UDWORD len;
+        if (lpszSection) {
+            sp81UCS2strcpy (szUpper, (tsp81_UCS2Char*) lpszSection);
+            aputoupW (szUpper);
+        }
+        else {
+            if (lpszEntry) {
+                sp81UCS2strcpy (szUpper, (tsp81_UCS2Char*) lpszEntry); 
+                aputoupW (szUpper);
+            }
+        }
+        l = 0;
+        s1 = (tsp81_UCS2Char*) szProfileStr;
+        while (s1) {
+            s =  sp81UCS2strchr (s1, semicolon);
+            if (s) 
+                len = (UDWORD) (s - s1);
+            else
+                len = (sizeof(szLine)-1) / charSize;
+            /* http://pts:1080/webpts?wptsdetail=yes&ErrorType=0&ErrorID=1131075 */
+            if (len > sizeof(szLine))
+                len = sizeof(szLine);
+            sp81UCS2strncpy(szLine, s1, len);
+            szLine[len] = UCS2terminator;
+            s1 = (s) ? s+1 : NULL;
+            s = szLine;
+            /* remove trailing spaces and cr nl */
+            for(x = s + sp81UCS2strlen(s)-1; x > s; x--) {
+                if (encoding->isSpace (x)) *x = UCS2terminator;
+                else break;
+            }
+            /* remove leading spaces */
+            while(encoding->isSpace(s)) s++;
+
+            if (s->s == UCS2terminator.s) {
+                goto end_while;
+            }
+            else if (s->s == bracketOpen.s) {              /*  '['  */
+                if (found) {
+                    goto end_while;
+                }
+                else {
+                    s++;
+                    if (lpszSection) {
+                        if (pa08compareW (s, szUpper, &bracketClose)) {  /* ] */
+                            if (lpszEntry) {
+                                tsp00_Uint4 destBytesWritten, srcBytesParsed;
+                                sp78convertString (encoding, szUpper, sizeof (szUpper),
+                                                   &destBytesWritten, TRUE,
+                                                   sp77encodingAscii,
+                                                   lpszEntry, (tsp00_Uint4) API_STRLEN (lpszEntry),
+                                                   &srcBytesParsed);
+                                API_TRACE(API_TR_WSTRING, "found", s);
+                                s += sp81UCS2strlen (szUpper);
+                            }
+                            sp81UCS2strncpy ((tsp81_UCS2Char*) lpszReturnBuffer,
+                                             (tsp81_UCS2Char*) lpszDefault,
+                                             cbReturnBuffer / charSize);
+                            found = TRUE;
+                        }
+                    }
+                    else {
+                        s1 = sp81UCS2strchr (s, bracketClose);
+                    }		  
+                }
+                break;
+            }
+            else {
+                if (found || !lpszSection) {		     
+                    tsp81_UCS2Char *p;
+                    if (lpszEntry) {
+                        if (p=pa08compareW (s, szUpper, &equal)) {
+                            while(encoding->isSpace(p)) p++;
+                            len = cbReturnBuffer / charSize;
+                            sp81UCS2strncpy ((tsp81_UCS2Char*) lpszReturnBuffer,
+                                             p, len);
+                            
+                            lpszReturnBuffer[len-1] =  UCS2terminator.s;
+                            API_TRACE(API_TR_WSTRING, "entry", lpszReturnBuffer);
+                            found = TRUE;
+                            goto end_while;
+                        }
+                    }
+                    else {
+                        if (lpszSection) {
+                            found = TRUE;
+                            if (l < (SWORD)(cbReturnBuffer-1)) {
+                                if (l == 0)
+                                    lpszReturnBuffer[0] =  UCS2terminator.s;
+                                sp81UCS2strncat ((tsp81_UCS2Char*) lpszReturnBuffer, s,
+                                                 (int)((cbReturnBuffer-1)-l) / charSize);
+                                l = (SWORD)sp81UCS2strlen ((tsp81_UCS2Char*) lpszReturnBuffer);
+                            }
+                            else
+                                goto end_while;
+                        }
+                    }		
+                }  /* of if (found || !lpszSection) */
+            }  /* else if (s->s == bracketOpen.s) */
+        }   /* of while (s1) */
+    end_while:	 
+        if(!found)
+            sp81UCS2strncpy ((tsp81_UCS2Char*) lpszReturnBuffer,
+                             (tsp81_UCS2Char*) lpszDefault, cbReturnBuffer / charSize);
+        ret = (SWORD)sp81UCS2strlen ((tsp81_UCS2Char*) lpszReturnBuffer) * charSize;
+    }
+    API_TRACE(API_TR_EXIT, "pa08GetProfileStringW", 0);
+    API_TRACE(API_TR_WSTRING, "lpszReturnBuffer", lpszReturnBuffer);
+    API_TRACE(API_TR_SWORD, "ret", &ret);
+    return (ret);
+} /* pa08GetProfileStringW */
+
+
+UCHAR* pa08compare(UCHAR *s, UCHAR *szString, char c)
+{
+    UCHAR *p;
+    UCHAR *x;
+    for (;isspace(*s); s++);
+    if(p = (UCHAR*) API_STRCHR(s, c)) {
+        *p = '\0';
+        for (x=p-1; x > s && isspace(*x); x--) *x = '\0';
+        aputoup(s);
+        if (!API_STRCMP(s, szString))
+            return(p+1);
+    }
+    return(NULL);
+} /* pa08compare */
+
+tsp81_UCS2Char* pa08compareW (tsp81_UCS2Char *s, tsp81_UCS2Char *szString, tsp81_UCS2Char *c)
+{
+    tsp81_UCS2Char *p;
+    tsp81_UCS2Char *x;
+    tpr05_StringEncoding encoding = sp77nativeUnicodeEncoding ();
+    tsp81_UCS2Char UCS2terminator;
+
+    UCS2terminator.c[0] = UCS2terminator.c[1] = 0;
+
+
+    for (;encoding->isSpace(s); s++);
+    if(p = sp81UCS2strchr (s, *c)) {
+        *p = UCS2terminator;
+        for (x=p-1; x > s && encoding->isSpace (x); x--)
+            *x = UCS2terminator;
+        s->s = sp81UCS2ToUpper (s->s);
+        aputoupW (s);
+        if (!sp81UCS2strcmp (s, szString))
+            return(p+1);
+    }
+    return(NULL);
+} /* pa08compareW */
+
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************

@@ -1,0 +1,4938 @@
+/****************************************************************************
+  module      : vkb39
+  author      : JuergenA,UweH,MartinB
+  responsible : UweH
+  special area: backup / restore - data / log / autosave
+  see also    :
+  description : tasks for reading and writing devspaces and tapes
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 2001-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+*****************************************************************************/
+ 
+.tt 1 $SAP$LiveCache$VKB39$
+.tt 3 $UweH$KB_backup_tasks$1999-07-20$
+ 
+Module  : KB_backup_tasks
+ 
+Define  :
+ 
+        PROCEDURE
+              k39config_restartrec_from_first_tape (
+                    VAR t        : tgg00_TransContext;
+                    glob         : tkb3_save_static_ptr;
+                    msg2type     : tgg00_MessType2;
+                    tape_no      : tsp00_Int2;
+                    block        : tkb3_block_ptr;
+                    bIsClustered : boolean);
+ 
+        PROCEDURE
+              k39locate_logentries_in_page (
+                    taskId             : tsp00_TaskId;
+                    VAR rte_cancel_flag : boolean;
+                    wanted_lpno         : tsp00_PageNo;
+                    VAR logpage         : tkb00_PagePtr;
+                    VAR trError         : tgg00_BasisError);
+ 
+        FUNCTION
+              k39pages_for_first_info (blocksize : tsp00_Int4) : tsp00_Int4;
+ 
+        PROCEDURE
+              k39read_label (
+                    VAR t          : tgg00_TransContext;
+                    glob           : tkb3_save_static_ptr;
+                    tape_no        : tsp00_Int2;
+                    VAR my_info    : tkb3_info_stuff);
+ 
+        PROCEDURE
+              k39restore_config (
+                    VAR t      : tgg00_TransContext;
+                    glob       : tkb3_save_static_ptr;
+                    VAR dbname : tsp00_DbName);
+ 
+        PROCEDURE
+              k39run_backup_task (
+                    VAR trans   : tgg00_TransContext;
+                    forAutosave : boolean;
+                    in_region   : boolean);
+ 
+        PROCEDURE
+              k39wakeup_all (
+                    glob          : tkb3_save_static_ptr;
+                    process_id    : tsp00_TaskId) ;
+ 
+        PROCEDURE
+              k39write_extra_block (
+                    VAR t     : tgg00_TransContext;
+                    glob      : tkb3_save_static_ptr;
+                    tape_no   : integer;
+                    what_page : tgg00_PageType2;
+                    VAR info  : tkb3_info_stuff);
+ 
+.CM *-END-* define --------------------------------------
+.sp;.cp 3
+Use     :
+ 
+        FROM
+              KB_Check : VKB03;
+ 
+        VAR
+              kb03Check : tkb00_Check;
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_headmaster: VKB38;
+ 
+        PROCEDURE
+              k38tapeopen_one (
+                    VAR t             : tgg00_TransContext;
+                    glob              : tkb3_save_static_ptr;
+                    tape_no           : tsp00_Int2;
+                    is_for_writing    : boolean;
+                    is_for_readlabel  : boolean);
+ 
+        PROCEDURE
+              k38closeasyn (
+                    VAR t         : tgg00_TransContext;
+                    glob          : tkb3_save_static_ptr;
+                    is_auto_load  : boolean;
+                    force_rewind  : boolean;
+                    tape_no       : tsp00_Int2;
+                    VAR is_open   : boolean;
+                    closefno      : tsp00_Int4);
+ 
+        PROCEDURE
+              k38current_msg_label (
+                    glob          : tkb3_save_static_ptr;
+                    VAR msg_label : tsp00_C8);
+ 
+        PROCEDURE
+              k38err_to_vtrace (
+                    VAR t             : tgg00_TransContext;
+                    glob              : tkb3_save_static_ptr;
+                    msg               : tsp00_Sname;
+                    VAR errtext       : tsp00_ErrText);
+ 
+        PROCEDURE
+              k38get_global (
+                    mess_type : tgg00_MessType;
+                    VAR glob : tkb3_save_static_ptr);
+ 
+        PROCEDURE
+              k38mdf_medium_def_write (
+                    glob       : tkb3_save_static_ptr;
+                    taskId     : tsp00_TaskId;
+                    tape_no    : tsp00_Int2;
+                    version_no : tsp00_Int4);
+ 
+        PROCEDURE
+              k38sys_msg (
+                    glob     : tkb3_save_static_ptr;
+                    msg_type : tsp3_msg_type;
+                    mess_no  : tsp00_Int4;
+                    errtxt   : tsp00_ErrText;
+                    bad_int  : tsp00_Int4);
+&       ifdef TRACE
+ 
+        PROCEDURE
+              k38show_monitor (glob : tkb3_save_static_ptr);
+ 
+        PROCEDURE
+              k38view_into_saveregion (
+                    glob    : tkb3_save_static_ptr;
+                    txt     : tsp00_Name ;
+                    q_only  : boolean);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_LogSaveIterator : VKB391;
+ 
+        PROCEDURE
+              kb391ReadNextLogpages (
+                    VAR trans        : tgg00_TransContext;
+                    queue_buffer     : tkb3_block_ptr;
+                    VAR numRead     : tsp00_Int2);
+ 
+        FUNCTION
+              kb391IOSeqIsInPage(
+                    VAR ioSequence    : tsp00_Uint4(*ptocSynonym const Log_IOSequenceNo&*);
+                    VAR page : tkb00_Page)
+                    : boolean;
+ 
+        FUNCTION
+              kb391IOSeqIsYoungerThanPage (
+                    VAR ioSequence       : tsp00_Uint4(*ptocSynonym const Log_IOSequenceNo&*);
+                    VAR oldestKnownIOSeq : tsp00_Uint4(*ptocSynonym const Log_IOSequenceNo&*);
+                    VAR page : tkb00_Page)
+                    : boolean;
+ 
+        PROCEDURE
+              kb391ResumeAllWaitingTask (forAutosave : boolean);
+ 
+        PROCEDURE
+              kb391ResumeFirstWaitingTask (
+                    forRead     : boolean;
+                    forAutosave : boolean);
+ 
+        PROCEDURE
+              kb391InsertWaitingTaskAtLast (
+                    taskid          : tsp00_TaskId;
+                    VAR waitcontext : tgg00_WaitContext;
+                    forRead         : boolean;
+                    forAutosave     : boolean);
+ 
+        PROCEDURE
+              kb391Create_RTEConf_ParameterAccess (
+                    VAR trans  : tgg00_TransContext;
+                    VAR params : tsp00_Addr);
+ 
+        PROCEDURE
+              kb391AppendTo_RTEConf_ParameterAccess (params : tsp00_Addr(*ptocSynonym RTEConf_Parameter&*);
+                    VAR xpPage : tkb3_xparam_page);
+ 
+        FUNCTION
+              kb391CheckParameterForRestore (params : tsp00_Addr(*ptocSynonym RTEConf_Parameter&*))
+                    : tgg00_BasisError;
+ 
+        PROCEDURE
+              kb391Destroy_RTEConf_ParameterAccess (
+                    VAR trans  : tgg00_TransContext;
+                    VAR params : tsp00_Addr);
+ 
+        FUNCTION
+              kb391SupressDBIdentCheckForMigration (VAR backupVersion : tsp00_Version) : boolean ;
+ 
+        PROCEDURE
+              kb391CheckLogTapeAndDataCompatibility (
+                    VAR trans         : tgg00_TransContext ;
+                    VAR restartRecord : tkb00_Page;
+                    VAR backupVersion : tsp00_Version;
+                    VAR dbident       : tsp00_Line;
+                    VAR firstIOSeq    : tsp00_Uint4;
+                    VAR lastIOSeq     : tsp00_Uint4);
+ 
+        FUNCTION
+              kb391ValidLogSaveIterator : boolean;
+ 
+        PROCEDURE
+              kb391CheckLogBackup(
+                    taskId          : tsp00_TaskId;
+                    VAR rte_cancel_flag : boolean;
+                    VAR firstIOsequence : tsp00_Uint4;
+                    VAR lastIOsequence  : tsp00_Uint4;
+                    VAR trError         : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_Logging : VKB560;
+ 
+        FUNCTION
+              kb560IsValidIOSeq (VAR ioSeq : tsp00_Uint4) : boolean;
+ 
+        FUNCTION
+              kb560IsSuccessor (
+                    VAR predecessor : tsp00_Uint4 (*ptocSynonym Log_IOSequenceNo& *);
+                    VAR successor   : tsp00_Uint4 (*ptocSynonym Log_IOSequenceNo& *) )
+                    : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_restart_record : VKB57;
+ 
+        VAR
+              k57restartrec : tkb00_PagePtr;
+ 
+        PROCEDURE
+              k57init_restartrec_handling (VAR t : tgg00_TransContext);
+ 
+        FUNCTION
+              kb57MigrateRestartRecord( pOldRestart : tsp00_PageAddr ) : boolean;
+ 
+        PROCEDURE
+              kb57InspectRestartRecordForRestore(
+                    pRestart             : tkb00_PagePtr;
+                    bIsRestoreData       : boolean;
+                    VAR bRestorePossible : boolean;
+                    VAR bMigrationNeeded : boolean);
+ 
+        PROCEDURE
+              k57save_restartrecord (TaskId : tsp00_TaskId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter: VGG01;
+ 
+        VAR
+              g01hashprime : tgg00_HashPrimeList;
+              g01vtrace    : tgg00_VtraceState;
+ 
+        PROCEDURE
+              g01check (
+                    msg_no     : tsp00_Int4;
+                    msg_label  : tsp00_C8;
+                    msg_text   : tsp00_C24;
+                    bad_value  : tsp00_Int4;
+                    constraint : boolean);
+ 
+        PROCEDURE
+              g01opmsg (
+                    msg_prio  : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C24;
+                    msg_value : tsp00_Int4);
+ 
+        PROCEDURE
+              g01optextmsg (
+                    msg_prio  : tsp3_priority;
+                    msg_type  : tsp3_msg_type;
+                    msg_no    : tsp00_Int4;
+                    msg_label : tsp00_C8;
+                    msg_text  : tsp00_C40);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Regions_and_Longwaits: VGG08;
+ 
+        VAR
+              g08save0     : tsp00_RegionId;
+ 
+        PROCEDURE
+              g08check_excl (region : tsp00_RegionId);
+ 
+        PROCEDURE
+              g08excl_check (
+                    pid          : tsp00_TaskId;
+                    region       : tsp00_RegionId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GG_edit_routines : VGG17;
+ 
+        PROCEDURE
+              g17nameto_line (
+                    n           : tsp00_Name;
+                    VAR ln_len  : integer;
+                    VAR ln      : tsp00_ErrText);
+ 
+        PROCEDURE
+              g17trimint4_to_line (
+                    int        : tsp00_Int4;
+                    VAR ln_len : integer;
+                    VAR ln     : tsp00_ErrText);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KernelAdministration_Interface : VGG999;
+ 
+        PROCEDURE
+              gg999RedoLogForRestore (
+                    VAR trans    : tgg00_TransContext;
+                    untildate    : tsp00_Date;
+                    untiltime    : tsp00_Time;
+                    untilIOSequence : tsp00_Uint4);
+ 
+        PROCEDURE
+              gg999AbortRedoLogByRestoreComponent(taskid : tsp00_TaskId;
+                    abortReason : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              error_text_handling : VBD06;
+ 
+        PROCEDURE
+              b06dump_bad_page (pid : tsp00_TaskId;
+                    page_type_flag : char;
+                    file_ext       : tsp00_C4;
+                    bad_pno        : tsp00_Int4;
+                    buf_ptr        : tkb3_page_ptr;
+                    curr_buf_cnt   : integer);
+ 
+      ------------------------------ 
+ 
+        FROM
+              pagestore: VBD10;
+ 
+        FUNCTION
+              b10bup_data_page_cnt (pid : tsp00_TaskId) : tsp00_Int4;
+ 
+        PROCEDURE
+              b10restart_converter_for_restore (
+                    VAR t                  : tgg00_TransContext;
+                    ConverterVersion       : tsp00_Int4;
+                    NumAllPages            : tsp00_Int4;
+                    LastSaveDataSuccessful : boolean;
+                    VAR RestartParam       : tkb00_ConfigRestartParam;
+                    VAR OldRestartParam    : tkb00_ConfigRestartParam);
+ 
+        PROCEDURE
+              b10create_converter_for_restore (
+                    TaskId                 : tsp00_TaskId;
+                    ConverterVersion       : tsp00_Int4;
+                    NumAllPages            : tsp00_Int4;
+                    LastSaveDataSuccessful : boolean;
+                    VAR RestartRecord      : tkb00_ConfigRestartParam);
+ 
+        FUNCTION
+              bd10conv_page_cnt: tsp00_Int4;
+ 
+        PROCEDURE
+              bd10GetConverterArchivePage (
+                    TaskId    : tsp00_TaskId;
+                    VAR Page  : tsp00_Page;
+                    VAR bNoMorePages : boolean);
+ 
+        PROCEDURE
+              bd10GetConverterBitMapPage (
+                    TaskId    : tsp00_TaskId;
+                    VAR Page  : tsp00_Page;
+                    VAR bNoMorePages : boolean);
+ 
+        PROCEDURE
+              bd10RemoveConverterBitMapPages;
+ 
+        PROCEDURE
+              bd10RemoveConverterArchivePages;
+ 
+        PROCEDURE
+              bd10RestoreUsedPageNos (
+                    TaskId           : tsp00_TaskId;
+                    pPage            : tsp00_PageAddr);
+ 
+        PROCEDURE
+              bd10RestoreConverter (
+                    TaskId           : tsp00_TaskId;
+                    pPage            : tsp00_PageAddr);
+ 
+        PROCEDURE
+              bd10CheckConverterPage(
+                    VAR Page          : tsp00_Page;
+                    Var bPageIsDamaged : boolean);
+ 
+        PROCEDURE
+              bd10CheckConverterBitMapPage(
+                    VAR Page          : tsp00_Page;
+                    Var bPageIsDamaged : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120InsertTrace (
+                    VAR t        : tgg00_TransContext;
+                    trace_layer  : tgg00_Debug;
+                    trace_object : tgg00_VtraceType;
+                    body_len     : tsp00_Int2;
+                    trace_body   : tgg11_VtraceBodyPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              BD_Wrapper : VBD999;
+ 
+        PROCEDURE
+              bd999CheckPageAfterRead(
+                    VAR TrError : tgg00_BasisError;
+                    VAR pNode   : tkb3_page_ptr);
+ 
+        FUNCTION
+              bd999TotalDataPages : tsp00_Int4;
+ 
+        PROCEDURE
+              bd999DetachAllDataVolumes( TaskId : tsp00_TaskId );
+ 
+        PROCEDURE
+              bd999AsynReadDataPages(
+                    VAR t                   : tgg00_TransContext;
+                    pPageList               : tsp00_PageAddr;
+                    maxBlockCount           : tsp00_Int4;
+                    pAsynIOHandle           : tkb3_save_static_ptr;
+                    VAR blocksToBeBackuped  : tsp00_Int2;
+                    bDoExtendedCheck        : boolean;
+                    VAR bIsClustered        : boolean);
+ 
+        PROCEDURE
+              bd999AsynWriteDataPages(
+                    VAR t            : tgg00_TransContext;
+                    pPageList        : tsp00_PageAddr;
+                    maxBlockCount    : tsp00_Int4;
+                    pAsynIOHandle    : tkb3_save_static_ptr;
+                    bDoExtendedCheck : boolean;
+                    bIsClustered     : boolean);
+ 
+        FUNCTION
+              bd999GetCacheSize : tsp00_Int4;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalFill (
+                    mod_id   : tsp00_C6;
+                    mod_num  : tsp00_Int4;
+                    obj_upb  : tsp00_Int4;
+                    obj      : tsp00_MoveObjPtr;
+                    obj_pos  : tsp00_Int4;
+                    length   : tsp00_Int4;
+                    fillchar : char;
+                    VAR e    : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01bool (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    curr_bool : boolean);
+ 
+        PROCEDURE
+              t01basis_error (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname;
+                    b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              t01int4 (
+                    layer : tgg00_Debug;
+                    nam : tsp00_Sname;
+                    int : tsp00_Int4);
+ 
+        PROCEDURE
+              t01name (debug : tgg00_Debug; nam  : tsp00_Name);
+ 
+        PROCEDURE
+              t01p2int4 (
+                    debug : tgg00_Debug;
+                    nam_1 : tsp00_Sname;
+                    int_1 : tsp00_Int4;
+                    nam_2 : tsp00_Sname;
+                    int_2 : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vasynio (
+                    hostfileno     : tsp00_Int4;
+                    io_id          : tsp00_Int4;
+                    file_pos       : tsp00_Int4;
+                    io_block_cnt   : tsp00_Int4;
+                    io_block_ptr   : tkb3_block_ptr;
+                    VAR returncode : tsp00_VaReturn;
+                    VAR errtext    : tsp00_ErrText);
+ 
+        PROCEDURE
+              vasynwait (
+                    hostfileno       : tsp00_Int4;
+                    VAR io_id        : tsp00_Int4;
+                    VAR io_block_cnt : tsp00_Int4;
+                    VAR returncode   : tsp00_VaReturn;
+                    VAR errtext      : tsp00_ErrText);
+ 
+        PROCEDURE
+              vdattime (
+                    VAR dat     : tsp00_Date;
+                    VAR tim     : tsp00_Time);
+ 
+        PROCEDURE
+              vbegexcl (
+                    pid     : tsp00_TaskId;
+                    region  : tsp00_RegionId);
+ 
+        PROCEDURE
+              vclock (
+                    VAR sec      : tsp00_Int4;
+                    VAR microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              vendexcl (
+                    pid    : tsp00_TaskId;
+                    region : tsp00_RegionId);
+ 
+        PROCEDURE
+              vmessage (
+                    prio         : tsp3_priority;
+                    msg_type     : tsp3_msg_type;
+                    msg_no       : tsp00_Int4;
+                    msg_label    : tsp00_C8;
+                    VAR msg_line : tsp00_C40);
+ 
+        PROCEDURE
+              vresume (pid : tsp00_TaskId);
+ 
+        PROCEDURE
+              vsuspend (
+                    pid            : tsp00_TaskId;
+                    suspend_reason : tsp00_Int2);
+ 
+        PROCEDURE
+              vxparam_open (
+                    VAR xp_fileno : tsp00_Int4 ;
+                    VAR errtext  : tsp00_ErrText;
+                    VAR xp_ret   : tsp00_XpReturnCode);
+ 
+        PROCEDURE
+              vxparam_open_binary (
+                    VAR dbname    : tsp00_DbName;
+                    open_readonly : boolean;
+                    VAR xp_fileno : tsp00_Int4;
+                    VAR errtext   : tsp00_ErrText;
+                    VAR xp_ret    : tsp00_XpReturnCode);
+ 
+        PROCEDURE
+              vxparam_close (
+                    xp_fileno   : tsp00_Int4 ;
+                    VAR errtext  : tsp00_ErrText;
+                    VAR xp_ret   : tsp00_XpReturnCode);
+ 
+        PROCEDURE
+              vxparam_get_filesize (
+                    VAR xp_filesize : tsp00_Int4 ;
+                    VAR errtext  : tsp00_ErrText;
+                    VAR xp_ret   : tsp00_XpReturnCode);
+ 
+        PROCEDURE
+              vxparam_read_binary (
+                    xp_fileno    : tsp00_Int4 ;
+                    p             : tsp00_PageAddr;
+                    bytes_to_read : tsp00_Int4;
+                    VAR bytes_read: tsp00_Int4;
+                    VAR errtext   : tsp00_ErrText;
+                    VAR xp_ret    : tsp00_XpReturnCode);
+ 
+        PROCEDURE
+              vxparam_write_binary (
+                    xp_fileno         : tsp00_Int4;
+                    p                 : tsp00_PageAddr;
+                    bytes_to_write    : tsp00_Int4;
+                    VAR bytes_written : tsp00_Int4;
+                    VAR errtext       : tsp00_ErrText;
+                    VAR xp_ret        : tsp00_XpReturnCode);
+ 
+.CM *-END-* use -----------------------------------------
+.sp;.cp 3
+Synonym :
+ 
+        PROCEDURE
+              b06dump_bad_page;
+ 
+              tbd_univ_ptr tkb3_page_ptr
+ 
+        PROCEDURE
+              bd15TestBadPage;
+ 
+              tbd_univ_page tkb3_page;
+ 
+        PROCEDURE
+              bd999CheckPageAfterRead;
+ 
+              tbd_nodeptr tkb3_page_ptr
+ 
+        PROCEDURE
+              kb57MigrateRestartRecord;
+ 
+              tkb57_OldRestarRecordPtr tsp00_PageAddr
+ 
+        PROCEDURE
+              g17nameto_line;
+ 
+              tsp00_Line tsp00_ErrText
+ 
+        PROCEDURE
+              g17trimint4_to_line;
+ 
+              tsp00_Line tsp00_ErrText
+ 
+        PROCEDURE
+              vasynio;
+ 
+              tsp00_Maxiobufaddr tkb3_block_ptr
+&             ifdef TRACE
+ 
+        PROCEDURE
+              t01addr;
+ 
+              tsp00_BufAddr tsp00_MoveObjPtr
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+ 
+ 
+Specification:
+.CM *-END-* specification -------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.fo
+.oc _/1
+Description:
+.CM *-END-* description ---------------------------------
+.sp 2
+***********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+Structure:
+ 
+.CM *-END-* structure -----------------------------------
+.sp 2
+**********************************************************
+.sp
+.cp 10
+.nf
+.oc _/1
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_msg_pagecnt       = 100;
+      c_sequential_access =  -1; (* for vasynio *)
+      c_dev_type_tape     =  20;
+      mx_io_vtrace        =  14; (* JA 1998-08-06 *)
+      (* *)
+      c_force_rewind      = true;
+      c_auto_load         = true;  (* PTS 1109736 mb 2002-08-05 *)
+      c_io_outside_region = true;
+      c_read_wait         = true;
+      c_show_q_only       = true;
+      c_time_check        = true;
+      c_for_writing       = true; (* PTS 1109736 mb 2002-09-03 *)
+      c_for_readlabel     = true; (* PTS 1109736 mb 2002-09-03 *)
+      c_IsClustered       = true;
+      (* *)
+      c_bad_bitmap_page   = 'bad format of bitmap page               ';
+      c_bad_conv_page     = 'bad format of converter page            ';
+      c_bad_blocksize     = 'blocksize SAVE/RESTORE must be equal    ';
+      c_bad_check_cnt     = 'write/check count mismatch              ';
+      c_bad_firstinfo     = 'first backup page missing               ';
+      c_bad_info_page     = 'bad info page                           ';
+      c_bad_info_pagekind = 'bad info page kind                      ';
+      c_bad_info_pagetype = 'no backup host file (wrong page type)   ';
+      c_bad_msgtype       = 'backup is not parallel saved            ';
+      c_bad_msg2type      = 'save/restore type mismatch              ';
+      c_bad_nil_page      = 'first page of block is nil              ';
+      c_bad_pagetype      = 'bad page (wrong page type)              ';
+      c_bad_pagetype_err  = 'bad page type                           ';
+      c_bad_restartrec    = 'bad restart record                      ';
+      c_bad_swapping      = 'wrong hostfile swapping                 ';
+      c_bad_volume        = 'volume is not part of backup            ';
+      c_dbident_mismatch  = 'invalid backup: DBIdent mismatch        '; (* PTS 1113550 mb 2002-05-14 *)
+      c_bad_volume_no     = 'illegal volume number                   ';
+      c_cancelled_msg     = 'cancelled by user                       ';
+      c_dupl_volume       = 'duplicate volume                        ';
+      c_lpno_mismatch     = 'mismatch of log range                   ';
+      c_invalid_sequence  = 'invalid log-backup: IOSequence mismatch '; (* PTS 1113550 mb 2002-05-14 *)
+      c_negative_pno      = 'negative page no                        ';
+      c_incomplete_segment= 'unexpected end of LogSegment found      ';
+      (* *)
+      c_bad_xparam_page        = 'bad format of xparam page               ';
+      c_prev_restore_useless   = 'previous restore pages was useless      ';
+      c_database_size_mismatch  = 'Configured data area is too small       ';
+      c_cache_size_to_small     = 'Configured CACHE_SIZE is too small      ';
+      c_increase_cache_size     = 'ACTION: Increase CACHE_SIZE             ';
+      c_increase_data_area_size = 'ACTION: Increase data area (add volumes)';
+ 
+TYPE
+ 
+      t_io_vtrace = RECORD
+            CASE integer OF
+                1:
+                    (vtr_line : tsp00_Line);
+                2:
+                    (vtr_dev_type  : tsp00_Uint1;
+                    vtr_page_type  : tgg00_PageType;
+                    vtr_page_type2 : tgg00_PageType2;
+                    vtr_buf_no     : tsp00_Uint1;
+                    vtr_pno        : tsp00_PageNo;
+                    vtr_dev_offset : tsp00_Int4;
+                    vtr_dev_no     : tsp00_Int2)
+                END;
+            (*ENDCASE*) 
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39config_restartrec_from_first_tape (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr;
+            msg2type     : tgg00_MessType2;
+            tape_no      : tsp00_Int2;      (* PTS 1109735 mb 2002-09-12 *)
+            block        : tkb3_block_ptr; (* PTS  1140372 mb 2006-02-27 *)
+            bIsClustered : boolean);
+ 
+VAR
+      bRestorePossible   : boolean;
+      bMigrationNeeded   : boolean;
+      neededDataAreaSize : tsp00_Int4;
+      msg_time           : tsp00_Int4;
+      blocks_read        : tsp00_Int4;
+      snapShotAddr       : tsp00_Uint4;
+      clusterResSpace    : tsp00_Uint4;
+      aux_msg_str        : ^tsp00_C40; (* PTS 1000449 UH 19980909 *)
+      tmpError           : tgg00_BasisError;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+msg_time       := 0;
+kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+      glob,
+      t.trRteCommPtr_gg00^.to_cancel,
+      t.trError_gg00);
+IF  t.trError_gg00 = e_ok
+THEN
+    BEGIN
+    (* PTS 1140057 mb 2006-02-14 IO not in region because of networkter interleaving *)
+    (* vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region); TODO +++++ *)
+    kb39io_tape_asyn (t, glob, tape_no, block, msg_time);
+    blocks_read := 1;
+    IF  (t.trError_gg00 <> e_ok) OR glob^.sta_tape^[tape_no].tpd_is_full
+    THEN
+        BEGIN
+        (* while autosave make a 'flush = close/open'     *)
+        (* there is a last open with no save coming then, *)
+        (* so we get tpd_is_full here instead of          *)
+        (* e_no_data_on_tape during open                  *)
+        IF  (glob^.sta_tape^[tape_no].tpd_type = vf_t_tape_norew)
+            AND
+            glob^.sta_tape^[tape_no].tpd_is_full
+        THEN
+            t.trError_gg00 := e_no_data_on_tape
+        ELSE
+            t.trError_gg00 := e_wrong_hostfile;
+        (*ENDIF*) 
+        END
+    ELSE
+        kb39block_check (t, glob, block, tape_no, bIsClustered);
+    (*ENDIF*) 
+    (* vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region); TODO +++++ *)
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    kb39t_first_read (t, glob, tape_no, block^[ckb3_blockpos_hostinfo]);
+(* only for the first tape complete the processing of the config-record *)
+(* PTS 1128809 mb 2004-03-30 *)
+(*ENDIF*) 
+IF  (glob^.sta_tapes_start_cnt = 1)
+THEN
+    BEGIN
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        glob^.sta_info := block^[ckb3_blockpos_hostinfo].info_page.the_info;
+        (* use info page to remember the elapsed time for restore *)
+        vdattime (glob^.sta_info.inf_start_date, glob^.sta_info.inf_start_time)
+        END;
+    (*ENDIF*) 
+    IF  t.trError_gg00 = e_ok
+    THEN
+        CASE msg2type OF
+            mm_log:
+                WITH glob^, sta_info, sta_tape^[tape_no] DO
+                    BEGIN
+                    IF  (inf_tapes_used > 0)
+                        AND
+                        (sta_num_tapes <> inf_tapes_used)
+                    THEN
+                        t.trError_gg00 := e_invalid_configuration
+                    ELSE
+                        BEGIN
+                        IF  NOT sta_check_save
+                        THEN
+                            BEGIN
+                            kb391CheckLogTapeAndDataCompatibility (
+                                  t,
+                                  k57restartrec^,
+                                  inf_curr_knlvers,        (* PTS 1116030 mb 2002-06-03 *)
+                                  inf_db_ident,
+                                  inf_first_iosequence,
+                                  inf_last_iosequence);
+                            IF  t.trError_gg00 = e_incompatible_log
+                            THEN
+                                BEGIN
+                                t.trError_gg00    := e_save_skipped;
+                                tpd_errtext := c_lpno_mismatch
+                                END;
+                            (*ENDIF*) 
+                            IF  t.trError_gg00 = e_invalid_label (* PTS 1113550 mb 2002-22-03 *)
+                            THEN
+                                (* PTS 1000449 UH 19980909 *)
+                                BEGIN
+                                (* outside log region *)
+                                aux_msg_str := @k57restartrec^.rstDbIdent_kb00;
+                                g01optextmsg (sp3p_console, sp3m_error,
+                                      kb39c1WrongInitConfigId_csp03, csp3_n_restore,
+                                      aux_msg_str^);
+                                aux_msg_str := @inf_db_ident;
+                                g01optextmsg (sp3p_console, sp3m_error,
+                                      kb39c2WrongInitConfigId_csp03, csp3_n_restore,
+                                      aux_msg_str^);
+                                t.trError_gg00    := e_incompatible_log;
+                                tpd_errtext := 'log is from other database              '
+                                END
+                            (*ENDIF*) 
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+            mm_database, mm_pages:
+                BEGIN
+                WITH block^[ckb3_blockpos_restartrec] DO
+                    BEGIN
+                    IF  NOT glob^.sta_check_save
+                    THEN
+                        BEGIN
+                        IF  t.trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            kb57InspectRestartRecordForRestore( @the_page, ( msg2type = mm_database ),
+                                  bRestorePossible, bMigrationNeeded );
+                            IF  NOT bRestorePossible
+                            THEN
+                                t.trError_gg00 := e_incompatible_savefile
+                            ELSE
+                                IF  bMigrationNeeded
+                                THEN
+                                    IF  NOT kb57MigrateRestartRecord( @the_page )
+                                    THEN
+                                        t.trError_gg00 := e_init_missing;
+                                    (*ENDIF*) 
+                                (*ENDIF*) 
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        IF   t.trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            univ_page.rstSetEndReadOnly_kb00 := true; (* PTS 1119205 UH 2002-11-28 *)
+                            IF  (glob^.sta_msg2type = mm_pages)
+                            THEN
+                                BEGIN
+                                (* PTS 1134119 UH 2005-02-23 *)
+                                IF  k57restartrec^.rstConfigParam_kb00.crPrevDataRecoveryWasIncomplete_kb00
+                                THEN
+                                    t.trError_gg00 := e_prev_data_recovery_was_incomplete
+                                ELSE
+                                    b10restart_converter_for_restore (t,
+                                          univ_page.rstCurrBackupVersion_kb00,
+                                          bd999TotalDataPages,
+                                          k57restartrec^.rstLastSaveDataSuccessful_kb00,
+                                          univ_page.rstConfigParam_kb00,
+                                          k57restartrec^.rstConfigParam_kb00);
+                                (*ENDIF*) 
+                                IF  t.trError_gg00 <> e_ok
+                                THEN
+                                    bd999DetachAllDataVolumes (t.trTaskId_gg00)
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                BEGIN
+                                b10create_converter_for_restore (
+                                      t.trTaskId_gg00,
+                                      univ_page.rstConverterVersion_kb00,
+                                      bd999TotalDataPages,
+                                      univ_page.rstLastSaveDataSuccessful_kb00,
+                                      univ_page.rstConfigParam_kb00);
+                                IF  t.trError_gg00 <> e_ok
+                                THEN
+                                    bd999DetachAllDataVolumes (t.trTaskId_gg00)
+                                (*ENDIF*) 
+                                END;
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        IF  t.trError_gg00 = e_ok
+                        THEN
+                            WITH block^[ckb3_blockpos_hostinfo].info_page.the_info DO
+                                BEGIN
+                                neededDataAreaSize := inf_conv_page_count + (inf_conv_page_count DIV 10)+1;
+                                IF  neededDataAreaSize >= bd999GetCacheSize
+                                THEN
+                                    BEGIN
+                                    t.trError_gg00 := e_wrong_configuration;
+                                    g01optextmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03,
+                                          csp3_n_restore, c_cache_size_to_small);
+                                    g01opmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                          'Configured CACHE_SIZE   ', bd999GetCacheSize );
+                                    g01opmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                          'Needed CACHE_SIZE (min) ', neededDataAreaSize);
+                                    g01optextmsg (sp3p_knldiag, sp3m_info, kbSaveRestoreSysMsg_csp03,
+                                          csp3_n_restore, c_increase_cache_size);
+                                    END;
+                                (*ENDIF*) 
+                                IF  (inf_bd_page_count + inf_conv_page_count) > bd999TotalDataPages
+                                THEN
+                                    BEGIN
+                                    t.trError_gg00 := e_devsize_too_small;
+                                    g01optextmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03,
+                                          csp3_n_restore, c_database_size_mismatch);
+                                    g01opmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                          'Given data area size    ',bd999TotalDataPages );
+                                    g01opmsg (sp3p_knldiag, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                          'Needed data area size   ',(inf_bd_page_count + inf_conv_page_count));
+                                    g01optextmsg (sp3p_knldiag, sp3m_info, kbSaveRestoreSysMsg_csp03,
+                                          csp3_n_restore, c_increase_data_area_size);
+                                    END;
+                                (*ENDIF*) 
+                                END;
+                            (*ENDWITH*) 
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  t.trError_gg00 = e_ok
+                    THEN
+                        BEGIN
+                        (* PTS 1119205 UH 2002-11-28 univ_page.rstSetEndReadOnly_kb00 := true; *)
+                        (* *)
+                        (* k37end_restore_data increments version *)
+                        (* ==> conv_vers + 1                      *)
+                        IF  (glob^.sta_msg2type = mm_pages)
+                            AND
+                            NOT glob^.sta_check_save
+                            AND
+                            ((univ_page.rstPrevBackupVersion_kb00 <>
+                            k57restartrec^.rstPrevBackupVersion_kb00)
+                            OR
+                            (k57restartrec^.rstCurrBackupVersion_kb00
+                            <> k57restartrec^.rstConverterVersion_kb00)
+                            OR
+                            (univ_page.rstConverterVersion_kb00 <=
+                            k57restartrec^.rstConverterVersion_kb00))
+                        THEN
+                            BEGIN
+&                           ifdef TRACE
+                            t01p2int4 (kb_save, '(ptr) prev-v', univ_page.rstPrevBackupVersion_kb00,
+                                  '(k57) curr-v', k57restartrec^.rstCurrBackupVersion_kb00);
+&                           endif
+                            t.trError_gg00 := e_incompatible_savefile
+                            END
+                        ELSE
+                            BEGIN
+                            (* Copy the restart record from the save file into the      *)
+                            (* memory to guarantee that save file restart record will   *)
+                            (* be written with bd14ShutdownFileSystemAfterRestore into  *)
+                            (* the data base after a successful restore.                *)
+                            IF  k57restartrec^.rstPrevBackupVersion_kb00 <> k57restartrec^.rstCurrBackupVersion_kb00
+                            THEN
+                                BEGIN
+                                g01optextmsg (sp3p_console, sp3m_warning, kbSaveRestoreSysMsg_csp03,
+                                      csp3_n_restore, c_prev_restore_useless);
+                                g01opmsg (sp3p_console, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                      '  PrevBackUpVers       =',k57restartrec^.rstPrevBackupVersion_kb00);
+                                g01opmsg (sp3p_console, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                      '  BackUpVers           =',k57restartrec^.rstCurrBackupVersion_kb00);
+                                g01opmsg (sp3p_console, sp3m_warning, kbSaveRestoreSysMsg_csp03, csp3_n_restore,
+                                      '  CurrentVers          =',univ_page.rstConverterVersion_kb00);
+                                END;
+                            (*ENDIF*) 
+                            snapShotAddr    := k57restartrec^.rstConfigParam_kb00.crSnapShotRestartRecordAddr_kb00;
+                            clusterResSpace := k57restartrec^.rstConfigParam_kb00.crClusterReservedSpace_kb00;
+                            k57restartrec^ := univ_page;
+                            IF  (glob^.sta_msg2type = mm_pages) AND NOT glob^.sta_check_save
+                            THEN
+                                BEGIN
+                                k57restartrec^.rstConfigParam_kb00.crSnapShotRestartRecordAddr_kb00 := snapShotAddr;
+                                k57restartrec^.rstConfigParam_kb00.crClusterReservedSpace_kb00      := clusterResSpace;
+                                END
+                            ELSE
+                                BEGIN
+                                k57restartrec^.rstConfigParam_kb00.crSnapShotRestartRecordAddr_kb00 := 0;
+                                k57restartrec^.rstConfigParam_kb00.crClusterReservedSpace_kb00      := 0;
+                                END;
+                            (*ENDIF*) 
+                            k57init_restartrec_handling (t);
+                            glob^.sta_data_rst_rec^ := univ_page;
+                            END
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    IF  NOT glob^.sta_check_save
+                    THEN
+                        (* PTS 1124994 UH 2004-01-26 begin *)
+                        BEGIN
+                        IF  (t.trError_gg00 = e_ok)
+                            AND
+                            (glob^.sta_msg2type = mm_pages)
+                            AND
+                            k57restartrec^.rstConfigParam_kb00.crPrevDataRecoveryWasIncomplete_kb00
+                        THEN
+                            BEGIN
+                            t.trError_gg00 := e_prev_data_recovery_was_incomplete;
+                            g01optextmsg (sp3p_knldiag, sp3m_error, kbSaveRestoreSysMsg_csp03,
+                                  csp3_n_restore, 'Previous data recovery was incomplete.  ');
+                            END;
+                        (*ENDIF*) 
+                        IF  t.trError_gg00 = e_ok
+                        THEN
+                            BEGIN
+                            k57restartrec^.rstConfigParam_kb00.crPrevDataRecoveryWasIncomplete_kb00
+                                  := true; (* PTS 1124994 UH 2004-01-26 *)
+                            k57save_restartrecord (t.trTaskId_gg00);
+                            END;
+                        (* PTS 1124994 UH 2004-01-26 end *)
+                        (*ENDIF*) 
+                        END;
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                IF  (t.trError_gg00 = e_ok)
+                    AND
+                    (block^[ckb3_blockpos_xp_page].the_pt  = ptSave_egg00)
+                    AND
+                    (block^[ckb3_blockpos_xp_page].the_pt2 = pt2Xparam_egg00)
+                THEN
+                    kb39ReadXparamPages (t, glob, tape_no, block, blocks_read);
+                (*ENDIF*) 
+                END;
+            END;
+        (*ENDCASE*) 
+    (*ENDIF*) 
+    WITH glob^ DO
+        BEGIN
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            sta_system_state := sta_system_state + [sy_configured];
+            sta_pages_transferred :=
+                  sta_pages_transferred + (sta_blocksize * blocks_read);
+            END
+        ELSE
+            WITH sta_tape^[tape_no] DO
+                BEGIN
+                tmpError := t.trError_gg00;
+                IF  tpd_type = vf_t_tape_norew
+                THEN
+                    BEGIN
+                    t.trError_gg00 := e_ok;
+                    kb39skip_to_end_of_volume(t, glob, tape_no, block, bIsClustered);
+                    END;
+                (*ENDIF*) 
+                t.trError_gg00 := e_ok;
+                k38closeasyn (t, glob,
+                      glob^.sta_is_auto_load,
+                      NOT c_force_rewind, tape_no,
+                      tpd_is_open, tpd_fno);
+                t.trError_gg00 := tmpError;
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01basis_error (kb_save, 'end config_r', t.trError_gg00);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39ReadXparamPages (
+            VAR t           : tgg00_TransContext;
+            glob            : tkb3_save_static_ptr;
+            tape_no         : tsp00_Int2;
+            block           : tkb3_block_ptr;
+            VAR blocks_read : tsp00_Int4);
+ 
+VAR
+      curr_page         : tsp00_Int4;
+      msg_time          : tsp00_Int4;
+      bytes_read        : tsp00_Int4;
+      max_bytes_to_read : tsp00_Int4;
+      params            : tsp00_Addr;
+ 
+BEGIN
+params            := NIL;
+curr_page         := ckb3_blockpos_xp_page;
+max_bytes_to_read := block^[curr_page].xp_page.xp_total_length;
+bytes_read        := block^[curr_page].xp_page.xp_length;
+&ifdef TRACE
+t01int4  (kb_save,'max_bytes   ',max_bytes_to_read);
+t01p2int4(kb_save,'bytes_read  ',bytes_read
+      ,           'curr_page   ',curr_page);
+&endif
+kb391Create_RTEConf_ParameterAccess(t, params);
+IF  t.trError_gg00 = e_ok
+THEN
+    kb391AppendTo_RTEConf_ParameterAccess(params, block^[curr_page].xp_page);
+(*ENDIF*) 
+REPEAT
+    WHILE (bytes_read < max_bytes_to_read)
+          AND
+          (curr_page < glob^.sta_blocksize)
+          AND
+          (t.trError_gg00 = e_ok) DO
+        BEGIN
+        curr_page := curr_page + 1;
+        kb391AppendTo_RTEConf_ParameterAccess(params, block^[curr_page].xp_page);
+        IF  (block^[curr_page].the_pt  = ptSave_egg00)
+            AND
+            (block^[curr_page].the_pt2 = pt2Xparam_egg00)
+        THEN
+            bytes_read := bytes_read +
+                  block^[curr_page].xp_page.xp_length
+        ELSE
+            BEGIN
+            bytes_read := bytes_read + mxkb3_xparam_page_body;
+            g01opmsg (sp3p_console, sp3m_error,kbXparamPagesMissing_csp03,
+                  csp3_n_restore, 'xparam pages missing    ',bytes_read);
+            END;
+        (*ENDIF*) 
+&       ifdef TRACE
+        t01p2int4 (kb_save, 'bytes_read  ', bytes_read
+              ,             'curr_page   ', curr_page);
+&       endif
+        END;
+    (*ENDWHILE*) 
+    IF  (bytes_read <  max_bytes_to_read)
+        AND
+        (curr_page >= glob^.sta_blocksize)
+        AND
+        (t.trError_gg00 =  e_ok)
+    THEN
+        BEGIN
+        kb39check_cancel_flag_and_kill (t.trTaskId_gg00,glob,
+              t.trRteCommPtr_gg00^.to_cancel, t.trError_gg00);
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            kb39io_tape_asyn (t, glob, tape_no, block, msg_time);
+            IF  glob^.sta_tape^[tape_no].tpd_is_full
+            THEN
+                t.trError_gg00 := e_wrong_hostfile;
+            (*ENDIF*) 
+            blocks_read := blocks_read + 1;
+            curr_page   := 0
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+UNTIL
+    (bytes_read >= max_bytes_to_read)
+    OR
+    (t.trError_gg00 <> e_ok);
+(*ENDREPEAT*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    t.trError_gg00 := kb391CheckParameterForRestore(params);
+(*ENDIF*) 
+kb391Destroy_RTEConf_ParameterAccess(t, params);
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39locate_logentries_in_page (
+            taskId              : tsp00_TaskId;
+            VAR rte_cancel_flag : boolean;
+            wanted_lpno     : tsp00_PageNo;
+            VAR logpage         : tkb00_PagePtr;
+            VAR trError         : tgg00_BasisError);
+ 
+VAR
+      wanted_is_greater : boolean;
+      remove_index      : tsp00_Int2;
+      queue_index       : tsp00_Int2;
+      glob              : tkb3_save_static_ptr;
+ 
+BEGIN
+k38get_global (m_save_parallel, glob);
+trError    := e_ok;
+wanted_is_greater := false;
+&ifdef TRACE
+t01int4 (kb_save, 'wanted_lpno ', wanted_lpno);
+&endif
+vbegexcl (taskId, g08save0 + glob^.sta_region);
+IF  (    sy_error       in glob^.sta_system_state) OR
+    NOT (sy_bup_working in glob^.sta_system_state)
+THEN
+    trError := e_logpage_not_found;
+(*ENDIF*) 
+IF  (trError = e_ok) AND NOT kb560IsValidIOSeq(wanted_lpno)
+THEN
+    trError := e_redo_log_read_error;
+(*ENDIF*) 
+IF  (trError = e_ok)
+    AND
+    (sy_knockoffwork in glob^.sta_system_state)
+    AND
+    (glob^.sta_queue_first_read <= 0)
+THEN
+    trError := e_end_of_backup;
+(*ENDIF*) 
+IF  trError = e_ok
+THEN
+    BEGIN
+    glob^.sta_last_lpno_wanted := wanted_lpno;
+    IF  glob^.sta_locked_queue_index > 0
+    THEN
+        BEGIN
+        kb39find_lpno_in_queue_elem (glob, wanted_lpno,
+              glob^.sta_locked_queue_index,
+              logpage, wanted_is_greater,
+              trError);
+        IF  trError = e_logpage_not_found
+        THEN
+            BEGIN
+            trError := e_ok;
+            kb39unlock_queue_index (glob, taskId,
+                  glob^.sta_locked_queue_index)
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  glob^.sta_locked_queue_index = 0
+    THEN
+        BEGIN
+        queue_index := glob^.sta_queue_first_read;
+        REPEAT
+            BEGIN
+            (* search in actual read-queue *)
+            WHILE (queue_index > 0) AND (trError = e_ok) DO
+                BEGIN
+                kb39find_lpno_in_queue_elem (glob, wanted_lpno,
+                      queue_index, logpage,
+                      wanted_is_greater, trError);
+                IF  trError = e_ok
+                THEN
+                    BEGIN
+                    kb39lock_queue_index (glob, queue_index);
+                    queue_index :=
+                          glob^.sta_queue^[queue_index].sre_next
+                    END;
+                (*ENDIF*) 
+                IF  trError = e_logpage_not_found
+                THEN
+                    BEGIN
+                    trError := e_ok;
+                    IF  wanted_is_greater
+                        AND
+                        (queue_index <> glob^.sta_locked_queue_index)
+                    THEN
+                        BEGIN
+                        remove_index := queue_index;
+                        queue_index  :=
+                              glob^.sta_queue^[queue_index].sre_next;
+                        kb39lock_queue_index   (glob, remove_index);
+                        kb39unlock_queue_index (glob, taskId,
+                              remove_index);
+                        END
+                    ELSE
+                        queue_index :=
+                              glob^.sta_queue^[queue_index].sre_next;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                END;
+            (*ENDWHILE*) 
+            IF  glob^.sta_locked_queue_index = 0
+            THEN
+                (* wanted not in actual queue *)
+                IF  (sy_knockoffwork in glob^.sta_system_state)
+                    AND
+                    (glob^.sta_queue_first_read <= 0)
+                THEN
+                    (* no more tapes available *)
+                    trError := e_end_of_backup
+                ELSE
+                    BEGIN
+                    IF  glob^.sta_queue_first_read = 0
+                    THEN
+                        (* the reader is able to read more pages *)
+                        BEGIN
+                        glob^.sta_lwt_perform_redo := false;
+                        kb39try_resume_trt_eof_wait (glob);
+                        kb39write_wait (taskId, glob, rte_cancel_flag, trError);
+                        IF  NOT (sy_knockoffwork in glob^.sta_system_state)
+                        THEN
+                            queue_index := glob^.sta_queue_first_read;
+                        (*ENDIF*) 
+                        glob^.sta_lwt_perform_redo := true
+                        END
+                    ELSE
+                        (* there are pages that has been read *)
+                        BEGIN
+                        trError := e_logpage_not_found
+                        END;
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END
+        UNTIL
+            (glob^.sta_locked_queue_index > 0) OR (trError <> e_ok)
+        (*ENDREPEAT*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+vendexcl (taskId, g08save0 + glob^.sta_region);
+&ifdef TRACE
+t01basis_error (kb_save, 'end k39locat', trError);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      k39pages_for_first_info (blocksize : tsp00_Int4) : tsp00_Int4;
+ 
+VAR
+      blocks            : tsp00_Int4;
+      xparam_page_count : tsp00_Int4;
+      xparam_size       : tsp00_Int4;
+      errtext           : tsp00_ErrText;
+      ret               : tsp00_XpReturnCode;
+ 
+BEGIN
+vxparam_get_filesize (xparam_size, errtext, ret);
+IF  (ret <> xp_ok) OR (blocksize <= 0)
+THEN
+    k39pages_for_first_info := 0
+ELSE
+    BEGIN
+    xparam_page_count := xparam_size DIV mxkb3_xparam_page_body;
+    IF  xparam_size MOD mxkb3_xparam_page_body > 0
+    THEN
+        xparam_page_count := xparam_page_count + 1;
+    (*ENDIF*) 
+    blocks := (xparam_page_count + ckb3_min_pages_per_block - 1) DIV
+          blocksize;
+    IF  (xparam_page_count + ckb3_min_pages_per_block - 1) MOD
+        blocksize > 0
+    THEN
+        blocks := blocks + 1;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+&ifdef TRACE
+t01p2int4 (kb_save, 'xp_size: ret', ord(ret)
+      ,             'xparam size ', xparam_size);
+t01int4   (kb_save, 'end k39pages', blocks * blocksize);
+&endif
+k39pages_for_first_info := blocks * blocksize;
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39read_label (
+            VAR t          : tgg00_TransContext;
+            glob           : tkb3_save_static_ptr;
+            tape_no        : tsp00_Int2;
+            VAR my_info    : tkb3_info_stuff);
+ 
+VAR
+      msg_time : tsp00_Int4;
+      block    : tkb3_block_ptr;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+block          := glob^.sta_queue^[ckb3_extra_block].sre_block;
+msg_time       := 0;
+(* io within region*)
+kb39io_tape_asyn (t, glob, tape_no, block, msg_time);
+(* without block check, old host file may be used *)
+IF  glob^.sta_tape^[tape_no].tpd_is_full
+THEN
+    t.trError_gg00 := e_hostfile_error;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    WITH block^[ckb3_blockpos_hostinfo].info_page.the_info,
+         glob^.sta_tape^[tape_no] DO
+        BEGIN
+        IF  inf_pt  <> ptSave_egg00
+        THEN
+            BEGIN
+            t.trError_gg00    := e_wrong_hostfile;
+            tpd_errtext := c_bad_info_pagetype;
+            k38sys_msg (glob, sp3m_error, kbBadPageType_csp03,
+                  tpd_errtext, ord (inf_pt))
+            END
+        ELSE
+            IF  inf_pt2 <> pt2VolumeFirstInfo_egg00
+            THEN
+                BEGIN
+                t.trError_gg00    := e_wrong_hostfile;
+                tpd_errtext := c_bad_firstinfo;
+                k38sys_msg (glob, sp3m_error, kbBadFirstInfo_csp03,
+                      tpd_errtext, ord (inf_pt2))
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    WITH block^[ckb3_blockpos_hostinfo].info_page DO
+        my_info := the_info;
+    (*ENDWITH*) 
+&ifdef TRACE
+(*ENDIF*) 
+t01basis_error (kb_save, 'end read_lab', t.trError_gg00);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39restore_config (
+            VAR t      : tgg00_TransContext;
+            glob       : tkb3_save_static_ptr;
+            VAR dbname : tsp00_DbName);
+ 
+CONST
+      c_tape_no  = 1;
+      c_readonly = true;
+ 
+VAR
+      msg_time            : tsp00_Int4;
+      block               : tkb3_block_ptr;
+      curr_page           : tsp00_Int4;
+      bytes_written       : tsp00_Int4;
+      total_bytes_written : tsp00_Int4;
+      total_length        : tsp00_Int4;
+      xparam_fileno       : tsp00_Int4;
+      pageaddr            : tsp00_PageAddr;
+      aux_ret             : tsp00_XpReturnCode;
+      ret                 : tsp00_XpReturnCode;
+ 
+BEGIN
+(* PTS 1103756 UH 1999-09-02 new *)
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+block          := glob^.sta_queue^[ckb3_extra_block].sre_block;
+msg_time       := 0;
+(* io within region*)
+kb39io_tape_asyn (t, glob, c_tape_no, block, msg_time);
+WITH glob^, sta_tape^[c_tape_no] DO
+    BEGIN
+    IF  tpd_is_full
+    THEN
+        t.trError_gg00 := e_wrong_hostfile;
+    (*ENDIF*) 
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  (block^[ckb3_blockpos_hostinfo].the_pt  = ptSave_egg00)
+            AND
+            (block^[ckb3_blockpos_hostinfo].the_pt2 = pt2VolumeFirstInfo_egg00)
+        THEN
+            BEGIN
+            sta_info := block^[ckb3_blockpos_hostinfo].info_page.the_info;
+            IF  dbname = bsp_c18
+            THEN
+                (* if no new DB-Name is given use the current to recover *)
+                dbname := sta_info.inf_serverdb;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  (block^[ckb3_blockpos_xp_page].the_pt  <> ptSave_egg00)
+            OR
+            (block^[ckb3_blockpos_xp_page].the_pt2 <> pt2Xparam_egg00)
+        THEN
+            BEGIN
+            t.trError_gg00 := e_wrong_hostfile;
+            tpd_errtext    := 'no xparam configuration found           '
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        pageaddr := NIL;
+        aux_ret  := xp_ok;
+        ret      := xp_ok;
+        vxparam_open_binary (dbname, NOT c_readonly, xparam_fileno, tpd_errtext, ret);
+&       ifdef TRACE
+        t01int4 (kb_save, 'xp_open: ret', ord(ret));
+&       endif
+        IF  ret = xp_ok
+        THEN
+            BEGIN
+            curr_page           := ckb3_blockpos_xp_page;
+            bytes_written       := 0;
+            total_bytes_written := 0;
+            total_length        := block^[curr_page].xp_page.xp_total_length;
+            REPEAT
+                WHILE (curr_page                 < sta_blocksize  ) AND
+                      (block^[curr_page].the_pt2 = pt2Xparam_egg00) AND
+                      (ret                       = xp_ok          )     DO
+                    BEGIN
+                    WITH block^[curr_page].xp_page DO
+                        BEGIN
+                        pageaddr := @xp_data[1];
+                        vxparam_write_binary (xparam_fileno, pageaddr, xp_length, bytes_written, tpd_errtext, ret);
+&                       ifdef TRACE
+                        t01int4 (kb_save, 'write-return', ord(ret) );
+                        t01int4 (kb_save, 'bytes writ. ', bytes_written);
+&                       endif
+                        total_bytes_written := total_bytes_written + bytes_written;
+                        END;
+                    (*ENDWITH*) 
+                    curr_page := curr_page + 1
+                    END;
+                (*ENDWHILE*) 
+                IF  (ret                 = xp_ok       ) AND
+                    (total_bytes_written < total_length)
+                THEN
+                    BEGIN
+                    kb39io_tape_asyn (t, glob, c_tape_no, block, msg_time);
+                    IF  tpd_is_full
+                    THEN
+                        t.trError_gg00 := e_wrong_hostfile;
+                    (*ENDIF*) 
+                    curr_page := 1
+                    END
+                (*ENDIF*) 
+            UNTIL
+                (total_bytes_written >= total_length) OR
+                (t.trError_gg00      <> e_ok        ) OR
+                (ret                 <> xp_ok       );
+            (*ENDREPEAT*) 
+            vxparam_close (xparam_fileno, tpd_errtext, aux_ret);
+&           ifdef TRACE
+            t01int4 (kb_save, 'xp_clos: ret', ord(aux_ret));
+&           endif
+            IF  (ret = xp_ok) AND (aux_ret <> xp_ok)
+            THEN
+                ret := aux_ret;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ret <> xp_ok
+        THEN
+            BEGIN
+            k38sys_msg (glob, sp3m_error, kb38ErrXparamRead_csp03, (*+++*)
+                  tpd_errtext, ord(ret));
+            t.trError_gg00 := e_hostfile_error
+            END
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+t01basis_error (kb_save, 'end RestConf', t.trError_gg00);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39run_backup_task (
+            VAR trans   : tgg00_TransContext;
+            forAutosave : boolean;
+            in_region   : boolean);
+ 
+VAR
+      glob : tkb3_save_static_ptr;
+ 
+BEGIN
+(* outside region *)
+&ifdef TRACE
+t01name      (kb_funct, '== backup task == ');
+&endif
+IF  forAutosave
+THEN
+    k38get_global (m_autosave, glob)
+ELSE
+    k38get_global (m_save_parallel, glob);
+(*ENDIF*) 
+IF  NOT in_region
+THEN
+    vbegexcl (trans.trTaskId_gg00, g08save0+glob^.sta_region)
+ELSE
+    BEGIN
+    IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+    THEN
+        g08excl_check (trans.trTaskId_gg00, g08save0 + glob^.sta_region);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (    sy_error       in glob^.sta_system_state) OR
+    NOT (sy_bup_working in glob^.sta_system_state)
+THEN
+    (* backup aborted in meantime *)
+    trans.trError_gg00 := e_write_task_crash
+ELSE
+    WITH glob^, sta_task^[trans.trChild_gg00] DO
+        BEGIN
+        tsd_task_pid := trans.trTaskId_gg00;
+        tsd_state    := ts_running;
+        CASE tsd_task_kind OF
+            task_drt:
+                kb39drt_devsp_read_task(trans, glob);
+            task_twt:
+                kb39twt_tape_write_task(trans, glob, tsd_tape_index);
+            task_dwt:
+                IF  glob^.sta_msg2type = mm_log
+                THEN
+                    kb39lwt_log_write_task (trans, glob)
+                ELSE
+                    kb39dwt_devsp_write_task(trans, glob);
+                (*ENDIF*) 
+            task_trt:
+                kb39trt_tape_read_task(trans,glob,tsd_tape_index);
+            OTHERWISE
+                trans.trError_gg00 := e_write_task_crash
+            END;
+        (*ENDCASE*) 
+        IF  trans.trError_gg00 <> e_write_task_crash
+        THEN
+            tsd_state := ts_stopped
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  NOT in_region
+THEN
+    vendexcl (trans.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39all_unlock (
+            glob       : tkb3_save_static_ptr;
+            process_id : tsp00_TaskId) ;
+ 
+VAR
+      queue_index  : tsp00_Int2;
+      remove_index : tsp00_Int2;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (process_id, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    BEGIN
+    IF  sta_locked_queue_index > 0
+    THEN
+        kb39unlock_queue_index (glob,process_id,sta_locked_queue_index);
+    (*ENDIF*) 
+    queue_index := sta_queue_first_read;
+    WHILE queue_index > 0 DO
+        BEGIN
+        (* remove block from queue and wakeup tape task *)
+        remove_index := queue_index;
+        queue_index  := sta_queue^[queue_index].sre_next;
+        kb39lock_queue_index   (glob, remove_index);
+        kb39unlock_queue_index (glob, process_id, remove_index);
+        END
+    (*ENDWHILE*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39wakeup_all (
+            glob       : tkb3_save_static_ptr;
+            process_id : tsp00_TaskId) ;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (process_id, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+IF  sy_allocated in glob^.sta_system_state
+THEN
+    BEGIN
+    WITH glob^ DO
+        BEGIN
+        sta_system_state := sta_system_state + [sy_knockoffwork];
+        kb391ResumeAllWaitingTask (sta_msgtype = m_autosave);
+        sta_read_tasks_waiting  := 0;
+        sta_write_tasks_waiting := 0;
+        END;
+    (*ENDWITH*) 
+&   ifdef TRACE
+    IF  sy_error in glob^.sta_system_state
+    THEN
+        BEGIN
+        k38show_monitor (glob);
+        k38view_into_saveregion (glob,
+              'called by kill-tas', NOT c_show_q_only)
+        END;
+&   endif
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      k39write_extra_block (
+            VAR t     : tgg00_TransContext;
+            glob      : tkb3_save_static_ptr;
+            tape_no   : integer;
+            what_page : tgg00_PageType2;
+            VAR info  : tkb3_info_stuff);
+ 
+VAR
+      dummy_return      : tkb3_answer_id;
+      msg_time          : tsp00_Int4;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+msg_time       := 0;
+WITH glob^, sta_queue^ [ckb3_extra_block] DO
+    BEGIN
+    sre_pages_per_block := 1;
+    kb39infopage_build (t, glob, tape_no, what_page, info,
+          sre_block^ [sre_pages_per_block].info_page);
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  what_page = pt2VolumeFirstInfo_egg00
+        THEN
+            CASE glob^.sta_msg2type OF
+                mm_pages, mm_database:
+                    BEGIN
+                    sre_pages_per_block := sre_pages_per_block + 1;
+                    WITH sre_block^ [sre_pages_per_block] DO
+                        univ_page := sta_data_rst_rec^;
+                    (*ENDWITH*) 
+                    kb39save_xparam (t, glob, tape_no, what_page)
+                    END;
+                mm_log:
+                    (* within region *)
+                    kb39t_outcopy_tape (t, glob,
+                          NOT c_io_outside_region, NOT c_IsClustered,
+                          what_page, tape_no, ckb3_extra_block,
+                          msg_time, dummy_return);
+                END
+            (*ENDCASE*) 
+        ELSE
+            (* within region *)
+            kb39t_outcopy_tape (t, glob,
+                  NOT c_io_outside_region, NOT c_IsClustered,
+                  what_page, tape_no, ckb3_extra_block,
+                  msg_time, dummy_return);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  (t.trError_gg00 = e_ok) AND (what_page = pt2VolumeFirstInfo_egg00)
+THEN
+    (* PTS 1104316 UH 25-10-1999 *)
+    k38mdf_medium_def_write (glob, t.trTaskId_gg00, tape_no, info.inf_file_version);
+&ifdef TRACE
+(*ENDIF*) 
+t01basis_error (kb_save, 'end write_ex', t.trError_gg00);
+&endif
+END;
+ 
+&ifdef TRACE
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39answerprint (ans: tkb3_answer_id) ;
+ 
+BEGIN
+CASE ans OF
+    ans_okay:
+        t01name (kb_save, 'answer: okay      ') ;
+    ans_task_ready:
+        t01name (kb_save, 'answer: task ready') ;
+    ans_read_finish:
+        t01name (kb_save, 'answer: read finis') ;
+    ans_error:
+        t01name (kb_save, 'answer: ERROR     ') ;
+    ans_tape_full:
+        t01name (kb_save, 'answer: TAPE FULL ') ;
+    OTHERWISE
+        t01int4 (kb_save, '*** answer  ', ord (ans))
+    END
+(*ENDCASE*) 
+END;
+ 
+&endif
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39bad_page_check (
+            VAR p         : tkb3_page;
+            curr_page     : tsp00_Int2;
+            VAR sys_found : boolean;
+            VAR b_err     : tgg00_BasisError;
+            VAR errtext   : tsp00_ErrText);
+ 
+VAR
+      is_damaged : boolean;
+ 
+BEGIN
+WITH p.univ_page DO
+    BEGIN
+    is_damaged := pageHeader_kb00.pageHeaderStr_gg00 <> pageTrailer_kb00.pageHeaderStr_gg00;
+    IF  NOT is_damaged AND (pageCheck_kb00 <> chckNil_egg00)
+    THEN
+        is_damaged := kb39chksum_page (p) <> pageChecksum_kb00
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+CASE p.the_pt2 OF
+    pt2EndSaveInfo_egg00,
+    pt2EndVolumeInfo_egg00,
+    pt2VolumeFirstInfo_egg00,
+    pt2VolumeLabelInfo_egg00:
+        IF  is_damaged OR (curr_page <> 1)
+        THEN
+            BEGIN
+            b_err   := e_bad_hostfile_page;
+            errtext := c_bad_info_page
+            END
+        ELSE
+            sys_found := true;
+        (*ENDIF*) 
+    pt2Xparam_egg00:
+        IF  is_damaged
+        THEN
+            BEGIN
+            b_err   := e_bad_bitmap_page;
+            errtext := c_bad_xparam_page
+            END;
+        (*ENDIF*) 
+    END;
+(*ENDCASE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39block_check (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr;
+            block        : tkb3_block_ptr;
+            tape_no      : tsp00_Int2;
+            bIsClustered : boolean);
+ 
+VAR
+      nil_found  : boolean;
+      sys_found  : boolean;
+      curr_page  : tsp00_Int2;
+      tr         : t_io_vtrace;
+      aux        : tkb3_page_ptr;
+      is_damaged : boolean;
+ 
+BEGIN
+(* outside region *)
+t.trError_gg00 := e_ok;
+WITH glob^.sta_tape^[tape_no] DO
+    BEGIN
+    curr_page := 1;
+    nil_found := false;
+    sys_found := false;
+    WHILE (t.trError_gg00 = e_ok) AND (curr_page <= glob^.sta_blocksize) DO
+        BEGIN
+        IF  nil_found AND (block^[curr_page].the_pt <> ptNil_egg00) AND (NOT bIsClustered)
+        THEN
+            BEGIN
+            t.trError_gg00    := e_bad_pagetype;
+            tpd_errtext := c_bad_pagetype;
+            k38sys_msg (glob, sp3m_error, kbBadPageType_csp03,
+                  c_bad_pagetype_err, ord (block^[curr_page].the_pt))
+            END
+        ELSE
+            CASE block^[curr_page].the_pt OF
+                ptNil_egg00:
+                    IF  curr_page = 1
+                    THEN
+                        BEGIN
+                        t.trError_gg00  := e_bad_pagetype;
+                        tpd_errtext     := c_bad_nil_page
+                        END
+                    ELSE
+                        nil_found := true;
+                    (*ENDIF*) 
+                ptSave_egg00:
+                    kb39bad_page_check (block^[curr_page], curr_page,
+                          sys_found, t.trError_gg00, tpd_errtext);
+                ptConverter_egg00:
+                    BEGIN
+                    bd10CheckConverterPage(block^[curr_page].the_page, is_damaged);
+                    IF  is_damaged
+                    THEN
+                        BEGIN
+                        t.trError_gg00  := e_bad_conv_page;
+                        tpd_errtext     := c_bad_conv_page;
+                        END;
+                    (*ENDIF*) 
+                    END;
+                ptConverterBitMap_egg00:
+                    BEGIN
+                    bd10CheckConverterBitMapPage(block^[curr_page].the_page, is_damaged);
+                    IF  is_damaged
+                    THEN
+                        BEGIN
+                        t.trError_gg00  := e_bad_bitmap_page;
+                        tpd_errtext     := c_bad_bitmap_page
+                        END;
+                    (*ENDIF*) 
+                    END;
+                ptSys_egg00:
+                    BEGIN (* only for data base migration with restore data from 7.2 to 7.4 *)
+                    aux := @block^ [curr_page];
+                    bd999CheckPageAfterRead( t.trError_gg00, aux );
+                    IF  block^ [curr_page].the_pt2 = pt2Checkpt_egg00
+                    THEN
+                        BEGIN
+                        IF  (t.trError_gg00 <> e_ok) OR (curr_page <> 2)
+                        THEN
+                            BEGIN
+                            t.trError_gg00 := e_bad_logpage;
+                            tpd_errtext    := c_bad_restartrec
+                            END
+                        ELSE
+                            sys_found := true
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                ptFileDir_egg00:
+                    ; (* consistency check is implemented in ioman::asyn etc *)
+                ptData_egg00:
+                    BEGIN
+                    (* consistency check is implemented in ioman::asyn etc *)
+                    IF  block^ [curr_page].the_pt2 = pt2Checkpt_egg00
+                    THEN
+                        BEGIN
+                        aux := @block^ [curr_page];
+                        bd999CheckPageAfterRead( t.trError_gg00, aux );
+                        IF  (t.trError_gg00 <> e_ok) OR (curr_page <> 2)
+                        THEN
+                            BEGIN
+                            t.trError_gg00 := e_bad_datapage;
+                            tpd_errtext    := c_bad_restartrec
+                            END
+                        ELSE
+                            sys_found := true
+                        (*ENDIF*) 
+                        END
+                    (*ENDIF*) 
+                    END;
+                ptLog_egg00:
+                    BEGIN
+                    (* k56bad_logpage_check (block^ [curr_page].univ_page,  removed due to
+                          *      block^ [curr_page].the_pt, t.trError_gg00);      introduction of
+                          *IF  t.trError_gg00 <> e_ok                             log_page_iterator m.b.
+                          *THEN
+                          *    BEGIN
+                          *
+                          *    t.trError_gg00    := e_bad_logpage;
+                          *    tpd_errtext := c_bad_logpage
+                          *    END
+                          *ELSE
+                          *)
+                    sys_found := true
+                    END;
+                OTHERWISE
+                    BEGIN
+                    t.trError_gg00    := e_bad_pagetype;
+                    tpd_errtext := c_bad_pagetype;
+                    k38sys_msg (glob, sp3m_error,
+                          kbBadPageType_csp03,
+                          c_bad_pagetype_err,
+                          ord (block^[curr_page].the_pt))
+                    END
+                END;
+            (*ENDCASE*) 
+        (*ENDIF*) 
+        IF  t.trError_gg00 = e_ok
+        THEN
+            curr_page := curr_page + 1
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    IF  t.trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        WITH tr DO
+            BEGIN
+            vtr_dev_type   := c_dev_type_tape;
+            vtr_page_type  := block^[curr_page].the_pt;
+            vtr_page_type2 := block^[curr_page].the_pt2;
+            vtr_dev_no     := tape_no;
+            vtr_pno        := block^[curr_page].the_pno;
+            vtr_dev_offset := -1;
+            vtr_buf_no     := curr_page
+            END;
+        (*ENDWITH*) 
+        IF  (glob^.sta_msgtype = m_save_parallel)
+            OR
+            (glob^.sta_msgtype = m_autosave)
+        THEN
+            BEGIN
+            b06dump_bad_page (t.trTaskId_gg00, 'B', '.bad',
+                  block^[curr_page].the_pno,
+                  @(block^[curr_page].the_page), 1);
+            b120InsertTrace (t, bd, b15write_page, mx_io_vtrace, @tr.vtr_line);
+            END
+        ELSE
+            BEGIN
+            b06dump_bad_page (t.trTaskId_gg00, 'R', '.bad',
+                  block^[curr_page].the_pno,
+                  @(block^[curr_page].the_page), 1);
+            b120InsertTrace (t, bd, b15read_page,  mx_io_vtrace, @tr.vtr_line);
+            END;
+        (*ENDIF*) 
+        k38sys_msg (glob, sp3m_error, kbTapeError_csp03,
+              tpd_errtext, block^[curr_page].the_pno);
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39bitmap_outcopy (
+            VAR t               : tgg00_TransContext;
+            glob                : tkb3_save_static_ptr;
+            queue_index         : tsp00_Int2;
+            VAR task_return     : tkb3_answer_id);
+ 
+VAR
+      errtext      : tsp00_ErrText;
+      bNoMorePages :boolean;
+ 
+BEGIN
+t.trError_gg00 := e_ok;
+task_return    := ans_okay;
+errtext        := bsp_c40;
+WITH glob^, sta_queue^ [queue_index] DO
+    BEGIN
+    sre_pages_per_block := 0;
+    REPEAT
+        bd10GetConverterBitMapPage (t.trTaskId_gg00,
+              sre_block^ [sre_pages_per_block + 1].the_page, bNoMorePages);
+        IF  bNoMorePages
+        THEN
+            BEGIN
+            t.trError_gg00 := e_no_next_record;
+            bd10RemoveConverterBitMapPages ;
+            END
+        ELSE
+            sre_pages_per_block := sre_pages_per_block + 1;
+        (*ENDIF*) 
+    UNTIL
+        (t.trError_gg00 <> e_ok) OR (sre_pages_per_block >= sta_blocksize);
+    (*ENDREPEAT*) 
+&   ifdef TRACE
+    t01int4 (kb_save, 'pages_block ', sre_pages_per_block);
+&   endif
+    IF  t.trError_gg00 = e_no_next_record
+    THEN
+        BEGIN
+        t.trError_gg00         := e_ok;
+        sta_write_bitmap_pages := false;
+        END;
+    (*ENDIF*) 
+    IF  t.trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        task_return := ans_error;
+        k38err_to_vtrace (t, glob, 'READ BITMAP ', errtext)
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39archconverter_outcopy (
+            VAR t               : tgg00_TransContext;
+            glob                : tkb3_save_static_ptr;
+            queue_index         : tsp00_Int2;
+            VAR task_return     : tkb3_answer_id);
+ 
+VAR
+      errtext      : tsp00_ErrText;
+      bNoMorePages :boolean;
+ 
+BEGIN
+t.trError_gg00 := e_ok;
+task_return    := ans_okay;
+errtext        := bsp_c40;
+WITH glob^, sta_queue^ [queue_index] DO
+    BEGIN
+    sre_pages_per_block := 0;
+    REPEAT
+        bd10GetConverterArchivePage (t.trTaskId_gg00,
+              sre_block^ [sre_pages_per_block + 1].the_page, bNoMorePages);
+        IF  bNoMorePages
+        THEN
+            BEGIN
+            t.trError_gg00 := e_no_next_record;
+            bd10RemoveConverterArchivePages ;
+            END
+        ELSE
+            sre_pages_per_block := sre_pages_per_block + 1;
+        (*ENDIF*) 
+    UNTIL
+        (t.trError_gg00 <> e_ok) OR (sre_pages_per_block >= sta_blocksize);
+    (*ENDREPEAT*) 
+&   ifdef TRACE
+    t01int4 (kb_save, 'pages_block ', sre_pages_per_block);
+&   endif
+    IF  t.trError_gg00 = e_no_next_record
+    THEN
+        BEGIN
+        t.trError_gg00         := e_ok;
+        sta_write_bitmap_pages := false;
+        END;
+    (*ENDIF*) 
+    IF  t.trError_gg00 <> e_ok
+    THEN
+        BEGIN
+        task_return := ans_error;
+        k38err_to_vtrace (t, glob, 'READ BITMAP ', errtext)
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39check_cancel_flag_and_kill (
+            trTaskId            : tsp00_TaskId;
+            glob                : tkb3_save_static_ptr;
+            VAR rte_cancel_flag : boolean;
+            VAR trError         : tgg00_BasisError );
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (trTaskId, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+IF  (    sy_error       in glob^.sta_system_state) OR
+    NOT (sy_bup_working in glob^.sta_system_state)
+THEN
+    (* backup aborted in meantime *)
+    trError:= e_write_task_crash
+ELSE
+    IF  rte_cancel_flag
+    THEN
+        BEGIN
+        k39wakeup_all (glob, trTaskId);
+        trError:= e_cancelled;
+        gg999AbortRedoLogByRestoreComponent(trTaskId, trError);
+        END
+    ELSE
+        BEGIN
+        IF  glob^.sta_to_cancel <> NIL
+        THEN
+            IF  glob^.sta_to_cancel^
+            THEN
+                BEGIN
+                g01optextmsg (sp3p_console, sp3m_warning,
+                      kb39Cancelled_csp03, csp3_n_save, c_cancelled_msg);
+                glob^.sta_system_state :=
+                      glob^.sta_system_state + [sy_error];
+                k39wakeup_all (glob, trTaskId);
+                trError := e_cancelled;
+                gg999AbortRedoLogByRestoreComponent(trTaskId, trError);
+                END
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39chk_all_logpages (
+            VAR t : tgg00_TransContext;
+            glob : tkb3_save_static_ptr);
+ 
+BEGIN
+(* check save only *)
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+kb391CheckLogBackup(t.trTaskId_gg00,
+      t.trRteCommPtr_gg00^.to_cancel,
+      glob^.sta_info.inf_first_iosequence,
+      glob^.sta_info.inf_last_iosequence,
+      t.trError_gg00);
+vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      kb39chksum_page (VAR p : tkb3_page) : tsp00_Int4;
+ 
+CONST
+      c_page_check_step    = 128;
+ 
+VAR
+      prime_idx : integer;
+      pos       : tsp00_Int4;
+      body_len  : tsp00_Int4;
+      check_sum : tsp00_Int4;
+ 
+BEGIN
+check_sum := 0;
+WITH p, univ_page DO
+    BEGIN
+    FOR pos := 1 TO 4 DO
+        check_sum := check_sum +
+              ord (pageHeader_kb00.pageHeaderStr_gg00 [pos]) * g01hashprime [pos];
+    (*ENDFOR*) 
+    check_sum := check_sum + ord (pageType2_kb00) * g01hashprime [5];
+    prime_idx := 6;
+    CASE p.the_pt2 OF
+        pt2EndSaveInfo_egg00,
+        pt2EndVolumeInfo_egg00,
+        pt2VolumeFirstInfo_egg00,
+        pt2VolumeLabelInfo_egg00:
+            body_len := sizeof (tkb3_info_stuff);
+        pt2Xparam_egg00:
+            IF  p.xp_page.xp_length > sizeof (tkb3_xparam_page_body)
+            THEN
+                body_len := sizeof (tkb3_xparam_page_body)
+            ELSE
+                body_len := p.xp_page.xp_length;
+            (*ENDIF*) 
+        END;
+    (*ENDCASE*) 
+    pos := 1;
+    WHILE (pos <= body_len) AND (prime_idx <= MAX_HASH_PRIME_GG00) DO
+        BEGIN
+        CASE p.the_pt2 OF
+            pt2EndSaveInfo_egg00,
+            pt2EndVolumeInfo_egg00,
+            pt2VolumeLabelInfo_egg00,
+            pt2VolumeFirstInfo_egg00:
+                check_sum := check_sum
+                      + ord (p.info_page.inf_body [pos])
+                      * g01hashprime [prime_idx];
+            pt2Xparam_egg00:
+                check_sum := check_sum
+                      + ord (p.xp_page.xp_data [pos])
+                      * g01hashprime [prime_idx];
+            END;
+        (*ENDCASE*) 
+        pos       := pos + c_page_check_step;
+        prime_idx := prime_idx + 1
+        END
+    (*ENDWHILE*) 
+    END;
+(*ENDWITH*) 
+kb39chksum_page := check_sum
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39d_incopy_volume (
+            VAR t           : tgg00_TransContext;
+            glob            : tkb3_save_static_ptr;
+            queue_index     : tsp00_Int2;
+            VAR task_return : tkb3_answer_id);
+ 
+VAR
+      bDoExtendedCheck : boolean;
+      pageIndex        : integer;
+      errtext          : tsp00_ErrText;
+      pBuffer          : tsp00_PageAddr;
+ 
+BEGIN
+(* outside region: copy from queue to data volume *)
+t.trError_gg00   := e_ok;
+task_return      := ans_okay;
+errtext          := bsp_c40;
+bDoExtendedCheck := false; (*TODO *)
+&ifdef TRACE
+t01int4 (kb_save, 'queue_index ', queue_index);
+&endif
+pageIndex := 1;
+WITH glob^.sta_queue^[ queue_index ] DO
+    BEGIN
+    IF  (sre_block^[1].the_pt = ptConverterBitMap_egg00) OR
+        (sre_block^[1].the_pt = ptConverter_egg00      )
+    THEN (* cluster contains only converter pages *)
+        BEGIN
+        WHILE  (t.trError_gg00 = e_ok) AND (pageIndex <= sre_pages_per_block) DO
+            BEGIN
+            CASE sre_block^[ pageIndex ].the_pt OF
+                ptConverterBitMap_egg00:
+                    bd10RestoreUsedPageNos (t.trTaskId_gg00, @(sre_block^[ pageIndex ].the_page));
+                ptConverter_egg00: (* only for SAPBW Archive *)
+                    bd10RestoreConverter (t.trTaskId_gg00, @(sre_block^[ pageIndex ].the_page));
+                ptNil_egg00:
+                    ; (* padding pages are okay *)
+                OTHERWISE:
+                    BEGIN
+                    k38sys_msg (glob, sp3m_error, csp3_bad_page, c_bad_pagetype,
+                          ord(sre_block^[ pageIndex ].the_pt));
+                    t.trError_gg00 := e_bad_pagetype
+                    END;
+                END;
+            (*ENDCASE*) 
+            pageIndex := pageIndex + 1
+            END
+        (*ENDWHILE*) 
+        END
+    ELSE
+        BEGIN
+        pBuffer := @sre_block^[1].the_page;
+        bd999AsynWriteDataPages( t, pBuffer, sre_pages_per_block,
+              glob, bDoExtendedCheck, sre_is_clustered );
+        END
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  t.trError_gg00 <> e_ok
+THEN
+    BEGIN
+    task_return := ans_error;
+    k38err_to_vtrace (t, glob, 'WRITE VOLUME', errtext)
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39d_outcopy_volume (
+            VAR t           : tgg00_TransContext;
+            glob            : tkb3_save_static_ptr;
+            queue_index     : tsp00_Int2;
+            VAR task_return : tkb3_answer_id);
+ 
+VAR
+      bDoExtendedCheck : boolean;
+      pBuffer          : tsp00_PageAddr;
+      errtext          : tsp00_ErrText;
+ 
+BEGIN
+t.trError_gg00     := e_ok;
+task_return        := ans_okay;
+errtext            := bsp_c40;
+bDoExtendedCheck   := false; (*TODO *)
+&ifdef TRACE
+t01int4 (kb_save, 'queue_index ', queue_index);
+&endif
+WITH glob^.sta_queue^[ queue_index ] DO
+    BEGIN
+    sre_pages_per_block := 0;
+    pBuffer             := @sre_block^[ 1 ].the_page;
+    bd999AsynReadDataPages( t, pBuffer, glob^.sta_blocksize, glob,
+          sre_pages_per_block, bDoExtendedCheck, sre_is_clustered );
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        IF  sre_pages_per_block = 0
+        THEN
+            task_return := ans_task_ready
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        sre_pages_per_block := 0;
+        task_return         := ans_error;
+        k38err_to_vtrace (t, glob, 'READ VOLUME ', errtext)
+        END;
+    (*ENDIF*) 
+&   ifdef TRACE
+    t01int4 (kb_save, 'pages_block ', sre_pages_per_block);
+&   endif
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39drt_devsp_read_task (
+            VAR t    : tgg00_TransContext;
+            glob     : tkb3_save_static_ptr);
+ 
+VAR
+      do_destroy    : boolean;
+      task_return   : tkb3_answer_id;
+      queue_index   : tsp00_Int2;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+do_destroy     := false;
+REPEAT
+    IF  glob^.sta_queue_first_free > 0
+    THEN
+        (* empty block found *)
+        BEGIN
+        queue_index := glob^.sta_queue_first_free;
+        WITH glob^, sta_queue^[queue_index] DO
+            BEGIN
+            sta_queue_first_free := sre_next;
+            sre_next  := 0;
+            sre_prev  := 0;
+            sre_state := sres_reading_writing;
+            kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+                  glob,
+                  t.trRteCommPtr_gg00^.to_cancel,
+                  t.trError_gg00);
+            IF  t.trError_gg00 = e_ok
+            THEN
+                BEGIN
+                vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+                CASE glob^.sta_msg2type OF
+                    mm_pages:
+                        IF  sta_write_bitmap_pages
+                        THEN
+                            BEGIN
+                            kb39bitmap_outcopy (t, glob, queue_index, task_return);
+                            IF  sre_pages_per_block = 0
+                            THEN
+                                kb39d_outcopy_volume (t, glob,
+                                      queue_index,
+                                      task_return)
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            kb39d_outcopy_volume (t, glob,
+                                  queue_index, task_return);
+                        (*ENDIF*) 
+                    mm_database:
+                        BEGIN
+                        IF  sta_write_conv_pages
+                        THEN
+                            BEGIN
+                            kb39archconverter_outcopy (t, glob, queue_index, task_return);
+                            IF  sre_pages_per_block = 0
+                            THEN
+                                kb39d_outcopy_volume (t, glob,
+                                      queue_index, task_return)
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            kb39d_outcopy_volume (t, glob, queue_index, task_return)
+                        (*ENDIF*) 
+                        END;
+                    mm_log:
+                        BEGIN
+                        IF  kb391ValidLogSaveIterator
+                        THEN
+                            BEGIN
+                            kb391ReadNextLogpages (t, sre_block, sre_pages_per_block );
+                            IF  t.trError_gg00 = e_ok
+                            THEN
+                                BEGIN
+                                IF  sre_pages_per_block = 0
+                                THEN
+                                    task_return := ans_task_ready
+                                ELSE
+                                    task_return := ans_okay
+                                (*ENDIF*) 
+                                END
+                            ELSE
+                                task_return := ans_error
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            task_return := ans_error
+                        (*ENDIF*) 
+                        END;
+                    END;
+                (*ENDCASE*) 
+                vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+                END;
+            (*ENDIF*) 
+            IF  (    sy_error       in glob^.sta_system_state) OR
+                NOT (sy_bup_working in glob^.sta_system_state)
+            THEN
+                (* save aborted in meantime *)
+                t.trError_gg00 := e_write_task_crash
+            ELSE
+                BEGIN
+                CASE task_return OF
+                    ans_okay:
+                        BEGIN
+                        (* buff contents copied: *)
+                        sta_into_count := sta_into_count + 1;
+                        sre_state      := sres_contains_pages;
+                        kb39wwt_wakeup_write_task (glob, t.trTaskId_gg00)
+                        END;
+                    ans_task_ready:
+                        BEGIN
+                        (* buff contents not copied: *)
+                        do_destroy             := true;
+                        sre_state              := sres_free;
+                        sta_devsp_ready_cnt    :=
+                              sta_devsp_ready_cnt + 1;
+                        IF  sta_devsp_ready_cnt >= sta_num_devsp
+                        THEN
+                            (* that's the last devspace *)
+                            k39wakeup_all (glob, t.trTaskId_gg00)
+                        ELSE
+                            kb39wrt_wakeup_read_task
+                                  (glob, t.trTaskId_gg00)
+                        (*ENDIF*) 
+                        END;
+                    ans_error:
+                        BEGIN
+                        do_destroy       := true;
+                        sre_state        := sres_free;
+                        sta_system_state := sta_system_state+[sy_error];
+                        k39wakeup_all (glob, t.trTaskId_gg00)
+                        END
+                    END;
+                (*ENDCASE*) 
+                kb39ins_into_read_or_free_list (glob, queue_index)
+                END
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+        END
+    ELSE
+        (* queue is full - to put a block into *)
+        IF  (sy_knockoffwork in glob^.sta_system_state)
+            OR
+            (t.trError_gg00 <> e_ok)
+        THEN
+            (* wakeup_all called *)
+            do_destroy := true
+        ELSE
+            kb39read_wait (t, glob)
+        (*ENDIF*) 
+    (*ENDIF*) 
+UNTIL
+    (t.trError_gg00 <> e_ok) OR do_destroy;
+(*ENDREPEAT*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39dwt_devsp_write_task (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr);
+ 
+VAR
+      do_destroy  : boolean;
+      task_return : tkb3_answer_id;
+      queue_index : tsp00_Int2;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+do_destroy     := false;
+task_return    := ans_okay;
+REPEAT
+    IF  glob^.sta_queue_first_read > 0
+    THEN
+        (* full block found *)
+        BEGIN
+        queue_index := glob^.sta_queue_first_read;
+        WITH glob^, sta_queue^ [queue_index], sta_info DO
+            BEGIN
+            sta_queue_first_read := sre_next;
+            IF  sta_queue_first_read <= 0
+            THEN
+                sta_queue_last_read := 0;
+            (*ENDIF*) 
+            sre_next  := 0;
+            sre_prev  := 0;
+            sre_state := sres_reading_writing;
+            kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+                  glob,
+                  t.trRteCommPtr_gg00^.to_cancel,
+                  t.trError_gg00);
+            IF  (t.trError_gg00 = e_ok) AND NOT glob^.sta_check_save
+            THEN
+                BEGIN
+                vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+                CASE sta_msg2type OF
+                    mm_database, mm_pages:
+                        kb39d_incopy_volume (t, glob, queue_index, task_return);
+                    END;
+                (*ENDCASE*) 
+                vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+                END;
+            (*ENDIF*) 
+            IF  (    sy_error       in glob^.sta_system_state) OR
+                NOT (sy_bup_working in glob^.sta_system_state)
+            THEN
+                (* restore aborted in meantime *)
+                t.trError_gg00 := e_write_task_crash
+            ELSE
+                BEGIN
+                CASE task_return OF
+                    ans_okay:
+                        BEGIN
+                        (* buff contents copied: *)
+                        sta_out_count := sta_out_count + 1;
+                        sre_state     := sres_free;
+                        kb39wrt_wakeup_read_task (glob, t.trTaskId_gg00)
+                        END;
+                    ans_task_ready:
+                        BEGIN
+                        (* this devspace: no_more_space *)
+                        do_destroy          := true;
+                        sre_state           := sres_contains_pages;
+                        sta_devsp_ready_cnt := sta_devsp_ready_cnt + 1;
+                        IF  sta_devsp_ready_cnt >= sta_num_devsp
+                        THEN
+                            (* all devspaces full *)
+                            BEGIN
+                            t.trError_gg00   := e_no_more_perm_space;
+                            sta_system_state :=
+                                  sta_system_state + [sy_error];
+                            k39wakeup_all (glob, t.trTaskId_gg00)
+                            END
+                        ELSE
+                            kb39wwt_wakeup_write_task
+                                  (glob, t.trTaskId_gg00)
+                        (*ENDIF*) 
+                        END;
+                    ans_error:
+                        BEGIN
+                        do_destroy       := true;
+                        sre_state        := sres_contains_pages;
+                        sta_system_state := sta_system_state+[sy_error];
+                        k39wakeup_all (glob, t.trTaskId_gg00)
+                        END
+                    END;
+                (*ENDCASE*) 
+                kb39ins_into_read_or_free_list (glob, queue_index)
+                END
+            (*ENDIF*) 
+            END
+        (*ENDWITH*) 
+        END
+    ELSE
+        (* queue is empty - to get a block *)
+        IF  sy_knockoffwork in glob^.sta_system_state
+        THEN
+            do_destroy := true
+        ELSE
+            kb39write_wait (t.trTaskId_gg00, glob,t.trRteCommPtr_gg00^.to_cancel,
+                  t.trError_gg00)
+        (*ENDIF*) 
+    (*ENDIF*) 
+UNTIL
+    (t.trError_gg00 <> e_ok) OR do_destroy
+(*ENDREPEAT*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39find_lpno_in_queue_elem (
+            glob                  : tkb3_save_static_ptr;
+            wanted_ioseq          : tsp00_PageNo;
+            queue_index           : tsp00_Int2;
+            VAR logpage           : tkb00_PagePtr;
+            VAR wanted_is_greater : boolean;
+            VAR trError           : tgg00_BasisError);
+ 
+VAR
+      log_found   : boolean;
+      curr_block  : tsp00_Int2;
+ 
+BEGIN
+(* outside region *)
+logpage           := NIL;
+wanted_is_greater := false;
+WITH glob^, sta_queue^ [queue_index] DO
+    BEGIN
+    IF  sre_pages_per_block = 0
+    THEN
+        BEGIN
+        sre_pages_per_block := sta_blocksize;
+        log_found           := false;
+        WHILE NOT log_found AND (sre_pages_per_block > 0) DO
+            BEGIN
+            IF  sre_block^[sre_pages_per_block].the_pt = ptNil_egg00
+            THEN
+                BEGIN
+                sre_pages_per_block := sre_pages_per_block - 1
+                END
+            ELSE
+                BEGIN
+                log_found := true;
+                END
+            (*ENDIF*) 
+            END;
+        (*ENDWHILE*) 
+        END;
+&   ifdef TRACE
+    (*ENDIF*) 
+    t01p2int4 (kb_save, 'wanted_ioseq', wanted_ioseq
+          ,             'pages/block ', sre_pages_per_block);
+&   endif
+    IF  sre_pages_per_block > 0
+    THEN
+        BEGIN
+        curr_block := 1;
+        WHILE (curr_block <= sre_pages_per_block) AND
+              (NOT kb391IOSeqIsInPage(wanted_ioseq, sre_block^[curr_block].univ_page))
+              DO
+            BEGIN
+            curr_block := curr_block + 1;
+            END;
+        (*ENDWHILE*) 
+        IF  (curr_block <= sre_pages_per_block)
+        THEN
+            BEGIN
+            logpage := @sre_block^ [curr_block];
+            trError := e_ok
+            END
+        ELSE
+            BEGIN
+            wanted_is_greater := kb391IOSeqIsYoungerThanPage(wanted_ioseq,
+                  sta_info.inf_first_iosequence,
+                  sre_block^[sre_pages_per_block].univ_page);
+            trError := e_logpage_not_found;
+            END;
+        (*ENDIF*) 
+        END
+    ELSE
+        BEGIN
+        trError := e_logpage_not_found
+        END
+    (*ENDIF*) 
+    END; (* with *)
+(*ENDWITH*) 
+&ifdef TRACE
+IF  trError <> e_ok
+THEN
+    BEGIN
+    t01basis_error (kb_save, 'end 39find_l', trError);
+    END
+&endif
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+FUNCTION
+      kb39get_tape_no (
+            pid            : tsp00_TaskId;
+            glob           : tkb3_save_static_ptr;
+            VAR tape_name  : tsp00_VFilename) : tsp00_Int2;
+ 
+VAR
+      found   : boolean;
+      tape_no : tsp00_Int2;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (pid, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    BEGIN
+    tape_no := 1;
+    found   := false;
+    WHILE (tape_no <= sta_num_tapes) AND NOT found DO
+        IF  sta_tape^ [tape_no].tpd_name = tape_name
+        THEN
+            found := true
+        ELSE
+            tape_no := tape_no + 1;
+        (*ENDIF*) 
+    (*ENDWHILE*) 
+    IF  tape_no > sta_num_tapes
+    THEN
+        kb39get_tape_no := ckb3_nil_tape_no
+    ELSE
+        kb39get_tape_no := tape_no
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39infopage_build (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr;
+            tape_no      : tsp00_Int2;
+            what_page    : tgg00_PageType2;
+            VAR info     : tkb3_info_stuff;
+            VAR out_page : tkb3_info_page);
+ 
+VAR
+      aux : tkb3_page_ptr;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH info DO
+    BEGIN
+    inf_conv_page_count := 0;
+    CASE glob^.sta_msg2type OF
+        mm_log: (* already set in kb38init_log_save *)
+            ; (*inf_bd_page_count := inf_last_iosequence - inf_first_iosequence; *)
+        mm_database, mm_pages:
+            BEGIN
+            inf_bd_page_count   := b10bup_data_page_cnt (t.trTaskId_gg00);
+            inf_conv_page_count := bd10conv_page_cnt;
+            inf_is_clustered    := glob^.sta_tape^[tape_no].tpd_is_clustered;
+            END;
+        OTHERWISE
+            inf_bd_page_count := 0;
+        END;
+    (*ENDCASE*) 
+    inf_pt       := ptSave_egg00;
+    inf_pt2      := what_page;
+    inf_check    := chckNil_egg00;
+    inf_filler1  := false;
+    IF  what_page = pt2EndSaveInfo_egg00
+    THEN
+        BEGIN
+        inf_max_volume_no := inf_volume_no;
+        inf_page_count    := glob^.sta_pages_transferred;
+        vdattime (inf_end_date, inf_end_time);
+        END
+    ELSE
+        IF  what_page = pt2VolumeFirstInfo_egg00
+        THEN
+            BEGIN
+            inf_save_blocksize := glob^.sta_blocksize;
+            inf_volume_no      := inf_volume_no + 1;
+            glob^.sta_tape^[tape_no].tpd_volume_no := inf_volume_no
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+(* zero init: for further use *)
+SAPDB_PascalFill ('VKB39 ',   1,    
+      sizeof (out_page), @out_page,
+      sizeof (out_page.the_info) + 1,
+      sizeof (out_page) - sizeof (out_page.the_info), chr (0),t.trError_gg00);
+IF  t.trError_gg00 = e_ok
+THEN
+    BEGIN
+    WITH out_page DO
+        BEGIN
+        the_info     := info;
+        aux          := @out_page;
+        inf_checksum := kb39chksum_page (aux^);
+        inf_trailer  := inf_header
+        END;
+    (*ENDWITH*) 
+    WITH out_page, glob^.sta_tape^[tape_no] DO
+        BEGIN
+        the_info.inf_volume_no := tpd_volume_no;
+        IF  (what_page = pt2EndSaveInfo_egg00  ) OR
+            (what_page = pt2EndVolumeInfo_egg00)
+        THEN
+            the_info.inf_vol_page_cnt :=
+                  tpd_cnt_pages + glob^.sta_blocksize
+        ELSE
+            the_info.inf_vol_page_cnt := tpd_cnt_pages
+        (*ENDIF*) 
+        END
+    (*ENDWITH*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39io_tape_asyn (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr;
+            tape_no      : tsp00_Int2;
+            block        : tkb3_block_ptr;
+            VAR msg_time : tsp00_Int4);
+ 
+VAR
+      is_mirror_io : boolean;
+      vaerr        : tsp00_VaReturn;
+      maxblockcnt  : tsp00_Int4;
+      io_id        : tsp00_Int4;
+      mirr_io_id   : tsp00_Int4;
+      i            : integer;
+      msg_label    : tsp00_C8;
+      tr           : t_io_vtrace;
+ 
+BEGIN
+(* outside region / tape and block are reserved *)
+io_id      := 8888 ;
+mirr_io_id := 9999 ;
+WITH glob^, sta_tape^ [tape_no] DO
+    BEGIN
+    is_mirror_io := tpd_mirror_index > 0;
+    IF  NOT sta_is_remote
+    THEN
+        BEGIN
+        vasynio (tpd_fno, io_id, c_sequential_access,
+              sta_blocksize, block, vaerr, tpd_errtext);
+        IF  (vaerr = va_ok) AND is_mirror_io
+        THEN
+            vasynio (sta_tape^ [tpd_mirror_index].tpd_fno, mirr_io_id,
+                  c_sequential_access,
+                  sta_blocksize, block, vaerr, tpd_errtext);
+        (*ENDIF*) 
+        IF  vaerr = va_ok
+        THEN
+            vasynwait (tpd_fno, io_id, maxblockcnt, vaerr, tpd_errtext);
+        (* PTS 1123886 UH 2003-09-08 begin *)
+        (*ENDIF*) 
+        IF  (vaerr = va_ok)
+            AND
+            (maxblockcnt < sta_blocksize)
+        THEN
+            BEGIN
+            vaerr := va_eof;
+            IF  sta_msgtype = m_save_parallel
+            THEN
+                tpd_errtext := 'write: last block is smaller            '
+            ELSE
+                tpd_errtext := 'read:  last block is smaller            '
+            (*ENDIF*) 
+            END;
+        (* PTS 1123886 UH 2003-09-08 end *)
+        (*ENDIF*) 
+        IF  (vaerr = va_ok) AND is_mirror_io
+        THEN
+            vasynwait (sta_tape^ [tpd_mirror_index].tpd_fno, mirr_io_id,
+                  maxblockcnt, vaerr, tpd_errtext);
+        (* PTS 1123886 UH 2003-09-08 begin *)
+        (*ENDIF*) 
+        IF  (vaerr = va_ok)
+            AND
+            (maxblockcnt < sta_blocksize)
+        THEN
+            BEGIN
+            vaerr := va_eof;
+            IF  sta_msgtype = m_save_parallel
+            THEN
+                tpd_errtext := 'write: last block is smaller            '
+            ELSE
+                tpd_errtext := 'read:  last block is smaller            '
+            (*ENDIF*) 
+            END;
+        (* PTS 1123886 UH 2003-09-08 end *)
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  NOT tpd_is_full
+    THEN
+        tpd_is_full := vaerr = va_eof;
+    (*ENDIF*) 
+    IF  vaerr = va_ok
+    THEN
+        BEGIN
+        tpd_cnt_pages := tpd_cnt_pages + sta_blocksize;
+        IF  (tpd_cnt_pages MOD c_msg_pagecnt) = 0
+        THEN
+            kb39transferred_msg (glob, tape_no, c_time_check, msg_time,
+                  t.trError_gg00)
+        (*ENDIF*) 
+        END
+    ELSE
+        IF  vaerr <> va_eof
+        THEN
+            t.trError_gg00 := e_hostfile_error;
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDWITH*) 
+IF  (vaerr = va_ok) AND
+    (g01vtrace.vtrAll_gg00 OR g01vtrace.vtrIoTrace_gg00)
+THEN
+    BEGIN
+    FOR i := 1 TO glob^.sta_blocksize DO
+        BEGIN
+        WITH tr DO
+            BEGIN
+            vtr_dev_type   := c_dev_type_tape;
+            vtr_page_type  := block^[i].the_pt;
+            vtr_page_type2 := block^[i].the_pt2;
+            vtr_dev_no     := tape_no;
+            vtr_pno        := block^[i].the_pno;
+            vtr_dev_offset := -1;
+            vtr_buf_no     := i
+            END;
+        (*ENDWITH*) 
+        IF  (glob^.sta_msgtype = m_save_parallel)
+            OR
+            (glob^.sta_msgtype = m_autosave)
+        THEN
+            b120InsertTrace (t, bd, b15write_page, mx_io_vtrace, @tr.vtr_line)
+        ELSE
+            b120InsertTrace (t, bd, b15read_page,  mx_io_vtrace, @tr.vtr_line)
+        (*ENDIF*) 
+        END
+    (*ENDFOR*) 
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+t01int4 (kb_save, 'tape IO err ', ord (vaerr) );
+&endif
+IF  kb03Check.chkBackup_kb00 (* PTS 1103957 JA 1999-10-11 *)
+    AND (vaerr = va_ok)
+THEN
+    BEGIN
+    CASE glob^.sta_msgtype OF
+        m_save_parallel:
+            msg_label := csp3_n_save;
+        m_restore_parallel:
+            msg_label := csp3_n_restore;
+        m_autosave:
+            msg_label := csp3_n_autosave;
+        OTHERWISE
+            msg_label := csp3_n_save;
+        END;
+    (*ENDCASE*) 
+    IF  is_mirror_io
+    THEN
+        BEGIN
+        g01check (kbBackupCheck_csp03, msg_label,
+              'Unknown asyn IO-ID      ', io_id,
+              (io_id = 8888) OR (io_id = 9999) );
+        g01check (kbBackupCheck_csp03, msg_label,
+              'Unknown asyn IO-ID (MIR)', mirr_io_id,
+              (mirr_io_id = 8888) OR (mirr_io_id = 9999) );
+        END
+    ELSE
+        g01check (kbBackupCheck_csp03, msg_label,
+              'Unknown asyn IO-ID      ', io_id, (io_id = 8888) )
+    (*ENDIF*) 
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39ins_into_read_or_free_list (
+            glob            : tkb3_save_static_ptr;
+            queue_index     : tsp00_Int2);
+ 
+BEGIN
+WITH glob^, sta_queue^ [queue_index] DO
+    IF  sre_state = sres_free
+    THEN
+        BEGIN
+        sre_task_no_into     := ckb3_nil_task_no;
+        sre_prev             := 0;
+        sre_next             := sta_queue_first_free;
+        sta_queue_first_free := queue_index
+        END
+    ELSE
+        (* state = contains pages -> read list *)
+        IF  sta_queue_first_read > 0
+        THEN
+            BEGIN
+            sta_queue^[sta_queue_last_read].sre_next := queue_index;
+            sre_prev            := sta_queue_last_read;
+            sta_queue_last_read := queue_index
+            END
+        ELSE
+            BEGIN
+            sta_queue_first_read := queue_index;
+            sta_queue_last_read  := queue_index
+            END
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39lock_queue_index (
+            glob        : tkb3_save_static_ptr;
+            queue_index : tsp00_Int2);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08check_excl (g08save0 + glob^.sta_region);
+(*ENDIF*) 
+IF  queue_index > 0
+THEN
+    WITH  glob^ DO
+        BEGIN
+&       ifdef TRACE
+        t01int4  (kb_save, 'queue_index ', queue_index);
+&       endif
+        sta_locked_queue_index := queue_index;
+        IF  sta_queue_first_read = queue_index
+        THEN
+            BEGIN
+            sta_queue_first_read := sta_queue^ [queue_index].sre_next;
+            IF  sta_queue_first_read > 0
+            THEN
+                sta_queue^[sta_queue_first_read].sre_prev := 0
+            (*ENDIF*) 
+            END
+        ELSE
+            WITH  sta_queue^[queue_index] DO
+                BEGIN
+                IF  kb03Check.chkBackup_kb00 (* PTS 1103957 JA 1999-10-11 *)
+                THEN
+                    g01check (kbBackupCheck_csp03, csp3_n_save,
+                          'LOCK QUEUE INDEX: prev=0', sre_prev,
+                          sre_prev > 0);
+                (*ENDIF*) 
+                sta_queue^[sre_prev].sre_next := sre_next;
+                IF  sre_next > 0
+                THEN
+                    sta_queue^[sre_next].sre_prev := sre_prev
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+        IF  sta_queue_last_read = queue_index
+        THEN
+            sta_queue_last_read := sta_queue^[queue_index].sre_prev;
+        (*ENDIF*) 
+        WITH  sta_queue^[queue_index] DO
+            BEGIN
+            sre_state := sres_reading_writing;
+            sre_next  := 0;
+            sre_prev  := 0
+            END
+        (*ENDWITH*) 
+        END
+    (*ENDWITH*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39lwt_log_write_task (
+            VAR t      : tgg00_TransContext;
+            glob       : tkb3_save_static_ptr);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    BEGIN
+    IF  sta_check_save
+    THEN
+        kb39chk_all_logpages (t, glob)
+    ELSE
+        BEGIN
+        glob^.sta_lwt_perform_redo := true;
+        vendexcl (t.trTaskId_gg00, g08save0 + sta_region);
+        gg999RedoLogForRestore (t, sta_until_date, sta_until_time, sta_until_iosequence);
+        vbegexcl (t.trTaskId_gg00, g08save0 + sta_region);
+        glob^.sta_lwt_perform_redo := false;
+        END;
+    (*ENDIF*) 
+    kb39try_resume_trt_eof_wait (glob);
+    IF  t.trError_gg00 = e_ok
+    THEN
+        BEGIN
+        sta_system_state    := sta_system_state + [sy_knockoffwork];
+        sta_devsp_ready_cnt := sta_devsp_ready_cnt + 1;
+        END
+    ELSE
+        sta_system_state := sta_system_state + [sy_error];
+    (*ENDIF*) 
+    kb39all_unlock (glob, t.trTaskId_gg00)
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39read_wait (
+            VAR t : tgg00_TransContext;
+            glob : tkb3_save_static_ptr);
+ 
+VAR
+      waitContext : tgg00_WaitContext;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    BEGIN
+    IF  sta_queue_into_count < MAX_INT4_SP00
+    THEN
+        sta_queue_into_count := sta_queue_into_count + 1;
+    (*ENDIF*) 
+    sta_read_tasks_waiting := sta_read_tasks_waiting + 1;
+    IF  (glob^.sta_msgtype  <> m_restore_parallel)
+        OR
+        (glob^.sta_msg2type <> mm_log)
+    THEN
+        kb391InsertWaitingTaskAtLast (t.trTaskId_gg00, waitContext,
+              c_read_wait, sta_msgtype = m_autosave);
+    (*ENDIF*) 
+    END ;
+(*ENDWITH*) 
+&ifdef TRACE
+t01int4 (kb_save, 'SUSPEND read', t.trTaskId_gg00) ;
+&endif
+vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region) ;
+(*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+vsuspend (t.trTaskId_gg00, 203);
+(*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region) ;
+&ifdef TRACE
+t01int4 (kb_save, 'RUNNING read', t.trTaskId_gg00) ;
+&endif
+kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+      glob,
+      t.trRteCommPtr_gg00^.to_cancel,
+      t.trError_gg00)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39save_xparam (
+            VAR t      : tgg00_TransContext;
+            glob       : tkb3_save_static_ptr;
+            tape_no    : integer;
+            what_page  : tgg00_PageType2);
+ 
+VAR
+      xparam_fileno : tsp00_Int4;
+      len           : tsp00_Int4;
+      msg_time      : tsp00_Int4;
+      pageaddr      : tsp00_PageAddr;
+      aux_ret       : tsp00_XpReturnCode;
+      ret           : tsp00_XpReturnCode;
+      dummy_return  : tkb3_answer_id;
+ 
+BEGIN
+pageaddr := NIL;
+aux_ret  := xp_ok;
+ret      := xp_ok;
+WITH glob^, sta_tape^ [tape_no], sta_queue^ [ckb3_extra_block] DO
+    BEGIN
+    IF  tpd_xp_size <= 0
+    THEN
+        vxparam_get_filesize (tpd_xp_size, tpd_errtext, ret);
+    (*ENDIF*) 
+    IF  ret = xp_ok
+    THEN
+        vxparam_open (xparam_fileno, tpd_errtext, ret);
+&   ifdef TRACE
+    (*ENDIF*) 
+    t01int4 (kb_save, 'xp_open: ret', ord(ret));
+&   endif
+    IF  ret = xp_ok
+    THEN
+        BEGIN
+        IF  tpd_xp_read > 0
+        THEN
+            (* skip already written xparam bytes *)
+            BEGIN
+            vxparam_read_binary (xparam_fileno, pageaddr, tpd_xp_read, len,
+                  tpd_errtext, ret);
+&           ifdef TRACE
+            t01int4 (kb_save, 'pages skiped', len);
+&           endif
+            END;
+        (*ENDIF*) 
+        REPEAT
+            WHILE (sre_pages_per_block < sta_blocksize) AND
+                  (tpd_xp_read         < tpd_xp_size)   AND
+                  (ret                 = xp_ok) DO
+                BEGIN
+                sre_pages_per_block := sre_pages_per_block + 1;
+                tpd_xp_pages        := tpd_xp_pages        + 1;
+                WITH sre_block^[sre_pages_per_block].xp_page DO
+                    BEGIN
+                    xp_pno          := tpd_xp_pages;
+                    xp_pt           := ptSave_egg00;
+                    xp_pt2          := pt2Xparam_egg00;
+                    xp_check        := chckNil_egg00;
+                    xp_filler1      := false;
+                    xp_total_length := tpd_xp_size;
+                    xp_length       := 0;
+                    pageaddr        := @xp_data[1];
+                    xp_checksum     := 0;
+                    xp_trailer      := xp_header;
+                    vxparam_read_binary (xparam_fileno, pageaddr,
+                          mxkb3_xparam_page_body, xp_length,
+                          tpd_errtext, ret);
+&                   ifdef TRACE
+                    t01int4 (kb_save, 'bp_read: ret', ord(ret) );
+                    t01int4 (kb_save, 'bytes_read: ', xp_length);
+&                   endif
+                    tpd_xp_read  := tpd_xp_read + xp_length;
+                    IF  ret = xp_ok
+                    THEN
+                        xp_checksum := kb39chksum_page
+                              (sre_block^[sre_pages_per_block])
+                    (*ENDIF*) 
+                    END;
+                (*ENDWITH*) 
+                END;
+            (*ENDWHILE*) 
+&           ifdef TRACE
+            t01int4 (kb_save, 'curr_bytes_r', tpd_xp_read);
+&           endif
+            IF  (ret = xp_ok) OR (ret = xp_eof)
+            THEN
+                kb39t_outcopy_tape (t, glob,
+                      NOT c_io_outside_region, NOT c_IsClustered,
+                      what_page, tape_no, ckb3_extra_block,
+                      msg_time, dummy_return);
+            (*ENDIF*) 
+            sre_pages_per_block := 0;
+        UNTIL
+            (tpd_xp_read    >= tpd_xp_size) OR
+            (t.trError_gg00 <> e_ok       ) OR
+            (ret            <> xp_ok      );
+        (*ENDREPEAT*) 
+        IF  (ret <> xp_ok) AND (ret <> xp_eof)
+        THEN
+            BEGIN
+            aux_ret := ret;
+            ret     := xp_ok
+            END;
+        (*ENDIF*) 
+        vxparam_close (xparam_fileno, tpd_errtext, ret);
+&       ifdef TRACE
+        t01int4 (kb_save, 'xp_clos: ret', ord(ret));
+&       endif
+        IF  aux_ret <> xp_ok
+        THEN
+            ret := aux_ret;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  (ret <> xp_ok) AND (ret <> xp_eof)
+    THEN
+        BEGIN
+        k38sys_msg (glob, sp3m_error,
+              kb38ErrXparamRead_csp03,
+              tpd_errtext, ord(ret));
+        t.trError_gg00 := e_hostfile_error
+        END;
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39skip_to_end_of_volume (
+            VAR t        : tgg00_TransContext;
+            glob         : tkb3_save_static_ptr;
+            tape_no      : tsp00_Int2;
+            block        : tkb3_block_ptr;
+            bIsClustered : boolean);
+ 
+VAR
+      msg_time : tsp00_Int4;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WHILE (t.trError_gg00 = e_ok)
+      AND
+      NOT glob^.sta_tape^[tape_no].tpd_is_full DO
+    BEGIN
+    kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+          glob,
+          t.trRteCommPtr_gg00^.to_cancel,
+          t.trError_gg00);
+    IF  t.trError_gg00 = e_ok
+    THEN
+        kb39io_tape_asyn (t, glob, tape_no, block, msg_time);
+    (*ENDIF*) 
+    IF  (t.trError_gg00 = e_ok) AND NOT glob^.sta_tape^[tape_no].tpd_is_full
+    THEN
+        BEGIN
+        kb39block_check (t, glob, block, tape_no, bIsClustered);
+        IF  (t.trError_gg00 = e_ok)
+            AND
+            ((block^[ckb3_blockpos_hostinfo].the_pt2 = pt2EndVolumeInfo_egg00) OR
+            ( block^[ckb3_blockpos_hostinfo].the_pt2 = pt2EndSaveInfo_egg00  ))
+        THEN
+            glob^.sta_tape^[tape_no].tpd_is_full := true
+        (*ENDIF*) 
+        END
+    (*ENDIF*) 
+    END
+(*ENDWHILE*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39t_first_read (
+            VAR t             : tgg00_TransContext;
+            glob              : tkb3_save_static_ptr;
+            tape_no           : tsp00_Int2;
+            VAR first_page    : tkb3_page);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_wrong_hostfile;
+WITH first_page.info_page.the_info, glob^, sta_tape^ [tape_no] DO
+    IF  first_page.the_pt <> ptSave_egg00
+    THEN
+        BEGIN
+        tpd_errtext := c_bad_info_pagetype;
+        k38sys_msg (glob, sp3m_error, kbBadPageType_csp03,
+              tpd_errtext, ord (first_page.the_pt))
+        END
+    ELSE
+        IF  (inf_mess_type <> m_save_parallel) AND
+            (inf_mess_type <> m_autosave     )
+        THEN
+            BEGIN
+            tpd_errtext := c_bad_msgtype;
+            k38sys_msg (glob, sp3m_error, kbBadMessType_csp03,
+                  tpd_errtext, ord (inf_mess_type))
+            END
+        ELSE
+            IF  ((sta_msg2type   =  mm_database) AND
+                ( inf_mess2_type <> mm_database))
+                OR
+                ((sta_msg2type   =  mm_pages) AND
+                ( inf_mess2_type <> mm_pages))
+                OR
+                ((sta_msg2type   =  mm_log) AND
+                ( inf_mess2_type <> mm_log))
+            THEN
+                BEGIN
+                tpd_errtext := c_bad_msg2type;
+                k38sys_msg (glob, sp3m_error, kbBadMess2Type_csp03,
+                      tpd_errtext, ord (inf_mess2_type))
+                END
+            ELSE
+                IF  inf_pt2 <> pt2VolumeFirstInfo_egg00
+                THEN
+                    BEGIN
+                    tpd_errtext := c_bad_firstinfo;
+                    k38sys_msg (glob, sp3m_error,
+                          kbBadFirstInfo_csp03,
+                          tpd_errtext, ord (inf_pt2))
+                    END
+                ELSE
+                    IF  inf_save_blocksize <> sta_blocksize
+                    THEN
+                        BEGIN
+                        tpd_errtext := c_bad_blocksize;
+                        k38sys_msg (glob, sp3m_error,
+                              kbBadBlockSize_csp03,
+                              tpd_errtext, inf_save_blocksize)
+                        END
+                    ELSE
+                        IF  inf_volume_no > ckb3_max_bool_list
+                        THEN
+                            BEGIN
+                            t.trError_gg00   := e_ok;
+                            END
+                        ELSE
+                            IF  inf_volume_no <= 0
+                            THEN
+                                BEGIN
+                                tpd_errtext := c_bad_volume_no;
+                                k38sys_msg (glob, sp3m_error,
+                                      kbBadVolumeNo_csp03,
+                                      tpd_errtext, inf_volume_no)
+                                END
+                            ELSE
+                                BEGIN
+                                t.trError_gg00 := e_ok;
+                                tpd_is_clustered := inf_is_clustered
+                                END;
+                            (*ENDIF*) 
+                        (*ENDIF*) 
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+IF  (t.trError_gg00 = e_ok)
+    AND
+    (first_page.info_page.the_info.inf_swap_check <> 0)
+    AND
+    (first_page.info_page.the_info.inf_swap_check <> ckb3_swap_check_no)
+THEN
+    BEGIN
+    t.trError_gg00 := e_wrong_hostfile;
+    k38sys_msg (glob, sp3m_error, kbBadSwapping_csp03, c_bad_swapping,
+          ord (first_page.info_page.the_info.inf_swap_check))
+    END;
+(*ENDIF*) 
+IF  (t.trError_gg00 = e_ok) AND (glob^.sta_info.inf_pt2 <> pt2Nil_egg00)
+THEN
+    WITH first_page.info_page, glob^ DO
+        BEGIN
+        IF  (the_info.inf_db_ident[1] <> chr(0))
+            AND
+            (sta_info.inf_db_ident[1] <> chr(0))
+            AND  (* PTS 1116030 mb 2002-06-03 *)
+            (NOT kb391SupressDBIdentCheckForMigration( the_info.inf_curr_knlvers ))
+            AND
+            (the_info.inf_db_ident <> sta_info.inf_db_ident) (* PTS 1113550 mb 2002-05-14 *)
+        THEN
+            WITH sta_tape^[tape_no] DO
+                BEGIN
+                t.trError_gg00 := e_wrong_hostfile;
+                tpd_errtext    := c_dbident_mismatch;
+                k38sys_msg (glob, sp3m_error, kbWrongHostFile_csp03,
+                      tpd_errtext, tape_no)
+                END
+            (*ENDWITH*) 
+        ELSE
+            IF  (sta_msg2type <> mm_log)
+                AND
+                ( the_info.inf_first_iosequence <> sta_info.inf_first_iosequence)
+            THEN
+                WITH sta_tape^[tape_no] DO
+                    BEGIN
+                    t.trError_gg00 := e_wrong_hostfile;
+                    tpd_errtext    := c_bad_volume;
+                    k38sys_msg (glob, sp3m_error, kbWrongHostFile_csp03,
+                          tpd_errtext, tape_no)
+                    END
+                (*ENDWITH*) 
+            ELSE
+                IF  (sta_msg2type = mm_log)
+                    AND
+                    (NOT kb560IsSuccessor (sta_info.inf_last_iosequence, the_info.inf_first_iosequence))
+                    (* PTS 1126639 mb 2003-12-22 *)(* PTS 1113550 mb 2002-05-14 *)
+                THEN
+                    WITH sta_tape^[tape_no] DO
+                        BEGIN
+&                       ifdef TRACE
+                        t01p2int4 (kb_save,
+                              'first_lpno  ', the_info.inf_first_iosequence,
+                              'last_lpno   ', the_info.inf_last_iosequence);
+                        t01p2int4 (kb_save,
+                              'sta.first   ', sta_info.inf_first_iosequence,
+                              'sta.last    ', sta_info.inf_last_iosequence);
+&                       endif
+                        t.trError_gg00 := e_wrong_hostfile;
+                        tpd_errtext    := c_invalid_sequence;
+                        k38sys_msg (glob, sp3m_error, kbWrongHostFile_csp03,
+                              tpd_errtext, tape_no)
+                        END;
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  sta_msg2type = mm_log
+        THEN
+            (* handle different logsave as a "following" tape *)
+            BEGIN
+            (* PTS 1104174 UH 25-10-1999 *)
+            (* k38history_write removed *)
+            sta_pages_transferred      := 0;
+            sta_info.inf_bd_page_count   := the_info.inf_bd_page_count; (* PTS 1106524 UH 05-05-2000 *)
+            sta_info.inf_conv_page_count := the_info.inf_conv_page_count;
+            sta_info.inf_first_iosequence      := the_info.inf_first_iosequence;
+            sta_info.inf_last_iosequence       := the_info.inf_last_iosequence;
+            sta_info.inf_file_version    := the_info.inf_file_version;
+            sta_info.inf_dbstamp1_date   := the_info.inf_dbstamp1_date;
+            sta_info.inf_dbstamp1_time   := the_info.inf_dbstamp1_time;
+            sta_info.inf_dbstamp2_date   := the_info.inf_dbstamp2_date;
+            sta_info.inf_dbstamp2_time   := the_info.inf_dbstamp2_time;
+            sta_info.inf_label           := the_info.inf_label
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  (t.trError_gg00 = e_ok) AND (glob^.sta_msg2type <> mm_log)
+THEN
+    WITH glob^, first_page.info_page.the_info DO
+        IF  inf_volume_no <= ckb3_max_bool_list
+        THEN
+            IF  sta_volume_started [inf_volume_no]
+            THEN
+                WITH sta_tape^[tape_no] DO
+                    BEGIN
+                    t.trError_gg00 := e_wrong_hostfile;
+                    tpd_errtext    := c_dupl_volume;
+                    k38sys_msg (glob, sp3m_error, kbDuplVolume_csp03,
+                          tpd_errtext, inf_volume_no)
+                    END;
+                (*ENDWITH*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    WITH glob^, first_page.info_page.the_info DO
+        IF  sta_tape_label <> bsp_c14 (* PTS 1128100 mb 2004-03-01 *)
+        THEN
+            IF  sta_tape_label <> inf_label
+            THEN
+                t.trError_gg00 := e_invalid_label;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    WITH first_page.info_page, glob^ DO
+        BEGIN
+        sta_tapes_start_cnt := sta_tapes_start_cnt +1;
+        IF  (the_info.inf_volume_no <= ckb3_max_bool_list)
+            AND
+            (sta_msg2type <> mm_log)
+        THEN
+            sta_volume_started [the_info.inf_volume_no] := true;
+        (* PTS 1104316 UH 25-10-1999 *)
+        (*ENDIF*) 
+        k38mdf_medium_def_write (glob, t.trTaskId_gg00, tape_no, the_info.inf_file_version)
+        END;
+    (*ENDWITH*) 
+&ifdef TRACE
+(*ENDIF*) 
+t01basis_error (kb_save, 'end first_re', t.trError_gg00);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39t_incopy_tape (
+            VAR t               : tgg00_TransContext;
+            glob                : tkb3_save_static_ptr;
+            tape_no             : tsp00_Int2;
+            block               : tkb3_block_ptr;
+            VAR is_clustered    : boolean;
+            endblock_mandantory : boolean; (* PTS 1127536 mb 2004-02-03 *)
+            VAR msg_time        : tsp00_Int4;
+            VAR task_return     : tkb3_answer_id);
+ 
+VAR
+      repeat_read     : boolean;
+      tape_loaded     : boolean;
+      end_block_found : boolean; (* PTS 1127536 mb 2004-02-03 *)
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(* copy from tape to queue *)
+(*ENDIF*) 
+REPEAT
+    end_block_found := false;
+    t.trError_gg00 := e_ok;
+    task_return    := ans_okay;
+    tape_loaded    := false;
+    is_clustered   := glob^.sta_tape^[tape_no].tpd_is_clustered;
+    REPEAT
+        repeat_read := false;
+        kb39check_cancel_flag_and_kill (t.trTaskId_gg00,
+              glob,
+              t.trRteCommPtr_gg00^.to_cancel,
+              t.trError_gg00);
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+            kb39io_tape_asyn (t, glob, tape_no, block, msg_time);
+            IF  (t.trError_gg00 <> e_ok) OR glob^.sta_tape^[tape_no].tpd_is_full
+            THEN
+                BEGIN
+                IF  glob^.sta_tape^[tape_no].tpd_cnt_pages <= 0
+                THEN
+                    (* first read: hostfile_err -> (try again) *)
+                    t.trError_gg00 := e_wrong_hostfile
+                (*ENDIF*) 
+                END
+            ELSE
+                kb39block_check (t, glob, block, tape_no, is_clustered);
+            (*ENDIF*) 
+            vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+            END;
+        (*ENDIF*) 
+        IF  (    sy_error       in glob^.sta_system_state) OR
+            NOT (sy_bup_working in glob^.sta_system_state)
+        THEN
+            (* restore aborted in meantime *)
+            t.trError_gg00 := e_write_task_crash;
+        (*ENDIF*) 
+        IF  t.trError_gg00 = e_ok
+        THEN
+            WITH glob^ DO
+                BEGIN
+                IF  NOT sta_tape^ [tape_no].tpd_is_full
+                THEN
+                    CASE block^ [1].the_pt OF
+                        ptSave_egg00:
+                            CASE block^[ckb3_blockpos_hostinfo]
+                                  .info_page.the_info.inf_pt2 OF
+                                pt2VolumeFirstInfo_egg00:
+                                    IF  sta_tape^[tape_no].tpd_cnt_pages
+                                        <= sta_blocksize
+                                    THEN
+                                        BEGIN
+                                        kb39t_first_read (t, glob,
+                                              tape_no,
+                                              block^
+                                              [ckb3_blockpos_hostinfo]);
+                                        repeat_read := (t.trError_gg00 = e_ok)
+                                        END;
+                                    (*ENDIF*) 
+                                pt2EndVolumeInfo_egg00,
+                                pt2EndSaveInfo_egg00:
+                                    BEGIN
+                                    end_block_found := true;
+                                    kb39t_last_read (t, glob, tape_no,
+                                          block^[ckb3_blockpos_hostinfo]
+                                          .info_page, task_return);
+                                    END;
+                                pt2Xparam_egg00:
+                                    repeat_read := true;
+                                pt2VolumeLabelInfo_egg00:
+                                    BEGIN
+                                    repeat_read  := true;
+                                    is_clustered := block^[ckb3_blockpos_hostinfo]
+                                          .info_page.the_info.inf_is_clustered;
+                                    glob^.sta_tape^[tape_no].tpd_is_clustered
+                                          := is_clustered;
+                                    END;
+                                OTHERWISE
+                                    BEGIN
+                                    (* CHECKED WHEN WRITING TO DEVICE *)
+                                    END
+                                END;
+                            (*ENDCASE*) 
+                        OTHERWISE
+                            BEGIN
+                            (* CHECKED WHEN WRITING TO DEVICE *)
+                            END
+                        END;
+                    (*ENDCASE*) 
+                (*ENDIF*) 
+                IF  sta_tape^ [tape_no].tpd_is_full
+                THEN
+                    BEGIN
+                    sta_tapes_ready_cnt := sta_tapes_ready_cnt + 1;
+                    IF  (sta_tapes_ready_cnt >=
+                        sta_info.inf_max_volume_no)
+                        AND
+                        (sta_info.inf_max_volume_no > 0)
+                    THEN
+                        IF  endblock_mandantory AND NOT end_block_found
+                            (* PTS 1127536 mb 2004-02-03 *)
+                        THEN
+                            BEGIN
+                            t.trError_gg00 := e_incomplete_logsegm;
+                            sta_tape^ [tape_no].tpd_errtext := c_incomplete_segment;
+                            task_return := ans_error;
+                            g01optextmsg (sp3p_knldiag, sp3m_error, kbLogSegmInvalid_csp03,
+                                  csp3_n_restore , c_incomplete_segment)
+                            END
+                        ELSE
+                            task_return := ans_read_finish
+                        (*ENDIF*) 
+                    ELSE
+                        task_return := ans_tape_full;
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+                IF  (t.trError_gg00 = e_ok)
+                    AND
+                    NOT sta_tape^ [tape_no].tpd_is_full
+                THEN
+                    BEGIN
+                    sta_pages_transferred :=
+                          sta_pages_transferred + sta_blocksize;
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+        (*ENDIF*) 
+    UNTIL
+        NOT repeat_read;
+    (*ENDREPEAT*) 
+    IF  ((t.trError_gg00 = e_ok) AND
+        (  (task_return = ans_task_ready) OR
+        (   task_return = ans_tape_full)  OR
+        (   task_return = ans_read_finish)))
+        OR
+        (t.trError_gg00 = e_wrong_hostfile)
+        OR
+        (t.trError_gg00 = e_invalid_label)
+        OR
+        ((t.trError_gg00 <> e_ok ) AND
+        (glob^.sta_check_save))
+    THEN
+        WITH glob^.sta_tape^[tape_no] DO
+            BEGIN
+            k38closeasyn (t, glob,
+                  glob^.sta_is_auto_load
+                  AND (task_return <> ans_read_finish),
+                  NOT c_force_rewind, tape_no, tpd_is_open, tpd_fno);
+            tape_loaded :=
+                  ((t.trError_gg00 = e_ok) OR (t.trError_gg00 = e_wrong_hostfile))
+                  AND glob^.sta_is_auto_load
+                  AND tpd_is_open
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+UNTIL
+    NOT tape_loaded;
+(*ENDREPEAT*) 
+IF  t.trError_gg00 <> e_ok
+THEN
+    BEGIN
+    task_return := ans_error;
+    k38err_to_vtrace (t, glob, 'READ TAPE   ',
+          glob^.sta_tape^[tape_no].tpd_errtext)
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39t_last_read (
+            VAR t            : tgg00_TransContext;
+            glob             : tkb3_save_static_ptr;
+            tape_no          : tsp00_Int2;
+            VAR last_info    : tkb3_info_page;
+            VAR task_return  : tkb3_answer_id);
+ 
+VAR
+      aux_date : tsp00_Date;
+      aux_time : tsp00_Time;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^, last_info DO
+    IF  (the_info.inf_pt2 <> pt2EndVolumeInfo_egg00) AND
+        (the_info.inf_pt2 <> pt2EndSaveInfo_egg00)
+    THEN
+        WITH glob^.sta_tape^[tape_no] DO
+            BEGIN
+            t.trError_gg00    := e_bad_hostfile_page;
+            tpd_errtext := c_bad_info_pagekind;
+            k38sys_msg (glob, sp3m_error, kbBadHostFilePage_csp03,
+                  tpd_errtext, ord (the_info.inf_pt2))
+            END
+        (*ENDWITH*) 
+    ELSE
+        IF  the_info.inf_pt2 = pt2EndSaveInfo_egg00
+        THEN
+            BEGIN
+            IF  sta_msg2type <> mm_log
+            THEN
+                BEGIN
+                aux_date                := sta_info.inf_start_date;
+                aux_time                := sta_info.inf_start_time;
+                sta_info                := the_info;
+                sta_info.inf_start_date := aux_date;
+                sta_info.inf_start_time := aux_time
+                END
+            ELSE
+                BEGIN
+                sta_info.inf_max_volume_no := the_info.inf_max_volume_no;
+                sta_info.inf_page_count    := the_info.inf_page_count
+                END;
+            (*ENDIF*) 
+&           ifdef TRACE
+            t01p2int4 (kb_save,
+                  'max_volume  ', the_info.inf_max_volume_no,
+                  'page_count  ', the_info.inf_page_count);
+&           endif
+            END;
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    WITH glob^ DO
+        BEGIN
+        sta_tapes_ready_cnt := sta_tapes_ready_cnt + 1;
+        IF  ((sta_info.inf_pt2 = pt2EndSaveInfo_egg00)
+            AND
+            (sta_tapes_ready_cnt >= sta_info.inf_max_volume_no)
+            AND
+            (sta_msg2type <> mm_log))
+            OR
+            (sta_check_save AND (sta_msg2type = mm_log))
+        THEN
+            (* all volumes finished *)
+            task_return := ans_read_finish
+        ELSE
+            (* this volume finished *)
+            task_return := ans_task_ready
+        (*ENDIF*) 
+        END
+    (*ENDWITH*) 
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39t_outcopy_tape (
+            VAR t               : tgg00_TransContext;
+            glob                : tkb3_save_static_ptr;
+            io_outside_region   : boolean;
+            bIsClustered        : boolean;
+            info_kind           : tgg00_PageType2;
+            tape_no             : tsp00_Int2;
+            queue_index         : tsp00_Int2;
+            VAR msg_time        : tsp00_Int4;
+            VAR task_return     : tkb3_answer_id);
+ 
+VAR
+      write_volume_end : boolean;
+      i                : integer;
+      initOffset       : tsp00_Int4;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(* copy from queue to tape *)
+(*ENDIF*) 
+t.trError_gg00   := e_ok;
+task_return      := ans_okay;
+write_volume_end := false;
+WITH glob^, sta_queue^[queue_index] DO
+    REPEAT
+        IF  write_volume_end
+        THEN
+            BEGIN
+            kb39infopage_build (t, glob, tape_no,
+                  pt2EndVolumeInfo_egg00,
+                  sta_info, sre_block^[1].info_page);
+            sre_pages_per_block            := 1;
+            task_return                    := ans_task_ready;
+            write_volume_end               := false;
+            sta_tape^[tape_no].tpd_is_full := true
+            END;
+        (*ENDIF*) 
+        IF  glob^.sta_to_cancel <> NIL
+        THEN
+            IF  glob^.sta_to_cancel^
+            THEN
+                BEGIN
+                glob^.sta_system_state :=
+                      glob^.sta_system_state + [sy_error];
+                g01optextmsg (sp3p_console, sp3m_warning,
+                      kb39Cancelled_csp03, csp3_n_save, c_cancelled_msg)
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  io_outside_region
+        THEN
+            vendexcl (t.trTaskId_gg00, g08save0 + sta_region);
+        (*ENDIF*) 
+        IF  kb03Check.chkBackup_kb00 (* PTS 1103957 JA 1999-10-11 *)
+        THEN
+            g01check (kbBackupCheck_csp03, csp3_n_save,
+                  'last blocks mismatch    ',
+                  sre_pages_per_block, (sre_pages_per_block > 0) AND
+                  (sre_pages_per_block <= sta_blocksize) );
+        (*ENDIF*) 
+        initOffset :=   sizeof(sre_block^[i].the_pno)
+              + sizeof(sre_block^[i].the_pt)
+              + sizeof(sre_block^[i].the_pt2);
+        FOR i := sre_pages_per_block + 1 TO sta_blocksize DO
+            BEGIN
+            sre_block^[i].the_pno := 0;
+            sre_block^[i].the_pt  := ptNil_egg00;
+            sre_block^[i].the_pt2 := pt2Nil_egg00;
+            SAPDB_PascalFill ('VKB39 ',   2,    
+                  sizeof (sre_block^[i]),
+                  @sre_block^[i],
+                  initOffset + 1,
+                  sizeof (sre_block^[i]) - initOffset,
+                  chr(0),
+                  t.trError_gg00)
+            END;
+        (*ENDFOR*) 
+        kb39block_check (t, glob, sre_block, tape_no, bIsClustered);
+        IF  t.trError_gg00 = e_ok
+        THEN
+            kb39io_tape_asyn (t, glob, tape_no, sre_block, msg_time);
+        (*ENDIF*) 
+        IF  io_outside_region
+        THEN
+            vbegexcl (t.trTaskId_gg00, g08save0 + sta_region);
+        (*ENDIF*) 
+        IF  ((   sy_error       in sta_system_state) OR
+            NOT (sy_bup_working in sta_system_state))
+        THEN
+            (* save aborted in meantime *)
+            t.trError_gg00 := e_write_task_crash;
+        (*ENDIF*) 
+        IF  (t.trError_gg00  =  e_ok           ) AND
+            (info_kind <> pt2EndSaveInfo_egg00 )
+        THEN
+            BEGIN
+            sta_pages_transferred :=
+                  sta_pages_transferred + sta_blocksize;
+            IF  task_return <> ans_task_ready
+            THEN
+                IF  sta_tape^ [tape_no].tpd_is_full
+                THEN
+                    task_return := ans_tape_full
+                ELSE
+                    WITH sta_tape^[tape_no] DO
+                        (* PTS 1120353 mb 2003-01-29 *)
+                        (* three extra blocks: RTE+header+trailer *)
+                        write_volume_end :=
+                              tpd_total_cnt_pages +
+                              tpd_cnt_pages + 3 * sta_blocksize - 1
+                              > tpd_max_pages
+                    (*ENDWITH*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+            END
+        (*ENDIF*) 
+    UNTIL
+        NOT write_volume_end;
+    (*ENDREPEAT*) 
+(*ENDWITH*) 
+IF  (t.trError_gg00 = e_ok)
+    AND
+    ((task_return = ans_task_ready) OR (task_return = ans_tape_full))
+THEN
+    WITH glob^, sta_tape^ [tape_no] DO
+        BEGIN
+        (* end-of-volume-block already written -> not, if tape full *)
+        k38closeasyn (t, glob, sta_is_auto_load, NOT c_force_rewind,
+              tape_no, tpd_is_open, tpd_fno);
+        IF  sta_is_auto_load AND tpd_is_open
+        THEN
+            (* first-info-block already written *)
+            task_return := ans_okay;
+        (*ENDIF*) 
+        END;
+    (*ENDWITH*) 
+(*ENDIF*) 
+IF  t.trError_gg00 <> e_ok
+THEN
+    BEGIN
+    task_return := ans_error;
+    k38err_to_vtrace (t, glob, 'WRITE TAPE  ',
+          glob^.sta_tape^[tape_no].tpd_errtext)
+    END;
+&ifdef TRACE
+(*ENDIF*) 
+kb39answerprint (task_return);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39transferred_msg (
+            glob         : tkb3_save_static_ptr;
+            tape_no      : tsp00_Int2;
+            time_check   : boolean;
+            VAR msg_time : tsp00_Int4;
+            VAR err      : tgg00_BasisError);
+ 
+CONST
+      c_msg_interval =    5; (* seconds *)
+ 
+VAR
+      len        : integer;
+      msg_len    : integer;
+      offset     : integer;
+      curr_time  : tsp00_Int4;
+      dummy_time : tsp00_Int4;
+      msg        : tsp00_ErrText;
+      msg_label  : tsp00_C8;
+ 
+BEGIN
+(* outside region / tape is reserved *)
+curr_time := 0;
+IF  time_check
+THEN
+    vclock (curr_time, dummy_time)
+ELSE
+    curr_time := 0;
+(*ENDIF*) 
+IF  NOT time_check OR (curr_time - msg_time >= c_msg_interval)
+THEN
+    BEGIN
+    IF  time_check
+    THEN
+        msg_time := curr_time;
+    (*ENDIF*) 
+    msg     := bsp_c40;
+    msg_len := 0;
+    g17trimint4_to_line (glob^.sta_tape^[tape_no].tpd_cnt_pages,
+          msg_len, msg);
+    msg_len := msg_len + 1;
+    k38current_msg_label (glob, msg_label);
+    CASE glob^.sta_msgtype OF
+        m_autosave, m_save_parallel:
+            g17nameto_line ('pages ->          ', msg_len, msg);
+        m_restore_parallel:
+            g17nameto_line ('pages <-          ', msg_len, msg);
+        END;
+    (*ENDCASE*) 
+    msg_len       := msg_len + 2;
+    msg [msg_len] := '"';
+    WITH glob^.sta_tape^[tape_no] DO
+        BEGIN
+        len := sizeof (tpd_name);
+        WHILE (len > 1) AND (tpd_name [len] = ' ') DO
+            len := len - 1;
+        (*ENDWHILE*) 
+        IF  len > sizeof (msg) - msg_len - 1
+        THEN
+            offset := len - (sizeof (msg) - msg_len - 1)
+        ELSE
+            offset := 0;
+        (*ENDIF*) 
+        SAPDB_PascalMove ('VKB39 ',   3,    
+              sizeof (tpd_name), sizeof (msg),
+              @tpd_name, offset + 1, @msg, msg_len + 1, len - offset,err)
+        END;
+    (*ENDWITH*) 
+    msg_len       := msg_len + len - offset + 1;
+    msg [msg_len] := '"';
+    vmessage (sp3p_console, sp3m_info, kbPagesTransferred_csp03,
+          msg_label, msg);
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39trt_tape_read_task (
+            VAR t       : tgg00_TransContext;
+            glob        : tkb3_save_static_ptr;
+            tape_no     : tsp00_Int2 );
+ 
+VAR
+      do_destroy          : boolean;
+      is_restore_log      : boolean;
+      reading_allowed     : boolean;
+      task_return         : tkb3_answer_id;
+      queue_index         : tsp00_Int2;
+      msg_time            : tsp00_Int4;
+      restart_record_read : boolean;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00  := e_ok;
+do_destroy      := false;
+msg_time        := 0;
+reading_allowed := true;
+is_restore_log  := glob^.sta_msg2type = mm_log;
+restart_record_read := false;
+(* PTS1109736 mb 2002-09-03 open tape in each tape writer task *)
+(* PTS1121681 mb 2003-04-29 but not for the first log-tape *)
+(*                          This is done in kb38parallel_backup *)
+IF  (glob^.sta_tapes_ready_cnt > 0 ) OR NOT is_restore_log
+THEN
+    k38tapeopen_one (t,glob,tape_no, NOT c_for_writing, NOT c_for_readlabel);
+(*ENDIF*) 
+IF  (t.trError_gg00  = e_hostfile_error) AND
+    glob^.sta_tape^[tape_no].tpd_is_replaced
+THEN
+    (* give a second chance to the user by changing medium/filename *)
+    BEGIN
+    t.trError_gg00 := e_wrong_hostfile;
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    BEGIN
+    (* PTS1121681 mb 2003-04-29 for log-recovery config_restart_rec is called *)
+    (*                          in kb38_parallel_backup                       *)
+    IF  NOT is_restore_log
+    THEN
+        REPEAT
+            IF  (glob^.sta_queue_first_free > 0)
+            THEN
+                BEGIN
+                queue_index := glob^.sta_queue_first_free;
+                WITH glob^, sta_queue^[queue_index] DO
+                    BEGIN
+                    sta_queue_first_free := sre_next;
+                    sre_next  := 0;
+                    sre_prev  := 0;
+                    sre_state := sres_reading_writing;
+                    sre_task_no_into := t.trChild_gg00;
+                    k39config_restartrec_from_first_tape (t, glob, glob^.sta_msg2type, tape_no,
+                          sre_block, sre_is_clustered);
+                    restart_record_read := true;
+                    sre_state := sres_free;
+                    kb39ins_into_read_or_free_list (glob, queue_index)
+                    END;
+                (*ENDWITH*) 
+                END
+            ELSE
+                (* queue is full - to put a block into *)
+                IF  sy_knockoffwork in glob^.sta_system_state
+                THEN
+                    (* wakeup_all called *)
+                    do_destroy := true
+                ELSE
+                    kb39read_wait (t, glob)
+                (*ENDIF*) 
+            (*ENDIF*) 
+        UNTIL
+            (t.trError_gg00 <> e_ok) OR restart_record_read OR do_destroy;
+        (*ENDREPEAT*) 
+    (*ENDIF*) 
+    IF  (t.trError_gg00 = e_ok) AND NOT do_destroy
+    THEN
+        BEGIN
+        REPEAT
+            WITH glob^, sta_tape^[tape_no] DO
+                IF  is_restore_log
+                THEN
+                    (* min_queue_size: sta_num_tapes * 2 *)
+                    reading_allowed := (sta_trt_into_queue [tape_no] <=
+                          sta_queue_size DIV sta_num_tapes);
+                (*ENDIF*) 
+            (*ENDWITH*) 
+            IF  (glob^.sta_queue_first_free > 0) AND reading_allowed
+            THEN
+                (* empty block found *)
+                BEGIN
+                queue_index := glob^.sta_queue_first_free;
+                WITH glob^, sta_queue^[queue_index] DO
+                    BEGIN
+                    sta_queue_first_free := sre_next;
+                    sre_next             := 0;
+                    sre_prev             := 0;
+                    sre_state            := sres_reading_writing;
+                    sre_task_no_into     := t.trChild_gg00;
+                    sre_pages_per_block  := sta_blocksize;
+                    kb39t_incopy_tape (t, glob, tape_no, sre_block, sre_is_clustered,
+                          is_restore_log, msg_time, task_return);
+                    IF  t.trError_gg00 <> e_write_task_crash
+                    THEN
+                        BEGIN
+                        CASE task_return OF
+                            ans_okay:
+                                BEGIN
+                                (* buff contents copied: *)
+                                sta_into_count := sta_into_count + 1;
+                                sta_trt_into_queue [tape_no] :=
+                                      sta_trt_into_queue [tape_no] + 1;
+                                sre_state      := sres_contains_pages;
+                                kb39wwt_wakeup_write_task (glob, t.trTaskId_gg00)
+                                END;
+                            ans_task_ready, ans_read_finish:
+                                BEGIN
+                                do_destroy := true;
+                                sre_state  := sres_free;
+                                IF  task_return = ans_read_finish
+                                THEN
+                                    (* all volumes finished *)
+                                    k39wakeup_all (glob, t.trTaskId_gg00)
+                                ELSE
+                                    kb39wrt_wakeup_read_task
+                                          (glob, t.trTaskId_gg00)
+                                (*ENDIF*) 
+                                END;
+                            ans_tape_full:
+                                BEGIN
+                                do_destroy := true;
+                                sre_state  := sres_free;
+                                END;
+                            ans_error:
+                                BEGIN
+                                do_destroy := true;
+                                sre_state  := sres_free;
+                                IF  t.trError_gg00 = e_wrong_hostfile
+                                THEN
+                                    (* wrong restore tape must be replaced *)
+                                    kb39wrt_wakeup_read_task
+                                          (glob, t.trTaskId_gg00)
+                                ELSE
+                                    BEGIN
+                                    IF  t.trError_gg00 = e_ok
+                                    THEN
+                                        t.trError_gg00 := e_write_task_crash;
+                                    (*ENDIF*) 
+                                    sta_system_state :=
+                                          sta_system_state + [sy_error];
+                                    k39wakeup_all (glob, t.trTaskId_gg00)
+                                    END
+                                (*ENDIF*) 
+                                END
+                            END;
+                        (*ENDCASE*) 
+                        kb39ins_into_read_or_free_list (glob, queue_index)
+                        END
+                    (*ENDIF*) 
+                    END
+                (*ENDWITH*) 
+                END
+            ELSE
+                (* queue is full - to put a block into *)
+                IF  sy_knockoffwork in glob^.sta_system_state
+                THEN
+                    (* wakeup_all called *)
+                    do_destroy := true
+                ELSE
+                    BEGIN
+                    IF  is_restore_log
+                    THEN
+                        glob^.sta_task^[t.trChild_gg00].tsd_state := ts_waiting;
+                    (*ENDIF*) 
+                    kb39read_wait (t, glob)
+                    END
+                (*ENDIF*) 
+            (*ENDIF*) 
+        UNTIL
+            (t.trError_gg00 <> e_ok) OR do_destroy;
+        (*ENDREPEAT*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    kb39transferred_msg (glob, tape_no, NOT c_time_check, msg_time,
+          t.trError_gg00);
+(*ENDIF*) 
+IF  (t.trError_gg00 = e_ok) AND is_restore_log AND
+    (task_return = ans_task_ready)
+THEN
+    kb39wait_for_redo (t, glob)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39try_resume_trt_eof_wait (glob : tkb3_save_static_ptr);
+ 
+BEGIN
+WITH glob^ DO
+    BEGIN
+    IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+    THEN
+        g08check_excl (g08save0 + sta_region);
+    (*ENDIF*) 
+    IF  sta_trt_eof_wait_pid <> cgg_nil_pid
+    THEN
+        BEGIN
+        (*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+        vresume (sta_trt_eof_wait_pid);
+        (*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+        sta_trt_eof_wait_pid := cgg_nil_pid
+        END
+    (*ENDIF*) 
+    END
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39twt_tape_write_task (
+            VAR t   : tgg00_TransContext;
+            glob    : tkb3_save_static_ptr;
+            tape_no : tsp00_Int2);
+ 
+VAR
+      do_destroy           : boolean;
+      exit_autoload_loop   : boolean;
+      is_autosave_log      : boolean;
+      task_return          : tkb3_answer_id;
+      queue_index          : tsp00_Int2;
+      msg_time             : tsp00_Int4;
+      decr_task_count      : boolean;            (* PTS 1119146 mb 2002-11-26 *)
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+t.trError_gg00 := e_ok;
+do_destroy     := false;
+decr_task_count:= true;
+msg_time       := 0;
+glob^.sta_tapes_start_cnt := glob^.sta_tapes_start_cnt + 1;           (* PTS1109736 mb 2002-09-04 *)
+is_autosave_log := glob^.sta_msgtype  = m_autosave;                   (* PTS1109736 mb 2002-09-17 *)
+IF  NOT is_autosave_log
+THEN
+    k38tapeopen_one (t,glob,tape_no, c_for_writing, NOT c_for_readlabel); (* PTS1109736 mb 2002-09-03 *)
+(*ENDIF*) 
+IF  (t.trError_gg00  = e_hostfile_error) AND
+    glob^.sta_tape^[tape_no].tpd_is_replaced
+THEN
+    (* give a second chance to the user by changing medium/filename *)
+    BEGIN
+    t.trError_gg00 := e_wrong_hostfile;
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    BEGIN
+    k39write_extra_block (t, glob, tape_no, pt2VolumeFirstInfo_egg00, glob^.sta_info);
+    IF  t.trError_gg00 <> e_ok
+    THEN (* PTS 1135003 mb 2005-04-19 *)
+        k39wakeup_all (glob, t.trTaskId_gg00);
+    (*ENDIF*) 
+    exit_autoload_loop:=FALSE;
+    WHILE      glob^.sta_tape^[tape_no].tpd_is_open
+          AND (NOT exit_autoload_loop)
+          AND (t.trError_gg00 = e_ok) DO
+        (* while autoload has opened the next tape automatically, use it without user interaction *)
+        BEGIN
+        IF  t.trError_gg00 = e_ok
+        THEN
+            BEGIN
+            REPEAT
+                IF  glob^.sta_queue_first_read > 0
+                THEN
+                    (* full block found *)
+                    BEGIN
+                    queue_index := glob^.sta_queue_first_read;
+                    WITH glob^, sta_queue^[queue_index] DO
+                        BEGIN
+                        sta_queue_first_read := sre_next;
+                        IF  sta_queue_first_read <= 0
+                        THEN
+                            sta_queue_last_read := 0;
+                        (*ENDIF*) 
+                        sre_next  := 0;
+                        sre_prev  := 0;
+                        IF  sre_is_clustered
+                        THEN
+                            BEGIN
+                            IF  NOT glob^.sta_tape^[tape_no].tpd_is_clustered
+                            THEN
+                                BEGIN
+                                glob^.sta_tape^[tape_no].tpd_is_clustered := true;
+                                k39write_extra_block (t, glob, tape_no, pt2VolumeLabelInfo_egg00, sta_info);
+                                END
+                            (*ENDIF*) 
+                            END
+                        ELSE
+                            BEGIN
+                            IF  glob^.sta_tape^[tape_no].tpd_is_clustered
+                            THEN
+                                BEGIN
+                                glob^.sta_tape^[tape_no].tpd_is_clustered := false;
+                                k39write_extra_block (t, glob, tape_no, pt2VolumeLabelInfo_egg00, sta_info);
+                                END
+                            (*ENDIF*) 
+                            END;
+                        (*ENDIF*) 
+                        sre_state := sres_reading_writing;
+                        kb39t_outcopy_tape (t, glob, c_io_outside_region, sre_is_clustered,
+                              pt2Nil_egg00, tape_no, queue_index, msg_time, task_return);
+                        IF  t.trError_gg00 <> e_write_task_crash
+                        THEN
+                            BEGIN
+                            CASE task_return OF
+                                ans_okay:
+                                    BEGIN
+                                    (* buff contents copied: *)
+                                    sta_out_count := sta_out_count + 1;
+                                    sre_state     := sres_free;
+                                    kb39wrt_wakeup_read_task (glob, t.trTaskId_gg00)
+                                    END;
+                                ans_task_ready:
+                                    BEGIN
+                                    (* buff contents copied: *)
+                                    do_destroy    := true;
+                                    sta_out_count := sta_out_count + 1;
+                                    sre_state     := sres_free;
+                                    kb39wrt_wakeup_read_task (glob, t.trTaskId_gg00);
+                                    END;
+                                ans_tape_full:
+                                    BEGIN
+                                    do_destroy       := true;
+                                    sre_state        := sres_contains_pages;
+                                    END;
+                                ans_error:
+                                    BEGIN
+                                    do_destroy       := true;
+                                    sre_state        := sres_contains_pages;
+                                    sta_system_state :=
+                                          sta_system_state + [sy_error];
+                                    k39wakeup_all (glob, t.trTaskId_gg00)
+                                    END
+                                END;
+                            (*ENDCASE*) 
+                            kb39ins_into_read_or_free_list (glob, queue_index)
+                            END
+                        (*ENDIF*) 
+                        END
+                    (*ENDWITH*) 
+                    END
+                ELSE
+                    (* queue is empty - to get a buffer *)
+                    IF  sy_knockoffwork in glob^.sta_system_state
+                    THEN
+                        BEGIN (* PTS 1109736 mb 2002-09-04 *)
+                        IF  (glob^.sta_tapes_start_cnt > 1) AND
+                            (NOT is_autosave_log)
+                            (* this is not the last tape to be closed *)
+                            (* the last tape will be closed by kb38closeall *)
+                            (* autosave-tapes (incl mirror are closed by post_autosavework *)
+                        THEN
+                            BEGIN
+                            glob^.sta_tapes_start_cnt := glob^.sta_tapes_start_cnt - 1; (* PTS 1119146 mb 2002-11-26 *)
+                            decr_task_count:=false;
+                            k39write_extra_block (t, glob, tape_no, pt2EndVolumeInfo_egg00, glob^.sta_info);
+                            glob^.sta_is_auto_load := false; (* do not reopen the tape *)
+&                           ifdef TRACE
+                            t01int4 (kb_save, '  tape-index', tape_no);
+&                           endif
+                            k38closeasyn (t, glob,
+                                  NOT c_auto_load,
+                                  NOT c_force_rewind,
+                                  tape_no,
+                                  glob^.sta_tape^[tape_no].tpd_is_open,
+                                  glob^.sta_tape^[tape_no].tpd_fno);
+&                           ifdef TRACE
+                            t01bool (kb_save, 't-closed ok ', t.trError_gg00 = e_ok);
+&                           endif
+                            END
+                        ELSE
+                            BEGIN
+                            exit_autoload_loop := TRUE;
+                            END;
+                        (*ENDIF*) 
+                        do_destroy := true
+                        END
+                    ELSE
+                        kb39write_wait (t.trTaskId_gg00, glob,
+                              t.trRteCommPtr_gg00^.to_cancel, t.trError_gg00)
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            UNTIL
+                (t.trError_gg00 <> e_ok) OR do_destroy;
+            (*ENDREPEAT*) 
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  t.trError_gg00 = e_ok
+THEN
+    kb39transferred_msg (glob, tape_no, NOT c_time_check, msg_time,
+          t.trError_gg00);
+(*ENDIF*) 
+IF  decr_task_count
+THEN
+    glob^.sta_tapes_start_cnt := glob^.sta_tapes_start_cnt - 1; (* PTS 1109736 mb 2002-08-04 *)
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39unlock_queue_index (
+            glob        : tkb3_save_static_ptr;
+            procid      : tsp00_TaskId;
+            queue_index : tsp00_Int2);
+ 
+VAR
+      tape_task_no : tsp00_Int2;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (procid, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    IF  queue_index > 0
+    THEN
+        WITH sta_queue^[queue_index] DO
+            BEGIN
+            tape_task_no           := sre_task_no_into;
+            sre_state              := sres_free;
+            sre_pages_per_block    := 0;
+            kb39ins_into_read_or_free_list (glob, queue_index);
+            sta_locked_queue_index := 0;
+            sta_out_count          := sta_out_count + 1;
+            sta_trt_into_queue [tape_task_no] :=
+                  sta_trt_into_queue [tape_task_no] - 1;
+            WITH sta_task^[tape_task_no] DO
+                BEGIN
+                IF  tsd_state = ts_waiting
+                THEN
+                    BEGIN
+                    tsd_state := ts_running;
+                    sta_read_tasks_waiting := sta_read_tasks_waiting -1;
+                    (**********************************)
+                    vresume (tsd_task_pid);
+                    (**********************************)
+                    END
+                (*ENDIF*) 
+                END;
+            (*ENDWITH*) 
+&           ifdef TRACE
+            t01p2int4 (kb_save, 'queue_index ', queue_index
+                  ,             'tape task no', tape_task_no);
+&           endif
+            END
+        (*ENDWITH*) 
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39wait_for_redo (
+            VAR t : tgg00_TransContext;
+            glob : tkb3_save_static_ptr);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+IF  glob^.sta_lwt_perform_redo
+THEN
+    BEGIN
+    glob^.sta_trt_eof_wait_pid := t.trTaskId_gg00;
+    vendexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region);
+    (*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+    vsuspend (t.trTaskId_gg00, 224) ;
+    (*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+    vbegexcl (t.trTaskId_gg00, g08save0 + glob^.sta_region)
+    END
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39write_wait (
+            taskId          : tsp00_TaskId;
+            glob            : tkb3_save_static_ptr;
+            VAR rte_cancel_flag : boolean;
+            VAR trError         : tgg00_BasisError);
+ 
+VAR
+      waitcontext : tgg00_WaitContext;
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (taskId, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    BEGIN
+    IF  sta_queue_out_count < MAX_INT4_SP00
+    THEN
+        sta_queue_out_count := sta_queue_out_count + 1;
+    (*ENDIF*) 
+    sta_write_tasks_waiting := sta_write_tasks_waiting + 1;
+    kb391InsertWaitingTaskAtLast (taskId, waitcontext,
+          NOT c_read_wait, sta_msgtype = m_autosave);
+    END;
+(*ENDWITH*) 
+&ifdef TRACE
+t01int4 (kb_save, 'SUSPEND writ', taskId) ;
+&endif
+vendexcl (taskId, g08save0 + glob^.sta_region) ;
+(*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+vsuspend (taskId, 204) ;
+(*-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-*)
+vbegexcl (taskId, g08save0 + glob^.sta_region) ;
+&ifdef TRACE
+t01int4 (kb_save, 'RUNNING writ', taskId) ;
+&endif
+kb39check_cancel_flag_and_kill (taskId, glob, rte_cancel_flag, trError)
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39wrt_wakeup_read_task (
+            glob   : tkb3_save_static_ptr;
+            my_pid : tsp00_TaskId);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (my_pid, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    IF  sta_read_tasks_waiting > 0
+    THEN
+        BEGIN
+        sta_read_tasks_waiting := sta_read_tasks_waiting - 1;
+        kb391ResumeFirstWaitingTask (c_read_wait, sta_msgtype = m_autosave);
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      kb39wwt_wakeup_write_task (
+            glob   : tkb3_save_static_ptr;
+            my_pid : tsp00_TaskId);
+ 
+BEGIN
+IF  kb03Check.chkRegion_kb00 (* PTS 1103957 JA 1999-10-11 *)
+THEN
+    g08excl_check (my_pid, g08save0 + glob^.sta_region);
+(*ENDIF*) 
+WITH glob^ DO
+    IF  sta_write_tasks_waiting > 0
+    THEN
+        BEGIN
+        sta_write_tasks_waiting := sta_write_tasks_waiting - 1;
+        kb391ResumeFirstWaitingTask (NOT c_read_wait, sta_msgtype = m_autosave);
+        END
+    (*ENDIF*) 
+(*ENDWITH*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

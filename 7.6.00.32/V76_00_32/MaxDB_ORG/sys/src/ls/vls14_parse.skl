@@ -1,0 +1,1700 @@
+/*
+  -----------------------------------------------------------------------------
+  module: vls14_parse.skl
+  -----------------------------------------------------------------------------
+  responsible:  SteffenS and d033893
+
+  special area: SAP DB LOADER
+
+  description:  bison skeleton for creating the replication server parser
+
+  version:      7.6.
+  -----------------------------------------------------------------------------
+
+// The GNU license agreement
+//
+// Copyright (C) 1984, 1989, 1990 Free Software Foundation, Inc.
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2, or (at your option)
+// any later version.
+// 
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//  
+// You should have received a copy of the GNU General Public License
+// along with this program; if not, write to the Free Software
+// Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.  
+//
+// As a special exception, when this file is copied by Bison into a
+// Bison output file, you may use that output file without restriction.
+// This special exception was added by the Free Software Foundation
+// in version 1.24 of Bison.
+//
+// Note: there must be only one dollar sign in this file.
+// It is replaced by the list of actions, each action
+// as one case of the switch. 
+//
+
+    ========== licence begin  GPL
+    Copyright (c) 1999-2004 SAP AG
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+
+*/  
+
+
+#include "gls00.h"
+
+#include "hls98msg.h"
+
+#include "hls14_scan.h"
+#include "hls14_parse.h"
+#include "hls05.h"
+#include "hls07.h"
+#include "hls15.h"
+#include "hls99.h"
+#include "hls19_check.h"        // length check for binary columns in vls14_parse.y
+
+#include "heo01.h"              // DBROOT path
+
+// next 2 for generation of URI for SSL
+#include "Messages/Msg_List.hpp"
+#include "RunTime/Communication/RTEComm_URIBuilder.hpp"
+
+
+char const   *LoaderParser::pszAncientDateTimeParseErrText[13] =
+                                             {"Invalid length for date or time field",  //17404
+                                              "Double field definition or delimiter",   //17405
+                                              "No delimiter allowed here",              //17406
+                                              "Invalid order of time fields",           //17407
+                                              "Mask too long",                          //17408
+                                              "Month table not available",              //17409
+                                              "Date mask incomplete",                   //17410
+                                              "Input string is too long",               //17411
+                                              "Input string is incomplete",             //17412
+                                              "Invalid time",                           //17413
+                                              "Invalid date",                           //17414
+                                              "Specify month by : Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", //17415
+                                              "Specify one standard for all DATE/TIME parameters"};                 //17416
+
+char const   *LoaderParser::pszDateTimeStrings[3] = {"date", "time", "timestamp"};
+
+extern tin_global_in_vars i01g;
+
+#define _INTERNAL_FILE_ID_    _T("14_PARSE_SKL")
+
+
+#define yyerrok     (yyerrstatus = 0)
+#define yyclearin   (yychar = YYEMPTY)
+#define YYEMPTY     -2
+#define YYEOF       0
+#define YYACCEPT    return(errOK_els00)
+#define YYABORT     return(errSQLSyntax_els98)
+#define YYERROR     goto yyerrlab1
+/* Like YYERROR except do call yyerror. This remains here temporarily to ease the
+ * transition to the new meaning of YYERROR, for GCC.
+ * Once GCC version 2 has supplanted version 1, this can go.  */
+#define YYFAIL      goto yyerrlab
+#define YYRECOVERING()  (!!yyerrstatus)
+
+#define YYTERROR    1
+#define YYERRCODE   256
+
+/* If nonreentrant, generate the variables here */
+
+
+/*  YYINITDEPTH indicates the initial size of the parser's stacks   */
+
+#ifndef YYINITDEPTH
+#define YYINITDEPTH 200
+#endif
+
+/*  YYMAXDEPTH is the maximum size the stacks can grow to
+(effective only if the built-in stack extension method is used).  */
+
+#if YYMAXDEPTH == 0
+#undef YYMAXDEPTH
+#endif
+
+#ifndef YYMAXDEPTH
+#define YYMAXDEPTH 10000
+#endif
+
+
+/* This is the most reliable way to avoid incompatibilities
+in available built-in functions on various systems.  */
+static void
+__yy_memcpy (char *to, char *from, int count)
+{
+   register char *f = from;
+   register char *t = to;
+   register int i = count;
+   
+   while (i-- > 0)
+      *t++ = *f++;
+}
+
+#line 155 "vls14_parse.skl"         /* make line directive always by 1 gt than line number */
+
+
+//*****************************************************************************
+// KONSTRUKTOR  : LoaderParser::LoaderParser
+// 
+// PARAMETER    : IN 
+//
+//    
+// Erzeugt einen Parser mit den optional angegebenen Ein- und Ausgabeströmen
+// ****************************************************************************/
+LoaderParser::LoaderParser( tls00_Command *SvrCmd, tls00_DBInfo *DBInfo )
+{
+    ROUTINE_DBG_MEO00 ("LoaderParser constructor");
+     
+    ParseError = STATIC_CAST(ErrorNumbers, 0);
+    
+    Scanner = new LoaderScanner( SvrCmd, ParseError );
+    if (NULL == Scanner)
+    {   //Exception if this fails ist besser als fehlermeldung
+
+        LoaderMessages::Instance()->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                                      errInternal_els98,
+                                                                      _INTERNAL_FILE_ID_,
+                                                                      __LINE__,
+                                                                      errParseNoScanner_els98);
+        ParseError = errInternal_els98;
+    }
+    else
+    {
+        lcpCommand_ls14 = SvrCmd;
+        lcpDBInfo_ls14  = DBInfo;
+
+        // Fuer die fehlermeldungen!!!
+        MsgInstance_ls14 = LoaderMessages::Instance();
+
+        pszMyUserStmt_ls14 = NULL;      // to print 'use user' cmds without passwords
+
+
+        // temporary hack
+        bFileEncodingNotSpecified_ls14 = false;
+        bDataFileEncodingNotSpecified_ls14 = false;
+
+        bFileFormatNotSpecified_ls14     = false;
+        bDataFileFormatNotSpecified_ls14 = false;
+        bIdentifierIsQuoted_ls14         = false;
+    }
+}
+
+
+//****************************************************************************
+//
+// METHODE      : LoaderParser::~LoaderParser
+// 
+// Terminiert den Parser
+//****************************************************************************
+LoaderParser::~LoaderParser()
+{
+   ROUTINE_DBG_MEO00 ("LoaderParser destructor");
+
+  if ( pszMyUserStmt_ls14 != NULL )  //PTS 1110617
+  {
+       delete pszMyUserStmt_ls14;
+       pszMyUserStmt_ls14 = NULL;
+
+  }
+
+  
+   delete Scanner;
+}
+
+
+//****************************************************************************
+//
+// METHODE      : LoaderParser::StartParsing
+// 
+// PARAMETER    : 
+// 
+// RETURN       : int - Fehlermeldung
+// 
+// Startet die (von Bison erzeugte) Parser-Routine
+//****************************************************************************
+int LoaderParser::StartParsing(void * & ScanReturnType) 
+{
+    // Die fehlervariable ist bei eintritt hier auf errOK_els00
+    
+    ROUTINE_DBG_MEO00 ("ls14_StartParsing");
+
+    tsp00_Int4  Erg = errOK_els00;
+
+    // call YYPARSE
+    if ( errOK_els00 != (Erg = yyparse(ScanReturnType)) )
+    {
+        // yyparse kann zurueckliefern:
+        // errSQLSyntax_els98       --> macro YYABORT ist definiert als (return errParseSyntax_els98;)  !!!
+        // errParseInternal_els98   --> wird direkt in yyparse zurueckgeliefert
+        // errOK_els00              --> macro YYACCEPT ist definiert als (return errOK_els00;)  !!!
+    
+        // Setze noch die fehlervariable
+        
+        // In case of syntax error detected only by the internal parser (not forced from
+        // within a rule) Erg has the right value.
+        // In case the error value comes from within a rule we have to set ParseError to this
+        // error code
+        
+        // setze die fehlervariable auf den entsprechenden wert
+//        ParseError = (errOK_els00 == lcpCommand_ls14->cmdReqErr_ls00) ? STATIC_CAST(ErrorNumbers, Erg)
+//                                                                      : STATIC_CAST(ErrorNumbers, lcpCommand_ls14->cmdReqErr_ls00);
+        if (errSQLSyntax_els98 != Erg)
+        {
+            ParseError = STATIC_CAST(ErrorNumbers, Erg);
+        }
+    }
+
+    return errOK_els00;
+}
+
+
+//****************************************************************************
+//
+// METHODE      : LoaderParser::yyparse
+// 
+// PARAMETER    : 
+// 
+// RETURN       : int - Fehlermeldung
+// 
+// Startet die (von Bison erzeugte) Parser-Routine
+//****************************************************************************
+int LoaderParser::yyparse(void * &ScanReturnType)
+{
+    ROUTINE_DBG_MEO00 ("yyparse()");
+
+    register int yystate;
+    register int yyn;
+    register short *yyssp;
+    register YYSTYPE *yyvsp;
+    int yyerrstatus;    /*  number of tokens to shift before error messages enabled */
+    int yychar1 = 0;        /*  lookahead token as an internal (translated) token number */
+   
+    short   yyssa[YYINITDEPTH]; /*  the state stack         */
+    YYSTYPE yyvsa[YYINITDEPTH]; /*  the semantic value stack        */
+   
+    short *yyss = yyssa;        /*  refer to the stacks thru separate pointers */
+    YYSTYPE *yyvs = yyvsa;  /*  to allow yyoverflow to reallocate them elsewhere */
+    #define YYPOPSTACK   (yyvsp--, yyssp--)
+    int yystacksize = YYINITDEPTH;
+   
+    YYSTYPE yyval;      /*  the variable used to return     */
+    memset(&yyval, 0, sizeof(YYSTYPE));
+    /*  semantic values from the action routines */
+   
+    int yylen;
+   
+    yystate = 0;
+    yyerrstatus = 0;
+    yynerrs = 0;
+    yychar = YYEMPTY;       /* Cause a token to be read.  */
+   
+    /* Initialize stack pointers. Waste one element of value and location stack
+     * so that they stay on the same level as the state stack.
+     * The wasted elements are never initialized.
+     */
+    yyssp = yyss - 1;
+    yyvsp = yyvs;
+
+    /*  Push a new state, which is found in  yystate. */
+    /*  In all cases, when you get here, the value and location stacks
+        have just been pushed. so pushing a state here evens the stacks.  */
+yynewstate:
+   
+    *++yyssp = yystate;
+   
+    /* Stack overflow ? */
+    if (yyssp >= yyss + yystacksize - 1)    
+    {
+        /* Give user a chance to reallocate the stack */
+        /* Use copies of these so that the &'s don't force the real ones into memory. */
+        YYSTYPE *yyvs1 = yyvs;
+        short *yyss1 = yyss;
+      
+        /* Get the current used size of the three stacks, in elements.  */
+        int size = (int)(yyssp - yyss + 1);
+      
+        /* Extend the stack our own way.  */
+        if (yystacksize >= YYMAXDEPTH)
+        {
+            MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                                errInternal_els98,
+                                                                _INTERNAL_FILE_ID_,
+                                                                __LINE__,
+                                                                errParseInternal_els98);
+            return errInternal_els98;
+        }
+
+        yystacksize *= 2;
+        if (yystacksize > YYMAXDEPTH)
+        {
+            yystacksize = YYMAXDEPTH;
+        }
+
+      /* Hier Code zum plattformunabhängigen Allloziieren des Stacks rein*/
+        yyss = (short *) alloca (yystacksize * sizeof (*yyssp));
+        __yy_memcpy ((char *)yyss, (char *)yyss1, size * sizeof (*yyssp));
+        yyvs = (YYSTYPE *) alloca (yystacksize * sizeof (*yyvsp));
+        __yy_memcpy ((char *)yyvs, (char *)yyvs1, size * sizeof (*yyvsp));
+
+        yyssp = yyss + size - 1;
+        yyvsp = yyvs + size - 1;
+        
+        if (yyssp >= yyss + yystacksize - 1)
+            YYABORT;
+    }
+   
+    /* Do appropriate processing given the current state.  */
+    /* Read a lookahead token if we need one and don't already have one. */
+/* yyresume: */
+   
+    /* First try to decide what to do without reference to lookahead token. */
+   
+    yyn = yypact[yystate];
+    if (yyn == YYFLAG)
+        goto yydefault;
+   
+    /* yychar is either YYEMPTY or YYEOF or a valid token in external form. */
+   
+    if (yychar == YYEMPTY)
+    {
+        yychar = Scanner->yylex(yylval);
+        
+        if (0 != ParseError)                /* fatal scanner error ==> no recovering possible. */
+        {
+            ls14_ShowError(ParseError);     /* Report the error and then abort the program */
+
+            YYABORT;
+        }
+    }
+   
+    /* Convert token to internal form (in yychar1) for indexing tables with */
+    if (yychar <= 0)        /* This means end of input. */
+    {
+        yychar1 = 0;
+        yychar = YYEOF;     /* Don't call YYLEX any more */
+    }
+    else
+    {
+        yychar1 = YYTRANSLATE(yychar);
+    }
+   
+    yyn += yychar1;
+    
+    if (yyn < 0 || yyn > YYLAST || yycheck[yyn] != yychar1)
+    {
+        goto yydefault;
+    }
+   
+    //*     Hier fällt durch die Belegung von yyn die Entscheidung für die
+    //*     nächste Parser-Aktion:
+    //*
+    //*     Negative => reduce, -yyn is rule number.
+    //*     Positive => shift, yyn is new state.
+    //*     New state is final state => don't bother to shift, just return success.
+    //*     0, or most negative number => error.
+    yyn = yytable[yyn];
+   
+    if (yyn < 0)
+    {
+        if (yyn == YYFLAG)
+        {
+            goto yyerrlab;
+        }
+        yyn = -yyn;
+        goto yyreduce;
+    }
+    else if (yyn == 0)
+    {
+        goto yyerrlab;
+    }
+   
+    if (yyn == YYFINAL)
+    {
+        YYACCEPT;
+    }
+   
+    /* Shift the lookahead token.  */
+  
+    /* Discard the token being shifted unless it is eof.  */
+    if (yychar != YYEOF)
+    {
+        yychar = YYEMPTY;
+    }
+   
+    //////////////////////////////////////////////////////////////////
+    // Aktueller Tokenwert auf den ValueStack  
+    *++yyvsp = yylval;
+
+    /* count tokens shifted since error; after three, turn off error status.  */
+    if (yyerrstatus) 
+    {
+        yyerrstatus--;
+    }
+   
+    yystate = yyn;
+    
+    goto yynewstate;
+   
+    /* Do the default action for the current state.  */
+yydefault:
+   
+    yyn = yydefact[yystate];
+    if (yyn == 0)
+    {
+        goto yyerrlab;
+    }
+   
+    /* Do a reduction.  yyn is the number of a rule to reduce with.  */
+yyreduce:
+    //////////////////////////////////////////////////////
+    // Bestimme die Länge der rechten Regelseite, und
+    // das aktuell anliegende Token, das nicht entfernt werden
+    // darf
+    yylen = yyr2[yyn];
+    if (yylen > 0)
+        yyval = yyvsp[1-yylen]; /* implement default value of the action */
+
+#ifdef OSF1
+#pragma message disable codeunreachable
+#endif
+
+   $   /* the action file gets copied in in place of this dollarsign */
+
+#ifdef OSF1
+#pragma message enable codeunreachable
+#endif
+
+#line 489 "vls14_parse.skl"         /* make line directive always by 1 gt than line number */
+
+    //*     Entferne die Symbole, die durch den gefundenen rechten
+    //*     Teil der Regel ersetzt werden, von den Stacks
+    yyvsp -= yylen;
+    yyssp -= yylen;
+    *++yyvsp = yyval;
+  
+   
+    /*  Now "shift" the result of the reduction. Determine what state that goes to,
+        based on the state we popped back to and the rule number reduced by.  */
+    yyn = yyr1[yyn];
+   
+    yystate = yypgoto[yyn - YYNTBASE] + *yyssp;
+    if (yystate >= 0 && yystate <= YYLAST && yycheck[yystate] == *yyssp)
+    {
+        yystate = yytable[yystate];
+    }
+    else
+    {
+        yystate = yydefgoto[yyn - YYNTBASE];
+    }
+   
+    goto yynewstate;
+   
+yyerrlab:   /* here on detecting error */
+   
+    if (! yyerrstatus)  /* If not already recovering from an error, report this error.  */
+    {
+        ++yynerrs;
+
+        /* Create syntax error and set error member of command */
+        char *pszToken = Scanner->ls14GetToken();
+        char szSomeText[128];
+        szSomeText[0] = 0;
+        strcpy(szSomeText, "Unexpected ");
+
+        if ('K' == pszToken[0])     /* keyword */
+        {
+            strcat(szSomeText, "keyword");
+
+        }
+        else if ( 0 == memcmp(pszToken, "DB_IDENTIFIER", 13) )
+        {
+            strcat(szSomeText, "identifier");
+        }
+        else if ( 0 == memcmp(pszToken, "INTEGER", 7) )
+        {
+            strcat(szSomeText, "integer value");
+        }
+        else        /* simple some token */
+        {
+            strcat(szSomeText, "token");
+        }
+
+        MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                           errSQLSyntax_els98,
+                                                           lcpCommand_ls14->cmdReqPos_ls00 - Scanner->YYLeng() + 1,
+                                                           szSomeText,
+                                                           Scanner->YYText());
+
+        lcpCommand_ls14->cmdReqErr_ls00 = errSQLSyntax_els98;
+    }
+   
+    goto yyerrlab1;
+yyerrlab1:   /* here on error raised explicitly by an action */
+   
+    if (yyerrstatus == 3)
+    {
+        /* if just tried and failed to reuse lookahead token after an error, discard it.  */
+      
+        /* return failure if at end of input */
+        if (yychar == YYEOF)
+        {
+            YYABORT;
+        }
+      
+        yychar = YYEMPTY;
+    }
+   
+    /* Else will try to reuse lookahead token after shifting the error token.  */
+   
+    yyerrstatus = 3;        /* Each real token shifted decrements this */
+   
+    goto yyerrhandle;
+   
+yyerrdefault:  /* current state does not do anything special for the error token. */
+   
+#if 0
+    /* This is wrong; only states that explicitly want error tokens should shift them.  */
+    yyn = yydefact[yystate];  /* If its default is to accept any token, ok.  Otherwise pop it.*/
+    if (yyn)
+        goto yydefault;
+#endif
+   
+yyerrpop:   /* pop the current state because it cannot handle the error token */
+   
+   if (yyssp == yyss)
+   {
+       YYABORT;
+   }
+   yyvsp--;
+   yystate = *--yyssp;
+   
+   
+yyerrhandle:
+   
+    yyn = yypact[yystate];
+    if (yyn == YYFLAG)
+    {
+        goto yyerrdefault;
+    }
+
+    yyn += YYTERROR;
+    if (yyn < 0 || yyn > YYLAST || yycheck[yyn] != YYTERROR)
+    {
+        goto yyerrdefault;
+    }
+
+    yyn = yytable[yyn];
+    if (yyn < 0)
+    {
+        if (yyn == YYFLAG)
+            goto yyerrpop;
+        
+        yyn = -yyn;
+        goto yyreduce;
+    }
+    else if (yyn == 0)
+        goto yyerrpop;
+   
+    if (yyn == YYFINAL)
+    {
+        YYACCEPT;
+    }
+   
+    *++yyvsp = yylval;
+    yystate = yyn;
+    goto yynewstate;
+}
+//  yyparse()
+
+
+void LoaderParser::ls14_ShowError(const ErrorNumbers lErrorNumber)
+{
+    ROUTINE_DBG_MEO00 ("ls14_ShowError");
+
+    MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00, lErrorNumber);
+
+    lcpCommand_ls14->cmdReqErr_ls00 = lErrorNumber;
+
+    TRACE_PRNF_MLS99 (("ls14_ShowError", "%s\n", lcpCommand_ls14->cmdRpyDat_ls00));
+    
+    return;
+}
+//  ls14_ShowError(const ErrorNumbers)
+
+
+
+/* Lokale Funktionen: ******************************************************************/
+
+
+void LoaderParser::ls14_SetDBName (tls00_SessionInfo*  Session, tls00_String DBName)
+{
+    ROUTINE_DBG_MEO00 ("ls14_SetDBName");
+
+    //*
+    //*     DBnamen eintragen
+    //* Die laenge des DBnamen DBName muss nicht geprueft werden, da die
+    //* funktion rawAssign nur soviele zeichen kopiert, wie siDBName_ls00 gross ist.
+    //*
+    Session->siDBName_ls00.Init();
+    Session->siDBName_ls00.rawAssign(DBName.strAddr_ls00);
+}
+//  ls14_SetDBName
+
+
+void
+LoaderParser::ls14_SetDBNode(tls00_SessionInfo*        Session,
+                             char*                     pOldDBNode,
+                             tls00_String*             pNewDBNode)
+{
+    ROUTINE_DBG_MEO00 ("ls14_SetDBNode");
+
+    if (NULL == pNewDBNode)
+    {
+        if (NULL != pOldDBNode)
+        {
+            SAPDB_UInt4 nodelen = _tcslen(pOldDBNode);
+            Session->si_pDBNode_ls00 = new char[nodelen + sizeof(char)];
+            SAPDB_memcpy(Session->si_pDBNode_ls00, pOldDBNode, nodelen);
+            Session->si_pDBNode_ls00[nodelen] = 0;
+        }
+    }
+    else
+    {
+        Session->si_pDBNode_ls00 = new char[pNewDBNode->strLeng_ls00 + 1];
+        SAPDB_memcpy(Session->si_pDBNode_ls00, pNewDBNode->strAddr_ls00, pNewDBNode->strLeng_ls00);
+        Session->si_pDBNode_ls00[pNewDBNode->strLeng_ls00] = 0;
+    }
+}
+//  ls14_SetDBNode
+
+
+void LoaderParser::ls14_SetUser(tls00_SessionInfo * Session,
+                                tls00_String   UserName,
+                                tls00_String   UserPwd)
+{
+    ROUTINE_DBG_MEO00 ("ls14_SetUser");
+
+    //*
+    //*     Set user name
+    //* No need to check the user name length because rawAssign copies only as many bytes
+    //* as siUserName_ls00 is defined for
+    //*
+    Session->siUserName_ls00.Init();
+    Session->siUserName_ls00.rawAssign(UserName.strAddr_ls00);
+
+    Session->siUserPwd_ls00.Init();                         
+    Session->siUserPwd_ls00.rawAssign(UserPwd.strAddr_ls00);
+
+    //*
+    //*     Encrypt user password
+    //* No need to check the password length because c2p copies only as many bytes
+    //* as tmpPwd is defined for. If UserPwd.strAddr_ls00 is shorter than
+    //* sizeof(tsp00_Pw) trailing blanks are handled as if belonging to the password!!!
+    //*
+    tsp00_Pw tmpPwd;
+    tmpPwd.SetBlank();
+    tmpPwd.c2p(UserPwd.strAddr_ls00);
+
+    ls15ApplEncrypt(tmpPwd, Session->siUserCPwd_ls00);
+}
+//  ls14_SetUser
+
+
+SAPDB_Int4
+LoaderParser::ls14_BuildDatabaseURI(tls00_SessionInfo* pSession)
+{
+    SAPDB_Int4 rc = errOK_els00;
+    if (epUnknown_els00 != pSession->siEncryptionProtocol_ls00)
+    {
+        RTEComm_URIBuilder::URIBuildRC rcBUILD(RTEComm_URIBuilder::Error);
+        Msg_List buildErr;
+
+        RTEComm_URIBuilder myURIBuilder;
+
+        rcBUILD = myURIBuilder.BuildDatabaseURI(REINTERPRET_CAST(SAPDB_UTF8*, pSession->siDBName_ls00.asCharp()),
+                                                pSession->si_pDBNode_ls00,
+                                                buildErr,
+                                                true);
+        if (RTEComm_URIBuilder::NoError == rcBUILD)
+        {
+            //*
+            //*     Replace node string by URI node string
+            //*
+            SAPDB_UInt4 _len = myURIBuilder.GetURILength();
+            if (NULL != pSession->si_pDBNode_ls00)
+            {
+                delete [] pSession->si_pDBNode_ls00;
+            }
+            pSession->si_pDBNode_ls00 = new char[_len + sizeof(char)];
+            SAPDB_memcpy(pSession->si_pDBNode_ls00, myURIBuilder.GetURI(), _len);
+            pSession->si_pDBNode_ls00[_len] = 0;
+        }
+        else
+        {
+            //*
+            //*     Handle error
+            //*
+
+            // Get the length of the buffer for the message
+            SAPDB_UInt4 lneededSize = 0;
+            SAPDB_UInt4 lDummyLen   = 0;
+            buildErr.MessageWithInsertedArguments(0, NULL, lneededSize, false);
+
+            // Get the message
+            SAPDB_Char* pszMsg = new char[lneededSize + sizeof(char)];
+            buildErr.MessageWithInsertedArguments(lneededSize, pszMsg, lDummyLen, false);
+            
+            MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                               errBuildingEncryptionURIFailed_els98,
+                                                               pszMsg);
+            lcpCommand_ls14->cmdReqErr_ls00 = errBuildingEncryptionURIFailed_els98;
+            rc = errBuildingEncryptionURIFailed_els98;
+
+            delete [] pszMsg;
+            pszMsg = NULL;
+        }
+    }
+    return rc;
+}
+// ls14_BuildDatabaseURI()
+
+
+tsp00_Int4  
+LoaderParser::ls14_CheckTransformationStreams(tls00_TransformationCmd *RC )
+{
+    ROUTINE_DBG_MEO00 ("ls14_CheckTransformationStreams");
+
+    tsp00_Int4 rc = errOK_els00;
+
+    if ( ptAll_els00   == RC->trPartSpec_ls00.psPartType_ls00  ||
+         ptUser_els00  == RC->trPartSpec_ls00.psPartType_ls00  ||
+         ptSchema_els00 == RC->trPartSpec_ls00.psPartType_ls00 ||
+         ptTable_els00 == RC->trPartSpec_ls00.psPartType_ls00  )
+    {
+         if ( (NULL == RC->trCatalogFile_ls00.fsFileName_ls00) &&        
+              (NULL == RC->trDataFile_ls00.fsFileName_ls00)    &&
+              (NULL == RC->trStatisticFile_ls00) )
+         {
+                 ls14_ShowError(errCatalogOrDatastreamNeeded);
+                 rc = errCatalogOrDatastreamNeeded;
+         }
+
+         if ( (errOK_els00 == rc) && (NULL != RC->trDataFile_ls00.fsFileName_ls00) )
+         {
+            if (true == bDataFileFormatNotSpecified_ls14)
+            {
+                // User seems to not have specified any format
+                //  -> adjust to PAGES in case EXTRACT ALL|USER
+                //  -> adjust to COMPRESSED in case EXTRACT TABLE
+                if (RC->trPartSpec_ls00.psPartType_ls00 > ptTable_els00)
+                {
+                    RC->trDataFile_ls00.fsFormat_ls00.ffoPage_ls00 = true;
+                    RC->trDataFile_ls00.fsFormat_ls00.ffoCompress_ls00 = false;
+                }
+                else
+                {
+                    RC->trDataFile_ls00.fsFormat_ls00.ffoCompress_ls00 = true;
+                }
+            }
+            else 
+            {
+                if ( (RC->trPartSpec_ls00.psPartType_ls00 > ptTable_els00)  &&
+                     ( (true == RC->trDataFile_ls00.fsFormat_ls00.ffoFormatted_ls00) ||
+                       (true == RC->trDataFile_ls00.fsFormat_ls00.ffoCompress_ls00) )  )
+                {
+                    // User seems to have explicitely set wrong format -> error
+                    MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                                       errLoaderConstraintViolation_els98,
+                                                                       "Data Format not supported; use PAGES or RECORDS instead");
+                    lcpCommand_ls14->cmdReqErr_ls00 = errLoaderConstraintViolation_els98;
+                    rc = errLoaderConstraintViolation_els98;
+                }
+            }   // end else of if (true == bDataFileFormatNotSpecified_ls14)
+        }   // end else of if (NULL ==  RC->trCatalogFile_ls00.fsFileName_ls00)
+    }   // end if (RC->trPartSpec_ls00.psPartType_ls00 > ptUnknown_els00)       // all, user, table
+    
+    if (ptTable_els00 == RC->trPartSpec_ls00.psPartType_ls00)
+    {
+         if ( RC->trConfigurationFile_ls00.fsFileName_ls00 != NULL )
+         {
+              ls14_ShowError(wrnConfigurationStreamNotSupported_els98);
+              rc = wrnConfigurationStreamNotSupported_els98;
+         }
+         if ( RC->trRestore_ls00 != resUnknown_els00 )
+         {
+            if (  RC->trPackageFile_ls00.fsFileName_ls00 == NULL )
+            {
+                  ls14_ShowError(errPackagestreamNeeded);
+                  rc = errPackagestreamNeeded;
+            }
+            if (  RC->trPackageFile_ls00.fsFileName_ls00 != NULL )
+            {
+                if (  RC->trCatalogFile_ls00.fsFileName_ls00 == NULL &&
+                      RC->trDataFile_ls00.fsFileName_ls00    == NULL    )
+                {
+                    ls14_ShowError(errCatalogOrDatastreamNeeded);
+                    rc = errCatalogOrDatastreamNeeded;
+                }
+            }
+         }
+    }
+    return rc;
+}
+// ls14_CheckTransformationStreams()
+
+
+// This function checks whether the position specification is correct. For FORMATTED file format
+// all columns to be loaded MUST be specified and thus all positions MUST be specified.
+// In case of COMPRESSED file format it check the positions for ascending order. In both cases an
+// error is returned causing the parser to stop.
+// In case that for FORMATTED file format one or more end positions of columns to load ARE NOT set
+// and that for COMRESSED file format one or more end positions ARE set a warning is issued and 
+// NO ERROR is returned!
+
+// Im falle das binary implizit eingestellt werden kann, wirds hier getan.
+tsp00_Int4 
+LoaderParser::ls14_CheckFormat(tls00_MultColSpec* pMultCol, bool bCompressed, bool bFormatted, bool & bBinary, bool bCompact)
+{
+    ROUTINE_DBG_MEO00 ("ls14_CheckFormat");
+
+    tsp00_Int4 rc       = errOK_els00;
+    tsp00_Int4 colCount = pMultCol->mcsCount_ls00;
+    
+    if ( (0 == colCount) && (true == bFormatted) )      // In case of file format FORMATTED the
+    {                                                   // columns to load MUST be specified
+        ls14_ShowError(errNoColAndFormatted_els98);
+        rc = errNoColAndFormatted_els98;
+    }
+    if ( (0 != colCount) && (true == bCompact) )      
+    {                                                 
+        //ls14_ShowError(errColAndCompact_els98);
+        //rc = errColAndCompact_els98;
+        rc = errOK_els00;
+    }
+
+    if (errOK_els00 == rc)
+    {
+
+        short i = 0;
+        short j = 0;
+        short k = 0;
+
+        // Now we know that at least one column is specified in the statement.
+        if (false == bFormatted)   // cols in accendant order only for unformatted load
+        {
+            if (0 != colCount)
+            {
+                short *lPosArray = new short[colCount];
+
+                //*
+                //*     'Formatted' check
+                //* In case that one extern column data format is not char (readable)
+                //* the file format MUST be formatted. Check it.
+                //*
+                for (i=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)
+                {
+                    if ( ioChar_els00 != pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoFormat_ls00)
+                    {
+                        ls14_ShowError(errFormattedRequired_els98);
+                        rc = errFormattedRequired_els98;
+                    }
+                }
+
+                //*
+                //*     We have to check here for the order of start positions for the
+                //*     specified columns. In case the user specified a constant value
+                //*     for a column (like 'fastload ... col1 date ...') the start position
+                //*     is set to 0 during parsing which is fine and MUST be skipped here.
+                //*     Therefore an array is built with only the none 0 start positions
+                //*     which are checked thereafter.
+                //*
+                for (i=0, k=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)
+                {
+                    if ( 0 != (lPosArray[k] = pMultCol->mcsColumn_ls00[i]->colFPos_ls00.fpoStart_ls00) )
+                    {
+                        ++k;
+                    }
+                }
+                for (j=0; ( (j < k-1) && (errOK_els00 == rc) ); ++j)
+                {
+                    if (lPosArray[j] > lPosArray[j+1])
+                    {
+                        ls14_ShowError(errPosNotAscending_els98);
+                        rc = errPosNotAscending_els98;
+                    }
+                }
+
+                if (NULL != lPosArray)
+                {
+                    delete [] lPosArray;
+                    lPosArray = NULL;
+                }
+                
+                //*
+                //*     Check for correct end position (should be 0 for COMRPESS data format)
+                //*     In case the end position is set we should issue a warning although the
+                //*     given position will be ignored.
+                //*
+                for (i=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)
+                {
+                    if (0 != pMultCol->mcsColumn_ls00[i]->colFPos_ls00.fpoEnd_ls00)
+                    {
+                        ls14_ShowError(errEndPosAndCompress_els98);
+                        rc = errEndPosAndCompress_els98;
+                    }
+                }
+            }
+        }
+        else
+        {
+            //*
+            //*     'BINARY' check
+            //* In case that ONE extern column data format is not char (readable) and
+            //* hex-switch is NOT set switch the file format implicitely to BINARY.
+            //*
+            for (i=0; ( (false == bBinary) && (i < colCount) ); ++i)
+            {
+                if ( (ioChar_els00 != pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoFormat_ls00) &&
+                     (false        == pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoIsHex_ls00) )
+                {
+                    bBinary = true;
+                }
+            }
+
+            //*
+            //*     In case of formatted load check for exact position specification - 
+            //*     that is start and end position have to be specified.
+            //*     Actually if no end position is given we assume a data length of 1 byte
+            //*     but issuing a warning could be right anyway.
+            //*
+
+            tls00_Column *pCol = NULL;
+            for (i=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)
+            {
+                pCol = pMultCol->mcsColumn_ls00[i];
+                // error only if it is not an assignment
+                if ( (0 == pCol->colFPos_ls00.fpoEnd_ls00) &&
+                     (asUnknown_els00 == pCol->colAssign_ls00.fasAsgnTyp_ls00) )
+                {
+                    ls14_ShowError(errEndPosAndFormatted_els98);
+                    rc = errEndPosAndFormatted_els98;
+                }
+                else
+                {
+                    // Check for end pos that are lt start pos
+                    if (pCol->colFPos_ls00.fpoEnd_ls00 < pCol->colFPos_ls00.fpoStart_ls00)
+                    {
+                        LoaderMessages::Instance()->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                                                      errEndPosLTStartPos_els98,
+                                                                                      pCol->colName_ls00.asCharp());
+                        lcpCommand_ls14->cmdReqErr_ls00 = errEndPosLTStartPos_els98;
+//                      ls14_ShowError(errEndPosLTStartPos_els98);
+                        rc = errEndPosAndFormatted_els98;
+                    }
+                }
+            }
+        }   // end if (false == bFormatted)
+    
+    
+        // Check if DEFAULT NULL conditions must be in HEX
+        tls00_Column *pCol = NULL;
+        for (i=0; (i < colCount); ++i)
+        {
+            pCol = pMultCol->mcsColumn_ls00[i];
+
+            if (NULL != pCol->colNullCond_ls00)
+            {
+                if ( (true == pCol->colNullCond_ls00->cosDefNull_ls00) &&
+                     (true == pCol->colFormat_ls00.ffoIsHex_ls00)      )
+                {
+                    pCol->colNullCond_ls00->cosCond_ls00->conIsHex_ls00 = true;
+                }
+            }
+        }
+    
+    }   // end if (errOK_els00 == rc)
+    
+    return rc;
+}
+// ls14_CheckFormat()
+
+
+// This function is special for dataextract; for using it with dataload/fastload
+// commands some work has to be done; special DE features are flagged
+
+// In case binary can be implicitely switched on it's done here
+tsp00_Int4
+LoaderParser::ls14_CheckFormatEx(tls00_MultColSpec *pMultCol,
+                                      bool              bFormatted,
+                                      bool &            bBinary,
+                                      bool              bCompact)
+{
+    ROUTINE_DBG_MEO00 ("ls14_CheckFormatEx");
+
+    tsp00_Int4 rc       = errOK_els00;
+    tsp00_Int4 colCount = pMultCol->mcsCount_ls00;
+
+    // Sind keine Spalten in der Spaltenliste angegeben, dann zurueck
+    // Es gibt nichts weiter zu ueberpruefen, da im kommando keine angaben
+    // ueber die spalten gemacht wurden. Diese angaben werden spaeter beim
+    // endgueltigen ausfuehren des jeweiligen kommandos besorgt.
+    if (0 == colCount)
+    {
+        return rc;
+    }
+
+    short i = 0;
+    
+    tls00_Column **pCol = pMultCol->mcsColumn_ls00;
+        
+    // Now we know that at least one column is specified in the statement.
+
+    //*
+    //*     Pruefe ob die angaben dem Datenformat COMPRESSED entsprechen
+    //* - Ist einer der datentypen fuer eine spalte nicht lesbar (char), dann
+    //*   darf nicht COMPRESSED-, sondern muss FORMATTED verwendet werden
+    //*   ---> FEHLER GENERIEREN
+    //* - Die spalten koennen in beliebiger reihenfolge angegeben sein, sie muessen
+    //*   nicht aufsteigend sortiert sein
+    //* - Die Positionen muessen als relative Positionen angegeben sein. Ist
+    //*   wenigstens eine Spalte mit anfangs- und endposition angegeben
+    //*   ---> FEHLER GENERIEREN
+    //*
+    if ( false == bFormatted || true == bCompact ) //!!RECORDS
+    {
+        for (i=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)    //  Different data types than CHAR?
+        {
+            if ( ioChar_els00 != pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoFormat_ls00)
+            {
+                ls14_ShowError(errFormattedRequired_els98);
+                rc = errFormattedRequired_els98;
+            }
+            else if (0 != pMultCol->mcsColumn_ls00[i]->colFPos_ls00.fpoEnd_ls00)    // end pos set?
+            {
+                ls14_ShowError(errEndPosAndCompress_els98);
+                rc = errEndPosAndCompress_els98;
+            }
+            // special dataextract feature: do not allow different col on the same position
+            if ( (errOK_els00 == rc) && (i > 0) )
+            {
+                if (pMultCol->mcsColumn_ls00[i]  ->colFPos_ls00.fpoStart_ls00 == 
+                    pMultCol->mcsColumn_ls00[i-1]->colFPos_ls00.fpoStart_ls00)
+                {
+                    ls14_ShowError(errColOrderCompressed);
+                    rc = errColOrderCompressed;
+                }
+            }
+        }
+    }
+    else
+    {
+        //*
+        //*     Pruefe ob die angaben dem Datenformat FORMATTED entsprechen
+        //* - Ist eines der datenformate der spalten in der spaltenliste nicht
+        //*   char und ist auch die hexadezimale angabe nicht gewuenscht,
+        //*   dann setze hier implizit BINARY.
+        //* - Ist bei wenigstens einer spalte die endposition nicht gesetzt
+        //*   ---> FEHLER GENERIEREN
+        for (i=0; ( (false == bBinary) && (i < colCount) ); ++i)
+        {
+            if ( (ioChar_els00 != pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoFormat_ls00) &&
+                 (false        == pMultCol->mcsColumn_ls00[i]->colFormat_ls00.ffoIsHex_ls00) )
+            {
+                bBinary = true;     // Wenn wir eins gefunden haben, ist die arbeit hieran
+            }
+        }
+
+        for (i=0; ( (i < colCount) && (errOK_els00 == rc) ); ++i)        // all end position set ?
+        {
+            // error only if it is not an assignment
+            if ( (0 == pMultCol->mcsColumn_ls00[i]->colFPos_ls00.fpoEnd_ls00) &&
+                 (asUnknown_els00 == pMultCol->mcsColumn_ls00[i]->colAssign_ls00.fasAsgnTyp_ls00) )
+            {
+                ls14_ShowError(errEndPosAndFormatted_els98);
+                rc = errEndPosAndFormatted_els98;
+            }
+
+            // special dataextract feature: do not allow different col data overlap
+            if ( (errOK_els00 == rc) && (i > 0) )
+            {
+                if (pMultCol->mcsColumn_ls00[i-1]->colFPos_ls00.fpoEnd_ls00 >=
+                        pMultCol->mcsColumn_ls00[i]->colFPos_ls00.fpoStart_ls00)
+                {
+                    ls14_ShowError(errColOrderFormatted);
+                    rc = errColOrderFormatted;
+                }
+            }
+        
+        }
+    }   // end if (true != bFormatted)
+    
+    return rc;
+}
+// ls14_CheckFormatEx()
+
+
+/* This routine is only made to make it possible to reach the parsing routines in vin41. But it should
+   be changed soon to own or BETTER global routines!!! */
+
+/* Type:  0 == Date     --> Default!!!
+          1 == Time
+          2 == Timestamp*/
+int LoaderParser::ls14_SpecialDateTimeParse(tls00_DateTimeSpec* pSpec, short Type)
+{
+    ROUTINE_DBG_MEO00 ("ls14_SpecialDateTimeParse");
+
+    tsp00_Int4 rc = errOK_els00;
+
+    int         lError = 0;
+    tsp00_Uint2 lErrorPos;
+
+
+    switch (pSpec->dtsType_ls00)
+    {
+        /* valid for all cases: no need to assign tlen a value; this is done by i41dparse */
+
+        case dtFreeMask_els00:
+        {
+            tsp00_Uint2  length = STATIC_CAST(tsp00_Uint2, strlen(pSpec->dtsMask_ls00) );
+
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_free);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = length;
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p(pSpec->dtsMask_ls00);
+
+            break;
+        }
+        case dtISO_els00:
+        {
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_iso);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = mxin_key_iso;      /* mxin_key_iso=3 */
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p("ISO");
+            break;
+        }
+        case dtUSA_els00:
+        {
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_usa);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = mxin_key_usa;      /* mxin_key_usa=3 */
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p("USA");
+
+            break;
+        }
+        case dtEUR_els00:
+        {
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_eur);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = mxin_key_eur;      /* mxin_key_eur=3 */
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p("EUR");
+
+            break;
+        }
+        case dtJIS_els00:
+        {
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_jis);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = mxin_key_jis;      /* mxin_key_jis=3 */
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p("JIS");
+            break;
+        }
+        case dtInternal_els00:
+        {
+            pSpec->dtsSpecialDateMask_ls00.dm_type.becomes(dm_int);
+            pSpec->dtsSpecialDateMask_ls00.mlen    = mxin_key_int;      /* mxin_key_int=3 */
+
+            pSpec->dtsSpecialDateMask_ls00.msk.SetBlank();
+            pSpec->dtsSpecialDateMask_ls00.msk.c2p("INTERNAL");
+            break;
+        }
+        default:
+        {
+            break;      /* Error! */
+        }
+    }
+
+    switch (Type)
+    {
+        case 0:     /* Date */
+        {
+            i41dparse(pSpec->dtsSpecialDateMask_ls00, lError, lErrorPos);
+            break;
+        }
+        case 1:     /* Time */
+        {
+            i41tparse(pSpec->dtsSpecialDateMask_ls00, lError, lErrorPos);
+            break;
+        }
+        case 2:     /* Timestamp */
+        {
+            i41tsparse(pSpec->dtsSpecialDateMask_ls00, lError, lErrorPos);
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+
+    if (0 != lError)
+    {
+        // This is only a workaround until we have rewritten the .... time conversion modul vin41
+        char const *pszErrText;
+        char pszErrNum[6];
+        if ( (lError > 17416) || (lError < 17404) )
+        {
+            pszErrNum[0] = 0;
+            _itot(lError, pszErrNum, 10);
+            pszErrText = pszErrNum;
+        }
+        else
+        {
+            pszErrText = pszAncientDateTimeParseErrText[lError - 17404];
+        }
+
+        MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                           errErrorParsingDateTimeMask_els98,
+                                                           pszDateTimeStrings[Type],
+                                                           pszErrText);
+
+        rc = lcpCommand_ls14->cmdReqErr_ls00 = errErrorParsingDateTimeMask_els98;
+    }
+
+    return rc;
+}
+
+/*
+ -----------------------------------------------------------------------------
+    function:   ls14_GetVersionInformation()
+ -----------------------------------------------------------------------------
+*/
+void LoaderParser::ls14_GetVersionInformation()
+{
+    ROUTINE_DBG_MEO00 ("ls14_VersionInformation");
+    
+    // Version
+    tsp100_VersionID1 Version;
+    sp100_GetVersionID(VersionIDType1_esp100, s100buildnumberEx, &Version );
+
+    // Operating system
+    _TCHAR   szOSString[32] = {'U','N','I','X',};
+    tsp00_Os osNumber;
+
+    sqlos(&osNumber);
+    switch(osNumber)
+    {
+        case os_unix:
+        {
+            break;
+        }
+        case os_vms:
+        {
+            _tcscpy(szOSString, "VMS");
+            break;
+        }
+        case os_win32:
+        {
+            _tcscpy(szOSString, "WIN32");
+            break;
+        }
+        case os_os2:
+        {
+            _tcscpy(szOSString, "OS2");
+            break;
+        }
+        default:
+        {
+            szOSString[0] = 0;
+            sp77sprintf(szOSString, 32, "unknown (%d)", STATIC_CAST(tsp00_Int4, osNumber));
+        }
+    } // end switch
+
+
+    // DBROOT path
+    tsp00_Pathc     szDBROOTPath;
+    tsp01_RteError  RteError;
+
+    sqlGetDbrootPath(szDBROOTPath, TERM_WITH_DELIMITER_EO01, &RteError);
+
+
+    // Swap behavior
+    _TCHAR szSwap[32] = {'n','o','r','m','a','l'};
+
+    switch (lcpDBInfo_ls14->dbiOwnSwap_ls00)
+    {
+        case sw_full_swapped:
+        {
+            _tcscpy(szSwap, "fully");
+            break;
+        }
+        case sw_normal:
+        {
+            break;
+        }
+        default:
+        {
+            szSwap[0] = 0;
+            sp77sprintf(szSwap, 32, "unknown (%d)", STATIC_CAST(tsp00_Int4, lcpDBInfo_ls14->dbiOwnSwap_ls00));
+        }
+    }
+
+    sp77sprintf(lcpCommand_ls14->cmdRpyDat_ls00, MAX_REPLY_LENGTH_LS00,
+                 "version, os, dbroot, swap\n"
+                 "\"%d.%d.%.2d.%.2d\", "
+                 "\"%s\", "
+                 "\"%.*s\", "
+                 "\"%s\"",
+                 STATIC_CAST(tsp00_Int4, Version.MajorVersion_sp100),
+                 STATIC_CAST(tsp00_Int4, Version.MinorVersion_sp100),
+                 STATIC_CAST(tsp00_Int4, Version.CorrLevel_sp100),
+                 STATIC_CAST(tsp00_Int4, Version.BuildNumberPrefix_sp100),
+                 szOSString,
+                 szDBROOTPath.length(), szDBROOTPath.asCharp(),
+                 szSwap);
+}
+// ls14_GetVersionInformation()
+
+
+int LoaderParser::ls14_ParseSelect(tls00_String* SelectStatement)
+{
+    ROUTINE_DBG_MEO00 ("ls14_ParseSelect");
+
+    /* Get starting point of select stmt */
+    tsp00_Int4 StartPos = lcpCommand_ls14->cmdReqPos_ls00 - Scanner->YYLeng();
+    SelectStatement->strAddr_ls00 = &lcpCommand_ls14->cmdReqDat_ls00[StartPos];
+
+    /*
+     * Read until the end of select stmt is found; the end is marked by one of the keywords OUTFIELDS or OUTFILE
+     */
+    while ((yychar != kwOUTFIELDS) && (yychar != kwOUTFILE) &&  (yychar != kwDATA) && (yychar != 0))
+    {
+        yychar = Scanner->yylex(yylval);
+    }
+
+    if (yychar == 0)    /* Error; none of the 2 keywords found */
+    {
+        MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                           errSQLSyntax_els98,
+                                                           Scanner->YYLeng(),
+                                                           "Missing keywords",
+                                                           "OUTFIELDS or OUTFILE");
+        lcpCommand_ls14->cmdReqErr_ls00 = errSQLSyntax_els98;
+        return errSQLSyntax_els98;
+    }
+    else                /* Success, found one of the keywords; unscan last token */
+    {
+        Scanner->ls14ExecUnscan();
+        SelectStatement->strLeng_ls00 = lcpCommand_ls14->cmdReqPos_ls00 - StartPos;
+        ls05StrTrimRight(SelectStatement->strAddr_ls00, SelectStatement->strLeng_ls00);
+        return errOK_els00;
+    }
+}
+//  ls14_ParseSelect()
+
+
+int LoaderParser::ls14GetErrorCode()
+{
+    ROUTINE_DBG_MEO00 ("ls14GetErrorCode");
+    
+    return STATIC_CAST(int, ParseError);
+}
+//  ls14GetErrorCode()
+
+
+/*
+  -----------------------------------------------------------------------------
+  function:     ls14_FillLongfileStruct I
+  -----------------------------------------------------------------------------
+*/
+tsp00_Int4
+LoaderParser::ls14_FillLongfileStruct(tls00_DeviceType   deviceType,
+                                           tls00_String      &pColumnName,        // may not be NULL
+                                           tls00_String      *pFileName,
+                                           tls00_CodeSpec    *pCodeSpec,          // may not be NULL
+                                           tls00_FileSpec   **pFileSpecifier)     // return value
+{
+    ROUTINE_DBG_MEO00 ("ls14_FillLongfileStruct I");
+
+    tsp00_Int4 rc = errOK_els00;
+    
+    tls00_FileSpec *pFS = NULL;
+    ls14_TemplateNewStruct(pFS);     // create new structure
+    if (NULL == pFS)
+    {
+        rc = -1;
+    }
+    else
+    {
+        pFS->fsDeviceType_ls00  = deviceType;
+        pFS->fsLongColID_ls00   = UNDEFINED_LS00;
+        pFS->fsLongColName_ls00 = pColumnName.strAddr_ls00;
+
+        if (NULL != pFileName)
+        {
+            pFS->fsFileName_ls00 = pFileName->strAddr_ls00;
+        }
+        pFS->fsAppend_ls00      = false;
+        pFS->fsFromOra_ls00     = false;
+
+        pFS->fsFormat_ls00.ffoCodeType_ls00 = pCodeSpec->cdsCodeType_ls00;
+        delete pCodeSpec;
+        pCodeSpec = NULL;
+
+        *pFileSpecifier = pFS;
+    }
+
+    return rc;
+}
+//  ls14_FillLongfileStruct()
+
+
+/*
+  -----------------------------------------------------------------------------
+  function:     ls14_FillLongfileStruct II
+  -----------------------------------------------------------------------------
+*/
+tsp00_Int4
+LoaderParser::ls14_FillLongfileStruct(tls00_DeviceType   deviceType,
+                                           tsp00_Int4         lColumnId,
+                                           tls00_String      *pFileName,
+                                           tls00_CodeSpec    *pCodeSpec,          // may not be NULL
+                                           tls00_FileSpec   **pFileSpecifier)     // return value
+{
+    ROUTINE_DBG_MEO00 ("ls14_FillLongfileStruct II");
+
+    tsp00_Int4 rc = errOK_els00;
+    
+    tls00_FileSpec *pFS = NULL;
+    ls14_TemplateNewStruct(pFS);     // create new structure
+    if (NULL == pFS)
+    {
+        rc = -1;
+    }
+    else
+    {
+        pFS->fsDeviceType_ls00  = deviceType;
+        pFS->fsLongColID_ls00   = lColumnId;
+        pFS->fsLongColName_ls00 = NULL;
+        if (NULL != pFileName)
+        {
+            pFS->fsFileName_ls00 = pFileName->strAddr_ls00;
+        }
+        pFS->fsAppend_ls00      = false;
+        pFS->fsFromOra_ls00     = false;
+
+        pFS->fsFormat_ls00.ffoCodeType_ls00 = pCodeSpec->cdsCodeType_ls00;
+        delete pCodeSpec;
+        pCodeSpec = NULL;
+
+        *pFileSpecifier = pFS;
+    }
+
+    return rc;
+}
+//  ls14_FillLongfileStruct()
+
+/*
+  -----------------------------------------------------------------------------
+  function:     ls14_ChangeUSE_USERString
+  -----------------------------------------------------------------------------
+*/
+void
+LoaderParser::ls14_ChangeUSE_USERString(tls00_String &PwPtr)
+{
+    ROUTINE_DBG_MEO00 ("ls14_ChangeUSE_USERString");
+    // cmd to manipulate:      'USE USER <user name> <password> <some more data>'
+    // cmd after manipulation: 'USE USER <user name> * <some more data>'
+
+    // In case of a one-character-password we need to add space for the trailing null
+    pszMyUserStmt_ls14 = new _TCHAR[_tcslen(lcpCommand_ls14->cmdReqDat_ls00) + 1];
+
+    size_t len = PwPtr.strAddr_ls00 - lcpCommand_ls14->cmdReqDat_ls00;  // gives len to starting pos of pw in cmd
+
+    pszMyUserStmt_ls14[0] = 0;
+    _tcsncpy(pszMyUserStmt_ls14, lcpCommand_ls14->cmdReqDat_ls00, len);
+    pszMyUserStmt_ls14[len] = '*';
+    pszMyUserStmt_ls14[len + 1] = 0;
+    strcat(pszMyUserStmt_ls14, PwPtr.strAddr_ls00 +  PwPtr.strLeng_ls00);
+
+    return;
+}
+//  ls14_ChangeUSE_USERString()
+
+
+/*
+  -----------------------------------------------------------------------------
+  function:     ls14_GetSeparatorDelimiter
+  -----------------------------------------------------------------------------
+*/
+tsp00_Int4
+LoaderParser::ls14_GetSeparatorDelimiter(char*         pszSource,
+                                         tsp00_Uint4   lSourceLen,
+                                         char*         pszDestination)
+{
+    ROUTINE_DBG_MEO00 ("ls14_GetSeparatorDelimiter");
+
+    tsp00_Int4 rc = errOK_els00;
+
+    switch (lSourceLen)
+    {
+        case 0:
+        {
+            pszDestination[0] = DEF_BYTE_LS00;
+            break;
+        }
+        case 1:
+        {                                   // das ist das zeichen selbst
+            pszDestination[0] = pszSource[0];
+            break;
+        }
+        case 2:
+        {
+            // Hier kann prinzipiell ein Maskierungszeichen dabei sein
+            if (BACKSLASH_LS00 != pszSource[0])
+            {
+                rc = errWrongDelSepSpec_els98;
+            }
+            else
+            {
+                if ('t' == pszSource[1])
+                {
+                    // Any escape char other than tab (suppose r, w, b ...) does not make sense here
+                    pszDestination[0] = '\t';
+                }
+                else
+                {
+                    if ( ('\'' == pszSource[1]) || (BACKSLASH_LS00 == pszSource[1]) || (SLASH_LS00 == pszSource[1]) )
+                    {
+                        pszDestination[0] = pszSource[1];
+                    }
+                    else
+                    {
+                        rc = errWrongDelSepSpec_els98;
+                    }
+                }
+            }
+            break;
+        }
+        default:
+        {
+            rc = errWrongDelSepSpec_els98;
+        }
+    }   // end switch (len)
+
+    if (errOK_els00 == rc)
+    {
+        pszDestination[1] = 0;
+    }
+    return rc;
+}
+//  ls14_GetSeparatorDelimiter()
+
+/*
+  -----------------------------------------------------------------------------
+  function:     ls14_SeparateIntValues
+  -----------------------------------------------------------------------------
+*/
+// Wenn der String nur aus einer Zahl besteht, wird nur val1 gefuellt und val2
+// wird auf 0 gesetzt. Wird ein Separator gefunden, dann werden beide WErte gefuellt,
+// val1 mit dem Wert vor dem Separator und val2 mit dem Wert nach dem Separator. Mit
+// dem BoolWert kann erzwungen werden, dass ein Separator gefunden werden muss oder
+// ein Fehler generiert wird.
+// Fehler, wenn nicht der Separator gefunden wird, der vorgegeben ist.
+tsp00_Int4
+LoaderParser::ls14_SeparateIntValues(char*         pszString,
+                                     char          SeparatorSign,
+                                     tsp00_Int4*          pval1,
+                                     tsp00_Int4*          pval2,
+                                     bool          bSeparatorIsMandatory)
+{
+    ROUTINE_DBG_MEO00 ("ls14_SeparateIntValues");
+
+    tsp00_Int4 rc = errOK_els00;
+
+    int _lError = 0;
+    char* _ppos = NULL;
+    char* _pUsedPtr = pszString;
+    
+    
+    _ppos = strchr(pszString, SeparatorSign);
+    if (NULL == _ppos)
+    {
+        if (true == bSeparatorIsMandatory)
+        {
+            // generate error message
+        }
+        else
+        {
+            // Done: value is simply an integer value
+            _lError = ls07CheckIntValueRange(pszString);
+            if (0 != _lError)
+            {
+                *pval1 = atoi(pszString);
+            }
+        }
+    }
+    else
+    {
+        // Well, we manipulate the string a bit but revert this later on
+        *_ppos = 0;
+        
+        // 1st value        
+        _lError = ls07CheckIntValueRange(pszString);
+        if (0 != _lError)
+        {
+            *pval1 = atoi(pszString);
+        
+            // 2nd value
+            _pUsedPtr = _ppos + sizeof(char);
+            _lError = ls07CheckIntValueRange(_pUsedPtr);
+            if (0 != _lError)
+            {
+                *pval2 = atoi(_pUsedPtr);
+            }
+        }
+    }
+
+    // Error message if necessary
+    if (0 == _lError)
+    {
+        MsgInstance_ls14->ls98MsgToString(layParser_els98, lcpCommand_ls14->cmdRpyDat_ls00,
+                                                           errInvalidInteger_els98,
+                                                           _pUsedPtr);
+        rc = errInvalidInteger_els98;
+    }
+
+    if (NULL != _ppos)
+    {
+        *_ppos = SeparatorSign;
+    }
+
+    return rc;
+}
+//  ls14_SeparateIntValues()
+

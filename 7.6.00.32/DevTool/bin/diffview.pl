@@ -1,0 +1,376 @@
+#!/usr/bin/perl
+#
+# @(#)diffview			1997-11-18
+#
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+
+use Tk;
+require Tk::ROText;
+use Getopt::Std;
+use File::Basename;
+
+# global vars
+my $SearchPattern = '\d+,*\d*(a|c|d)\d+,*\d*$';
+my $prot_txt;
+my $prot_start_pos = 1;
+my $prot_end_pos   = 1;
+my $pdiff_line;
+my $message        = " ";
+my $tagtype        = "unknown";
+
+# check options
+if ( !getopts('h') || $opt_h || (@ARGV != 1))
+{
+    print <DATA>;
+    exit 1;
+}
+
+my $SutName = shift;
+
+# check pdiff and prot
+if  ( ! -e "$SutName.prot" )
+{
+    print "$SutName.prot not found!\n";
+    exit 1;
+}
+if  ( ! -e "$SutName.pdiff" )
+{
+    print "$SutName.pdiff not found!\n";
+    exit 1;
+}
+
+
+# creating main window
+my $mw = MainWindow->new;
+$mw->title ("DiffView");
+$mw->geometry("+10+10");
+
+
+# creating a message line
+my $mf = $mw->Frame( -relief => 'groove',
+                  -borderwidth => 2);
+$mf->pack(-side => 'bottom', -anchor => 's', -expand => 0, -fill => 'x');
+$mf->Label ( -textvariable => \$message)->pack(-side => 'left');
+
+# show sut name and prot date in lower right corner
+my @statinfo = stat "$SutName.prot";
+my ($r_size, $r_mtime) = (\7, \9);
+my $FileInfoStr =
+    basename($SutName) . ".prot " . scalar localtime(@statinfo[$$r_mtime]);
+$mf->Label ( -text => "$FileInfoStr")->pack(-side => 'right');
+
+# creating button list and bind some keys
+$mw->bind("<Key-x>", \&ExitMain);
+$mw->bind("<Key-h>", \&HelpScreen);
+$mw->bind("<Key-o>", \&ShowProt);
+$mw->bind("<Key-n>", \&NextDiff);
+$mw->bind("<Key-p>", \&PrevDiff);
+
+my $bf = $mw->Frame( -relief => 'ridge',
+		  -borderwidth => 2);
+$bf->pack(-side => 'top', -anchor => 'n', -expand => 0, -fill => 'x');
+
+my $exit_btn = $bf->Button(-text => 'exit',
+			-width => 10,
+			-underline => 1,
+			-command => \&ExitMain);
+$exit_btn->pack(-side => 'left');
+
+my $prot_btn = $bf->Button(-text => 'prot',
+			-width => 10,
+			-underline => 2,
+			-command => \&ShowProt);
+$prot_btn->pack(-side => 'left');
+
+my $prev_btn = $bf->Button(-text => 'prev',
+			-width => 10,
+			-underline => 0,
+			-command => \&PrevDiff);
+$prev_btn->pack(-side => 'left');
+
+my $next_btn = $bf->Button(-text => 'next',
+			-width => 10,
+			-underline => 0,
+			-command => \&NextDiff);
+$next_btn->pack(-side => 'left');
+
+my $help_btn = $bf->Button(-text => 'help',
+			-underline => 0,
+			-width => 10,
+			-command => \&HelpScreen);
+$help_btn->pack(-side => 'right');
+
+my $pdiff_txt = ShowText ("$SutName.pdiff");
+
+$pdiff_txt->focusForce();
+
+NextDiff ();
+
+########################################################################
+
+sub HelpScreen {
+
+    require Tk::Dialog;
+
+    if (not Exists($HelpDialog)) {
+	$HelpDialog = $mw->Dialog(
+				  -title          => 'HELP',
+				  -bitmap         => 'info',
+				  -default_button => $ok,
+				  -buttons        => ['OK'],
+				  -default_button => 'OK',
+				  -wraplength     => '6i',
+				  -text           => <<"END"
+DiffView Version 1.0
+
+DiffView shows a \'diff\' output and after pressing the <prot> button the
+prot file belonging to it.
+
+With the buttons <next> and <prev> you can get the next or previous difference.
+
+usage: diffview <filename>
+
+  <filename>   --  filename without .pdiff/.prot extension
+END
+);
+    }
+
+    my $pressed = $HelpDialog->Show();
+
+}
+
+########################################################################
+
+sub NextDiff {
+
+    my $pdiff_index;
+    my $dummy_char;
+
+    if ( $pdiff_line )
+    {
+	$pdiff_line++;
+    } else {
+	$pdiff_line = 1;
+    }
+
+    $pdiff_index = "$pdiff_line.0";
+
+    $pdiff_index = $pdiff_txt->search( -regexp, $SearchPattern, $pdiff_index);
+
+    if ($pdiff_index) {
+
+        ($pdiff_line, $dummy_char) = split  /\./, $pdiff_index;
+
+        AnalyzeDiffExpr ($pdiff_txt->get ("$pdiff_line.0",
+					  "$pdiff_line.0 lineend"));
+
+
+    }
+
+    HighlightDiff ();
+}
+
+########################################################################
+
+sub PrevDiff {
+
+    my $pdiff_index;
+    my $dummy_char;
+
+    if ( $pdiff_line )
+    {
+	$pdiff_line--;
+    } else {
+	$pdiff_line = 'end';
+    }
+
+    $pdiff_index = "$pdiff_line.0";
+
+    $pdiff_index = $pdiff_txt->search( -regexp, -backward, $SearchPattern,
+                                       $pdiff_index);
+
+    if ($pdiff_index) {
+
+        ($pdiff_line, $dummy_char) = split  /\./, $pdiff_index;
+
+        AnalyzeDiffExpr ($pdiff_txt->get ("$pdiff_line.0",
+					  "$pdiff_line.0 lineend"));
+    }
+
+    HighlightDiff ();
+}
+
+########################################################################
+
+sub ExitMain {
+
+    $mw->destroy();
+}
+
+########################################################################
+
+sub ShowProt {
+
+    # swap button state and key binding
+    $prot_btn->configure (-state => 'disabled');
+    $mw->bind("<Key-o>", '');
+
+    # creating text widget and put prot into it
+    $prot_txt = ShowText("$SutName.prot");
+
+    # $prot_txt->geometry("$pdiffgeo");
+
+    $mw->geometry ("");
+
+    # highlight diff in prot
+    HighlightDiff ();
+
+}
+
+########################################################################
+
+sub ShowText {
+
+    # creating text widget and put filename into it
+    my ($filename, $diff_highlighted) = @_;
+    my $txt;
+
+    $txt = $mw->Scrolled("ROText", -scrollbars => 'se');
+    $txt->pack(-expand => 1, -fill => 'both');
+
+    open (FH, "$filename") || die "Could not open $filename";
+
+    # it is possible to highlight diff lines
+    $txt->tagConfigure ("diff_highlighted",
+			-foreground => 'red') if ($diff_highlighted);
+    while (<FH>) {
+        if ( $diff_highlighted && /$SearchPattern/ ) {
+	    $txt->insert('end', $_, "diff_highlighted");
+	} else {
+	    $txt->insert('end', $_);
+	}
+    }
+    close (FH);
+
+    $txt->tagConfigure ("changed",
+			-background => 'yellow');
+
+    $txt->tagConfigure ("deleted",
+			-background => 'lightblue');
+
+    $txt->tagConfigure ("added",
+			-background => 'lightgreen');
+
+    return $txt;
+
+}
+
+########################################################################
+
+sub HighlightDiff {
+
+    my ($center_pos, $ttype, @tindexes);
+
+    foreach $ttype ("changed", "deleted", "added") {
+
+	if ( $prot_txt ) {
+	    @tindexes = $prot_txt->tagRanges ($ttype);
+	    $prot_txt->tagRemove ($ttype, @tindexes) if (@tindexes);
+	}
+
+	@tindexes = $pdiff_txt->tagRanges ($ttype);
+	$pdiff_txt->tagRemove ($ttype, @tindexes) if (@tindexes);
+    }
+
+    unless ( $tagtype eq "unknown" ) {
+        if ( $prot_txt ) {
+        	$prot_txt->tagAdd ($tagtype,
+		       "$prot_start_pos.0",
+			   "$prot_end_pos.0 lineend");
+        }
+
+        $pdiff_txt->tagAdd ($tagtype,
+			"$pdiff_line.0",
+			"$pdiff_line.0 lineend");
+    }
+
+    $center_pos = int ($pdiff_txt->cget(-height) / 2);
+    $pdiff_txt->yview("$pdiff_line.0 - $center_pos lines");
+
+    if ($prot_txt) {
+
+	$center_pos = int (($prot_txt->cget(-height) / 2) -
+			   (($prot_end_pos - $prot_start_pos) / 2));
+	$prot_txt->yview ("$prot_start_pos.0 - $center_pos lines");
+    }
+}
+
+########################################################################
+
+sub AnalyzeDiffExpr {
+
+    my ($diffstring) = shift;
+
+    $match = $diffstring =~ /\d+,*\d*(a|c|d)(\d+),*(\d*)$/;
+
+    my ($diff_type) = $1;
+    $prot_start_pos = $2;
+    $prot_end_pos   = $3;
+
+    print "\match\n" if ($match);
+    print "\n$diff_type\n";
+    print "\n$prot_start_pos\n";
+    print "\n$prot_end_pos  \n";
+
+    $prot_end_pos   = $prot_start_pos unless ( $prot_end_pos );
+
+
+    if ( $diff_type eq "c" ) {
+      	$message = "changed line(s)";
+       	$tagtype = "changed";
+    } elsif ( $diff_type eq "a" ) {
+       	$message = "additional line(s)";
+       	$tagtype = "added";
+    } elsif ( $diff_type eq "d" ) {
+       	$message = "line(s) missing";
+       	$tagtype = "deleted";
+    }
+}
+
+########################################################################
+
+MainLoop;
+
+
+__END__
+
+DiffView Version 1.0
+
+DiffView shows a diff output and after pressing the prot button
+the prot file belonging to it.
+
+With the buttons next and prev you can get
+the next and previous difference.
+
+usage: diffview <filename>
+
+ <filename>   --  filename without .pdiff/.prot extension

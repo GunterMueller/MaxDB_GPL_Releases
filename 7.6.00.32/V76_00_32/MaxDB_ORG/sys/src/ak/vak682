@@ -1,0 +1,3210 @@
+.nf
+ 
+ .nf
+ 
+    ========== licence begin  GPL
+    Copyright (c) 1999-2005 SAP AG
+ 
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation; either version 2
+    of the License, or (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+    ========== licence end
+.fo
+ 
+ 
+.fo
+*****************************************************
+Copyright (c) 1999-2005 SAP AG
+SAP Database Technology
+ 
+Release :      Date : 2000-09-11
+*****************************************************
+modname : VAK682
+changed : 2000-09-11
+module  : Join_Select_execution
+ 
+Author  : ElkeZ
+Created : 1985-10-16
+*****************************************************
+ 
+Purpose : The module determines the most favourable order for
+          table processing and sends the Mess-Buffers that have
+          been built by VAK69 to KB
+ 
+Define  :
+ 
+        PROCEDURE
+              a682_only_ex_join (
+                    VAR acv        : tak_all_command_glob;
+                    VAR dmli       : tak_dml_info;
+                    VAR parsk      : tak_parskey;
+                    VAR res_tree   : tgg00_FileId;
+                    use_old_rescnt : boolean);
+ 
+        PROCEDURE
+              a682_execute_join (
+                    VAR acv             : tak_all_command_glob;
+                    VAR dmli            : tak_dml_info;
+                    VAR series          : tak68_sequence;
+                    VAR res_tree        : tgg00_FileId;
+                    VAR parsk           : tak_parskey;
+                    VAR jvrec           : tak68_joinview_rec;
+                    use_old_rescnt      : boolean;
+                    seqsearch_for_exec  : boolean);
+ 
+        PROCEDURE
+              a682_execute_join_operator (
+                    VAR acv             : tak_all_command_glob;
+                    VAR dmli            : tak_dml_info;
+                    VAR series          : tak68_sequence;
+                    VAR res_tree        : tgg00_FileId;
+                    VAR parsk           : tak_parskey;
+                    VAR jvrec           : tak68_joinview_rec;
+                    use_old_rescnt      : boolean;
+                    seqsearch_for_exec  : boolean);
+ 
+        PROCEDURE
+              a682context_mblock_sysk (VAR ke : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              a682copy_joinparsinfo (
+                    VAR acv   : tak_all_command_glob;
+                    VAR parsk : tak_parskey);
+ 
+        PROCEDURE
+              a682save_context (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    VAR ak_strat_interface  : tak71_strat_rec;
+                    VAR series              : tak68_sequence;
+                    VAR eq_rec              : tak68_eq_record;
+                    VAR res_tree            : tgg00_FileId;
+                    use_operator_join       : boolean;
+                    copy_joininfo           : boolean);
+ 
+        PROCEDURE
+              a682join_MBlock_key (
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    VAR parsk       : tak_parskey (*ptocConst*);
+                    VAR jv_tabid    : tgg00_Surrogate (*ptocConst*);
+                    seqno           : tsp00_Int2;
+                    VAR syskey      : tgg00_SysInfoKey;
+                    use_stmt_parsk  : boolean);
+ 
+        PROCEDURE
+              a682_mbuf_to_tmpbuf (
+                    VAR acv       : tak_all_command_glob;
+                    VAR syskey    : tgg00_SysInfoKey;
+                    VAR b_err     : tgg00_BasisError;
+                    sysinfo_kind  : tak68_mbuf_to_tmpbuf_context);
+ 
+        PROCEDURE
+              a682j_one_record (
+                    VAR acv         : tak_all_command_glob;
+                    VAR dmli        : tak_dml_info;
+                    act_join        : tsp00_Int2(*ptocConst*);
+                    curr_tabno      : tsp00_Int2 (*ptocConst*);
+                    VAR parsk       : tak_parskey (*ptocConst*);
+                    VAR jvrec       : tak68_joinview_rec (*ptocConst*);
+                    use_old_rescnt  : boolean (*ptocConst*);
+                    MBlocks_created : boolean (*ptocConst*));
+ 
+.CM *-END-* define --------------------------------------
+Use     :
+ 
+        FROM
+              Scanner : VAK01;
+ 
+        VAR
+              a01sysnullkey      : tgg00_SysInfoKey;
+              a01diag_monitor_on : boolean;
+              a01diag_analyze_on : boolean;
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_universal_semantic_tools : VAK06;
+ 
+        PROCEDURE
+              a06a_mblock_init (
+                    VAR acv      : tak_all_command_glob;
+                    mtype        : tgg00_MessType;
+                    m2type       : tgg00_MessType2;
+                    VAR tree     : tgg00_FileId);
+ 
+        PROCEDURE
+              a06cpy_mblock (
+                    VAR acv        : tak_all_command_glob;
+                    VAR src_mblock : tgg00_MessBlock;
+                    VAR dst_mblock : tgg00_MessBlock;
+                    withoutData    : boolean;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06dml_send_mess_buf (
+                    VAR acv    : tak_all_command_glob;
+                    VAR mbuf   : tgg00_MessBlock;
+                    VAR dmli   : tak_dml_info;
+                    VAR b_err  : tgg00_BasisError);
+ 
+        PROCEDURE
+              a06inc_linkage (VAR linkage : tsp00_C2);
+ 
+        PROCEDURE
+              a06drop_fieldlist_references (VAR fieldlists : tgg00_FieldLists);
+ 
+        PROCEDURE
+              a06drop_pars_fieldlist_refs (VAR fieldlists : tgg00_FieldLists);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_error_handling : VAK07;
+ 
+        PROCEDURE
+              a07_b_put_error (
+                    VAR acv  : tak_all_command_glob;
+                    b_err    : tgg00_BasisError;
+                    err_code : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Systeminfo_cache : VAK10;
+ 
+        PROCEDURE
+              a10mblock_into_cache (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    VAR mblock   : tgg00_MessBlock;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10dispose (
+                    VAR acv : tak_all_command_glob;
+                    VAR p : tsp00_MoveObjPtr);
+ 
+        PROCEDURE
+              a10_add_repl_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    add_sysinfo  : boolean;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10ins_or_upd (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10_rel_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey);
+ 
+        PROCEDURE
+              a10_nil_get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    syslen       : tsp00_Int4;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10add_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10get_sysinfo (
+                    VAR acv      : tak_all_command_glob;
+                    VAR syskey   : tgg00_SysInfoKey;
+                    dstate       : tak_directory_state;
+                    VAR syspoint : tak_sysbufferaddress;
+                    VAR b_err    : tgg00_BasisError);
+ 
+        PROCEDURE
+              a10del_sysinfo (
+                    VAR acv     : tak_all_command_glob;
+                    VAR syskey  : tgg00_SysInfoKey;
+                    VAR b_err   : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SQLManager : vak101;
+ 
+        FUNCTION
+              a101_IsExtendedTempFile(
+                    VAR acv    : tak_all_command_glob;
+                    VAR fileId : tgg00_FileId(*ptocConst*)) : boolean;
+ 
+        FUNCTION
+              a101_GetExtendedTempFileType(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId(*ptocConst*)) : tgg00_TfnTemp;
+ 
+        PROCEDURE
+              a101_SetTempFileLevel(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId;
+                    level          : tsp00_Int2(*ptocConst*));
+ 
+        PROCEDURE
+              a101_SetTempFileIndex(
+                    VAR acv        : tak_all_command_glob;
+                    VAR tempFileId : tgg00_FileId;
+                    sublevel       : tsp00_Int4(*ptocConst*));
+ 
+        PROCEDURE
+              a101_DestroyGroupedTempFile(
+                    VAR trans      : tgg00_TransContext;
+                    VAR tempFileId : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              SequenceWrapper : VAK104;
+ 
+        FUNCTION
+              ak104_GetReference_MS (
+                    sequence     : tsp00_MoveObjPtr) : tsp00_MoveObjPtr;
+ 
+        PROCEDURE
+              ak104_DropReference_MS (
+                    VAR sequence     : tsp00_MoveObjPtr);
+ 
+      ------------------------------ 
+ 
+        FROM
+              AK_update_statistics : VAK28;
+ 
+        PROCEDURE
+              a28sys_upd_statistics (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tree    : tgg00_FileId;
+                    mtype       : tgg00_MessType;
+                    m2type      : tgg00_MessType2;
+                    known_pages : tsp00_Int4;
+                    found_pages : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_complex : VAK502;
+ 
+        PROCEDURE
+              a502destroy_file (
+                    VAR acv          : tak_all_command_glob;
+                    VAR tree         : tgg00_FileId);
+ 
+        PROCEDURE
+              a502empty_result (
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    VAR res_tree : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_union : VAK503;
+ 
+        PROCEDURE
+              a503build_union_buffer (
+                    VAR acv : tak_all_command_glob;
+                    in_join : boolean);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Executing_loop_most : VAK505;
+ 
+        PROCEDURE
+              a505check_if_executed (
+                    VAR acv       : tak_all_command_glob;
+                    VAR test_name : tsp00_KnlIdentifier;
+                    VAR test_tree : tgg00_FileId);
+ 
+        PROCEDURE
+              a505const_param_expression  (
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    VAR mblock   : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              DML_Help_Procedures : VAK54;
+ 
+        PROCEDURE
+              a54_dml_init (
+                    VAR acv   : tak_all_command_glob;
+                    VAR dmli  : tak_dml_info;
+                    in_union  : boolean);
+ 
+        PROCEDURE
+              a54_dml_finalize (
+                    VAR dmli         : tak_dml_info;
+                    VAR TransContext : tgg00_TransContext);
+ 
+        PROCEDURE
+              a54expand_tabarr_ex(
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    new_capacity : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Execute_Select_Expression : VAK660;
+ 
+        PROCEDURE
+              a660build_view_treeid (
+                    VAR acv     : tak_all_command_glob;
+                    VAR tableid : tgg00_Surrogate;
+                    VAR tree    : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Build_Strategy : VAK70;
+ 
+        VAR
+              a70glob_join_key_strats : tgg07_StratEnumSet;
+ 
+      ------------------------------ 
+ 
+        FROM
+              Join_Select : VAK680;
+ 
+        PROCEDURE
+              a680search_sequence (
+                    VAR acv                 : tak_all_command_glob;
+                    VAR dmli                : tak_dml_info;
+                    VAR parsk               : tak_parskey;
+                    VAR eq_rec              : tak68_eq_record;
+                    VAR res_tree            : tgg00_FileId;
+                    VAR series              : tak68_sequence;
+                    VAR ak_strat_interface  : tak71_strat_rec;
+                    VAR jvrec               : tak68_joinview_rec;
+                    use_operator_join       : boolean);
+ 
+        PROCEDURE
+              a680rollback_temp_jinfo(
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    VAR parsk    : tak_parskey;
+                    VAR jv_tabid : tgg00_Surrogate;
+                    info_cnt     : tsp00_Int2;
+                    seqsearch_for_exec  : boolean);
+&       ifdef trace
+ 
+      ------------------------------ 
+ 
+        FROM
+              join_trace_routines : VAK683;
+ 
+        PROCEDURE
+              a683tr_sequence(
+                    debug       : tgg00_Debug;
+                    VAR dmli    : tak_dml_info;
+                    VAR series  : tak68_sequence);
+ 
+        PROCEDURE
+              a683_output (
+                    debug    : tgg00_Debug;
+                    VAR joins : tak_joinrec);
+ 
+        PROCEDURE
+              a683out_equal_record(
+                    debug       : tgg00_Debug;
+                    VAR eq_rec  : tak68_eq_record);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Join2_Select_help_routines : VAK685;
+ 
+        PROCEDURE
+              a685init_eq_rec(
+                    VAR acv         : tak_all_command_glob;
+                    VAR eq_rec      : tak68_eq_record );
+ 
+        PROCEDURE
+              a685expand_eq_rec_ex(
+                    VAR acv      : tak_all_command_glob;
+                    VAR eq_rec   : tak68_eq_record;
+                    new_capacity : tsp00_Int4);
+ 
+        PROCEDURE
+              a685finalize_eq_rec(
+                    VAR acv         : tak_all_command_glob;
+                    VAR eq_rec      : tak68_eq_record );
+ 
+        PROCEDURE
+              a685expand_joinarr_ex(
+                    VAR acv      : tak_all_command_glob;
+                    VAR dmli     : tak_dml_info;
+                    new_capacity : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Join_execution : VAK686;
+ 
+        PROCEDURE
+              a686_create_join_result (
+                    VAR acv       : tak_all_command_glob;
+                    VAR dmli      : tak_dml_info;
+                    VAR series    : tak68_sequence;
+                    VAR parsk     : tak_parskey;
+                    VAR jvrec     : tak68_joinview_rec;
+                    use_old_rescnt: boolean;
+                    del_parsinfos : boolean;
+                    VAR b_err     : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              task_temp_data_cache : VBD21;
+ 
+        PROCEDURE
+              b21m_reset_monitor (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    reset_sum      : boolean);
+ 
+        PROCEDURE
+              b21mp_copy_result_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    copy_result : tsp00_C3);
+ 
+        PROCEDURE
+              b21mp_kb_calls_put (temp_cache_ptr : tgg00_TempDataCachePtr);
+ 
+        PROCEDURE
+              b21mp_microsec_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_new_sum_put (temp_cache_ptr : tgg00_TempDataCachePtr);
+ 
+        PROCEDURE
+              b21mp_rows_qual_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    rows_qual : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_phys_ios_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    phys_ios : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_rows_read_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    rows_read : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_sec_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    sec : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_suspends_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    suspends : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_virt_reads_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    virt_reads : tsp00_Int4);
+ 
+        PROCEDURE
+              b21mp_waits_put (
+                    temp_cache_ptr : tgg00_TempDataCachePtr;
+                    waits : tsp00_Int4);
+ 
+      ------------------------------ 
+ 
+        FROM
+              ref_statistic : VBD73;
+ 
+        PROCEDURE
+              b73cmd_count (statement_kind : tgg00_RefInfoIndex);
+ 
+      ------------------------------ 
+ 
+        FROM
+              RTE_kernel : VEN101;
+ 
+        PROCEDURE
+              vclock (
+                    VAR sec      : tsp00_Int4;
+                    VAR microsec : tsp00_Int4);
+ 
+        PROCEDURE
+              vsleft (VAR freestacksize : tsp00_Int4);
+ 
+        PROCEDURE
+              vmonitor (
+                    pid          : tsp00_TaskId;
+                    VAR phys_ios : tsp00_Int4;
+                    VAR suspends : tsp00_Int4;
+                    VAR waits    : tsp00_Int4);
+&       ifdef trace
+ 
+        PROCEDURE
+              vdebug_break (debug_break_pos : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              filesysteminterface_1 : VBD01;
+ 
+        VAR
+              b01niltree_id : tgg00_FileId;
+ 
+        PROCEDURE
+              b01destroy_file (
+                    VAR t       : tgg00_TransContext;
+                    VAR file_id : tgg00_FileId);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Trace : VBD120;
+ 
+        PROCEDURE
+              b120InsertTrace(
+                    VAR t  : tgg00_TransContext;
+                    TraceLayer : tgg00_Debug;
+                    TraceType  : tgg00_VtraceType;
+                    BodyLen    : tsp00_Int2;
+                    pEntry     : tgg11_VtraceBodyPtr );
+ 
+      ------------------------------ 
+ 
+        FROM
+              Configuration_Parameter : VGG01;
+ 
+        VAR
+              g01vtrace                 : tgg00_VtraceState;
+              gg01_operator_join        : boolean;
+ 
+        FUNCTION
+              g01join_prefetch_percent : tsp00_Int4;
+&       ifdef TRACE
+ 
+        PROCEDURE
+              g01abort (
+                    msg_no     : tsp00_Int4;
+                    msg_label  : tsp00_C8;
+                    msg_text   : tsp00_C24;
+                    bad_value  : tsp00_Int4);
+&       endif
+ 
+      ------------------------------ 
+ 
+        FROM
+              Select_Help_Procedures : VGG04;
+ 
+        FUNCTION
+              g04calc_optimize_info_len (VAR mblock : tgg00_MessBlock): tsp00_Int2;
+ 
+        PROCEDURE
+              g04mblock_optimize_info (VAR mblock : tgg00_MessBlock);
+ 
+      ------------------------------ 
+ 
+        FROM
+              Kernel_move_and_fill : VGG101;
+ 
+        PROCEDURE
+              SAPDB_PascalMove   (
+                    mod_id         : tsp00_C6;
+                    mod_intern_num : tsp00_Int4;
+                    size1          : tsp00_Int4;
+                    size2          : tsp00_Int4;
+                    val1           : tsp00_MoveObjPtr;
+                    p1             : tsp00_Int4;
+                    val2           : tsp00_MoveObjPtr;
+                    p2             : tsp00_Int4;
+                    cnt            : tsp00_Int4;
+                    VAR e          : tgg00_BasisError);
+ 
+        PROCEDURE
+              SAPDB_PascalForcedMove  (
+                    size1    : tsp00_Int4;
+                    size2    : tsp00_Int4;
+                    val1     : tsp00_MoveObjPtr;
+                    p1       : tsp00_Int4;
+                    val2     : tsp00_MoveObjPtr;
+                    p2       : tsp00_Int4;
+                    cnt      : tsp00_Int4);
+ 
+        PROCEDURE
+              SAPDB_PascalOverlappingMove (
+                    mod_id      : tsp00_C6;
+                    mod_num     : tsp00_Int4;
+                    source_upb  : tsp00_Int4;
+                    dest_upb    : tsp00_Int4;
+                    source      : tsp00_MoveObjPtr;
+                    src_pos     : tsp00_Int4;
+                    destin      : tsp00_MoveObjPtr;
+                    dest_pos    : tsp00_Int4;
+                    length      : tsp00_Int4;
+                    VAR e       : tgg00_BasisError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              GET-Conversions : VSP40;
+ 
+        PROCEDURE
+              s40g4int (
+                    VAR buf     : tsp00_ResNum;
+                    pos         : tsp00_Int4;
+                    VAR dest    : tsp00_Int4;
+                    VAR res     : tsp00_NumError);
+ 
+      ------------------------------ 
+ 
+        FROM
+              KB_transaction : VKB53;
+ 
+        PROCEDURE
+              k53wait (
+                    VAR t     : tgg00_TransContext;
+                    MessType  : tgg00_MessType;
+                    MessType2 : tgg00_MessType2);
+&       ifdef TRACE
+ 
+      ------------------------------ 
+ 
+        FROM
+              Test_Procedures : VTA01;
+ 
+        PROCEDURE
+              t01execution_kind (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    ex_kind   : tak_execution_kind);
+ 
+        PROCEDURE
+              t01surrogate (
+                    debug     : tgg00_Debug;
+                    nam       : tsp00_Sname;
+                    VAR tabid : tgg00_Surrogate);
+ 
+        PROCEDURE
+              t01bool (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    curr_bool: boolean);
+ 
+        PROCEDURE
+              t01recursive_state (
+                    debug           : tgg00_Debug;
+                    nam             : tsp00_Sname;
+                    recursive_state : tak_recursive_state);
+ 
+        PROCEDURE
+              t01treeid (
+                    debug      : tgg00_Debug;
+                    nam        : tsp00_Sname;
+                    VAR treeid : tgg00_FileId);
+ 
+        PROCEDURE
+              t01name (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Name);
+ 
+        PROCEDURE
+              t01sname (
+                    debug : tgg00_Debug;
+                    nam   : tsp00_Sname);
+ 
+        PROCEDURE
+              t01messblock (
+                    debug         : tgg00_Debug;
+                    nam           : tsp00_Sname;
+                    VAR m         : tgg00_MessBlock);
+ 
+        PROCEDURE
+              t01int4 (
+                    debug    : tgg00_Debug;
+                    nam      : tsp00_Sname;
+                    int      : tsp00_Int4);
+ 
+        PROCEDURE
+              t01moveobj (
+                    debug       : tgg00_Debug;
+                    VAR moveobj : tak_systembuffer;
+                    startpos    : tsp00_Int4;
+                    endpos      : tsp00_Int4);
+&       endif
+ 
+.CM *-END-* use -----------------------------------------
+Synonym :
+ 
+        PROCEDURE
+              a10dispose;
+ 
+              tak_sysbufferaddress tsp00_MoveObjPtr
+ 
+        FUNCTION
+              ak104_GetReference_MS;
+ 
+              tak104_MemorySequence tsp00_MoveObjPtr
+ 
+        PROCEDURE
+              ak104_DropReference_MS;
+ 
+              tak104_MemorySequence tsp00_MoveObjPtr
+ 
+        PROCEDURE
+              s40g4int;
+ 
+              tsp00_MoveObj tsp00_ResNum
+&             ifdef TRACE
+ 
+        PROCEDURE
+              t01moveobj;
+ 
+              tsp00_MoveObj tak_systembuffer
+
+&             endif
+ 
+.CM *-END-* synonym -------------------------------------
+***********************************************************
+Specification:
+.CM *-END-* specification -------------------------------
+***********************************************************
+Description:
+ 
+ 
+A680_ONLY_EX_JOIN
+ 
+This procedure is called by VAK53 if it has been detected that a Join is to be
+performed. The parse id under which the Join information can be found and the
+result file name are also provided.
+The table descriptions are entered again in the ATARR; the processing order
+is fetched (GET_JOIN_PARS_INFO) and the Join itself is executed in
+A680_EXECUTE_JOIN.
+The table descriptions are necessary if a strategy must also be determined
+within the processing of the Join, i.e. if BD has to be called to count pages
+(see VAK72).
+ 
+A680_EXECUTE_JOIN
+ 
+J_RES_FN specifies the file name that is to be used for any necessary resorting
+of the table that is to be newly added.
+All tables are processed in a loop. The loop ends prematurely if an
+intermediate result is empty.
+ji_ACT_JOIN specifies the number of the run through the loop, not the number
+of the table.
+The intermediate result of the penultimate Join step, which is no longer
+required, is deleted.
+By means of J_ONE_RECORD, a Mess-Buffer is formed from the parse information
+stored for the current Join step.
+This Mess-Buffer is sent by means of A06_SEND_MESS_BUF to the KB/BD level
+for processing.
+If more than one result is expected, the number is in part1 behind the
+header. This number is read out and the tree id of the intermediate-result file
+is saved.
+If resorting was necessary within this Join step, this auxiliary file is
+deleted.
+ 
+If the loop ended prematurely, the stored Mess-Buffers, which normally are
+needed for processing and are then deleted, must also be deleted. This must, of
+course, not happen if the Join is only being executed, i.e. if this information
+must be available also for the next execution.
+Also the intermediate-result file, which is no longer required,
+must be deleted.
+If the loop was terminated prematurely, an empty result file with the name
+desired by the user must also be created and its tree id must be written to the
+location in part1 expected by the calling procedure.
+In this case, the last-created intermediate-result file must also be
+deleted, since it is not the one desired by the user.
+ 
+J_ONE_RECORD
+ 
+The interrogation with regard to ATVIEW relates only to the Mess-Buffers created
+for updatable Join Views, which are permanent, but have exactly the same
+appearance as the temporary ones, yet have a different key.
+The Mess-Buffer contains only Part1 of the Mess-Buffer and the strategy.
+Since those together may be greater than what can be stored in one parse-
+information record, they are, if necessary, split up into two, with the number
+of the second buffer = old number + maxsources (16).
+The strategy is written to Part2 of the Mess-Buffer behind the data
+(part2_len) that are the same for all Join Steps.
+If these stored Mess-Buffers are not to be permanent (for updatable Join
+Views) or are required for other Execute requests, they must be deleted.
+If a Join for an updatable Join View is to be tested, the keys of the
+records that are supposed to satisfy the Join conditions are in JVREC. The key
+belonging to this Join Step (to this table) is moved to the start of part2 of
+the Mess-Buffer. This part had therefore been kept free.
+For the first Join step, the current session number is entered in the name
+of the first intermediate-result file; for the last Join step, the tree id of
+the still existing INTO file is entered as the result tree id.
+If this procedure has been called for execution and not only for
+determination of strategy (A680_STRATEGIES), the tree id of the respective
+intermediate result is incorporated into the strategy of the Join.
+Then, if necessary, the strategy, which could not be fully determined at
+the time of parsing, is completed (A72_EX_PICK_BEST_STRATEGY).
+Required for this purpose is addpos, which specifies precisely the number of
+stack entries that have been written in front of the qualification stack
+entries since the preliminary determination of the strategy (see
+A680SEARCH_SEQUENCE). The strategy-information data must be altered by this
+number in order to access the correct stack entries.
+ 
+ 
+.CM *-END-* description ---------------------------------
+***********************************************************
+.CM -lll-
+Code    :
+ 
+ 
+CONST
+      c_append_data            = true;
+      c_del_parsinfos          = true;
+      c_max_linkage            = '\FF\FF';
+      c_max_buf_usage          = 1;
+ 
+TYPE
+ 
+      tak682_join1infos  =  RECORD
+            j_old_tree    : tgg00_FileId;
+            j_rescnt      : tsp00_Int4;
+            j_act_join    : tsp00_Int2;
+            j_filler      : tsp00_Int2;
+      END;
+ 
+ 
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682get_join_sequence (
+            VAR acv               : tak_all_command_glob;
+            VAR dmli              : tak_dml_info;
+            VAR parsk             : tak_parskey;
+            VAR res_tree          : tgg00_FileId;
+            VAR series            : tak68_sequence; (* uninitialized *)
+            VAR jvrec             : tak68_joinview_rec;
+            VAR sequence_search   : boolean;
+            VAR use_operator_join : boolean;
+            VAR aux_fieldlists    : tgg00_FieldLists;
+            mtype2                : tgg00_MessType2);
+ 
+VAR
+      _eq_rec             : tak68_eq_record;
+      _ak_strat_interface : tak71_strat_rec;
+      _init_ex_kind       : tak_execution_kind;
+      _ex_kind            : tak_execution_kind;
+      _h_count_literals   : tsp00_Int2;
+ 
+BEGIN
+a685init_eq_rec( acv, _eq_rec );
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    ak682restore_context (acv, parsk, dmli, _ak_strat_interface,
+          _eq_rec, res_tree, series, sequence_search, use_operator_join);
+    _init_ex_kind  := acv.a_init_ex_kind;
+    _ex_kind       := acv.a_ex_kind;
+    IF  (a101_IsExtendedTempFile (acv, res_tree)                                 AND
+        (ttfnUserResult_egg00 = a101_GetExtendedTempFileType (acv, res_tree))    AND
+        NOT (
+        (mm_with_functions = mtype2)                                          OR
+        ((no_distinct = dmli.d_distinct) AND (dmli.d_keylen > RESCNT_MXGG04)) OR
+        ((dmli.d_distinct <> no_distinct) AND
+        ( dmli.d_keylen > HASHVAL_MXGG04+RESCNT_MXGG04))
+        ))
+    THEN
+        IF  ((cgg04_no_rowno_predicate = dmli.d_rowno)        AND
+            ( dmli.d_upper_limit <> cgg04_no_rowno_predicate))
+        THEN
+            IF  ( dmli.d_limit_offset <> cgg04_no_rowno_predicate)
+            THEN
+                dmli.d_rowno := dmli.d_limit_offset + dmli.d_upper_limit
+            ELSE
+                dmli.d_rowno := dmli.d_upper_limit;
+            (*ENDIF*) 
+        (*ENDIF*) 
+    (*ENDIF*) 
+    IF  ( use_operator_join  AND NOT gg01_operator_join )
+    THEN
+        a07_b_put_error (acv, e_old_fileversion, 1);
+    (*ENDIF*) 
+    IF  ( sequence_search AND ( acv.a_returncode = 0 ))
+    THEN
+        BEGIN (* sequence of table processing has not been determined *)
+        (* during parsing of join, find optimal sequence              *)
+        acv.a_ex_kind         := only_parsing;
+        acv.a_init_ex_kind    := only_executing;
+        _h_count_literals     := acv.a_count_literals;
+        acv.a_count_literals  := 0;
+        dmli.d_joins.jrc_col_upd := false;
+        a680search_sequence (acv, dmli, parsk,
+              _eq_rec, res_tree, series, _ak_strat_interface,
+              jvrec, use_operator_join);
+        IF  (aux_fieldlists[cgg_idx_ex_result_valuefieldlist] = NIL) AND
+            (acv.a_mblock.mb_fieldlists[cgg_idx_ex_result_valuefieldlist] <> NIL)
+        THEN
+            aux_fieldlists[cgg_idx_ex_result_valuefieldlist] :=
+                  acv.a_mblock.mb_fieldlists[cgg_idx_ex_result_valuefieldlist];
+        (*ENDIF*) 
+        acv.a_init_ex_kind   := _init_ex_kind;
+        acv.a_ex_kind        := _ex_kind;
+        acv.a_count_literals := _h_count_literals;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+a06drop_pars_fieldlist_refs (acv.a_mblock.mb_fieldlists);
+a685finalize_eq_rec( acv, _eq_rec );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682context_mblock_sysk (VAR ke : tgg00_SysInfoKey);
+ 
+BEGIN
+ke.sentrytyp    := cak_emessblock;
+ke.slinkage     := c_max_linkage
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682save_context (
+            VAR acv                : tak_all_command_glob;
+            VAR dmli               : tak_dml_info;
+            VAR parsk              : tak_parskey;
+            VAR ak_strat_interface : tak71_strat_rec;
+            VAR series             : tak68_sequence;
+            VAR eq_rec             : tak68_eq_record;
+            VAR res_tree           : tgg00_FileId;
+            use_operator_join      : boolean;
+            copy_joininfo          : boolean);
+ 
+VAR
+      _e              : tgg00_BasisError;
+      _sequence_found : boolean;
+      _get_len        : tsp00_Int4;
+      _sbuf           : tak68_joinparsrecord_hybrid;
+      _ke             : tgg00_SysInfoKey;
+ 
+BEGIN
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    _sequence_found := ( series[ 1 ].jos_source <> 0 );
+    _ke := a01sysnullkey;
+    _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+    SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_ke.sauthid),
+          @parsk, 1, @_ke.sauthid, 2, mxak_parskey);
+    _ke.sentrytyp := cak_ejparsinfo;
+    IF  ( _sequence_found )
+    THEN
+        _get_len := cak_sysbufferoffset + cak68_contextconstoffset
+              + dmli.d_cntfromtab * sizeof(tak68_one_seq_join)
+    ELSE
+        _get_len := cak_sysbufferoffset + cak68_contextconstoffset
+              + dmli.d_order_or_group_cols^.ocntord * sizeof(tak00_ofield);
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4 (ak_join, 'd_cntfromtab', dmli.d_cntfromtab);
+    t01int4 (ak_join, 'get_len     ', _get_len);
+&   endif
+    _sbuf.jph_uniptr := NIL;
+    a10_nil_get_sysinfo (acv, _ke, d_release, _get_len, _sbuf.jph_uniptr, _e);
+    IF  ( _e = e_ok )
+    THEN
+        BEGIN
+        _sbuf.jph_uniptr^.b_sl := cak_sysbufferoffset + cak68_contextconstoffset;
+        _sbuf.jph_joinpars^.jp_restree           := res_tree;
+        _sbuf.jph_joinpars^.jp_d_inoutpos        := dmli.d_inoutpos;
+        _sbuf.jph_joinpars^.jp_d_cntfromtab      := dmli.d_cntfromtab;
+        _sbuf.jph_joinpars^.jp_d_reclen          := dmli.d_reclen;
+        _sbuf.jph_joinpars^.jp_d_keylen          := dmli.d_keylen;
+        _sbuf.jph_joinpars^.jp_sr_strategy       := ak_strat_interface.sr_strategy;
+        _sbuf.jph_joinpars^.jp_sr_use_rowno      := ak_strat_interface.sr_use_rowno;
+        _sbuf.jph_joinpars^.jp_filler1           := false;
+        _sbuf.jph_joinpars^.jp_sr_distinct_bytes := ak_strat_interface.sr_distinct_bytes;
+        _sbuf.jph_joinpars^.jp_d_standard        := dmli.d_standard;
+        _sbuf.jph_joinpars^.jp_d_single          :=
+              dmli.d_single OR (dmli.d_rowno = cgg04_one_record_at_most_internal);
+        _sbuf.jph_joinpars^.jp_d_distinct        := dmli.d_distinct;
+        _sbuf.jph_joinpars^.jp_d_rowno           := dmli.d_rowno;
+        _sbuf.jph_joinpars^.jp_d_globstate       := dmli.d_globstate;
+        _sbuf.jph_joinpars^.jp_d_limit_offset    := dmli.d_limit_offset;
+        _sbuf.jph_joinpars^.jp_d_upper_limit     := dmli.d_upper_limit;
+        _sbuf.jph_joinpars^.jp_d_session_isolevel:= acv.a_iso_level;
+        _sbuf.jph_joinpars^.jp_d_use_session_isolevel:=
+              (acv.a_transinf.tri_global_state = dmli.d_unchanged_globstate);
+        _sbuf.jph_joinpars^.jp_d_union           := dmli.d_union;
+        _sbuf.jph_joinpars^.jp_search_sequence   := NOT _sequence_found;
+        _sbuf.jph_joinpars^.jp_a_outer_join      := acv.a_outer_join;
+        _sbuf.jph_joinpars^.jp_d_one_join_phase  := dmli.d_one_join_phase;
+        _sbuf.jph_joinpars^.jp_nextexist         := false;
+        _sbuf.jph_joinpars^.jp_use_operator_join := use_operator_join;
+        _sbuf.jph_joinpars^.jp_d_pseudo_ins_select := dmli.d_pseudo_ins_select;
+        _sbuf.jph_joinpars^.jp_joincnt           := dmli.d_joins.jrc_cnt;
+        IF  ( _sequence_found )
+        THEN
+            (* eq_rec and atorder are not  *)
+            (* required to restore context *)
+            BEGIN
+            _sbuf.jph_joinpars^.jp_eq_cnt            := 0;
+            _sbuf.jph_joinpars^.jp_d_order_cnt       := 0;
+            END
+        ELSE
+            BEGIN
+            _sbuf.jph_joinpars^.jp_eq_cnt            := eq_rec.eqr_cnt;
+            _sbuf.jph_joinpars^.jp_d_order_cnt       := dmli.d_order_or_group_cols^.ocntord;
+            END;
+        (*ENDIF*) 
+        IF  ( _sequence_found )
+        THEN
+            BEGIN
+            (* optimal sequence of table processing has been found *)
+            (* at parse time, store sequence                       *)
+&           ifdef trace
+            a683tr_sequence( ak_join, dmli, series );
+&           endif
+            SAPDB_PascalMove ('VAK682',   1,    
+                  dmli.d_cntfromtab * sizeof(series[1]),
+                  sizeof(_sbuf.jph_uniptr^),
+                  @series, 1,
+                  @_sbuf.jph_uniptr^, _sbuf.jph_uniptr^.b_sl + 1,
+                  dmli.d_cntfromtab * sizeof(tak68_one_seq_join), _e);
+            _sbuf.jph_uniptr^.b_sl := _sbuf.jph_uniptr^.b_sl +
+                  dmli.d_cntfromtab * sizeof(tak68_one_seq_join);
+            END
+        ELSE
+            (* write order columns *)
+            BEGIN
+            IF  ( dmli.d_order_or_group_cols^.ocntord > 0 )
+            THEN
+                BEGIN
+                SAPDB_PascalMove('VAK682',   2,    
+                      dmli.d_order_or_group_cols^.ocntord *
+                      sizeof(tak00_ofield),
+                      sizeof(_sbuf.jph_uniptr^),
+                      @dmli.d_order_or_group_cols^.ofield, 1,
+                      @_sbuf.jph_uniptr^, _sbuf.jph_uniptr^.b_sl + 1,
+                      dmli.d_order_or_group_cols^.ocntord *
+                      sizeof(tak00_ofield), _e);
+                _sbuf.jph_uniptr^.b_sl := _sbuf.jph_uniptr^.b_sl +
+                      dmli.d_order_or_group_cols^.ocntord * sizeof(tak00_ofield);
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ( _e = e_ok )
+        THEN
+            a10add_sysinfo (acv, _sbuf.jph_uniptr, _e);
+        (*ENDIF*) 
+        ;
+        ak682table_info_write( acv, dmli );
+&       ifdef trace
+        t01bool (ak_join, 'sequence_sea', NOT _sequence_found);
+        t01int4 (ak_join, 'ocntord     ', dmli.d_order_or_group_cols^.ocntord);
+        t01int4 (ak_join, 'jrc_cnt     ', dmli.d_joins.jrc_cnt);
+        t01int4 (ak_join, 'eqr_cnt     ', eq_rec.eqr_cnt);
+        t01int4 (ak_join, 'get_len     ', _get_len);
+&       endif
+        IF   ( dmli.d_joins.jrc_cnt > 0 )
+        THEN
+            ak682join_info_write( acv, dmli );
+        (*ENDIF*) 
+        IF  ( _e = e_ok ) AND ( NOT _sequence_found )
+        THEN
+            BEGIN
+            (* sequence of table processing could not be evaluated   *)
+            (* at parsing time, store eq_rec, atorder, jrc_joinarr   *)
+            (* to be able to find optimal sequence at execution time *)
+            IF  ( eq_rec.eqr_cnt > 0 )
+            THEN
+                ak682eq_info_write( acv, eq_rec );
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    IF  ( NOT copy_joininfo )
+    THEN
+        BEGIN
+        IF  ( _e <> e_ok )
+        THEN
+            a07_b_put_error (acv, _e, 1)
+        ELSE
+            a682context_mblock_sysk (_ke);
+        (*ENDIF*) 
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            a682_mbuf_to_tmpbuf(acv, _ke, _e, mtc_save_context);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+a683_output( ak_join, dmli.d_joins );
+a683out_equal_record( ak_join, eq_rec );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682restore_context (
+            VAR acv               : tak_all_command_glob;
+            VAR parsk             : tak_parskey;
+            VAR dmli              : tak_dml_info;
+            VAR sr_rec            : tak71_strat_rec;
+            VAR eq_rec            : tak68_eq_record;
+            VAR res_tree          : tgg00_FileId;
+            VAR series            : tak68_sequence; (* IN: uninitialized *)
+            VAR sequence_search   : boolean;
+            VAR use_operator_join : boolean);
+ 
+VAR
+      _e                 : tgg00_BasisError;
+      _i                 : tsp00_Int2;
+      _pos               : tsp00_Int4;
+      _sbuf              : tak68_joinparsrecord_hybrid;
+      _ke                : tgg00_SysInfoKey;
+      _aux_data_len      : tsp00_Int4;
+ 
+BEGIN
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    _ke := a01sysnullkey;
+    _ke.sauthid[ 1 ] := cak_tempinfo_byte;
+    SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_ke.sauthid), @parsk, 1,
+          @_ke.sauthid, 2, mxak_parskey);
+    _ke.sentrytyp := cak_ejparsinfo;
+    _sbuf.jph_uniptr := NIL;
+    a10get_sysinfo (acv, _ke, d_fix, _sbuf.jph_uniptr, _e);
+&   ifdef trace
+    t01moveobj (ak_join, _sbuf.jph_uniptr^, 1, _sbuf.jph_uniptr^.b_sl);
+&   endif
+    _pos := cak_sysbufferoffset + cak68_contextconstoffset + 1;
+    IF  ( _e = e_ok )
+    THEN
+        BEGIN
+        res_tree                   := _sbuf.jph_joinpars^.jp_restree;
+        dmli.d_order_cols.ocntord  := _sbuf.jph_joinpars^.jp_d_order_cnt;
+        dmli.d_order_or_group_cols := @dmli.d_order_cols;
+        dmli.d_inoutpos            := _sbuf.jph_joinpars^.jp_d_inoutpos;
+        dmli.d_cntfromtab          := _sbuf.jph_joinpars^.jp_d_cntfromtab;
+        dmli.d_acttabindex         := 0;
+        dmli.d_reclen              := _sbuf.jph_joinpars^.jp_d_reclen;
+        dmli.d_keylen              := _sbuf.jph_joinpars^.jp_d_keylen;
+        dmli.d_single              := _sbuf.jph_joinpars^.jp_d_single;
+        dmli.d_distinct            := _sbuf.jph_joinpars^.jp_d_distinct;
+        IF  (_sbuf.jph_joinpars^.jp_d_rowno <> cgg04_rowno_given_as_parameter)
+        THEN
+            dmli.d_rowno               := _sbuf.jph_joinpars^.jp_d_rowno;
+        (*ENDIF*) 
+        IF  (_sbuf.jph_joinpars^.jp_d_limit_offset <> cgg04_rowno_given_as_parameter)
+        THEN
+            dmli.d_limit_offset    := _sbuf.jph_joinpars^.jp_d_limit_offset;
+        (*ENDIF*) 
+        IF  (_sbuf.jph_joinpars^.jp_d_upper_limit <> cgg04_rowno_given_as_parameter)
+        THEN
+            dmli.d_upper_limit     := _sbuf.jph_joinpars^.jp_d_upper_limit;
+        (*ENDIF*) 
+        dmli.d_view                := false;
+        sr_rec.sr_strategy         := _sbuf.jph_joinpars^.jp_sr_strategy;
+        sr_rec.sr_must_result      := true;
+        sr_rec.sr_use_rowno        := _sbuf.jph_joinpars^.jp_sr_use_rowno;
+        sr_rec.sr_distinct_bytes   := _sbuf.jph_joinpars^.jp_sr_distinct_bytes;
+        sr_rec.sr_reverse_access   := false;
+        dmli.d_standard            := _sbuf.jph_joinpars^.jp_d_standard;
+        dmli.d_join                := true;
+        dmli.d_union               := _sbuf.jph_joinpars^.jp_d_union;
+        dmli.d_globstate           := _sbuf.jph_joinpars^.jp_d_globstate;
+        dmli.d_unchanged_globstate := _sbuf.jph_joinpars^.jp_d_globstate;
+        dmli.d_one_join_phase      := _sbuf.jph_joinpars^.jp_d_one_join_phase;
+        use_operator_join          := _sbuf.jph_joinpars^.jp_use_operator_join;
+        dmli.d_pseudo_ins_select   := _sbuf.jph_joinpars^.jp_d_pseudo_ins_select;
+        IF  ((_sbuf.jph_joinpars^.jp_d_session_isolevel <> acv.a_iso_level) AND
+            _sbuf.jph_joinpars^.jp_d_use_session_isolevel)
+        THEN
+            (* R/3-command: SET ISOLATION LEVEL 0/1    *)
+            (* was given between parsing and executing *)
+            IF  ( acv.a_iso_level = 0 )
+            THEN
+                BEGIN
+                (* switched from isolevel 1 to 0 *)
+                IF  ( hsConsistentLock_egg00 in dmli.d_globstate )
+                THEN
+                    dmli.d_globstate := dmli.d_globstate - [ hsConsistentLock_egg00 ] +
+                          [ hsWithoutLock_egg00 ];
+                (*ENDIF*) 
+                IF  ( hsCollisionTest_egg00 in dmli.d_globstate )
+                THEN
+                    dmli.d_globstate := dmli.d_globstate - [ hsCollisionTest_egg00 ] +
+                          [ hsWithoutLock_egg00 ];
+                (*ENDIF*) 
+                END
+            ELSE
+                (* switched from isolevel 0 to 1 *)
+                dmli.d_globstate := dmli.d_globstate + [ hsCollisionTest_egg00 ] -
+                      [ hsWithoutLock_egg00 ];
+            (*ENDIF*) 
+        (*ENDIF*) 
+        acv.a_outer_join     := _sbuf.jph_joinpars^.jp_a_outer_join;
+        dmli.d_joins.jrc_cnt := _sbuf.jph_joinpars^.jp_joincnt;
+        eq_rec.eqr_cnt       := _sbuf.jph_joinpars^.jp_eq_cnt;
+        sequence_search      := _sbuf.jph_joinpars^.jp_search_sequence;
+        IF  ( dmli.d_cntfromtab > dmli.d_tabarr_capacity )
+        THEN
+            a54expand_tabarr_ex( acv, dmli, dmli.d_cntfromtab );
+        (*ENDIF*) 
+        ak682table_info_read( acv, dmli, parsk );
+&       ifdef trace
+        t01bool (ak_join, 'sequence_sea', sequence_search);
+        t01int4 (ak_join, 'ocntord     ', dmli.d_order_or_group_cols^.ocntord);
+        t01int4 (ak_join, 'jrc_cnt     ', dmli.d_joins.jrc_cnt);
+        t01int4 (ak_join, 'eqr_cnt     ', eq_rec.eqr_cnt);
+&       endif
+        IF  ( NOT sequence_search )
+        THEN
+            BEGIN (* restore sequence *)
+            SAPDB_PascalMove ('VAK682',   3,    
+                  sizeof(_sbuf.jph_uniptr^),
+                  dmli.d_cntfromtab * sizeof(series[1]),
+                  @_sbuf.jph_uniptr^,
+                  cak_sysbufferoffset + cak68_contextconstoffset + 1,
+                  @series, 1, dmli.d_cntfromtab * sizeof(tak68_one_seq_join),
+                  acv.a_returncode);
+&           ifdef trace
+            a683tr_sequence( ak_join, dmli, series );
+&           endif
+            END
+        ELSE
+            BEGIN (* restore eq_record, order columns if necessary *)
+            (* fake for a682save_context() *)
+            series[ 1 ].jos_source := 0;
+            series[ 1 ].jos_joinno := cak68_cartesian_product;
+            IF  ( dmli.d_order_or_group_cols^.ocntord > 0 )
+            THEN
+                BEGIN
+                SAPDB_PascalMove('VAK682',   4,    
+                      sizeof(_sbuf.jph_uniptr^),
+                      dmli.d_order_or_group_cols^.ocntord * sizeof(tak00_ofield),
+                      @_sbuf.jph_uniptr^,
+                      cak_sysbufferoffset + cak68_contextconstoffset + 1,
+                      @dmli.d_order_or_group_cols^.ofield, 1,
+                      dmli.d_order_or_group_cols^.ocntord * sizeof(tak00_ofield),
+                      acv.a_returncode);
+                END;
+            (*ENDIF*) 
+            IF  ( eq_rec.eqr_cnt > 0 )
+            THEN
+                BEGIN
+                a685expand_eq_rec_ex( acv, eq_rec, eq_rec.eqr_cnt );
+                IF  ( acv.a_returncode = 0 )
+                THEN
+                    ak682eq_info_read( acv, parsk, eq_rec );
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        IF  ( dmli.d_joins.jrc_cnt > 0 )
+        THEN
+            BEGIN
+            a685expand_joinarr_ex( acv, dmli,
+                  dmli.d_joins.jrc_cnt + 1 (* we have to reserve 1 free item *) );
+            IF  ( acv.a_returncode = 0 )
+            THEN
+                ak682join_info_read( acv, dmli, parsk );
+            (* restore d_outer_join and d_oj_tables *)
+            (*ENDIF*) 
+            dmli.d_oj_tables := []; (* PTS 1122177 *)
+            FOR _i := 0 TO dmli.d_joins.jrc_cnt - 1 DO
+                BEGIN
+                IF  dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ 1 ].jop_outer_join
+                THEN
+                    dmli.d_oj_tables  := dmli.d_oj_tables +
+                          [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ 1 ].jop_tableno ];
+                (*ENDIF*) 
+                IF  dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ 2 ].jop_outer_join
+                THEN
+                    dmli.d_oj_tables  := dmli.d_oj_tables +
+                          [ dmli.d_joins.jrc_joinarr^[ _i ].jo_recs[ 2 ].jop_tableno ];
+                (*ENDIF*) 
+                END;
+            (*ENDFOR*) 
+            IF  dmli.d_oj_tables <> [] (* PTS 1122177 *)
+            THEN
+                dmli.d_outer_join := true;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        a10_rel_sysinfo( acv, _ke );
+        END;
+    (*ENDIF*) 
+    IF  ( _e <> e_ok )
+    THEN
+        a07_b_put_error (acv, _e, 1)
+    ELSE
+        a682context_mblock_sysk (_ke);
+    (*ENDIF*) 
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        _aux_data_len := acv.a_mblock.mb_data_len;
+        ak682_tmpbuf_to_mbuf (acv, _ke, _e,
+              NOT c_del_parsinfos, NOT c_append_data);
+        acv.a_mblock.mb_data_len := _aux_data_len;
+        END;
+    (*ENDIF*) 
+    END;
+&ifdef trace
+(*ENDIF*) 
+a683_output( ak_join, dmli.d_joins );
+a683out_equal_record( ak_join, eq_rec );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682copy_joinparsinfo (
+            VAR acv   : tak_all_command_glob;
+            VAR parsk : tak_parskey);
+ 
+VAR
+      _exit_loop          : boolean;
+      _e                  : tgg00_BasisError;
+      _joinp              : tak_sysbufferaddress;
+      _ojoinp             : tak_sysbufferaddress;
+      _ak_strat_interface : tak71_strat_rec;
+      _newkey             : tgg00_SysInfoKey;
+      _oldkey             : tgg00_SysInfoKey;
+      _series             : tak68_sequence;
+      _res_tree           : tgg00_FileId;
+      _dmli               : tak_dml_info;
+      _eq_rec             : tak68_eq_record;
+      _sequence_search    : boolean;
+      _use_operator_join  : boolean;
+ 
+BEGIN
+a54_dml_init (acv, _dmli, false);
+a685init_eq_rec( acv, _eq_rec );
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    _e := e_ok;
+    ak682restore_context (acv, parsk, _dmli, _ak_strat_interface,
+          _eq_rec, _res_tree, _series, _sequence_search,
+          _use_operator_join );
+    (* *)
+    a682save_context (acv, _dmli, acv.a_pars_last_key,
+          _ak_strat_interface, _series, _eq_rec, _res_tree,
+          _use_operator_join, true);
+    ;
+    a06drop_fieldlist_references (acv.a_mblock.mb_fieldlists);
+    (**)
+    IF  ( acv.a_returncode = 0 )
+    THEN
+        BEGIN
+        _oldkey              := a01sysnullkey;
+        _oldkey.sauthid[ 1 ] := cak_tempinfo_byte;
+        SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_oldkey.sauthid), @parsk, 1,
+              @_oldkey.sauthid, 2, mxak_parskey);
+        IF  ( NOT _sequence_search )
+        THEN
+            BEGIN
+            (* join sequence created while parsing *)
+            _oldkey.sentrytyp     := cak_emessblock;
+            _oldkey.slinkage[ 2 ] := chr(1)
+            END
+        ELSE
+            a682context_mblock_sysk (_oldkey);
+        (*ENDIF*) 
+        _exit_loop := false;
+        _ojoinp    := NIL;
+        _joinp     := NIL;
+        REPEAT
+            a10get_sysinfo (acv, _oldkey, d_release, _ojoinp, _e);
+            IF  _e = e_ok
+            THEN
+                BEGIN
+                _newkey := _oldkey;
+                SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(_newkey.sauthid),
+                      @acv.a_pars_last_key, 1,
+                      @_newkey.sauthid, 2, mxak_parskey);
+                a10mblock_into_cache (acv, _newkey,
+                      _ojoinp^.smessblock.mbr_mess_block,
+                      d_release, _joinp, _e);
+                END;
+            (*ENDIF*) 
+            IF  ( _e = e_ok )
+            THEN
+                a10add_sysinfo (acv, _joinp, _e);
+            (*ENDIF*) 
+            IF  ( _e = e_ok )
+            THEN
+                IF  ( _newkey.slinkage = c_max_linkage )
+                THEN
+                    _exit_loop := true
+                ELSE
+                    BEGIN
+                    IF  ( ord (_newkey.slinkage[ 2 ]) = _dmli.d_cntfromtab )
+                    THEN
+                        a682context_mblock_sysk (_oldkey)
+                    ELSE
+                        _oldkey.slinkage[ 2 ] := succ(_oldkey.slinkage[ 2 ]);
+                    (*ENDIF*) 
+                    END;
+                (*ENDIF*) 
+            (*ENDIF*) 
+            IF  ( _e <> e_ok )
+            THEN
+                _exit_loop := true;
+            (*ENDIF*) 
+        UNTIL
+            _exit_loop;
+        (*ENDREPEAT*) 
+        END;
+    (*ENDIF*) 
+    IF  ( _e <> e_ok )
+    THEN
+        a07_b_put_error (acv, _e, 1);
+    (*ENDIF*) 
+    END
+ELSE
+    a07_b_put_error( acv, e_no_more_memory, 1 );
+(*ENDIF*) 
+a685finalize_eq_rec( acv, _eq_rec );
+a54_dml_finalize( _dmli, acv.a_transinf.tri_trans );
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682_only_ex_join (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            VAR parsk      : tak_parskey;
+            VAR res_tree   : tgg00_FileId;
+            use_old_rescnt : boolean);
+ 
+VAR
+      _i                : tsp00_Int2;
+      _aux_return       : tsp00_Int2;
+      _aux_errorpos     : tsp00_Int4;
+      _k_pa             : tgg00_SysInfoKey;
+      _jvrec            : tak68_joinview_rec;
+      _series           : tak68_sequence;
+      _b_err            : tgg00_BasisError;
+      _aux_fieldlists   : tgg00_FieldLists;
+      _sequence_search  : boolean;
+      _use_operator_join: boolean;
+      _m_d_single       : boolean;
+      _mtype2           : tgg00_MessType2;
+ 
+BEGIN
+(* save dmli.sparr which contains pointers to parsrecords *)
+(* allocated with state fix                               *)
+acv.a_p_arr5 := dmli.d_sparr;
+_mtype2      := mm_nil;
+_jvrec.jv_tabid      := b01niltree_id.fileTabId_gg00;
+_jvrec.jv_maxkeyl    := 0;
+IF  (dmli.d_sparr.px[1] <> NIL) AND (dmli.d_sparr.pcount > 0)
+THEN
+    BEGIN
+    _mtype2 := dmli.d_sparr.px[1]^.sparsinfo.p_mtyp2;
+    _b_err := e_ok;
+    _k_pa  := dmli.d_sparr.px[1]^.syskey;
+    _i     := 1;
+    WHILE _i <= dmli.d_sparr.pcount DO
+        BEGIN
+        a10ins_or_upd (acv, dmli.d_sparr.px[_i], _b_err);
+        IF  _b_err = e_ok
+        THEN
+            a10_rel_sysinfo (acv, dmli.d_sparr.px[_i]^.syskey)
+        ELSE
+            BEGIN
+            _i := dmli.d_sparr.pcount + 1;
+            a07_b_put_error (acv, _b_err, 1);
+            END;
+        (*ENDIF*) 
+        _i := _i + 1
+        END;
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+_b_err := e_ok;
+_aux_fieldlists := acv.a_mblock.mb_fieldlists;
+_m_d_single     := dmli.d_single;
+IF  ( acv.a_returncode = 0 )
+THEN
+    ak682get_join_sequence( acv, dmli, parsk, res_tree,
+          _series, _jvrec, _sequence_search, _use_operator_join, _aux_fieldlists, _mtype2);
+(*ENDIF*) 
+&ifdef trace
+t01bool (ak_join, 'sequence_sea', _sequence_search);
+&endif
+acv.a_from_select := acv.a_from_select OR
+      (a101_IsExtendedTempFile (acv, res_tree) AND
+      ( a101_GetExtendedTempFileType (acv, res_tree) = ttfnFromSelect_egg00 ));
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    IF  ( _use_operator_join )
+    THEN
+        BEGIN
+        a682_execute_join_operator (acv, dmli, _series,
+              res_tree, parsk, _jvrec, use_old_rescnt,
+              _sequence_search );
+        END
+    ELSE
+        a682_execute_join (acv, dmli, _series,
+              res_tree, parsk, _jvrec, use_old_rescnt, _sequence_search);
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    acv.a_mblock.mb_fieldlists[ cgg_idx_param_valuefieldlist]     := NIL;
+    acv.a_mblock.mb_fieldlists[ cgg_idx_ex_result_valuefieldlist] := NIL;
+    END;
+(*ENDIF*) 
+a06drop_fieldlist_references (_aux_fieldlists);
+dmli.d_sparr := acv.a_p_arr5;
+_i            := 1;
+_b_err        := e_ok;
+_aux_return   := acv.a_returncode;
+_aux_errorpos := acv.a_errorpos;
+(* PTS 1121321 E.Z. *)
+acv.a_returncode := 0;
+WHILE ( _i <= acv.a_p_arr5.pcount) AND (_b_err = e_ok) DO
+    BEGIN
+    a10get_sysinfo (acv, _k_pa, d_fix,
+          dmli.d_sparr.px[ _i ], _b_err);
+    _i := succ (_i);
+    IF  _i < acv.a_p_arr5.pcount
+    THEN
+        _k_pa.sauthid[ 1 + mxak_parskey + 1 ] :=
+              chr(succ(ord(_k_pa.sauthid[ 1 + mxak_parskey + 1 ])))
+    ELSE
+        BEGIN
+        _k_pa.sauthid[ 1 + mxak_parskey + 1 ] :=
+              a01sysnullkey.sauthid[ 1 + mxak_parskey + 1 ];
+        _k_pa.sentrytyp := cak_emessblock;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDWHILE*) 
+dmli.d_single := _m_d_single;
+(* PTS 1121321 E.Z. *)
+IF  (_aux_return <> 0)
+THEN
+    BEGIN
+    acv.a_returncode := _aux_return;
+    acv.a_errorpos   := _aux_errorpos;
+    END;
+(*ENDIF*) 
+IF  (_b_err <> e_ok)
+THEN
+    a07_b_put_error (acv, _b_err, 1);
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682_execute_join (
+            VAR acv             : tak_all_command_glob;
+            VAR dmli            : tak_dml_info;
+            VAR series          : tak68_sequence;
+            VAR res_tree        : tgg00_FileId;
+            VAR parsk           : tak_parskey;
+            VAR jvrec           : tak68_joinview_rec;
+            use_old_rescnt      : boolean;
+            seqsearch_for_exec  : boolean);
+ 
+VAR
+      _dispose_aux_buf       : boolean;
+      _e                     : tgg00_BasisError;
+      _aux_buf_ptr           : tsp00_MoveObjPtr;
+      _gg_strategy_ptr       : ^tgg07_StrategyInfo;
+      _jvars                 : tak682_join1infos;
+      _res                   : tsp00_NumError;
+      _ke                    : tgg00_SysInfoKey;
+      _aux_return            : tsp00_Int2;
+      _aux_errorpos          : tsp00_Int4;
+      _joinp                 : tak_sysbufferaddress;
+      _join_prefetch_percent : tsp00_Int4;
+      _saved_data_len        : tsp00_Int4; (* h.b. PTS 1104929 *)
+      _curr_result_id        : tgg00_FileId;
+      _old_result_id         : tgg00_FileId;
+      _aux_fieldlists        : tgg00_FieldLists;
+ 
+BEGIN
+&ifdef TRACE
+(* fight against usecheck *)
+_jvars.j_filler := 0;
+t01treeid( ak_join, 'res_tree    ', res_tree );
+t01execution_kind( ak_join, 'a_ex_kind   ', acv.a_ex_kind );
+t01execution_kind( ak_join, 'a_init_ex_ki', acv.a_init_ex_kind );
+&endif
+_dispose_aux_buf   := false;
+_aux_buf_ptr       := NIL;
+_gg_strategy_ptr   := NIL;
+_jvars.j_act_join  := 1;
+_jvars.j_rescnt    := 0;
+_curr_result_id := b01niltree_id;
+_old_result_id  := b01niltree_id;
+_aux_fieldlists := acv.a_mblock.mb_fieldlists;
+IF  a101_IsExtendedTempFile (acv, res_tree)
+THEN
+    IF  a101_GetExtendedTempFileType (acv, res_tree) = ttfnUserResult_egg00
+    THEN
+        IF  acv.a_ex_kind = only_executing
+        THEN
+            a101_SetTempFileIndex (acv, res_tree, acv.a_max_res_id)
+        ELSE
+            a101_SetTempFileIndex (acv, res_tree, acv.a_curr_res_id)
+        (*ENDIF*) 
+    ELSE
+        IF  (acv.a_recursive_state     = rs_recursive_select)    AND
+            (a101_GetExtendedTempFileType (acv, res_tree) = ttfnRecursive_egg00)
+        THEN
+            a101_SetTempFileLevel (acv, res_tree, acv.a_recursive_no);
+        (*ENDIF*) 
+    (*ENDIF*) 
+(*ENDIF*) 
+_join_prefetch_percent := g01join_prefetch_percent;
+b73cmd_count(ijoin_legacy);
+_joinp := NIL;
+IF  (acv.a_returncode = 0)
+THEN
+    REPEAT
+        acv.a_mblock.mb_fieldlists := _aux_fieldlists;
+        _old_result_id := _curr_result_id;
+        a682j_one_record (acv, dmli, _jvars.j_act_join,
+              series[ _jvars.j_act_join ].jos_source,
+              parsk, jvrec, use_old_rescnt, seqsearch_for_exec);
+        IF  ( acv.a_returncode = 0 ) AND
+            ( _jvars.j_act_join > 1 )
+        THEN
+            BEGIN
+            (* write into gi_result_info.o_tree *)
+            SAPDB_PascalMove ('VAK682',   5,    
+                  sizeof(_jvars.j_old_tree), acv.a_mblock.mb_strat_size,
+                  @_jvars.j_old_tree, 1,
+                  @acv.a_mblock.mb_strat^,
+                  acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.
+                  mstrat_pos + cgg07_ResultShiftInfo_Offset].epos -
+                  sizeof(tgg07_JoinResInfo), sizeof(_jvars.j_old_tree),
+                  acv.a_returncode);
+            END;
+        (*ENDIF*) 
+        ;
+        IF  (_jvars.j_act_join < dmli.d_cntfromtab)
+        THEN
+            IF  ( series[ _jvars.j_act_join + 1 ].jos_joinstrat IN
+                a70glob_join_key_strats ) AND
+                (_join_prefetch_percent > 0)
+            THEN
+                BEGIN
+                a682join_MBlock_key (acv, dmli, parsk, jvrec.jv_tabid,
+                      series[ _jvars.j_act_join + 1 ].jos_source, _ke,
+                      seqsearch_for_exec);
+                a10get_sysinfo (acv, _ke, d_release, _joinp, _e);
+                IF  _e <> e_ok
+                THEN
+                    BEGIN
+                    a07_b_put_error (acv, _e, 1);
+                    END
+                ELSE
+                    acv.a_mblock.mb_next_mblock :=
+                          @_joinp^.smessblock.mbr_mess_block;
+                (*ENDIF*) 
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        ;
+        IF  ( acv.a_returncode = 0 )
+        THEN
+            BEGIN
+            IF  ( _jvars.j_act_join = dmli.d_cntfromtab )
+            THEN
+                acv.a_mblock.mb_type2    := mm_join_with_last_tab;
+            (*ENDIF*) 
+            ;
+&           ifdef TRACE
+            t01int4 (ak_join, 'j_act_join  ', _jvars.j_act_join);
+            t01int4 (ak_join, 'j_act_join  ', acv.a_union_cnt);
+&           endif
+            _gg_strategy_ptr := @acv.a_mblock.mb_strat^[ acv.a_mblock.
+                  mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos ];
+            IF  ( _jvars.j_act_join = dmli.d_cntfromtab ) AND
+                (( _gg_strategy_ptr^.str_rowno = cgg04_rowno_given_as_parameter ) OR
+                (  dmli.d_rowno = 1) (* TOP 1 in subqueries may overwrite other rowno-values *) )
+            THEN
+                _gg_strategy_ptr^.str_rowno := dmli.d_rowno;
+            (*ENDIF*) 
+            _curr_result_id := _gg_strategy_ptr^.str_result_id;
+            IF  (acv.a_returncode = 0)
+            THEN
+                BEGIN
+                (* h.b. PTS 1104929 *)
+                _saved_data_len := acv.a_mblock.mb_data_len;
+                _e := e_ok;
+                IF  NOT acv.a_intern_explain (* h.b. PTS 1105331 *)
+                THEN
+                    a06dml_send_mess_buf (acv, acv.a_mblock, dmli, _e);
+                (*ENDIF*) 
+                ;
+                (* h.b. PTS 1104929 *)
+                IF  acv.a_mblock.mb_data_len = 0
+                THEN
+                    acv.a_mblock.mb_data_len := _saved_data_len;
+                (*ENDIF*) 
+                IF  ( _e <> e_ok )
+                THEN
+                    BEGIN
+                    IF  ((_e = e_no_next_record) OR
+                        (_e = e_key_not_found))
+                        AND
+                        ((acv.a_mblock.mb_qual^.mfirst_free - 1) =
+                        cgg04_return_stack_entries) AND
+                        (_gg_strategy_ptr^.str_strategy = strat_key_range) AND
+                        (NOT dmli.d_view (* no joinview *)
+                        )
+                    THEN
+                        a28sys_upd_statistics (acv,
+                              dmli.d_tabarr^[ series[ _jvars.j_act_join ].jos_source ].otreeid,
+                              m_select, mm_nil,
+                              dmli.d_tabarr^[ series[ _jvars.j_act_join ].jos_source ].opages,
+                              acv.a_mblock.mb_qual^.mr_pagecnt);
+                    (*ENDIF*) 
+                    a07_b_put_error (acv, _e, 1)
+                    END
+                ELSE
+                    BEGIN (* read result count and result tree_id *)
+                    s40g4int (acv.a_mblock.mb_qual^.mr_resnum, 2,
+                          _jvars.j_rescnt, _res);
+                    (* res has to be num_ok *)
+&                   ifdef TRACE
+                    t01int4 (ak_join, 'j_rescnt    ', _jvars.j_rescnt);
+&                   endif
+                    _jvars.j_old_tree := acv.a_mblock.mb_qual^.mr_restree;
+                    IF  (_gg_strategy_ptr^.str_strategy = strat_key_range) AND
+                        (NOT dmli.d_view (* no joinview *)
+                        )
+                    THEN
+                        a28sys_upd_statistics (acv,
+                              dmli.d_tabarr^[ series[ _jvars.j_act_join ].jos_source ].otreeid,
+                              m_select, mm_nil,
+                              dmli.d_tabarr^[ series[ _jvars.j_act_join ].jos_source ].opages,
+                              acv.a_mblock.mb_qual^.mr_pagecnt);
+                    (*ENDIF*) 
+                    END
+                (*ENDIF*) 
+                END
+            (*ENDIF*) 
+            END
+        ELSE
+            IF  (acv.a_returncode = csp_old_fileversion) AND
+                (_jvars.j_act_join  > 1)
+            THEN
+                BEGIN
+                _aux_return   := acv.a_returncode;
+                _aux_errorpos := acv.a_errorpos;
+                acv.a_returncode := 0;
+                a502destroy_file (acv, _jvars.j_old_tree);
+                acv.a_returncode := _aux_return;
+                acv.a_errorpos   := _aux_errorpos;
+                END;
+            (*ENDIF*) 
+        (*ENDIF*) 
+        ;
+&       ifdef trace
+        t01sname (ak_join, 'try nxt loop');
+&       endif
+        _jvars.j_act_join            := succ(_jvars.j_act_join);
+    UNTIL
+        (_jvars.j_act_join > dmli.d_cntfromtab)
+        OR
+        ((_jvars.j_rescnt <= 0)     AND
+        ((NOT acv.a_outer_join))    AND
+        (* ! we have to deliver aggregated values !*)
+        (NOT dmli.d_one_join_phase))
+        OR
+        (acv.a_returncode <> 0);
+    (*ENDREPEAT*) 
+(*ENDIF*) 
+IF  _dispose_aux_buf
+THEN
+    BEGIN
+    _aux_return   := acv.a_returncode;
+    _aux_errorpos := acv.a_errorpos;
+    acv.a_returncode := 0;
+    a10dispose (acv, _aux_buf_ptr);
+    acv.a_returncode := _aux_return;
+    acv.a_errorpos   := _aux_errorpos;
+    END;
+(*ENDIF*) 
+IF  ( seqsearch_for_exec AND (( acv.a_returncode <> 0 ) OR ( _jvars.j_rescnt = 0 )))
+THEN
+    BEGIN
+    (* delete parsinfo's that have not been *)
+    (* deleted by ak682_tmpbuf_to_mbuf()    *)
+    a680rollback_temp_jinfo( acv, dmli, parsk, jvrec.jv_tabid,
+          dmli.d_cntfromtab, true );
+    END;
+(*ENDIF*) 
+;
+IF  ((acv.a_returncode = 0) AND (NOT dmli.d_single) AND
+    ((_jvars.j_act_join <= dmli.d_cntfromtab) OR (_jvars.j_rescnt = 0)))
+THEN
+    BEGIN
+    IF  (( _jvars.j_act_join = 2 ) AND ( _gg_strategy_ptr <> NIL ))
+    THEN
+        BEGIN
+        b01destroy_file( acv.a_transinf.tri_trans,
+              _gg_strategy_ptr^.str_result_id );
+        END;
+    (*ENDIF*) 
+    a502empty_result (acv, dmli, res_tree);
+    IF  acv.a_returncode = 0
+    THEN
+        BEGIN
+        acv.a_mblock.mb_qual^.mr_restree   := res_tree;
+        acv.a_mblock.mb_qual^.mr_res_build := true;
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode <> 0) AND
+    (_old_result_id.fileName_gg00 <> b01niltree_id.fileName_gg00)
+THEN
+    BEGIN
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    a101_DestroyGroupedTempFile (acv.a_transinf.tri_trans, _old_result_id);
+    acv.a_transinf.tri_trans.trError_gg00 := e_ok;
+    END;
+(*ENDIF*) 
+IF  (acv.a_returncode = 0) AND (acv.a_union_cnt = 0)
+THEN
+    IF  (NOT dmli.d_single)
+    THEN
+        acv.a_mblock.mb_data_len  := 0
+    ELSE
+        BEGIN
+        IF  (_jvars.j_rescnt = 0)
+        THEN
+            a07_b_put_error (acv, e_no_next_record, 1);
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+(*ENDIF*) 
+;
+&ifdef TRACE
+t01messblock (ak_join, 'MESSBLOCK   ', acv.a_mblock);
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682j_one_record (
+            VAR acv         : tak_all_command_glob;
+            VAR dmli        : tak_dml_info;
+            act_join        : tsp00_Int2;
+            curr_tabno      : tsp00_Int2;
+            VAR parsk       : tak_parskey;
+            VAR jvrec       : tak68_joinview_rec;
+            use_old_rescnt  : boolean;
+            MBlocks_created : boolean);
+ 
+VAR
+      _b_err         : tgg00_BasisError;
+      _gg_strategy_ptr : ^tgg07_StrategyInfo;
+      _ke            : tgg00_SysInfoKey;
+ 
+BEGIN
+&ifdef trace
+t01int4( ak_join, 'act join    ', act_join );
+t01int4( ak_join, 'act tabno   ', curr_tabno );
+&endif
+a682join_MBlock_key( acv, dmli, parsk, jvrec.jv_tabid,
+      curr_tabno, _ke, MBlocks_created );
+ak682_tmpbuf_to_mbuf( acv, _ke, _b_err, MBlocks_created, c_append_data );
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    _gg_strategy_ptr := @acv.a_mblock.mb_strat^[
+          acv.a_mblock.mb_st^[ acv.a_mblock.mb_qual^.mstrat_pos ].epos ];
+    IF  ( act_join = dmli.d_cntfromtab )
+    THEN
+        BEGIN
+        IF  a101_IsExtendedTempFile (acv, _gg_strategy_ptr^.str_result_id)
+        THEN
+            IF  a101_GetExtendedTempFileType (acv,
+                _gg_strategy_ptr^.str_result_id) = ttfnInto_egg00
+            THEN
+                _gg_strategy_ptr^.str_result_id := acv.a_into_tree
+            ELSE
+                IF  a101_GetExtendedTempFileType (acv,
+                    _gg_strategy_ptr^.str_result_id)
+                    = ttfnUserResult_egg00
+                THEN
+                    BEGIN
+                    IF  acv.a_ex_kind = only_executing
+                    THEN
+                        a101_SetTempFileIndex (acv,
+                              _gg_strategy_ptr^.str_result_id,
+                              acv.a_max_res_id)
+                    ELSE
+                        a101_SetTempFileIndex (acv,
+                              _gg_strategy_ptr^.str_result_id,
+                              acv.a_curr_res_id);
+                    (*ENDIF*) 
+                    END
+                ELSE
+                    IF  ( acv.a_recursive_state = rs_recursive_select) AND
+                        a101_IsExtendedTempFile (acv,
+                        _gg_strategy_ptr^.str_result_id) AND
+                        ( a101_GetExtendedTempFileType (acv,
+                        _gg_strategy_ptr^.str_result_id)
+                        = ttfnRecursive_egg00 )
+                    THEN
+                        a101_SetTempFileLevel (acv,
+                              _gg_strategy_ptr^.str_result_id,
+                              acv.a_recursive_no);
+                    (*ENDIF*) 
+                (*ENDIF*) 
+            (*ENDIF*) 
+        (*ENDIF*) 
+        IF  ( use_old_rescnt )
+        THEN
+            BEGIN
+            IF  (dmli.d_mselect_loop_cnt  = cgg04_first_and_only_of_all) OR
+                ((dmli.d_mselect_loop_cnt = cgg04_first_of_all) OR
+                ( dmli.d_mselect_loop_cnt = cgg04_first_and_only_of_this) AND
+                NOT dmli.d_repl_reskey)
+            THEN
+                BEGIN
+                END
+            ELSE
+                BEGIN
+                (* call in the course of a mass select *)
+                (* where current select is not the     *)
+                (* first one, ==> result file has      *)
+                (* already been created                *)
+                _gg_strategy_ptr^.str_result_id.fileHandling_gg00 :=
+                      _gg_strategy_ptr^.str_result_id.fileHandling_gg00 -
+                      [ hsCreateFile_egg00 ]
+                END;
+            (*ENDIF*) 
+            IF  ( dmli.d_mselect_rescnt > 0 )
+            THEN
+                _gg_strategy_ptr^.str_foundresults := dmli.d_mselect_rescnt;
+            (*ENDIF*) 
+            END;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( dmli.d_view )
+THEN
+    BEGIN (* Join in the course of an join view update *)
+    acv.a_mblock.mb_qual^.mtree.fileHandling_gg00  :=
+          acv.a_transinf.tri_global_state -
+          [ hsTempLock_egg00, hsPermLock_egg00 ];
+    acv.a_mblock.mb_qual^.mtree.fileLeafNodes_gg00 := cgg_nil_leafnodes;
+    IF  ( act_join = 1 )
+    THEN
+        BEGIN
+        acv.a_mblock.mb_data^.mbp_keylen := jvrec.jv_keybuf^.sviewkey.vkjvkeylen;
+&       ifdef trace
+        t01name(ak_join, 'viewkey -> mb_data');
+&       endif
+        SAPDB_PascalMove ('VAK682',   6,    
+              sizeof(jvrec.jv_keybuf^.sviewkey.vkjvkey),
+              acv.a_mblock.mb_data_size,
+              @jvrec.jv_keybuf^.sviewkey.vkjvkey, 1,
+              @acv.a_mblock.mb_data^.mbp_buf, cgg_rec_key_offset + 1,
+              acv.a_mblock.mb_data^.mbp_keylen,
+              acv.a_returncode);
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    IF  ( acv.a_union_cnt > 0 )
+    THEN
+        IF  ( act_join = dmli.d_cntfromtab )
+        THEN
+            a503build_union_buffer (acv, true);
+        (*ENDIF*) 
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree)
+THEN
+    BEGIN
+    IF  a101_GetExtendedTempFileType (acv,
+        acv.a_mblock.mb_qual^.mtree) = ttfnUserResult_egg00
+    THEN
+        a505check_if_executed (acv, dmli.d_tabarr^[ curr_tabno ].otable,
+              acv.a_mblock.mb_qual^.mtree)
+    ELSE
+        BEGIN
+&       ifdef trace
+        t01recursive_state( ak_join, 'recurs state', acv.a_recursive_state );
+&       endif
+        IF  NOT (acv.a_recursive_state in
+            [ rs_no_recursive_select, rs_first_select ])               AND
+            a101_IsExtendedTempFile (acv, acv.a_mblock.mb_qual^.mtree) AND
+            (a101_GetExtendedTempFileType (acv,
+            acv.a_mblock.mb_qual^.mtree) = ttfnRecursive_egg00)
+        THEN
+            BEGIN
+            a101_SetTempFileLevel (acv, acv.a_mblock.mb_qual^.mtree,
+                  acv.a_recursive_no-1);
+&           ifdef trace
+            t01int4( ak_join, 'set fileLeve', acv.a_recursive_no-1 );
+&           endif
+            END
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    IF  ( acv.a_initial_segment_header.sp1c_mess_type = sp1m_execute )
+    THEN
+        BEGIN
+        (* may be R/3-command: SET ISOLATION LEVEL 0/1 *)
+        (* was given between parsing and executing     *)
+        IF  ( dmli.d_unchanged_globstate <> dmli.d_globstate )
+        THEN
+            (* no special isolevel for internal use used *)
+            (* but session iso level changed in the meantime *)
+            (* compare restore_context                       *)
+            IF  ( acv.a_iso_level = 0 )
+            THEN
+                BEGIN
+                (* switched from isolevel 1 to 0 *)
+                IF  ( hsConsistentLock_egg00
+                    in acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 )
+                THEN
+                    acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 :=
+                          acv.a_mblock.mb_qual^.mtree.fileHandling_gg00
+                          - [ hsConsistentLock_egg00 ]
+                          + [ hsWithoutLock_egg00    ];
+                (*ENDIF*) 
+                IF  ( hsCollisionTest_egg00
+                    in acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 )
+                THEN
+                    acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 :=
+                          acv.a_mblock.mb_qual^.mtree.fileHandling_gg00
+                          - [ hsCollisionTest_egg00 ]
+                          + [ hsWithoutLock_egg00   ];
+                (*ENDIF*) 
+                END
+            ELSE
+                (* switched from isolevel 0 to 1 *)
+                acv.a_mblock.mb_qual^.mtree.fileHandling_gg00 :=
+                      acv.a_mblock.mb_qual^.mtree.fileHandling_gg00
+                      + [ hsCollisionTest_egg00 ]
+                      - [ hsWithoutLock_egg00   ];
+            (*ENDIF*) 
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    a505const_param_expression( acv, dmli, acv.a_mblock );
+&   ifdef TRACE
+    t01messblock (ak_join, 'NEW MESSBUFF', acv.a_mblock);
+&   endif
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682join_MBlock_key (
+            VAR acv         : tak_all_command_glob;
+            VAR dmli        : tak_dml_info;
+            VAR parsk       : tak_parskey;
+            VAR jv_tabid    : tgg00_Surrogate;
+            seqno           : tsp00_Int2;
+            VAR syskey      : tgg00_SysInfoKey;
+            use_stmt_parsk  : boolean);
+ 
+BEGIN
+syskey := a01sysnullkey;
+IF  dmli.d_view
+THEN
+    BEGIN
+    syskey.stableid  := jv_tabid;
+    syskey.sentrytyp := cak_epermmessblock;
+    IF  dmli.d_checkview
+    THEN
+        BEGIN
+&       ifdef trace
+        t01sname (ak_join, 'd_checkview ');
+&       endif
+        syskey.slinkage[ 1 ] := chr(1);
+        END;
+    (*ENDIF*) 
+    END
+ELSE
+    BEGIN
+    IF  (acv.a_ex_kind = only_parsing) OR (acv.a_ex_kind = only_executing)
+    THEN
+        BEGIN
+        syskey.sauthid[ 1 ] := cak_tempinfo_byte;
+&       ifdef trace
+        t01bool (ak_join, 'use stmt par', use_stmt_parsk);
+&       endif
+        IF  ( use_stmt_parsk )
+        THEN
+            SAPDB_PascalForcedMove (
+                  sizeof(acv.a_statement_parsid.pid_parsk),
+                  sizeof(syskey.sauthid),
+                  @acv.a_statement_parsid.pid_parsk, 1,
+                  @syskey.sauthid, 2, mxak_parskey)
+        ELSE
+            SAPDB_PascalForcedMove (
+                  sizeof(parsk), sizeof(syskey.sauthid),
+                  @parsk, 1,
+                  @syskey.sauthid, 2, mxak_parskey);
+        (*ENDIF*) 
+        END
+    ELSE
+        syskey.stempid := acv.a_curr_res_id;
+    (*ENDIF*) 
+    syskey.sentrytyp := cak_emessblock;
+    END;
+(*ENDIF*) 
+syskey.slinkage[ 2 ] := chr(seqno);
+&ifdef trace
+t01surrogate( ak_join, 'syskey      ', syskey.sauthid );
+&endif
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682_mbuf_to_tmpbuf (
+            VAR acv       : tak_all_command_glob;
+            VAR syskey    : tgg00_SysInfoKey;
+            VAR b_err     : tgg00_BasisError;
+            sysinfo_kind  : tak68_mbuf_to_tmpbuf_context);
+ 
+VAR
+      _add_sysinfo   : boolean;
+      _cachearea_ptr : tak_sysbufferaddress;
+      _jmbp          : tgg00_MessBlockPtr;
+      _jqbp          : tgg00_QualBufPtr;
+      _aux_data_len  : tsp00_Int4;
+ 
+BEGIN
+b_err         := e_ok;
+_add_sysinfo  := true;
+_aux_data_len := acv.a_mblock.mb_data_len;
+IF  ( acv.a_returncode = 0 )
+THEN
+    BEGIN
+    _cachearea_ptr := NIL;
+    CASE sysinfo_kind OF
+        mtc_search_sequence :
+            BEGIN
+&           ifdef trace
+            t01sname( ak_join, 'search_seque' );
+&           endif
+            _add_sysinfo := ( acv.a_internal_sql <> sql_alter_table );
+            END;
+        mtc_generate_join_info,
+        mtc_generate_join_info_operator_join :
+            BEGIN
+&           ifdef trace
+            t01sname( ak_join, 'generate_joi' );
+&           endif
+            (* delete tmp messblocks from ak680prepare_join() *)
+            a10del_sysinfo (acv, syskey, b_err);
+            _add_sysinfo := true;
+            END;
+        mtc_save_context :
+            BEGIN
+&           ifdef trace
+            t01sname( ak_join, 'save_context' );
+&           endif
+            (* *** call from a682save_context *** *)
+            _add_sysinfo             := true;
+            acv.a_mblock.mb_data_len := 0
+            END;
+&       ifdef TRACE
+        OTHERWISE
+            g01abort (csp3_a682_sysinfo_kind_invalid, csp3_n_join,
+                  'INVALID SYSINFO_KIND    ', ord(sysinfo_kind));
+&       endif
+        END;
+    (*ENDCASE*) 
+&   ifdef trace
+    t01bool (ak_join, '_add_sysinfo', _add_sysinfo);
+&   endif
+    IF  b_err = e_ok
+    THEN
+        BEGIN
+        IF  ( sysinfo_kind = mtc_generate_join_info )
+        THEN
+            (* operator join share common data part, so we can't do this *)
+            g04mblock_optimize_info( acv.a_mblock );
+        (*ENDIF*) 
+        a10mblock_into_cache( acv, syskey, acv.a_mblock,
+              d_release, _cachearea_ptr, b_err );
+        END;
+    (*ENDIF*) 
+    IF  ( b_err = e_ok )
+    THEN
+        BEGIN
+        _jmbp := @_cachearea_ptr^.smessblock.mbr_mess_block;
+        _jqbp := _jmbp^.mb_qual;
+        IF  ( sysinfo_kind in
+            [ mtc_search_sequence, mtc_generate_join_info,
+            mtc_generate_join_info_operator_join ] )
+        THEN
+            BEGIN
+            IF  _jmbp^.mb_qual^.mst_optimize_pos > 0
+            THEN
+                BEGIN
+                (* save only optimize info for several messblocks *)
+                _jmbp^.mb_qual^.mst_optimize_pos := 1;
+                _jmbp^.mb_data_len := g04calc_optimize_info_len( acv.a_mblock );
+                SAPDB_PascalOverlappingMove ('VAK682',   7,    
+                      _jmbp^.mb_data_size, _jmbp^.mb_data_size,
+                      @_jmbp^.mb_data^.mbp_buf, _aux_data_len + 1,
+                      @_jmbp^.mb_data^.mbp_buf, 1,
+                      _jmbp^.mb_data_len,
+                      acv.a_returncode);
+                END
+            ELSE
+                _jmbp^.mb_data_len := 0;
+            (*ENDIF*) 
+            END
+        ELSE
+            BEGIN
+            (* mtc_save_context *)
+            END;
+        (*ENDIF*) 
+        ;
+&       ifdef TRACE
+        t01messblock (ak_join, 'mess_block >', _jmbp^);
+&       endif
+        _cachearea_ptr^.smessblock.mbr_segment_id := cak00_local_segment_id;
+        a10_add_repl_sysinfo( acv, _cachearea_ptr, _add_sysinfo, b_err );
+        END;
+    (*ENDIF*) 
+    acv.a_mblock.mb_data_len := _aux_data_len;
+    acv.a_mblock.mb_qual^.mst_optimize_pos := 0;
+&   ifdef trace
+    t01messblock (ak_join, 'MESSBLOCK   ', acv.a_mblock);
+&   endif
+    IF  ( b_err <> e_ok )
+    THEN
+        a07_b_put_error( acv, b_err, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682_tmpbuf_to_mbuf (
+            VAR acv       : tak_all_command_glob;
+            VAR syskey    : tgg00_SysInfoKey;
+            VAR b_err     : tgg00_BasisError;
+            del_parsinfos : boolean;
+            append_data   : boolean);
+ 
+CONST
+      c_without_data = true;
+ 
+VAR
+      _data_len      : tsp00_Int4;
+      _cachearea_ptr : tak_sysbufferaddress;
+      _jmbp          : tgg00_MessBlockPtr;
+      _jqbp          : tgg00_QualBufPtr;
+      _aux_fieldlists: tgg00_FieldLists;
+      _i             : integer;
+ 
+BEGIN
+IF  ( acv.a_mblock.mb_qual^.mst_optimize_pos > 0 )
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4( ak_join, 'optim pos   ', acv.a_mblock.mb_qual^.mst_optimize_pos );
+&   endif
+    _data_len := acv.a_mblock.mb_qual^.mst_optimize_pos - 1;
+    END
+ELSE
+    BEGIN
+    _data_len := acv.a_mblock.mb_data_len;
+    END;
+(*ENDIF*) 
+_aux_fieldlists     := acv.a_mblock.mb_fieldlists;
+&ifdef trace
+t01int4( ak_join, 'old datalen ', _data_len );
+&endif
+a06a_mblock_init( acv, m_nil, mm_nil, b01niltree_id );
+_cachearea_ptr := NIL;
+a10get_sysinfo( acv, syskey, d_release, _cachearea_ptr, b_err );
+IF  ( b_err = e_ok )
+THEN
+    BEGIN
+    _jmbp       := @_cachearea_ptr^.smessblock.mbr_mess_block;
+    _jqbp       := _jmbp^.mb_qual;
+    IF  ( append_data )
+    THEN
+        BEGIN
+&       ifdef trace
+        t01sname( ak_join, 'append data ' );
+&       endif
+        acv.a_mblock.mb_data_len := _data_len;
+        END
+    ELSE
+        acv.a_mblock.mb_data_len := 0;
+    (*ENDIF*) 
+    a06cpy_mblock( acv, _jmbp^, acv.a_mblock, NOT c_without_data, b_err );
+    IF  ( acv.a_mblock.mb_data_len > 0 ) AND
+        ( _jmbp^.mb_qual^.mst_optimize_pos > 0 )
+    THEN
+        (* append optimize info on data part *)
+        acv.a_mblock.mb_qual^.mst_optimize_pos := _data_len + 1;
+    (*ENDIF*) 
+    FOR _i := 0 TO cgg_idx_max_valuefieldlist DO
+        IF  (acv.a_mblock.mb_fieldlists[_i]  = NIL) AND
+            (           _aux_fieldlists[_i] <> NIL)
+        THEN
+            BEGIN
+            acv.a_mblock.mb_fieldlists[_i] := ak104_GetReference_MS (_aux_fieldlists[_i]);
+            END;
+        (*ENDIF*) 
+    (*ENDFOR*) 
+    END;
+(*ENDIF*) 
+IF  ( b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, b_err, 1 )
+ELSE
+    BEGIN
+&   ifdef TRACE
+    t01messblock (ak_join, 'mess_block <', _jmbp^);
+    t01messblock (ak_join, 'MESSBLOCK   ', acv.a_mblock);
+&   endif
+    IF  del_parsinfos
+    THEN (* ignore error, if delete fails *)
+        BEGIN
+        a10del_sysinfo( acv, _cachearea_ptr^.syskey, b_err );
+        IF  b_err = e_ok
+        THEN
+            _cachearea_ptr := NIL;
+        (*ENDIF*) 
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      a682_execute_join_operator (
+            VAR acv             : tak_all_command_glob;
+            VAR dmli            : tak_dml_info;
+            VAR series          : tak68_sequence;
+            VAR res_tree        : tgg00_FileId;
+            VAR parsk           : tak_parskey;
+            VAR jvrec           : tak68_joinview_rec;
+            use_old_rescnt      : boolean;
+            seqsearch_for_exec  : boolean);
+ 
+CONST
+      c_reserve           = 20480;
+      c_reset_sum         = true;
+ 
+VAR
+      _stack_free       : tsp00_Int4;
+      _start_time_sec   : tsp00_Int4;
+      _start_time_msec  : tsp00_Int4;
+      _start_phys_ios   : tsp00_Int4;
+      _start_suspends   : tsp00_Int4;
+      _start_waits      : tsp00_Int4;
+      _stop_time_sec    : tsp00_Int4;
+      _stop_time_msec   : tsp00_Int4;
+      _stop_phys_ios    : tsp00_Int4;
+      _stop_suspends    : tsp00_Int4;
+      _stop_waits       : tsp00_Int4;
+      _diff_sec         : tsp00_Int4;
+      _diff_msec        : tsp00_Int4;
+      _len              : tsp00_Int4;
+      _mess_time_trace  : tgg11_KbTimeTrace;
+      _trace            : tgg11_KbTrace;
+      _b_err            : tgg00_BasisError;
+      _aux_m_type       : tgg00_MessType;
+      _aux_m2_type      : tgg00_MessType2;
+ 
+BEGIN
+&ifdef trace
+t01name(ak_join, 'EXEC JOIN OPERATOR');
+t01treeid( ak_join, 'res_tree    ', res_tree );
+t01execution_kind( ak_join, 'a_ex_kind   ', acv.a_ex_kind );
+t01execution_kind( ak_join, 'a_init_ex_ki', acv.a_init_ex_kind );
+&endif
+IF  ( acv.a_dbproc_level + acv.a_trigger_level > 0 )
+THEN
+    BEGIN
+    (* call from a dbproc or trigger, check stack usage *)
+    (* to avoid kernel crashing                         *)
+    vsleft( _stack_free );
+&   ifdef trace
+    t01int4( ak_sem, 'stack_free  ', _stack_free );
+&   endif
+    IF  (( _stack_free < c_reserve )
+        AND
+        ( NOT acv.a_in_ddl_trigger ))
+    THEN
+        a07_b_put_error( acv, e_program_stack_overflow, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  (( g01vtrace.vtrAll_gg00 AND g01vtrace.vtrTime_gg00 ) OR
+    a01diag_monitor_on OR a01diag_analyze_on )
+THEN
+    BEGIN
+    _start_time_sec  := 0;
+    _start_time_msec := 0;
+    _start_phys_ios  := 0;
+    _start_suspends  := 0;
+    _start_waits     := 0;
+    vclock( _start_time_sec, _start_time_msec );
+    IF  ( a01diag_monitor_on OR a01diag_analyze_on )
+    THEN
+        vmonitor (acv.a_transinf.tri_trans.trTaskId_gg00,
+              _start_phys_ios, _start_suspends, _start_waits);
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( acv.a_returncode = 0 ) AND ( NOT acv.a_intern_explain )
+THEN
+    BEGIN
+    _aux_m_type  := acv.a_mblock.mb_type;
+    _aux_m2_type := acv.a_mblock.mb_type2;
+    a686_create_join_result( acv, dmli, series, parsk, jvrec,
+          use_old_rescnt, seqsearch_for_exec, _b_err );
+    ;
+    WHILE ( _b_err = e_wait_for_lock_release ) DO
+        BEGIN
+        IF  ( g01vtrace.vtrAll_gg00 OR g01vtrace.vtrKbLock_gg00 )
+        THEN
+            BEGIN
+            _trace.kbMessType_gg11  := _aux_m_type;
+            _trace.kbMessType2_gg11 := _aux_m2_type;
+            _trace.kbError_gg11     := _b_err;
+            b120InsertTrace( acv.a_mblock.mb_trns^, kb, vttKbLockWait_egg00,
+                  sizeof (_trace), @_trace );
+            END;
+        (*ENDIF*) 
+        k53wait (acv.a_mblock.mb_trns^, _aux_m_type, _aux_m2_type);
+        _b_err := acv.a_mblock.mb_trns^.trError_gg00;
+        IF  ( g01vtrace.vtrAll_gg00 OR g01vtrace.vtrKbLock_gg00 )
+        THEN
+            BEGIN
+            _trace.kbError_gg11 := _b_err;
+            b120InsertTrace( acv.a_mblock.mb_trns^, kb, vttKbLockWaitResume_egg00,
+                  sizeof (_trace), @_trace );
+            END;
+        (*ENDIF*) 
+        IF  ( _b_err = e_ok )
+        THEN
+            BEGIN
+            acv.a_mblock.mb_type         := _aux_m_type;
+            acv.a_mblock.mb_type2        := _aux_m2_type;
+            acv.a_mblock.mb_trns^.trError_gg00 := e_ok;
+            acv.a_mblock.mb_trns         := @acv.a_transinf.tri_trans;
+            a686_create_join_result( acv, dmli, series, parsk, jvrec,
+                  use_old_rescnt, seqsearch_for_exec, _b_err );
+            END
+        (*ENDIF*) 
+        END
+    (*ENDWHILE*) 
+    END;
+(*ENDIF*) 
+IF  (( g01vtrace.vtrAll_gg00 AND g01vtrace.vtrTime_gg00 ) OR
+    a01diag_monitor_on OR a01diag_analyze_on )
+THEN
+    BEGIN
+    vclock( _stop_time_sec, _stop_time_msec );
+    _diff_sec  := _stop_time_sec - _start_time_sec;
+    _diff_msec := _stop_time_msec - _start_time_msec;
+    IF  ( _stop_time_msec < _start_time_msec )
+    THEN
+        BEGIN
+        _diff_sec  := _diff_sec  - 1;
+        _diff_msec := _diff_msec + 1000000 ;
+        END;
+    (*ENDIF*) 
+    IF  ( a01diag_monitor_on OR a01diag_analyze_on )
+    THEN
+        BEGIN
+        vmonitor (acv.a_transinf.tri_trans.trTaskId_gg00, _stop_phys_ios, _stop_suspends, _stop_waits);
+        b21mp_sec_put      (acv.a_transinf.tri_trans.trBdTcachePtr_gg00, _diff_sec);
+        b21mp_microsec_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00, _diff_msec);
+        b21mp_phys_ios_put   (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+              _stop_phys_ios - _start_phys_ios);
+        b21mp_suspends_put   (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+              _stop_suspends - _start_suspends);
+        b21mp_waits_put      (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+              _stop_waits - _start_waits);
+        b21mp_virt_reads_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00,
+              acv.a_transinf.tri_trans.trRteCommPtr_gg00^.virt_reads + csp_maxint2);
+        b21mp_kb_calls_put   (acv.a_transinf.tri_trans.trBdTcachePtr_gg00);
+        b21mp_copy_result_put (acv.a_transinf.tri_trans.trBdTcachePtr_gg00, 'YES');
+        b21mp_new_sum_put    (acv.a_transinf.tri_trans.trBdTcachePtr_gg00);
+        b21m_reset_monitor   (acv.a_transinf.tri_trans.trBdTcachePtr_gg00, NOT c_reset_sum);
+        END;
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+IF  ( g01vtrace.vtrAll_gg00 )
+THEN
+    BEGIN
+    IF  ( acv.a_mblock.mb_type = m_return_result )
+    THEN
+        _mess_time_trace.kbtmHead_gg11.kbMessType_gg11 := m_return_result
+    ELSE
+        _mess_time_trace.kbtmHead_gg11.kbMessType_gg11 := m_return_error;
+    (*ENDIF*) 
+    _mess_time_trace.kbtmHead_gg11.kbMessType2_gg11 := mm_nil;
+    _mess_time_trace.kbtmHead_gg11.kbError_gg11     := _b_err;
+    IF  ( g01vtrace.vtrTime_gg00 )
+    THEN
+        BEGIN
+        _mess_time_trace.kbtmHead_gg11.kbMessType2_gg11 := mm_test;
+        _mess_time_trace.kbtmSec_gg11  := _diff_sec;
+        _mess_time_trace.kbtmMsec_gg11 := _diff_msec;
+        _len := sizeof( _mess_time_trace );
+        END
+    ELSE
+        _len := sizeof( _mess_time_trace.kbtmHead_gg11 );
+    (*ENDIF*) 
+    b120InsertTrace( acv.a_transinf.tri_trans, kb,
+          vttKbFunctions_egg00, _len, @_mess_time_trace);
+    END;
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682join_info_write (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info);
+ 
+VAR
+      _max_cnt_per_buf : tsp00_Int4;
+      _write_cnt       : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV sizeof( tak_one_join );
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(_ke.sauthid),
+      @acv.a_pars_last_key, 1, @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_joinarr;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := dmli.d_joins.jrc_cnt;
+IF  ( _remain_cnt > _max_cnt_per_buf )
+THEN
+    _write_cnt := _max_cnt_per_buf
+ELSE
+    _write_cnt := _remain_cnt;
+(*ENDIF*) 
+_cptr.jph_uniptr := NIL;
+a10_nil_get_sysinfo( acv, _ke, d_release,
+      cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      ( _write_cnt * sizeof( tak_one_join )),
+      _cptr.jph_uniptr, _b_err );
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _write_cnt := _max_cnt_per_buf
+    ELSE
+        _write_cnt := _remain_cnt;
+    (*ENDIF*) 
+    IF  ( _remain_cnt < dmli.d_joins.jrc_cnt )
+    THEN
+        (* put filled record into cache *)
+        (* get new/next catalog record  *)
+        BEGIN
+        ak682finalize_record( acv, _cptr.jph_uniptr,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _max_cnt_per_buf * sizeof( tak_one_join )), _b_err );
+        (* get new record *)
+        a06inc_linkage( _ke.slinkage );
+        a10_nil_get_sysinfo( acv, _ke, d_release,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _write_cnt * sizeof( tak_one_join )),
+              _cptr.jph_uniptr, _b_err );
+        END;
+    (*ENDIF*) 
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        _cptr.jph_joinpars_buf^.jp_filler := '    ';
+        (* write data into buf on record *)
+        SAPDB_PascalMove ('VAK682',   8,    
+              dmli.d_joins.jrc_cnt * sizeof( tak_one_join ),
+              _max_cnt_per_buf * sizeof( tak_one_join ),
+              @dmli.d_joins.jrc_joinarr^,
+              1 + ( dmli.d_joins.jrc_cnt - _remain_cnt ) * sizeof( tak_one_join ),
+              @_cptr.jph_joinpars_buf^.jp_buf, 1,
+              _write_cnt * sizeof(tak_one_join),
+              acv.a_returncode);
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _write_cnt;
+    END;
+(*ENDWHILE*) 
+;
+(* write last record *)
+(* write correct catalog record length *)
+ak682finalize_record( acv, _cptr.jph_uniptr, cak_sysbufferoffset +
+      sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      _write_cnt * sizeof( tak_one_join ),
+      _b_err );
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682join_info_read (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            VAR parsk      : tak_parskey);
+ 
+VAR
+      _max_cnt_per_buf : tsp00_Int4;
+      _read_cnt        : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV sizeof( tak_one_join );
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_ke.sauthid), @parsk, 1,
+      @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_joinarr;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := dmli.d_joins.jrc_cnt;
+_cptr.jph_uniptr := NIL;
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _read_cnt := _max_cnt_per_buf
+    ELSE
+        _read_cnt := _remain_cnt;
+    (*ENDIF*) 
+    ;
+    (* get new record *)
+    a10get_sysinfo( acv, _ke, d_release, _cptr.jph_uniptr, _b_err );
+    a06inc_linkage( _ke.slinkage );
+    ;
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        (* read data into jrc_joinarr *)
+        SAPDB_PascalMove ('VAK682',   9,    
+              _cptr.jph_uniptr^.b_sl - cak_sysbufferoffset -
+              sizeof( _cptr.jph_joinpars_buf^.jp_filler ),
+              dmli.d_joins.jrc_cnt * sizeof( tak_one_join ),
+              @_cptr.jph_joinpars_buf^.jp_buf, 1,
+              @dmli.d_joins.jrc_joinarr^,
+              1 + ( dmli.d_joins.jrc_cnt - _remain_cnt ) * sizeof( tak_one_join ),
+              _read_cnt * sizeof(tak_one_join),
+              acv.a_returncode);
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _read_cnt;
+    END;
+(*ENDWHILE*) 
+;
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682eq_info_write (
+            VAR acv        : tak_all_command_glob;
+            VAR eq_rec     : tak68_eq_record);
+ 
+VAR
+      _max_cnt_per_buf : tsp00_Int4;
+      _write_cnt       : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV sizeof( tak68_eqfield );
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(_ke.sauthid),
+      @acv.a_pars_last_key, 1, @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_eqarr;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := eq_rec.eqr_cnt;
+IF  ( _remain_cnt > _max_cnt_per_buf )
+THEN
+    _write_cnt := _max_cnt_per_buf
+ELSE
+    _write_cnt := _remain_cnt;
+(*ENDIF*) 
+_cptr.jph_uniptr := NIL;
+a10_nil_get_sysinfo( acv, _ke, d_release,
+      cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      ( _write_cnt * sizeof( tak68_eqfield )),
+      _cptr.jph_uniptr, _b_err );
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _write_cnt := _max_cnt_per_buf
+    ELSE
+        _write_cnt := _remain_cnt;
+    (*ENDIF*) 
+    IF  ( _remain_cnt < eq_rec.eqr_cnt )
+    THEN
+        (* put filled record into cache *)
+        (* get new/next catalog record  *)
+        BEGIN
+        ak682finalize_record( acv, _cptr.jph_uniptr,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _max_cnt_per_buf * sizeof( tak68_eqfield )), _b_err );
+        (* get new record *)
+        a06inc_linkage( _ke.slinkage );
+        a10_nil_get_sysinfo( acv, _ke, d_release,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _write_cnt * sizeof( tak68_eqfield )),
+              _cptr.jph_uniptr, _b_err );
+        END;
+    (*ENDIF*) 
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        _cptr.jph_joinpars_buf^.jp_filler := '    ';
+        (* write data into buf on record *)
+        SAPDB_PascalMove ('VAK682',  10,    
+              eq_rec.eqr_cnt * sizeof( tak68_eqfield ),
+              _max_cnt_per_buf * sizeof( tak68_eqfield ),
+              @eq_rec.eqr_arr^,
+              1 + ( eq_rec.eqr_cnt - _remain_cnt ) * sizeof( tak68_eqfield ),
+              @_cptr.jph_joinpars_buf^.jp_buf, 1,
+              _write_cnt * sizeof(tak68_eqfield),
+              acv.a_returncode);
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _write_cnt;
+    END;
+(*ENDWHILE*) 
+;
+(* write last record *)
+(* write correct catalog record length *)
+ak682finalize_record( acv, _cptr.jph_uniptr, cak_sysbufferoffset +
+      sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      _write_cnt * sizeof( tak68_eqfield ),
+      _b_err );
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682eq_info_read (
+            VAR acv        : tak_all_command_glob;
+            VAR parsk      : tak_parskey;
+            VAR eq_rec     : tak68_eq_record);
+ 
+VAR
+      _max_cnt_per_buf : tsp00_Int4;
+      _read_cnt        : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV sizeof( tak68_eqfield );
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_ke.sauthid), @parsk, 1,
+      @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_eqarr;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := eq_rec.eqr_cnt;
+&ifdef trace
+t01int4( ak_join, 'eqr_cnt     ', eq_rec.eqr_cnt );
+&endif
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _read_cnt := _max_cnt_per_buf
+    ELSE
+        _read_cnt := _remain_cnt;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4( ak_join, '_remain_cnt ', _remain_cnt );
+    t01int4( ak_join, '_read_cnt   ', _read_cnt );
+&   endif
+    ;
+    (* get new record *)
+    _cptr.jph_uniptr := NIL;
+    a10get_sysinfo( acv, _ke, d_release, _cptr.jph_uniptr, _b_err );
+    a06inc_linkage( _ke.slinkage );
+    ;
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        (* read data into eqr_right/left *)
+        SAPDB_PascalMove ('VAK682',  11,    
+              _cptr.jph_uniptr^.b_sl - cak_sysbufferoffset -
+              sizeof( _cptr.jph_joinpars_buf^.jp_filler ),
+              eq_rec.eqr_cnt * sizeof( tak68_eqfield ),
+              @_cptr.jph_joinpars_buf^.jp_buf, 1,
+              @eq_rec.eqr_arr^,
+              1 + ( eq_rec.eqr_cnt - _remain_cnt ) * sizeof( tak68_eqfield ),
+              _read_cnt * sizeof(tak68_eqfield),
+              acv.a_returncode);
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _read_cnt;
+    END;
+(*ENDWHILE*) 
+;
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682table_info_write (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info);
+ 
+VAR
+      _info_len        : tsp00_Int4;
+      _max_cnt_per_buf : tsp00_Int4;
+      _write_cnt       : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _xi              : tsp00_Int2;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+_info_len := sizeof( tak_one_table ) - ( 2 * sizeof( tak_columnset ));
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV _info_len;
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(acv.a_pars_last_key), sizeof(_ke.sauthid),
+      @acv.a_pars_last_key, 1, @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_table;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := dmli.d_cntfromtab;
+IF  ( _remain_cnt > _max_cnt_per_buf )
+THEN
+    _write_cnt := _max_cnt_per_buf
+ELSE
+    _write_cnt := _remain_cnt;
+(*ENDIF*) 
+_cptr.jph_uniptr := NIL;
+a10_nil_get_sysinfo( acv, _ke, d_release,
+      cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      ( _write_cnt * _info_len ),
+      _cptr.jph_uniptr, _b_err );
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _write_cnt := _max_cnt_per_buf
+    ELSE
+        _write_cnt := _remain_cnt;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4( ak_join, '_write_cnt  ', _write_cnt );
+    t01int4( ak_join, '_remain_cnt ', _remain_cnt );
+&   endif
+    IF  ( _remain_cnt < dmli.d_cntfromtab )
+    THEN
+        (* put filled record into cache *)
+        (* get new/next catalog record  *)
+        BEGIN
+        ak682finalize_record( acv, _cptr.jph_uniptr,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _max_cnt_per_buf * _info_len), _b_err );
+        (* get new record *)
+        a06inc_linkage( _ke.slinkage );
+        a10_nil_get_sysinfo( acv, _ke, d_release,
+              cak_sysbufferoffset + sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+              ( _write_cnt * _info_len ),
+              _cptr.jph_uniptr, _b_err );
+        END;
+    (*ENDIF*) 
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        _cptr.jph_joinpars_buf^.jp_filler := '    ';
+        (* write data into buf on record *)
+        FOR _xi := dmli.d_cntfromtab-_remain_cnt+1 TO
+              dmli.d_cntfromtab-_remain_cnt+1 + _write_cnt - 1 DO
+            BEGIN
+&           ifdef trace
+            t01int4( ak_join, '_xi         ', _xi );
+            t01int4( ak_join, 'pos on buf  ',
+                  1 + ( _xi - (dmli.d_cntfromtab-_remain_cnt+1))*_info_len );
+&           endif
+            IF  ( dmli.d_tabarr^[ _xi ].ocomplex_view )
+            THEN
+                a660build_view_treeid (acv, dmli.d_tabarr^[ _xi ].ofromtableid,
+                      dmli.d_tabarr^[ _xi ].otreeid);
+            (*ENDIF*) 
+            dmli.d_tabarr^[ _xi ].ocomplex_view := false;
+            SAPDB_PascalMove ('VAK682',  12,    
+                  _info_len,
+                  _max_cnt_per_buf * _info_len,
+                  @dmli.d_tabarr^ [ _xi ], 1,
+                  @_cptr.jph_joinpars_buf^.jp_buf,
+                  1 + ( _xi - (dmli.d_cntfromtab-_remain_cnt+1))*_info_len,
+                  _info_len, _b_err);
+            END;
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _write_cnt;
+    END;
+(*ENDWHILE*) 
+;
+(* write last record *)
+(* write correct catalog record length *)
+ak682finalize_record( acv, _cptr.jph_uniptr, cak_sysbufferoffset +
+      sizeof( _cptr.jph_joinpars_buf^.jp_filler ) +
+      _write_cnt * _info_len,
+      _b_err );
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682table_info_read (
+            VAR acv        : tak_all_command_glob;
+            VAR dmli       : tak_dml_info;
+            VAR parsk      : tak_parskey);
+ 
+VAR
+      _info_len        : tsp00_Int4;
+      _max_cnt_per_buf : tsp00_Int4;
+      _read_cnt        : tsp00_Int4;
+      _remain_cnt      : tsp00_Int4;
+      _xi              : tsp00_Int2;
+      _ke              : tgg00_SysInfoKey;
+      _cptr            : tak68_joinparsrecord_hybrid;
+      _b_err           : tgg00_BasisError;
+ 
+BEGIN
+_info_len := sizeof( tak_one_table ) - ( 2 * sizeof( tak_columnset ));
+&ifdef diagnose
+_max_cnt_per_buf := c_max_buf_usage;
+&else
+_max_cnt_per_buf := mxak68_joinpars_buf DIV _info_len;
+&endif
+_b_err        := e_ok;
+_ke           := a01sysnullkey;
+_ke.sauthid[ 1 ] := cak_tempinfo_byte;
+SAPDB_PascalForcedMove (sizeof(parsk), sizeof(_ke.sauthid), @parsk, 1,
+      @_ke.sauthid, 2, mxak_parskey);
+_ke.sentrytyp := cak_ejparsinfo_table;
+_ke.slinkage  := cak_init_linkage;
+_remain_cnt   := dmli.d_cntfromtab;
+&ifdef trace
+t01int4( ak_join, 'd_cntfromtab', dmli.d_cntfromtab );
+&endif
+_cptr.jph_uniptr := NIL;
+WHILE ( _remain_cnt > 0 ) AND ( _b_err = e_ok ) DO
+    BEGIN
+    IF  ( _remain_cnt > _max_cnt_per_buf )
+    THEN
+        _read_cnt := _max_cnt_per_buf
+    ELSE
+        _read_cnt := _remain_cnt;
+    (*ENDIF*) 
+&   ifdef trace
+    t01int4( ak_join, '_remain_cnt ', _remain_cnt );
+    t01int4( ak_join, '_read_cnt   ', _read_cnt );
+&   endif
+    ;
+    (* get new record *)
+    a10get_sysinfo( acv, _ke, d_release, _cptr.jph_uniptr, _b_err );
+    a06inc_linkage( _ke.slinkage );
+    ;
+    IF  ( _b_err = e_ok )
+    THEN
+        BEGIN
+        (* restore from table info (d_tabarr^) *)
+        FOR _xi := dmli.d_cntfromtab-_remain_cnt+1 TO
+              dmli.d_cntfromtab-_remain_cnt+1 + _read_cnt - 1 DO
+            BEGIN
+&           ifdef trace
+            t01int4( ak_join, '_xi         ', _xi );
+            t01int4( ak_join, 'pos on buf  ',
+                  1 + ( _xi - (dmli.d_cntfromtab-_remain_cnt+1))*_info_len );
+&           endif
+            SAPDB_PascalMove ('VAK682',  13,    
+                  _max_cnt_per_buf * _info_len,
+                  _info_len,
+                  @_cptr.jph_joinpars_buf^.jp_buf,
+                  1 + ( _xi - (dmli.d_cntfromtab-_remain_cnt+1))*_info_len,
+                  @dmli.d_tabarr^ [ _xi ], 1,
+                  _info_len, _b_err);
+            dmli.d_tabarr^ [ _xi ].oprivset      := [  ];
+            dmli.d_tabarr^ [ _xi ].osetallpriv   := [  ];
+            END;
+        (*ENDFOR*) 
+        END;
+    (*ENDIF*) 
+    _remain_cnt := _remain_cnt - _read_cnt;
+    END;
+(*ENDWHILE*) 
+;
+IF  ( _b_err <> e_ok )
+THEN
+    a07_b_put_error( acv, _b_err, 1 );
+(*ENDIF*) 
+END;
+ 
+(*------------------------------*) 
+ 
+PROCEDURE
+      ak682finalize_record (
+            VAR acv         : tak_all_command_glob;
+            VAR syspoint    : tak_sysbufferaddress;
+            rec_length      : tsp00_Int4;
+            VAR b_err       : tgg00_BasisError);
+ 
+BEGIN
+IF  (( acv.a_returncode = 0 ) AND ( b_err = e_ok ) AND ( rec_length > 0 ))
+THEN
+    BEGIN
+&   ifdef trace
+    t01int4( ak_join, 'rec_length  ', rec_length );
+&   endif
+    syspoint^.b_sl := rec_length;
+    a10add_sysinfo( acv, syspoint, b_err );
+    IF  ( b_err <> e_ok )
+    THEN
+        a07_b_put_error( acv, b_err, 1 );
+    (*ENDIF*) 
+    END;
+(*ENDIF*) 
+END;
+ 
+.CM *-END-* code ----------------------------------------
+.SP 2 
+***********************************************************
+.PA 

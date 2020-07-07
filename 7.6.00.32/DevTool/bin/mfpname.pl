@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+# mfpname  file    (NOT called by vmake !)
+#
+# @(#)mfpname		1997-11-18
+#
+# Append "_" to pascal procedure and function names.
+#
+#    ========== licence begin  GPL
+#    Copyright (C) 2001 SAP AG
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#    ========== licence end
+#
+
+package mfpname;
+use Env;
+use Carp;
+use File::Copy;
+do "$TOOLVARS";
+if ( $@ ) { print "$@"; exit }
+ToolTrace("mfpname called with @ARGV\n");
+
+$USAGE = "usage: mfpname file[s]\n";
+if ( @ARGV < 1 ) { print $USAGE; exit 1 }
+local($TMPFILE) = "$TMP/mfpname.$$";
+
+# Assume all args are files.
+foreach $F (@ARGV) {
+
+	open(FILE_IN, "<$F") or croak "Can't open $F (input): $!\n";
+	open(FILE_OUT, "+>$TMPFILE") or croak "Can't open $TMPFILE (output): $!\n";
+
+    # "PROCEDURE" is the only word on the line.
+    # The procedure name is the 1st word on the next line.
+    # The word following the procedure name begins with "(".
+    # Append "_" to the proc name.
+    # Repeat for "FUNCTION".
+	while (<FILE_IN>) {
+		chop;
+		if (/^[ \t]*PROCEDURE[ \t]*$/) {
+			$_ .= "\n";
+			$len1 = length;
+			$_ .= <FILE_IN>;
+			chop if $len1 < length;
+			s/([ \t]*\w*)([ \t]*\()/$1_$2/;
+		}
+
+		if (/^[ \t]*FUNCTION[ \t]*$/) {
+			$_ .= "\n";
+			$len1 = length;
+			$_ .= <FILE_IN>;
+			chop if $len1 < length;
+			s/([ \t]*\w*)([ \t]*\()/$1_$2/;
+		}
+		print FILE_OUT "$_\n";
+	}
+
+	close FILE_IN; close FILE_OUT;
+    copy $TMPFILE, $FILE;
+}
+
+
+__END__
+
+Hier können lange Kommentare stehen
